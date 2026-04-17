@@ -1,0 +1,17 @@
+version: "3.8"
+services:
+  backend:
+    build: .
+    volumes:
+      - ./:/app:cached
+      - /app/node_modules
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres@db:5432/mivia?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      PORT: "4000"
+    ports:
+      - "4000:4000"
+    command: npm run dev
+    depends_on:
+      - db
+      - redis

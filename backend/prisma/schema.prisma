@@ -1,0 +1,86 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl"]
+}
+
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Vendor {
+  id        Int       @id @default(autoincrement())
+  name      String
+  rating    Float     @default(4.5)
+  createdAt DateTime  @default(now())
+  products  Product[]
+}
+
+model Product {
+  id              Int      @id @default(autoincrement())
+  name            String
+  category        String
+  subCategory     String?
+  description     String?
+  price           Float
+  currency        String   @default("USD")
+  isRentable      Boolean  @default(false)
+  sampleAvailable Boolean  @default(false)
+  ecoFriendly     Boolean  @default(false)
+  preowned        Boolean  @default(false)
+  ingredients     Json?
+  skinTypes       String[]
+
+  vendor    Vendor    @relation(fields: [vendorId], references: [id])
+  vendorId  Int
+  createdAt DateTime  @default(now())
+  variants  Variant[]
+}
+
+model Variant {
+  id        Int     @id @default(autoincrement())
+  sku       String
+  size      String?
+  color     String?
+  volumeMl  Int?
+  stock     Int     @default(0)
+  product   Product @relation(fields: [productId], references: [id])
+  productId Int
+}
+
+model Courier {
+  id        Int      @id @default(autoincrement())
+  name      String
+  status    String   @default("available")
+  lat       Float?
+  lng       Float?
+  createdAt DateTime @default(now())
+
+  orders Order[] @relation("CourierOrders")
+}
+
+model Order {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  items      Json
+  total      Float
+  type       String   @default("purchase")
+  status     String   @default("pending")
+  courierId  Int?
+  courier    Courier? @relation("CourierOrders", fields: [courierId], references: [id])
+  etaMinutes Int?
+  createdAt  DateTime @default(now())
+}
+
+model Rental {
+  id          Int      @id @default(autoincrement())
+  productId   Int
+  userId      Int
+  startDate   DateTime
+  endDate     DateTime
+  deposit     Float
+  cleaningFee Float
+  status      String   @default("reserved")
+  createdAt   DateTime @default(now())
+}

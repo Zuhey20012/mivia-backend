@@ -1,0 +1,45 @@
+version: "3.8"
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: mivia
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  backend:
+    build: .
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres@db:5432/mivia?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      PORT: "4000"
+    ports:
+      - "4000:4000"
+    command: npm run dev
+    depends_on:
+      - db
+      - redis
+
+  worker:
+    build: .
+    volumes:
+      - ./:/app
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres@db:5432/mivia?schema=public"
+      REDIS_URL: "redis://redis:6379"
+    command: npm run worker:dev
+
+volumes:
+  db-data:

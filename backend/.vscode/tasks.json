@@ -1,0 +1,34 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Start DB+Redis",
+            "type": "shell",
+            "command": "docker compose up -d db redis",
+            "problemMatcher": []
+        },
+        {
+            "label": "Install deps",
+            "type": "shell",
+            "command": "npm ci",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Run backend dev",
+            "type": "shell",
+            "command": "npm run dev",
+            "isBackground": true,
+            "problemMatcher": []
+        },
+        {
+            "label": "Run worker dev",
+            "type": "shell",
+            "command": "npm run worker:dev",
+            "isBackground": true,
+            "problemMatcher": []
+        }
+    ]
+}

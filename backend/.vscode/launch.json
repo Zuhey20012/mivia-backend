@@ -1,0 +1,21 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Backend (ts-node-dev)",
+            "type": "pwa-node",
+            "request": "launch",
+            "program": "${workspaceFolder}/node_modules/ts-node-dev/lib/bin.js",
+            "args": [
+                "--respawn",
+                "--transpile-only",
+                "--ignore-watch",
+                "node_modules",
+                "src/index.ts"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/.env"
+        }
+    ]
+}
