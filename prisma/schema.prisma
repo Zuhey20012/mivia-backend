@@ -1,0 +1,368 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum UserRole {
+  CUSTOMER
+  VENDOR
+  COURIER
+  ADMIN
+}
+
+enum StoreCategory {
+  APPAREL
+  COSMETICS
+  THRIFT
+  ACCESSORIES
+  HOME_DECOR
+  HANDMADE
+  ECO_FRIENDLY
+  OTHER
+}
+
+enum ProductCondition {
+  NEW
+  LIKE_NEW
+  GOOD
+  FAIR
+  POOR
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+enum RentalStatus {
+  PENDING
+  CONFIRMED
+  ACTIVE
+  OVERDUE
+  RETURNED
+  CANCELLED
+}
+
+enum ReturnStatus {
+  REQUESTED
+  APPROVED
+  IN_TRANSIT
+  RECEIVED
+  REFUNDED
+  REJECTED
+}
+
+enum ReturnReason {
+  WRONG_ITEM
+  DAMAGED_ON_ARRIVAL
+  NOT_AS_DESCRIBED
+  CHANGED_MIND
+  RENTAL_RETURN
+  OTHER
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+// ─────────────────────────────────────────────
+// USER
+// ─────────────────────────────────────────────
+
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  name         String
+  phone        String?
+  passwordHash String
+  role         UserRole @default(CUSTOMER)
+  avatarUrl    String?
+  address      String?
+  latitude     Float?
+  longitude    Float?
+
+  store        Store?
+  orders       Order[]
+  rentals      Rental[]
+  returns      Return[]
+  refreshTokens RefreshToken[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model RefreshToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// STORE  (replaces Vendor)
+// ─────────────────────────────────────────────
+
+model Store {
+  id             Int           @id @default(autoincrement())
+  ownerId        Int           @unique
+  owner          User          @relation(fields: [ownerId], references: [id])
+  name           String
+  description    String?
+  category       StoreCategory
+  logoUrl        String?
+  bannerUrl      String?
+  isHomeBased    Boolean       @default(false)
+  isVerified     Boolean       @default(false)
+  isEcoFriendly  Boolean       @default(false)
+
+  address        String?
+  latitude       Float?
+  longitude      Float?
+  phone          String?
+  email          String?
+
+  // Business settings
+  commissionRate Float         @default(0.10) // 10% Mivia commission
+
+  // Ratings (denormalised for speed)
+  rating         Float         @default(0)
+  totalReviews   Int           @default(0)
+
+  products       Product[]
+  orders         Order[]
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+// ─────────────────────────────────────────────
+// PRODUCT
+// ─────────────────────────────────────────────
+
+model Product {
+  id               Int              @id @default(autoincrement())
+  storeId          Int
+  store            Store            @relation(fields: [storeId], references: [id])
+
+  name             String
+  description      String?
+  category         String           // "Dress", "Lipstick", "Vintage Bag", etc.
+  condition        ProductCondition @default(NEW)
+  images           String[]         // Cloudinary URLs
+  tags             String[]         // ["eco-friendly", "handmade", "vintage"]
+
+  // Sale
+  canBeSold        Boolean          @default(true)
+  salePriceCents   Int?             // stored in cents, e.g. 4999 = $49.99
+
+  // Rental
+  canBeRented      Boolean          @default(false)
+  rentalDayCents   Int?             // price per day in cents
+  depositCents     Int?             // refundable deposit in cents
+
+  // Inventory
+  stockQuantity    Int              @default(1)
+  isAvailable      Boolean          @default(true)
+
+  // Flags
+  isEcoFriendly    Boolean          @default(false)
+  isHandmade       Boolean          @default(false)
+  isSecondHand     Boolean          @default(false)
+  isFeatured       Boolean          @default(false)
+
+  variants         ProductVariant[]
+  orderItems       OrderItem[]
+  rentalItems      RentalItem[]
+
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+}
+
+model ProductVariant {
+  id               Int      @id @default(autoincrement())
+  productId        Int
+  product          Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  size             String?
+  color            String?
+  sku              String?  @unique
+  stock            Int      @default(1)
+  priceAdjustCents Int      @default(0) // adds to base price
+
+  orderItems       OrderItem[]
+  rentalItems      RentalItem[]
+}
+
+// ─────────────────────────────────────────────
+// ORDER  (SALE transactions)
+// ─────────────────────────────────────────────
+
+model Order {
+  id               Int           @id @default(autoincrement())
+  userId           Int
+  user             User          @relation(fields: [userId], references: [id])
+  storeId          Int
+  store            Store         @relation(fields: [storeId], references: [id])
+  courierId        Int?
+  courier          Courier?      @relation(fields: [courierId], references: [id])
+
+  status           OrderStatus   @default(PENDING)
+
+  // Pricing (all in cents, server-calculated)
+  subtotalCents      Int         // sum of items
+  deliveryFeeCents   Int         @default(299) // $2.99
+  commissionCents    Int         // 10% of subtotal → Mivia keeps
+  sellerPayoutCents  Int         // subtotal − commission → seller gets
+  totalCents         Int         // subtotalCents + deliveryFeeCents (what customer pays)
+
+  // Stripe
+  stripePaymentIntentId String?
+  paymentStatus         PaymentStatus @default(PENDING)
+
+  // Delivery
+  deliveryAddress  String?
+  deliveryLat      Float?
+  deliveryLng      Float?
+  etaMinutes       Int?
+
+  notes            String?
+  items            OrderItem[]
+  returns          Return[]
+
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+}
+
+model OrderItem {
+  id         Int             @id @default(autoincrement())
+  orderId    Int
+  order      Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId  Int
+  product    Product         @relation(fields: [productId], references: [id])
+  variantId  Int?
+  variant    ProductVariant? @relation(fields: [variantId], references: [id])
+
+  quantity   Int
+  unitCents  Int             // price snapshot at time of purchase
+}
+
+// ─────────────────────────────────────────────
+// RENTAL
+// ─────────────────────────────────────────────
+
+model Rental {
+  id              Int          @id @default(autoincrement())
+  userId          Int
+  user            User         @relation(fields: [userId], references: [id])
+  courierId       Int?
+  courier         Courier?     @relation(fields: [courierId], references: [id])
+
+  status          RentalStatus @default(PENDING)
+  startDate       DateTime
+  endDate         DateTime
+  rentalDays      Int          // computed: endDate - startDate
+
+  // Pricing (cents)
+  subtotalCents   Int          // rentalDays × dailyCents
+  depositCents    Int          // refundable on return
+  deliveryFeeCents Int         @default(299)
+  commissionCents Int
+  totalCents      Int          // what customer pays upfront
+
+  stripePaymentIntentId String?
+  paymentStatus   PaymentStatus @default(PENDING)
+
+  items           RentalItem[]
+  return          Return?
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+}
+
+model RentalItem {
+  id         Int             @id @default(autoincrement())
+  rentalId   Int
+  rental     Rental          @relation(fields: [rentalId], references: [id], onDelete: Cascade)
+  productId  Int
+  product    Product         @relation(fields: [productId], references: [id])
+  variantId  Int?
+  variant    ProductVariant? @relation(fields: [variantId], references: [id])
+
+  quantity   Int
+  dailyCents Int             // rate snapshot at time of booking
+}
+
+// ─────────────────────────────────────────────
+// RETURN
+// ─────────────────────────────────────────────
+
+model Return {
+  id              Int          @id @default(autoincrement())
+
+  // Linked to either an Order or a Rental (not both)
+  orderId         Int?
+  order           Order?       @relation(fields: [orderId], references: [id])
+  rentalId        Int?         @unique
+  rental          Rental?      @relation(fields: [rentalId], references: [id])
+
+  userId          Int
+  user            User         @relation(fields: [userId], references: [id])
+  courierId       Int?
+  courier         Courier?     @relation(fields: [courierId], references: [id])
+
+  reason          ReturnReason
+  conditionNote   String?      // vendor fills this on receipt
+  refundCents     Int?         // calculated after inspection
+  damageDedCents  Int?         @default(0) // deducted if damaged
+
+  status          ReturnStatus @default(REQUESTED)
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+}
+
+// ─────────────────────────────────────────────
+// COURIER
+// ─────────────────────────────────────────────
+
+model Courier {
+  id            Int      @id @default(autoincrement())
+  name          String
+  phone         String?
+  email         String?  @unique
+  passwordHash  String?
+  isActive      Boolean  @default(true)
+
+  latitude      Float?
+  longitude     Float?
+
+  // Current assignment tracking
+  currentOrderId  Int?
+  currentRentalId Int?
+  currentReturnId Int?
+
+  orders        Order[]
+  rentals       Rental[]
+  returns       Return[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
