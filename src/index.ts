@@ -40,5 +40,5 @@ app.use(errorHandler);
 
 const port = env.port;
 server.listen(port, () => {
-  logger.info(`🚀 MIVIA backend v2.0 listening on port ${port}`);
+  logger.info(`Ã°Å¸Å¡â‚¬ MALVOYA backend v2.0 listening on port ${port}`);
 });

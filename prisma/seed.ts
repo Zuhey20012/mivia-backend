@@ -4,14 +4,14 @@ import bcrypt from "bcryptjs";
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log("🌱 Seeding Mivia database...");
+  console.log("Ã°Å¸Å’Â± Seeding Malvoya database...");
 
   // Admin user
   const adminHash = await bcrypt.hash("Admin1234!", 12);
   const admin = await prisma.user.upsert({
     where: { email: "admin@mivia.app" },
     update: {},
-    create: { name: "Mivia Admin", email: "admin@mivia.app", passwordHash: adminHash, role: "ADMIN" },
+    create: { name: "Malvoya Admin", email: "admin@mivia.app", passwordHash: adminHash, role: "ADMIN" },
   });
 
   // Vendor users
@@ -111,7 +111,7 @@ async function main() {
     create: { name: "Test Customer", email: "customer@mivia.app", passwordHash: customerHash, role: "CUSTOMER" },
   });
 
-  console.log("✅ Seed complete!");
+  console.log("Ã¢Å“â€¦ Seed complete!");
   console.log("  admin@mivia.app     / Admin1234!");
   console.log("  customer@mivia.app  / Customer1234!");
   console.log("  sakura@mivia.app    / Vendor1234!");
