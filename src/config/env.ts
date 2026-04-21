@@ -16,8 +16,8 @@ export const env = {
   cloudinaryKey:    process.env.CLOUDINARY_API_KEY      || "",
   cloudinarySecret: process.env.CLOUDINARY_API_SECRET   || "",
 
-  stripeSecretKey:      process.env.STRIPE_SECRET_KEY       || "",
-  stripeWebhookSecret:  process.env.STRIPE_WEBHOOK_SECRET   || "",
+  stripeSecretKey:      process.env.STRIPE_SECRET_KEY       || "sk_test_1234567890",
+  stripeWebhookSecret:  process.env.STRIPE_WEBHOOK_SECRET   || "whsec_1234567890",
 
   deliveryFeeCents:  299, // $2.99
   commissionRate:    0.10, // 10%
