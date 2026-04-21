@@ -1,6 +1,6 @@
-﻿import Redis from "ioredis";
+import Redis from "ioredis";
 import { env } from "../config/env";
-export const redis = new Redis(env.redisUrl);
+export const redis = env.redisUrl ? new Redis(env.redisUrl) : new Redis({ lazyConnect: true });
 redis.on("error", (err) => {
-  console.error("[redis] connection error:", err?.message || err);
+  console.warn("[redis] connection error (continuing without redis):", err?.message || err);
 });
