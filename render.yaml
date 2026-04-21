@@ -3,7 +3,7 @@ services:
     name: malvoya-api
     env: node
     plan: free
-    buildCommand: npm install && npm run build && npx prisma generate && npx prisma migrate deploy
+    buildCommand: npm install --production && npx prisma generate && npx prisma migrate deploy
     startCommand: npm start
     envVars:
       - key: DATABASE_URL
