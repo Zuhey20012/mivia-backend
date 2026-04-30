@@ -71,8 +71,10 @@ export async function createOrder(userId: number, input: {
     return order;
   });
 
-  // 5. Queue courier assignment
-  await assignmentQueue.add("assign-delivery", { orderId: order.id, type: "ORDER" });
+  // 5. Queue courier assignment (if Redis is available)
+  if (assignmentQueue) {
+    await assignmentQueue.add("assign-delivery", { orderId: order.id, type: "ORDER" });
+  }
 
   return { order, clientSecret: paymentIntent.client_secret };
 }
@@ -151,7 +153,9 @@ export async function createRental(userId: number, input: {
     include: { items: true },
   });
 
-  await assignmentQueue.add("assign-delivery", { rentalId: rental.id, type: "RENTAL" });
+  if (assignmentQueue) {
+    await assignmentQueue.add("assign-delivery", { rentalId: rental.id, type: "RENTAL" });
+  }
   return { rental, clientSecret: paymentIntent.client_secret };
 }
 
@@ -197,7 +201,9 @@ export async function createReturn(userId: number, input: {
     data: { userId, orderId: input.orderId, rentalId: input.rentalId, reason: input.reason as any, conditionNote: input.conditionNote },
   });
 
-  await assignmentQueue.add("assign-return", { returnId: ret.id });
+  if (assignmentQueue) {
+    await assignmentQueue.add("assign-return", { returnId: ret.id });
+  }
   return ret;
 }
 

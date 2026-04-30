@@ -10,6 +10,8 @@ export async function createOrder(input: { userId: number; vendorId: number; tot
     } as any
   });
 
-  await assignmentQueue.add("assign", { orderId: order.id });
+  if (assignmentQueue) {
+    await assignmentQueue.add("assign", { orderId: order.id });
+  }
   return order;
 }
