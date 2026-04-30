@@ -1,19 +1,25 @@
-# Dockerfile (replace existing)
-FROM node:20-bullseye
+﻿# Use Debian-based Node so Prisma linux engines can load libssl
+FROM node:20-bullseye-slim
 
 WORKDIR /app
 
-# Install build tools and ca-certificates
-RUN apt-get update && apt-get install -y build-essential ca-certificates && rm -rf /var/lib/apt/lists/*
+# Install build deps for native modules (if needed)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    openssl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy package files and install production deps
+# copy package files first for cached install
 COPY package.json package-lock.json* ./
-RUN npm ci --production
 
-# Copy source and build
+# install production deps
+RUN npm ci --omit=dev
+
+# copy rest of the project
 COPY . .
+
+# build TypeScript
 RUN npm run build
 
 EXPOSE 4000
-
 CMD ["node", "dist/index.js"]

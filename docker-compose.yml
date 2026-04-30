@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: mivia
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  backend:
+    build: .
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres@db:5432/mivia?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      PORT: "4000"
+      NODE_ENV: "development"
+    ports:
+      - "4001:4000"
+    depends_on:
+      - db
+      - redis
+
+volumes:
+  db-data:

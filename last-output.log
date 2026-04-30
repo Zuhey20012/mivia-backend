@@ -1,0 +1,4 @@
+﻿# paste clipboard into a file quickly
+Get-Clipboard | Out-File -FilePath .\last-output.log -Encoding utf8
+code .\last-output.log
+

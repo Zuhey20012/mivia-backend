@@ -1,0 +1,158 @@
+{
+  "project_info": {
+    "project_number": "648758685616",
+    "project_id": "mivia-4f159",
+    "storage_bucket": "mivia-4f159.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:648758685616:android:046cd8bc85d225c0157075",
+        "android_client_info": {
+          "package_name": "com.example.mivia_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "648758685616-f0j8khvilkulhffvjhgpn90en88ju6m2.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.mivia_app",
+            "certificate_hash": "316c6128657289749c0c687d2db5adeac1681bf6"
+          }
+        },
+        {
+          "client_id": "648758685616-8bur5l2b22qbaf4s2l2em8497uehngom.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBUNqVZTxsB-Tg_eLSjWiuBNoknbnW0WN8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "648758685616-8bur5l2b22qbaf4s2l2em8497uehngom.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:648758685616:android:75c0f111a44309f4157075",
+        "android_client_info": {
+          "package_name": "com.malvoya.courier"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "648758685616-9vrs45s5gjds17b4niism2mk8mkclait.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.malvoya.courier",
+            "certificate_hash": "1634f79405a3e4bd0893afd11586f2b8ec3febae"
+          }
+        },
+        {
+          "client_id": "648758685616-8bur5l2b22qbaf4s2l2em8497uehngom.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBUNqVZTxsB-Tg_eLSjWiuBNoknbnW0WN8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "648758685616-8bur5l2b22qbaf4s2l2em8497uehngom.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:648758685616:android:01c5cdc4cf67d544157075",
+        "android_client_info": {
+          "package_name": "com.malvoya.customer"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "648758685616-tjk6r6hkt8o3cdot4n0pv42bdqa75h82.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.malvoya.customer",
+            "certificate_hash": "1634f79405a3e4bd0893afd11586f2b8ec3febae"
+          }
+        },
+        {
+          "client_id": "648758685616-8bur5l2b22qbaf4s2l2em8497uehngom.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBUNqVZTxsB-Tg_eLSjWiuBNoknbnW0WN8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "648758685616-8bur5l2b22qbaf4s2l2em8497uehngom.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:648758685616:android:8db43a3105991af9157075",
+        "android_client_info": {
+          "package_name": "com.malvoya.vendor"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "648758685616-9453igakve1u6jeopfub2m8uqr5dnta2.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.malvoya.vendor",
+            "certificate_hash": "1634f79405a3e4bd0893afd11586f2b8ec3febae"
+          }
+        },
+        {
+          "client_id": "648758685616-8bur5l2b22qbaf4s2l2em8497uehngom.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBUNqVZTxsB-Tg_eLSjWiuBNoknbnW0WN8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "648758685616-8bur5l2b22qbaf4s2l2em8497uehngom.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

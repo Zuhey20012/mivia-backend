@@ -1,0 +1,122 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    background-color: #F5F5F7;
+    color: #1D1D1F;
+    -webkit-font-smoothing: antialiased;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #D1D1D6; border-radius: 9999px; }
+}
+
+@layer components {
+  .apple-card {
+    background: white;
+    border-radius: 1rem;
+    border: 1px solid #F2F2F7;
+    padding: 1.5rem;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.03);
+  }
+  .apple-input {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: #F5F5F7;
+    border: 1px solid transparent;
+    border-radius: 0.75rem;
+    font-size: 0.875rem;
+    outline: none;
+    transition: all 0.2s;
+  }
+  .apple-input:focus {
+    background: white;
+    border-color: #0071E3;
+    box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
+  }
+  .apple-btn-primary {
+    background: #0071E3;
+    color: white;
+    font-size: 0.875rem;
+    font-weight: 500;
+    padding: 0.625rem 1.25rem;
+    border-radius: 9999px;
+    border: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    transition: background 0.15s;
+  }
+  .apple-btn-primary:hover { background: #0077ED; }
+  .apple-btn-primary:active { background: #006CD3; transform: scale(0.98); }
+
+  .apple-btn-secondary {
+    background: #F5F5F7;
+    color: #1D1D1F;
+    font-size: 0.875rem;
+    font-weight: 500;
+    padding: 0.625rem 1.25rem;
+    border-radius: 9999px;
+    border: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    transition: background 0.15s;
+  }
+  .apple-btn-secondary:hover { background: #E8E8ED; }
+
+  .apple-btn-danger {
+    background: #FFF1F0;
+    color: #EF4444;
+    font-size: 0.875rem;
+    font-weight: 500;
+    padding: 0.625rem 1.25rem;
+    border-radius: 9999px;
+    border: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    transition: background 0.15s;
+  }
+  .apple-btn-danger:hover { background: #FEE2E2; }
+
+  .sidebar-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.625rem 0.75rem;
+    border-radius: 0.75rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #6B6B6B;
+    text-decoration: none;
+    transition: all 0.15s;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    width: 100%;
+    text-align: left;
+  }
+  .sidebar-item:hover { background: #F5F5F7; color: #1D1D1F; }
+  .sidebar-item.active { background: #F5F5F7; color: #1D1D1F; }
+
+  .badge-green  { display:inline-flex;align-items:center;padding:2px 10px;border-radius:9999px;font-size:0.75rem;font-weight:500;background:#ECFDF5;color:#059669; }
+  .badge-yellow { display:inline-flex;align-items:center;padding:2px 10px;border-radius:9999px;font-size:0.75rem;font-weight:500;background:#FEFCE8;color:#CA8A04; }
+  .badge-red    { display:inline-flex;align-items:center;padding:2px 10px;border-radius:9999px;font-size:0.75rem;font-weight:500;background:#FEF2F2;color:#DC2626; }
+  .badge-blue   { display:inline-flex;align-items:center;padding:2px 10px;border-radius:9999px;font-size:0.75rem;font-weight:500;background:#EFF6FF;color:#2563EB; }
+  .badge-gray   { display:inline-flex;align-items:center;padding:2px 10px;border-radius:9999px;font-size:0.75rem;font-weight:500;background:#F3F4F6;color:#6B7280; }
+  .badge-orange { display:inline-flex;align-items:center;padding:2px 10px;border-radius:9999px;font-size:0.75rem;font-weight:500;background:#FFF7ED;color:#EA580C; }
+  .badge-purple { display:inline-flex;align-items:center;padding:2px 10px;border-radius:9999px;font-size:0.75rem;font-weight:500;background:#FAF5FF;color:#7C3AED; }
+
+  .table-row { border-bottom: 1px solid #FAFAFA; }
+  .table-row:hover { background: #FAFAFA; }
+  .table-row:last-child { border-bottom: none; }
+}

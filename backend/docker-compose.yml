@@ -1,15 +1,14 @@
-version: "3.8"
-services:
+﻿services:
   db:
     image: postgres:15
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: mivia
-    volumes:
-      - db-data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
 
   redis:
     image: redis:7
@@ -18,26 +17,13 @@ services:
 
   backend:
     build: .
-    command: npm run dev
-    volumes:
-      - ./:/app
-      - /app/node_modules
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/mivia?schema=public
-      - REDIS_URL=redis://redis:6379
-      - PORT=4000
+      DATABASE_URL: "postgresql://postgres:postgres@db:5432/mivia?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      PORT: "4000"
+      NODE_ENV: "development"
     ports:
-      - "4000:4000"
-    depends_on:
-      - db
-      - redis
-
-  worker:
-    build: .
-    command: node dist/workers/assignmentWorker.js
-    environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/mivia?schema=public
-      - REDIS_URL=redis://redis:6379
+      - "4001:4000"
     depends_on:
       - db
       - redis
