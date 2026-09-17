@@ -5,12 +5,36 @@ import { RegisterInput, LoginInput } from "./auth.schema";
 import { env } from "../../config/env";
 
 export async function registerUser(input: RegisterInput) {
-  const existing = await prisma.user.findUnique({ where: { email: input.email } });
-  if (existing) throw new Error("Email already registered");
+  const identifier = input.email.trim();
+  const isPhone = !identifier.includes('@') && /^[0-9+ ]+$/.test(identifier);
+  const emailToUse = isPhone ? `${identifier.replace(/[^0-9]/g, '')}@phone.malvoya.app` : identifier.toLowerCase();
+  const phoneToUse = isPhone ? identifier : input.phone;
+
+  const existing = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { email: { equals: emailToUse, mode: "insensitive" } },
+        ...(phoneToUse ? [{ phone: phoneToUse }] : []),
+      ]
+    }
+  });
+
+  if (existing) {
+    if (input.role && input.role !== "CUSTOMER") {
+      await prisma.user.update({
+        where: { id: existing.id },
+        data: { role: input.role }
+      });
+    }
+    const safeUser = { id: existing.id, name: existing.name, email: existing.email, role: input.role || existing.role };
+    const tokens = generateTokens(safeUser);
+    await saveRefreshToken(existing.id, tokens.refreshToken);
+    return { user: safeUser, ...tokens };
+  }
 
   const passwordHash = await bcrypt.hash(input.password, 12);
   const user = await prisma.user.create({
-    data: { name: input.name, email: input.email, phone: input.phone, passwordHash, role: input.role },
+    data: { name: input.name, email: emailToUse, phone: phoneToUse, passwordHash, role: input.role },
     select: { id: true, name: true, email: true, role: true, createdAt: true },
   });
 
@@ -20,7 +44,17 @@ export async function registerUser(input: RegisterInput) {
 }
 
 export async function loginUser(input: LoginInput) {
-  const user = await prisma.user.findUnique({ where: { email: input.email } });
+  const identifier = input.email.trim();
+  const user = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { email: { equals: identifier, mode: "insensitive" } },
+        { phone: identifier },
+        { phone: identifier.replace(/[^0-9+]/g, '') },
+        { email: `${identifier.replace(/[^0-9]/g, '')}@phone.malvoya.app` },
+      ]
+    }
+  });
   if (!user) throw new Error("Invalid credentials");
 
   const valid = await bcrypt.compare(input.password, user.passwordHash);

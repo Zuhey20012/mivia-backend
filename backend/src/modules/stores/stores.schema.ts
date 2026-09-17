@@ -3,7 +3,15 @@ import { z } from "zod";
 export const createStoreSchema = z.object({
   name:          z.string().min(2).max(100),
   description:   z.string().max(1000).optional(),
-  category:      z.enum(["APPAREL","COSMETICS","THRIFT","ACCESSORIES","HOME_DECOR","HANDMADE","ECO_FRIENDLY","OTHER"]),
+  category:      z.string().transform((val) => {
+    const raw = (val || "").toString().toUpperCase().trim().replace(/\s+/g, '_');
+    if (raw === 'SKINCARE') return 'COSMETICS' as const;
+    if (raw === 'BOUTIQUES' || raw === 'CLOTHING') return 'APPAREL' as const;
+    if (raw === 'HOME_BASED') return 'HOME_DECOR' as const;
+    const valid = ["APPAREL","COSMETICS","THRIFT","ACCESSORIES","HOME_DECOR","HANDMADE","ECO_FRIENDLY","OTHER"];
+    if (valid.includes(raw)) return raw as any;
+    return "OTHER" as const;
+  }),
   isHomeBased:   z.boolean().default(false),
   isEcoFriendly: z.boolean().default(false),
   address:       z.string().optional(),

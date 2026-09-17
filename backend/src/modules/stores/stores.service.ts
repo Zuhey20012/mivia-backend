@@ -45,7 +45,10 @@ export async function getStoreById(id: number) {
 
 export async function createStore(ownerId: number, data: any) {
   const existing = await prisma.store.findUnique({ where: { ownerId } });
-  if (existing) throw new Error("You already have a store");
+  if (existing) {
+    return prisma.store.update({ where: { ownerId }, data });
+  }
+  await prisma.user.update({ where: { id: ownerId }, data: { role: "VENDOR" } });
   return prisma.store.create({ data: { ...data, ownerId } });
 }
 
