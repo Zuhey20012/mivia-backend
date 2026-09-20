@@ -29,4 +29,6 @@ export const storeQuerySchema = z.object({
   search:      z.string().optional(),
   page:        z.string().default("1"),
   limit:       z.string().default("20"),
+  lat:         z.string().optional(),
+  lng:         z.string().optional(),
 });

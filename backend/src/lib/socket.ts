@@ -18,6 +18,59 @@ export function initSocket(httpServer: HttpServer): SocketServer {
       socket.join(`rental:${rentalId}`);
     });
 
+    // Courier updates location during delivery transit (high-precision telemetry stream)
+    socket.on("courier:telemetry", (data: {
+      courierId: number;
+      orderId?: number;
+      lat: number;
+      lng: number;
+      bearing?: number;
+      speed?: number;
+      accuracy?: number;
+      etaMinutes?: number;
+    }) => {
+      if (data && data.lat && data.lng) {
+        if (data.orderId) {
+          io.to(`order:${data.orderId}`).emit("courier:location", {
+            courierId: data.courierId,
+            orderId: data.orderId,
+            lat: data.lat,
+            lng: data.lng,
+            bearing: data.bearing ?? 0,
+            speed: data.speed ?? 0,
+            accuracy: data.accuracy ?? 5.0,
+            etaMinutes: data.etaMinutes ?? 15,
+            timestamp: Date.now(),
+          });
+        }
+      }
+    });
+
+    socket.on("courier:update_location", (data: { orderId: number; lat: number; lng: number; etaMinutes?: number; bearing?: number }) => {
+      if (data && data.orderId && data.lat && data.lng) {
+        emitCourierLocation(data.orderId, {
+          lat: data.lat,
+          lng: data.lng,
+          bearing: data.bearing ?? 0,
+          etaMinutes: data.etaMinutes ?? 15,
+        });
+      }
+    });
+
+    // In-transit chat message relay
+    socket.on("chat:join", (orderId: number) => {
+      socket.join(`chat:${orderId}`);
+    });
+
+    socket.on("chat:send", (data: { orderId: number; sender: string; text: string; role: string }) => {
+      if (data && data.orderId && data.text) {
+        io.to(`chat:${data.orderId}`).emit("chat:message", {
+          ...data,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    });
+
     socket.on("disconnect", () => {});
   });
 
@@ -34,7 +87,7 @@ export function getIo(): SocketServer {
  */
 export function emitCourierLocation(
   orderId: number,
-  data: { lat: number; lng: number; etaMinutes: number }
+  data: { lat: number; lng: number; bearing?: number; etaMinutes: number }
 ) {
   if (!io) return;
   io.to(`order:${orderId}`).emit("courier:location", data);
@@ -44,3 +97,4 @@ export function emitOrderStatus(orderId: number, status: string) {
   if (!io) return;
   io.to(`order:${orderId}`).emit("order:status", { status });
 }
+

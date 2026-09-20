@@ -1,8 +1,10 @@
 import { prisma } from "../../lib/prisma";
 import { StoreCategory } from "@prisma/client";
+import { haversineKm, calcEtaMinutes } from "../../utils/distance";
 
 export async function getStores(query: {
   category?: string; isHomeBased?: string; search?: string; page: string; limit: string;
+  lat?: string; lng?: string;
 }) {
   const page  = Math.max(1, Number(query.page));
   const limit = Math.min(50, Math.max(1, Number(query.limit)));
@@ -27,7 +29,43 @@ export async function getStores(query: {
     prisma.store.count({ where }),
   ]);
 
-  return { stores, total, page, limit, pages: Math.ceil(total / limit) };
+  const userLat = query.lat ? Number(query.lat) : null;
+  const userLng = query.lng ? Number(query.lng) : null;
+
+  const enrichedStores = stores.map((s) => {
+    let distanceKm: number | null = null;
+    let etaMinutes: number = 30;
+    let deliveryFeeCents: number = 299;
+
+    if (userLat !== null && userLng !== null && !isNaN(userLat) && !isNaN(userLng) && s.latitude && s.longitude) {
+      const km = haversineKm(userLat, userLng, s.latitude, s.longitude);
+      distanceKm = Number(km.toFixed(1));
+      etaMinutes = calcEtaMinutes(km);
+      if (km <= 1.5) {
+        deliveryFeeCents = 190; // €1.90 base
+      } else {
+        deliveryFeeCents = Math.min(690, 190 + Math.round((km - 1.5) * 50));
+      }
+    }
+
+    return {
+      ...s,
+      distanceKm,
+      etaMinutes,
+      deliveryFeeCents,
+      isOpen: true,
+    };
+  });
+
+  if (userLat !== null && userLng !== null) {
+    enrichedStores.sort((a, b) => {
+      if (a.distanceKm === null) return 1;
+      if (b.distanceKm === null) return -1;
+      return a.distanceKm - b.distanceKm;
+    });
+  }
+
+  return { stores: enrichedStores, total, page, limit, pages: Math.ceil(total / limit) };
 }
 
 export async function getStoreById(id: number) {
@@ -36,7 +74,10 @@ export async function getStoreById(id: number) {
     include: {
       products: {
         where: { isAvailable: true },
-        take: 20,
+        take: 50,
+        include: {
+          variants: true,
+        },
         orderBy: { isFeatured: "desc" },
       },
     },

@@ -27,6 +27,8 @@ async function findNearestCourier(storeLat: number, storeLng: number) {
   )[0];
 }
 
+import { dispatchEngine } from "../services/dispatchEngine";
+
 // ─── Assign delivery (order or rental) ──────────────────────────────────────
 async function handleAssignDelivery(job: Job) {
   const { orderId, rentalId, type } = job.data as { orderId?: number; rentalId?: number; type: string };
@@ -39,18 +41,33 @@ async function handleAssignDelivery(job: Job) {
 
     const storeLat = order.store.latitude ?? 60.17; // fallback Helsinki
     const storeLng = order.store.longitude ?? 24.94;
-    const courier = await findNearestCourier(storeLat, storeLng);
 
-    if (!courier) throw new Error(`No courier available for order ${orderId}`); // triggers retry
+    const match = await dispatchEngine.matchSingleOrderBipartite({
+      orderId,
+      storeId: order.storeId,
+      storeLat,
+      storeLng,
+      deliveryLat: order.deliveryLat ?? undefined,
+      deliveryLng: order.deliveryLng ?? undefined,
+      enqueuedAt: Date.now(),
+    });
 
-    const distKm    = order.deliveryLat ? haversineKm(storeLat, storeLng, order.deliveryLat, order.deliveryLng!) : 5;
-    const etaMinutes = calcEtaMinutes(distKm);
+    if (!match) {
+      // Fallback nearest courier
+      const courier = await findNearestCourier(storeLat, storeLng);
+      if (!courier) throw new Error(`No courier available for order ${orderId}`);
 
-    await prisma.$transaction([
-      prisma.order.update({ where: { id: orderId }, data: { courierId: courier.id, status: "CONFIRMED", etaMinutes } }),
-      prisma.courier.update({ where: { id: courier.id }, data: { currentOrderId: orderId } }),
-    ]);
-    console.log(`[worker] Order ${orderId} assigned to courier ${courier.id}, ETA ${etaMinutes}min`);
+      const distKm = order.deliveryLat ? haversineKm(storeLat, storeLng, order.deliveryLat, order.deliveryLng!) : 5;
+      const etaMinutes = calcEtaMinutes(distKm);
+
+      await prisma.$transaction([
+        prisma.order.update({ where: { id: orderId }, data: { courierId: courier.id, status: "CONFIRMED", etaMinutes } }),
+        prisma.courier.update({ where: { id: courier.id }, data: { currentOrderId: orderId } }),
+      ]);
+      console.log(`[worker] Order ${orderId} assigned to fallback courier ${courier.id}, ETA ${etaMinutes}min`);
+    } else {
+      console.log(`[worker] Order ${orderId} matched via Bipartite Dispatch Engine to courier ${match.courierId}`);
+    }
   }
 
   if (type === "RENTAL" && rentalId) {

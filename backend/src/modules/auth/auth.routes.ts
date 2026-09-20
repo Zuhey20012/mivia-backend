@@ -1,15 +1,18 @@
 import { Router } from "express";
-import { register, login, refresh, logout, googleLogin, phoneLogin, appleLogin } from "./auth.controller";
+import { register, login, refresh, logout, googleLogin, phoneLogin, appleLogin, sendOtpHandler, verifyOtpHandler } from "./auth.controller";
 import { authLimiter } from "../../middleware/rateLimiter";
 
 const router = Router();
 
-router.post("/register", authLimiter, register);
-router.post("/login",    authLimiter, login);
-router.post("/google",   authLimiter, googleLogin);
-router.post("/phone",    authLimiter, phoneLogin);
-router.post("/apple",    authLimiter, appleLogin);
-router.post("/refresh",  refresh);
-router.post("/logout",   logout);
+router.post("/register",   authLimiter, register);
+router.post("/login",      authLimiter, login);
+router.post("/otp/send",   authLimiter, sendOtpHandler);
+router.post("/otp/verify", authLimiter, verifyOtpHandler);
+router.post("/google",     authLimiter, googleLogin);
+router.post("/phone",      authLimiter, phoneLogin);
+router.post("/apple",      authLimiter, appleLogin);
+router.post("/refresh",    refresh);
+router.post("/logout",     logout);
 
 export default router;
+

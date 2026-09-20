@@ -71,7 +71,29 @@ export async function createOrder(userId: number, input: {
     return order;
   });
 
-  // 5. Queue courier assignment (if Redis is available)
+  // 5. Initialize Escrow Split Hold (PSD2 & PCI Zero-Touch Card Tokenization)
+  try {
+    const { holdEscrow, calculateEscrowSplit } = await import("../../services/paymentSplittingService");
+    const split = calculateEscrowSplit({ itemsSubtotalCents: subtotalCents, deliveryDistanceKm: 3.0 });
+    holdEscrow(order.id, split);
+  } catch {}
+
+  // 6. Enqueue into Spatial Bipartite Dispatch Engine (10-20s Optimization Epoch)
+  try {
+    const { dispatchEngine } = await import("../../services/dispatchEngine");
+    const store = await prisma.store.findUnique({ where: { id: input.storeId }, select: { latitude: true, longitude: true } });
+    dispatchEngine.enqueueOrder({
+      orderId: order.id,
+      storeId: input.storeId,
+      storeLat: store?.latitude ?? 60.1841,
+      storeLng: store?.longitude ?? 24.9493,
+      deliveryLat: input.deliveryLat,
+      deliveryLng: input.deliveryLng,
+      enqueuedAt: Date.now(),
+    });
+  } catch {}
+
+  // 7. Queue BullMQ courier assignment (if Redis is available)
   if (assignmentQueue) {
     await assignmentQueue.add("assign-delivery", { orderId: order.id, type: "ORDER" });
   }

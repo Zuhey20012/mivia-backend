@@ -74,3 +74,34 @@ export async function appleLogin(req: Request, res: Response) {
     res.status(401).json({ ok: false, error: e.message });
   }
 }
+
+export async function sendOtpHandler(req: Request, res: Response) {
+  const { target, phone, email, channel } = req.body;
+  const destination = target || phone || email;
+  if (!destination) {
+    return res.status(400).json({ ok: false, error: "Phone number or email address is required" });
+  }
+  try {
+    const { sendOtp } = await import("./otp.service");
+    const data = await sendOtp(destination, channel);
+    res.json(data);
+  } catch (e: any) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+}
+
+export async function verifyOtpHandler(req: Request, res: Response) {
+  const { target, phone, email, code } = req.body;
+  const destination = target || phone || email;
+  if (!destination || !code) {
+    return res.status(400).json({ ok: false, error: "Target destination and verification code are required" });
+  }
+  try {
+    const { verifyOtp } = await import("./otp.service");
+    const data = await verifyOtp(destination, code);
+    res.json(data);
+  } catch (e: any) {
+    res.status(401).json({ ok: false, error: e.message });
+  }
+}
+

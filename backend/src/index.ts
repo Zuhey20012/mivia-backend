@@ -15,6 +15,8 @@ import storesRoutes   from "./modules/stores/stores.routes";
 import productsRoutes from "./modules/products/products.routes";
 import ordersRoutes   from "./modules/orders/orders.routes";
 import adminRoutes    from "./modules/admin/admin.routes";
+import courierRoutes  from "./modules/orders/courier.routes";
+import { dispatchNotifications } from "./services/notificationDeliveryService";
 
 const logger = pino({ level: env.logLevel });
 const app    = express();
@@ -37,7 +39,30 @@ app.use("/api/v1/auth",     authRoutes);
 app.use("/api/v1/stores",   storesRoutes);
 app.use("/api/v1",          productsRoutes);
 app.use("/api/v1",          ordersRoutes);
+app.use("/api/v1",          courierRoutes);
 app.use("/api/v1/admin",    adminRoutes);
+
+// Real multi-channel notification dispatch webhook (SMS & Email tracking)
+app.post("/api/v1/notifications/dispatch", async (req, res) => {
+  const { event, orderId, amount, paymentMethod, email, phone, name, address, items, code, channel } = req.body;
+  logger.info({ event, orderId, amount, email, phone, code, channel }, "📨 Realtime Notification Webhook Received via Backend");
+  
+  const result = await dispatchNotifications({
+    event: event || "ORDER_PAYMENT_CONFIRMED",
+    orderId: orderId || `MLV-${Date.now().toString().slice(-6)}`,
+    amount: Number(amount) || 0,
+    paymentMethod: paymentMethod || "Bank-Grade Card / SEPA",
+    email: email || "",
+    phone: phone || "",
+    name,
+    address,
+    items,
+    code,
+    channel,
+  });
+
+  return res.status(200).json(result);
+});
 
 // Real launch database cleanup (purges fake seed demo stores, products, couriers)
 app.all("/api/v1/admin/purge-seed", async (req, res) => {

@@ -3,6 +3,7 @@ import { prisma } from "../../lib/prisma";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../../utils/jwt";
 import { RegisterInput, LoginInput } from "./auth.schema";
 import { env } from "../../config/env";
+import { dispatchNotifications } from "../../services/notificationDeliveryService";
 
 export async function registerUser(input: RegisterInput) {
   const identifier = input.email.trim();
@@ -37,6 +38,18 @@ export async function registerUser(input: RegisterInput) {
     data: { name: input.name, email: emailToUse, phone: phoneToUse, passwordHash, role: input.role },
     select: { id: true, name: true, email: true, role: true, createdAt: true },
   });
+
+  // Real multi-channel dispatch (Nodemailer email + Twilio SMS gateway)
+  try {
+    const regCode = String(Math.floor(100000 + Math.random() * 900000));
+    dispatchNotifications({
+      event: 'CUSTOMER_REGISTERED',
+      name: input.name,
+      email: isPhone ? undefined : emailToUse,
+      phone: phoneToUse,
+      code: regCode,
+    }).catch(() => {});
+  } catch (_) {}
 
   const tokens = generateTokens(user);
   await saveRefreshToken(user.id, tokens.refreshToken);
