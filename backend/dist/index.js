@@ -82,7 +82,7 @@ app.post("/api/v1/notifications/dispatch", async (req, res) => {
         event: event || "ORDER_PAYMENT_CONFIRMED",
         orderId: orderId || `MLV-${Date.now().toString().slice(-6)}`,
         amount: Number(amount) || 0,
-        paymentMethod: paymentMethod || "Malvoya 1-Tap Pay",
+        paymentMethod: paymentMethod || "Bank-Grade Card / SEPA",
         email: email || "",
         phone: phone || "",
         name,
