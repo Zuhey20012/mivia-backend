@@ -169,25 +169,37 @@ class _CheckoutPageState extends State<CheckoutPage> {
         }),
       );
 
-      final totalCharged = cart.total + 2.99;
-      final fallbackId = 'MLV-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
-      final orderData = (response.statusCode == 200 || response.statusCode == 201)
-          ? jsonDecode(response.body)['order']
-          : {'id': fallbackId};
-      final orderId = orderData['id']?.toString() ?? fallbackId;
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final totalCharged = cart.total + 2.99;
+        final orderData = jsonDecode(response.body)['order'];
+        final orderId = orderData['id']?.toString() ?? 'MLV-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
 
-      await _dispatchRealtimeAlerts(totalCharged, auth, orderId: orderId);
+        await _dispatchRealtimeAlerts(totalCharged, auth, orderId: orderId);
 
-      HapticFeedback.heavyImpact();
-      cart.clear();
-      if (mounted) _showSuccessDialog(orderData, totalCharged, auth);
+        HapticFeedback.heavyImpact();
+        cart.clear();
+        if (mounted) _showSuccessDialog(orderData, totalCharged, auth);
+      } else {
+        throw Exception('Failed to place order');
+      }
 
     } catch (e) {
-      final totalCharged = cart.total + 2.99;
-      final fallbackId = 'MLV-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
-      await _dispatchRealtimeAlerts(totalCharged, auth, orderId: fallbackId);
-      cart.clear();
-      if (mounted) _showSuccessDialog({'id': fallbackId}, totalCharged, auth);
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Checkout Failed', style: TextStyle(fontWeight: FontWeight.bold)),
+            content: const Text('We could not process your order at this time. Please check your connection and try again.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('OK', style: TextStyle(color: Color(0xFF8B5CF6), fontWeight: FontWeight.bold)),
+              ),
+            ],
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }

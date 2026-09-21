@@ -31,9 +31,10 @@ class MapTrackerScreen extends StatefulWidget {
   State<MapTrackerScreen> createState() => _MapTrackerScreenState();
 }
 
-class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerProviderStateMixin {
+class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProviderStateMixin {
   late final MapController _mapController;
   late final AnimationController _animCtrl;
+  late final AnimationController _pulseCtrl;
   late final Animation<double> _routeProgress;
 
   // Route: Kallio Boutique -> Kaisaniemi -> Central -> Delivery Destination
@@ -44,6 +45,10 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
   late List<LatLng> _fullRoute;
 
   LatLng _currentCourierPos = LatLng(60.1841, 24.9493);
+  LatLng _startCourierPos = LatLng(60.1841, 24.9493);
+  LatLng _targetCourierPos = LatLng(60.1841, 24.9493);
+  bool _receivedRealGps = false;
+  
   double _currentBearing = 205.0;
   double _distanceMeters = 450.0;
   int _etaMinutes = 15;
@@ -59,17 +64,25 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
 
     _animCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 24),
+      duration: const Duration(milliseconds: 1000),
     );
+
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat(reverse: true);
 
     _routeProgress = CurvedAnimation(
       parent: _animCtrl,
-      curve: Curves.easeInOut,
+      curve: Curves.linear,
     )..addListener(() {
         if (!mounted) return;
         final t = _routeProgress.value;
         setState(() {
-          _currentCourierPos = _interpolateRoute(t);
+          _currentCourierPos = LatLng(
+            _startCourierPos.latitude + (_targetCourierPos.latitude - _startCourierPos.latitude) * t,
+            _startCourierPos.longitude + (_targetCourierPos.longitude - _startCourierPos.longitude) * t,
+          );
           const distanceCalc = Distance();
           _distanceMeters = distanceCalc.as(LengthUnit.Meter, _currentCourierPos, _homePos);
           _etaMinutes = (_distanceMeters / 250.0).ceil().clamp(1, 60);
@@ -78,6 +91,8 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
 
     // Real live readiness: Courier stays stationary at pickup location until live assignment
     _currentCourierPos = _boutiquePos;
+    _startCourierPos = _boutiquePos;
+    _targetCourierPos = _boutiquePos;
     const distanceCalc = Distance();
     _distanceMeters = distanceCalc.as(LengthUnit.Meter, _boutiquePos, _homePos);
     _etaMinutes = (_distanceMeters / 250.0).ceil().clamp(1, 60);
@@ -90,16 +105,22 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
     // Listen for real courier GPS updates
     CustomerSocketService().onCourierLocationUpdate = (data) {
       if (mounted) {
-        setState(() {
-          final lat = (data['latitude'] as num?)?.toDouble();
-          final lng = (data['longitude'] as num?)?.toDouble();
-          if (lat != null && lng != null) {
-            _currentCourierPos = LatLng(lat, lng);
+        final lat = (data['latitude'] as num?)?.toDouble();
+        final lng = (data['longitude'] as num?)?.toDouble();
+        if (lat != null && lng != null) {
+          final newPos = LatLng(lat, lng);
+          setState(() {
+            _receivedRealGps = true;
+            _startCourierPos = _currentCourierPos;
+            _targetCourierPos = newPos;
             if (data['bearing'] != null) {
               _currentBearing = (data['bearing'] as num).toDouble();
+            } else {
+              _currentBearing = _calculateBearing(_startCourierPos, _targetCourierPos);
             }
-          }
-        });
+          });
+          _animCtrl.forward(from: 0.0);
+        }
       }
     };
   }
@@ -107,6 +128,7 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
   @override
   void dispose() {
     CustomerSocketService().onCourierLocationUpdate = null;
+    _pulseCtrl.dispose();
     _animCtrl.dispose();
     _mapController.dispose();
     super.dispose();
@@ -119,24 +141,6 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
     final y = math.sin(dLon) * math.cos(lat2Rad);
     final x = math.cos(lat1Rad) * math.sin(lat2Rad) - math.sin(lat1Rad) * math.cos(lat2Rad) * math.cos(dLon);
     return (math.atan2(y, x) * 180 / math.pi + 360) % 360;
-  }
-
-  LatLng _interpolateRoute(double t) {
-    if (_fullRoute.length < 2) return _boutiquePos;
-    final totalSegments = _fullRoute.length - 1;
-    final scaledT = t * totalSegments;
-    final segIndex = scaledT.floor().clamp(0, totalSegments - 1);
-    final segFraction = scaledT - segIndex;
-
-    final p1 = _fullRoute[segIndex];
-    final p2 = _fullRoute[segIndex + 1];
-
-    _currentBearing = _calculateBearing(p1, p2);
-
-    return LatLng(
-      p1.latitude + (p2.latitude - p1.latitude) * segFraction,
-      p1.longitude + (p2.longitude - p1.longitude) * segFraction,
-    );
   }
 
   void _showMaskedProxyCallDialog() {
@@ -175,8 +179,8 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Masked VoIP Proxy Call', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: textPrimary)),
-                      const Text('Zero-PII Direct Courier Relay', style: TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.w700)),
+                      Text(AppLocalizations.of(context).translate('maskedVoipCall'), style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: textPrimary)),
+                      Text(AppLocalizations.of(context).translate('zeroPiiRelay'), style: const TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.w700)),
                     ],
                   ),
                 ),
@@ -278,11 +282,11 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
                 physics: const BouncingScrollPhysics(),
                 child: Row(
                   children: [
-                    _quickReplyChip('I am downstairs 🚪', textCtrl, setSheetState),
-                    const SizedBox(width: 6),
-                    _quickReplyChip('Leave by doorstep 📦', textCtrl, setSheetState),
-                    const SizedBox(width: 6),
-                    _quickReplyChip('Call when arrived 📞', textCtrl, setSheetState),
+                    _quickReplyChip(AppLocalizations.of(context).translate('quickReplyDownstairs'), textCtrl, setSheetState),
+                    const SizedBox(width: 8),
+                    _quickReplyChip(AppLocalizations.of(context).translate('quickReplyDoorstep'), textCtrl, setSheetState),
+                    const SizedBox(width: 8),
+                    _quickReplyChip(AppLocalizations.of(context).translate('quickReplyCall'), textCtrl, setSheetState),
                   ],
                 ),
               ),
@@ -448,8 +452,8 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Contactless Delivery Proof', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: textPrimary)),
-                          const Text('GPS Geotagged • Doorstep Drop', style: TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.w700)),
+                          Text(AppLocalizations.of(context).translate('contactlessProof'), style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: textPrimary)),
+                          Text(AppLocalizations.of(context).translate('gpsGeotagged'), style: const TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.w700)),
                         ],
                       ),
                     ],
@@ -595,9 +599,9 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
                                 color: const Color(0xFF10B981),
                                 borderRadius: BorderRadius.circular(8),
                               ),
-                              child: const Text(
-                                'DELIVERED',
-                                style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w900),
+                              child: Text(
+                                AppLocalizations.of(context).translate('deliveredText'),
+                                style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w900),
                               ),
                             ),
                           ],
@@ -626,9 +630,9 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                              const Text(
-                                'Tamper Seal Verified ✅',
-                                style: TextStyle(color: Color(0xFF10B981), fontSize: 10, fontWeight: FontWeight.w700),
+                              Text(
+                                AppLocalizations.of(context).translate('tamperSealVerified'),
+                                style: const TextStyle(color: Color(0xFF10B981), fontSize: 10, fontWeight: FontWeight.w700),
                               ),
                             ],
                           ),
@@ -865,40 +869,91 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
                       ),
                     ),
                   ),
-                  // Moving Courier Marker with Bearing
-                  Marker(
-                    point: _currentCourierPos,
-                    width: 54,
-                    height: 54,
-                    builder: (ctx) => Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        Container(
-                          width: 54,
-                          height: 54,
-                          decoration: BoxDecoration(
-                            color: AppTheme.primary.withValues(alpha: 0.25),
-                            shape: BoxShape.circle,
+                  // Moving Courier Marker or Waiting Indicator
+                  if (!_receivedRealGps)
+                    Marker(
+                      point: _boutiquePos,
+                      width: 180,
+                      height: 100,
+                      builder: (ctx) => Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          AnimatedBuilder(
+                            animation: _pulseCtrl,
+                            builder: (ctx, child) => Container(
+                              width: 30 + (_pulseCtrl.value * 20),
+                              height: 30 + (_pulseCtrl.value * 20),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primary.withValues(alpha: 0.3 - (_pulseCtrl.value * 0.2)),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: AppTheme.primary.withValues(alpha: 0.8 - (_pulseCtrl.value * 0.5)),
+                                  width: 2,
+                                ),
+                              ),
+                              child: Center(
+                                child: Container(
+                                  width: 12,
+                                  height: 12,
+                                  decoration: const BoxDecoration(
+                                    color: AppTheme.primary,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
-                        Transform.rotate(
-                          angle: _currentBearing * math.pi / 180,
-                          child: Container(
-                            width: 40,
-                            height: 40,
-                            decoration: const BoxDecoration(
-                              color: Colors.white,
+                          const SizedBox(height: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.9),
+                              borderRadius: BorderRadius.circular(6),
+                              boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
+                            ),
+                            child: const Text(
+                              'Waiting for courier location...',
+                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black87),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    Marker(
+                      point: _currentCourierPos,
+                      width: 54,
+                      height: 54,
+                      builder: (ctx) => Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Container(
+                            width: 54,
+                            height: 54,
+                            decoration: BoxDecoration(
+                              color: AppTheme.primary.withValues(alpha: 0.25),
                               shape: BoxShape.circle,
-                              boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 6)],
-                            ),
-                            child: const Center(
-                              child: Icon(Icons.navigation_rounded, color: AppTheme.primary, size: 22),
                             ),
                           ),
-                        ),
-                      ],
+                          Transform.rotate(
+                            angle: _currentBearing * math.pi / 180,
+                            child: Container(
+                              width: 40,
+                              height: 40,
+                              decoration: const BoxDecoration(
+                                color: Colors.white,
+                                shape: BoxShape.circle,
+                                boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 6)],
+                              ),
+                              child: const Center(
+                                child: Icon(Icons.navigation_rounded, color: AppTheme.primary, size: 22),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
                 ],
               ),
             ],

@@ -273,7 +273,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: const Icon(Icons.delivery_dining_rounded, color: Colors.white, size: 42),
                     ),
                     const SizedBox(height: 16),
-                    const Text('Malvoya Courier', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: AppTheme.textPrimary, letterSpacing: -0.5)),
+                    Text(AppLocalizations.of(context).translate('malvoyaCourier'), style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: AppTheme.textPrimary, letterSpacing: -0.5)),
                     const SizedBox(height: 4),
                     Text('Delivery Partner Portal', style: TextStyle(fontSize: 14, color: Colors.grey.shade500, fontWeight: FontWeight.w500)),
                   ],

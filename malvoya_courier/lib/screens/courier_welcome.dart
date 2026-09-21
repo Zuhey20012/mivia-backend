@@ -106,9 +106,9 @@ class CourierWelcomeScreen extends StatelessWidget {
               child: const Icon(Icons.delivery_dining_rounded, color: Colors.white, size: 18),
             ),
             const SizedBox(width: 8),
-            const Text(
-              'Malvoya Courier',
-              style: TextStyle(
+            Text(
+              AppLocalizations.of(context).translate('malvoyaCourier'),
+              style: const TextStyle(
                 fontWeight: FontWeight.w900,
                 fontSize: 17,
                 letterSpacing: -0.3,

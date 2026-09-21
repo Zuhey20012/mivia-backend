@@ -93,6 +93,10 @@ class AppLocalizations {
       'perkRetailDesc': 'Deliver stylish boutique apparel, lifestyle drops & cosmetics in 20–45 min.',
       'perkVehicle': 'Your Choice of Vehicle',
       'perkVehicleDesc': 'Bicycle, e-bike, scooter, or car. You choose how you ride.',
+      'deliveryAcceptedToast': '✅ Delivery accepted! Live radar broadcasting to customer.',
+      'hiName': 'Hi, ',
+      'malvoyaCourier': 'Malvoya Courier',
+      'partnerAgreementSign': 'I have read, accept, and digitally sign the Malvoya Courier Partner Agreement.',
     },
     'fi': {
       'language': 'Kieli',
@@ -148,6 +152,10 @@ class AppLocalizations {
       'perkRetailDesc': 'Toimita laadukkaita putiikkivaatteita, löytöjä ja tuotteita 20–45 minuutissa.',
       'perkVehicle': 'Valitse ajoneuvosi',
       'perkVehicleDesc': 'Polkupyörä, sähköpyörä, skootteri tai auto. Päätät itse.',
+      'deliveryAcceptedToast': '✅ Toimitus hyväksytty! Live-tutka lähettää asiakkaalle.',
+      'hiName': 'Hei, ',
+      'malvoyaCourier': 'Malvoya Kuriiri',
+      'partnerAgreementSign': 'Olen lukenut, hyväksyn ja allekirjoitan digitaalisesti Malvoyan kuriirikumppanuussopimuksen.',
     },
     'sv': {
       'language': 'Språk',

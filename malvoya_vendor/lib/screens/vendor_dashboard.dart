@@ -25,6 +25,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
   Map<String, dynamic>? _store;
   bool _loadingOrders = true;
   bool _loadingProducts = true;
+  bool _connectionError = false;
 
   final List<Map<String, dynamic>> _merchantDrops = [];
 
@@ -52,6 +53,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
   }
 
   Future<void> _loadAll() async {
+    setState(() => _connectionError = false);
     await Future.wait([_fetchStore(), _fetchOrders(), _loadLocalDrops()]);
   }
 
@@ -140,8 +142,12 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       if (res.statusCode == 200 && mounted) {
         final data = jsonDecode(res.body);
         setState(() { _orders = data is List ? data : (data['orders'] ?? []); });
+      } else {
+        if (mounted) setState(() => _connectionError = true);
       }
-    } catch (_) {} finally {
+    } catch (_) {
+      if (mounted) setState(() => _connectionError = true);
+    } finally {
       if (mounted) setState(() => _loadingOrders = false);
     }
   }
@@ -157,8 +163,12 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       if (res.statusCode == 200 && mounted) {
         final data = jsonDecode(res.body);
         setState(() { _products = data['products'] ?? data ?? []; });
+      } else {
+        if (mounted) setState(() => _connectionError = true);
       }
-    } catch (_) {} finally {
+    } catch (_) {
+      if (mounted) setState(() => _connectionError = true);
+    } finally {
       if (mounted) setState(() => _loadingProducts = false);
     }
   }
@@ -209,7 +219,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(_store?['name'] ?? 'Your Store', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                Text(_store?['name'] ?? AppLocalizations.of(context).translate('yourStoreFallback'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                 Text(vendorName, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary, fontWeight: FontWeight.w400)),
               ],
             ),
@@ -261,13 +271,30 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabs,
+      body: Column(
         children: [
-          _buildOrdersTab(),
-          _buildProductsTab(),
-          _buildVideoDropsTab(),
-          _buildDashboardTab(),
+          if (_connectionError)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(8),
+              color: const Color(0xFF8B5CF6),
+              child: const Text(
+                'No connection. Please check your network and try again.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabs,
+              children: [
+                _buildOrdersTab(),
+                _buildProductsTab(),
+                _buildVideoDropsTab(),
+                _buildDashboardTab(),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -277,9 +304,28 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
 
   Widget _buildOrdersTab() {
     if (_loadingOrders) return _shimmerList();
+    if (_connectionError) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.wifi_off_rounded, size: 64, color: Colors.grey.shade400),
+            const SizedBox(height: 16),
+            const Text('Could not fetch orders', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: _fetchOrders,
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8B5CF6), foregroundColor: Colors.white),
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
     if (_orders.isEmpty) return _emptyState(
       icon: Icons.inbox_outlined,
-      title: 'No orders yet',
+      title: AppLocalizations.of(context).translate('noOrdersYet'),
       subtitle: 'Your first order will appear here. Share your store to attract customers!',
       color: AppTheme.primary,
     );
@@ -410,7 +456,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                 child: ElevatedButton.icon(
                   onPressed: () => _updateOrderStatus(order['id'], 'PROCESSING'),
                   icon: const Icon(Icons.inventory_2_outlined, size: 16),
-                  label: const Text('Start Packaging Items'),
+                  label: Text(AppLocalizations.of(context).translate('startPackagingItems')),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blue.shade700,
                     foregroundColor: Colors.white,
@@ -450,6 +496,54 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
 
   Widget _buildProductsTab() {
     if (_loadingProducts) return _shimmerList();
+    
+    Widget bodyContent;
+    if (_connectionError) {
+      bodyContent = Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.wifi_off_rounded, size: 64, color: Colors.grey.shade400),
+            const SizedBox(height: 16),
+            const Text('Could not fetch products', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: _fetchProducts,
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8B5CF6), foregroundColor: Colors.white),
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    } else if (_products.isEmpty) {
+      bodyContent = _emptyState(
+        icon: Icons.inventory_2_outlined,
+        title: 'No products yet',
+        subtitle: 'Add your first product to start selling on Malvoya.',
+        color: AppTheme.primary,
+        actionLabel: 'Add First Product',
+        onAction: () async {
+          final added = await Navigator.push<bool>(
+            context,
+            MaterialPageRoute(builder: (_) => AddProductScreen(storeId: _store?['id'] ?? 0)),
+          );
+          if (added == true) _fetchProducts();
+        },
+      );
+    } else {
+      bodyContent = RefreshIndicator(
+        onRefresh: _fetchProducts,
+        color: AppTheme.primary,
+        child: ListView.separated(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+          itemCount: _products.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 12),
+          itemBuilder: (ctx, i) => _buildProductCard(_products[i]),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppTheme.background,
       floatingActionButton: FloatingActionButton.extended(
@@ -464,31 +558,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
         icon: const Icon(Icons.add_rounded, color: Colors.white),
         label: const Text('Add Product', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
       ),
-      body: _products.isEmpty
-          ? _emptyState(
-              icon: Icons.inventory_2_outlined,
-              title: 'No products yet',
-              subtitle: 'Add your first product to start selling on Malvoya.',
-              color: AppTheme.primary,
-              actionLabel: 'Add First Product',
-              onAction: () async {
-                final added = await Navigator.push<bool>(
-                  context,
-                  MaterialPageRoute(builder: (_) => AddProductScreen(storeId: _store?['id'] ?? 0)),
-                );
-                if (added == true) _fetchProducts();
-              },
-            )
-          : RefreshIndicator(
-              onRefresh: _fetchProducts,
-              color: AppTheme.primary,
-              child: ListView.separated(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-                itemCount: _products.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
-                itemBuilder: (ctx, i) => _buildProductCard(_products[i]),
-              ),
-            ),
+      body: bodyContent,
     );
   }
 
@@ -572,7 +642,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _store != null ? _store!['name'] ?? 'Your Store' : 'Set up your store',
+                  _store != null ? _store!['name'] ?? AppLocalizations.of(context).translate('yourStoreFallback') : 'Set up your store',
                   style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 4),

@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../auth_service.dart';
 import '../config/constants.dart';
 import '../config/theme.dart';
+import '../l10n.dart';
 
 class AddProductScreen extends StatefulWidget {
   final int storeId;
@@ -161,9 +162,9 @@ class _AddProductScreenState extends State<AddProductScreen> {
         ),
         backgroundColor: Colors.transparent,
         iconTheme: const IconThemeData(color: Colors.white),
-        title: const Text(
-          'Lisää tuote / Add Product',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 17),
+        title: Text(
+          AppLocalizations.of(context).translate('addProductTitle'),
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 17),
         ),
       ),
       body: SingleChildScrollView(
@@ -357,8 +358,10 @@ class _AddProductScreenState extends State<AddProductScreen> {
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                         ),
                         icon: const Icon(Icons.add_rounded, color: Colors.white),
-                        label: const Text('Lisää tuote kauppaan / Add to Store',
-                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: Colors.white)),
+                        label: Text(
+                          AppLocalizations.of(context).translate('addToStoreBtn'),
+                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: Colors.white),
+                        ),
                       ),
                     ),
             ),

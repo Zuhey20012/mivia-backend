@@ -11,6 +11,7 @@ import '../l10n.dart';
 import '../services/courier_telemetry_service.dart';
 import '../services/socket_service.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:geolocator/geolocator.dart';
 
 class CourierDashboard extends StatefulWidget {
   const CourierDashboard({super.key});
@@ -25,6 +26,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
   List _myDeliveries = [];
   bool _loadingOrders = false;
   bool _loadingDeliveries = false;
+  bool _connectionError = false;
   Map<String, dynamic>? _activeDelivery;
 
   @override
@@ -56,8 +58,40 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
   }
 
   Future<void> _toggleOnline() async {
-    final prefs = await SharedPreferences.getInstance();
     final nextState = !_isOnline;
+    double lat = 60.1841;
+    double lng = 24.9493;
+
+    if (nextState) {
+      try {
+        LocationPermission permission = await Geolocator.checkPermission();
+        if (permission == LocationPermission.denied) {
+          permission = await Geolocator.requestPermission();
+          if (permission == LocationPermission.denied) {
+            throw Exception('Location permissions are denied');
+          }
+        }
+        if (permission == LocationPermission.deniedForever) {
+          throw Exception('Location permissions are permanently denied');
+        }
+        
+        Position position = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high);
+        lat = position.latitude;
+        lng = position.longitude;
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Location unavailable. Cannot go online.'),
+                backgroundColor: Colors.red),
+          );
+        }
+        return;
+      }
+    }
+
+    final prefs = await SharedPreferences.getInstance();
     setState(() => _isOnline = nextState);
     await prefs.setBool('courier_online', nextState);
 
@@ -77,7 +111,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
         http.post(
           Uri.parse('${AppConstants.apiBase}/courier/status'),
           headers: {'Authorization': _authHeader(), 'Content-Type': 'application/json'},
-          body: jsonEncode({'isOnline': nextState, 'latitude': 60.1841, 'longitude': 24.9493}),
+          body: jsonEncode({'isOnline': nextState, 'latitude': lat, 'longitude': lng}),
         ).timeout(const Duration(seconds: 4));
       } catch (_) {}
     }
@@ -98,6 +132,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
   }
 
   Future<void> _fetchAll() async {
+    setState(() => _connectionError = false);
     await Future.wait([_fetchAvailableOrders(), _fetchMyDeliveries()]);
   }
 
@@ -112,8 +147,12 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
       if (res.statusCode == 200 && mounted) {
         final data = jsonDecode(res.body);
         setState(() { _availableOrders = data is List ? data : (data['orders'] ?? []); });
+      } else {
+        if (mounted) setState(() => _connectionError = true);
       }
-    } catch (_) {} finally {
+    } catch (_) {
+      if (mounted) setState(() => _connectionError = true);
+    } finally {
       if (mounted) setState(() => _loadingOrders = false);
     }
   }
@@ -139,8 +178,12 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
           CourierSocketService().trackOrder(_activeDelivery!['id']);
           CourierTelemetryService().startLiveBroadcast(orderId: _activeDelivery!['id']);
         }
+      } else {
+        if (mounted) setState(() => _connectionError = true);
       }
-    } catch (_) {} finally {
+    } catch (_) {
+      if (mounted) setState(() => _connectionError = true);
+    } finally {
       if (mounted) setState(() => _loadingDeliveries = false);
     }
   }
@@ -158,7 +201,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
         _tabs.animateTo(1);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('✅ Delivery accepted! Live radar broadcasting to customer.')),
+            SnackBar(content: Text(AppLocalizations.of(context).translate('deliveryAcceptedToast'))),
           );
         }
       }
@@ -253,8 +296,8 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Hi, $name!', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                const Text('Malvoya Courier', style: TextStyle(fontSize: 11, color: AppTheme.textSecondary, fontWeight: FontWeight.w400)),
+                Text('${AppLocalizations.of(context).translate('hiName')}$name!', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                Text(AppLocalizations.of(context).translate('malvoyaCourier'), style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary, fontWeight: FontWeight.w400)),
               ],
             ),
           ],
@@ -364,6 +407,17 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
                 ],
               ),
             ),
+          if (_connectionError)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(8),
+              color: const Color(0xFF8B5CF6),
+              child: const Text(
+                'No connection. Please check your network and try again.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ),
           Expanded(
             child: TabBarView(
               controller: _tabs,
@@ -411,6 +465,28 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
       );
     }
     if (_loadingOrders) return _shimmerList();
+    if (_connectionError) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.wifi_off_rounded, size: 64, color: Colors.grey.shade400),
+              const SizedBox(height: 16),
+              const Text('Could not fetch orders', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: _fetchAvailableOrders,
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8B5CF6), foregroundColor: Colors.white),
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     if (_availableOrders.isEmpty) {
       return Center(
         child: Padding(
@@ -506,7 +582,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
               child: ElevatedButton(
                 onPressed: () => _acceptDelivery(order),
                 style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
-                child: const Text('Accept Delivery'),
+                child: Text(AppLocalizations.of(context).translate('acceptDelivery')),
               ),
             ),
           ],

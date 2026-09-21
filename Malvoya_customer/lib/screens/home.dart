@@ -15,6 +15,7 @@ import 'location_selector_modal.dart';
 import 'notification_center_drawer.dart';
 import 'returns_screen.dart';
 import '../features/returns/presentation/widgets/swipe_to_swap_sheet.dart';
+import 'package:shimmer/shimmer.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -586,6 +587,41 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
+  Widget _buildShimmerStoreCard(BuildContext context, bool isDark) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 20),
+      decoration: BoxDecoration(
+        color: AppTheme.cardBackground(context),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppTheme.cardBorder(context), width: 1.2),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Shimmer.fromColors(
+        baseColor: isDark ? Colors.grey[800]! : Colors.grey[300]!,
+        highlightColor: isDark ? Colors.grey[700]! : Colors.grey[100]!,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(height: 140, width: double.infinity, color: Colors.white),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(height: 20, width: 200, color: Colors.white),
+                  const SizedBox(height: 6),
+                  Container(height: 14, width: 150, color: Colors.white),
+                  const SizedBox(height: 12),
+                  Container(height: 14, width: 100, color: Colors.white),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<LocaleProvider>(
@@ -721,19 +757,39 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     const SizedBox(height: 14),
 
                     if (loading)
-                      const Center(
-                        child: Padding(
-                          padding: EdgeInsets.all(36.0),
-                          child: CircularProgressIndicator(color: Color(0xFF8B5CF6)),
-                        ),
+                      Column(
+                        children: List.generate(3, (index) => _buildShimmerStoreCard(context, isDark)),
                       )
                     else if (error)
                       Center(
                         child: Padding(
                           padding: const EdgeInsets.all(32.0),
-                          child: Text(
-                            l10n.translate('couldNotLoadStores'),
-                            style: TextStyle(color: textSecondary),
+                          child: Column(
+                            children: [
+                              Icon(Icons.wifi_off_rounded, size: 48, color: textSecondary),
+                              const SizedBox(height: 16),
+                              Text(
+                                l10n.translate('couldNotLoadStores'),
+                                style: TextStyle(color: textPrimary, fontWeight: FontWeight.w600),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 16),
+                              ElevatedButton.icon(
+                                onPressed: () {
+                                  setState(() {
+                                    loading = true;
+                                    error = false;
+                                  });
+                                  fetchStores();
+                                },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF8B5CF6),
+                                  foregroundColor: Colors.white,
+                                ),
+                                icon: const Icon(Icons.refresh_rounded),
+                                label: const Text('Retry'),
+                              ),
+                            ],
                           ),
                         ),
                       )

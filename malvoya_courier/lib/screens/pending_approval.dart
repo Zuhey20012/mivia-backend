@@ -138,8 +138,8 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> {
                           activeColor: AppTheme.primary,
                           onChanged: (v) => setModalState(() => agreed = v ?? false),
                         ),
-                        const Expanded(
-                          child: Text('I have read, accept, and digitally sign the Malvoya Courier Partner Agreement.', style: TextStyle(fontSize: 12)),
+                        Expanded(
+                          child: Text(AppLocalizations.of(context).translate('partnerAgreementSign'), style: const TextStyle(fontSize: 12)),
                         ),
                       ],
                     ),

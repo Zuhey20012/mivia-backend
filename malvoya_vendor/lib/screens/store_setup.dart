@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../auth_service.dart';
 import '../config/constants.dart';
+import '../l10n.dart';
 import 'vendor_dashboard.dart';
 
 class StoreSetupScreen extends StatefulWidget {
@@ -181,9 +182,9 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                       ],
                     ),
                     const SizedBox(height: 20),
-                    const Text(
-                      'Avaa kauppasi\nOpen Your Store',
-                      style: TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w900, height: 1.2, letterSpacing: -0.5),
+                    Text(
+                      AppLocalizations.of(context).translate('openYourStore'),
+                      style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w900, height: 1.2, letterSpacing: -0.5),
                     ),
                     const SizedBox(height: 8),
                     const Text(
