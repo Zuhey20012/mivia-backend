@@ -130,19 +130,30 @@ export async function deleteUserAccount(userId: number) {
     // 1. Returns where user is returning party
     await tx.return.deleteMany({ where: { userId } });
 
+    let deletedUser = await tx.user.findFirst({ where: { email: 'deleted@malvoya.app' } });
+    if (!deletedUser) {
+      deletedUser = await tx.user.create({
+        data: { email: 'deleted@malvoya.app', name: 'DELETED_USER', passwordHash: 'DELETED', role: 'CUSTOMER' }
+      });
+    }
+
     // 2. Orders and Rentals as a customer
     const orders = await tx.order.findMany({ where: { userId }, select: { id: true } });
     const orderIds = orders.map(o => o.id);
     if (orderIds.length > 0) {
-      await tx.orderItem.deleteMany({ where: { orderId: { in: orderIds } } });
-      await tx.order.deleteMany({ where: { id: { in: orderIds } } });
+      await tx.order.updateMany({
+        where: { id: { in: orderIds } },
+        data: { userId: deletedUser.id, deliveryAddress: null, deliveryLat: null, deliveryLng: null, notes: null }
+      });
     }
 
     const rentals = await tx.rental.findMany({ where: { userId }, select: { id: true } });
     const rentalIds = rentals.map(r => r.id);
     if (rentalIds.length > 0) {
-      await tx.rentalItem.deleteMany({ where: { rentalId: { in: rentalIds } } });
-      await tx.rental.deleteMany({ where: { id: { in: rentalIds } } });
+      await tx.rental.updateMany({
+        where: { id: { in: rentalIds } },
+        data: { userId: deletedUser.id }
+      });
     }
 
     // 3. Store data (if vendor)

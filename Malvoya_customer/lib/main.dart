@@ -10,6 +10,7 @@ import 'screens/login.dart';
 import 'cart.dart';
 import 'auth_service.dart';
 import 'admin_service.dart';
+import 'screens/cookie_consent_banner.dart';
 import 'l10n.dart';
 import 'locale_provider.dart';
 import 'theme_provider.dart';
@@ -112,13 +113,60 @@ class MalvoyaApp extends StatelessWidget {
             ],
             home: Consumer<AuthService>(
               builder: (context, auth, child) {
-                if (!auth.isAuthenticated) return const LoginScreen();
-                return const MainNavigation();
+                final screen = !auth.isAuthenticated ? const LoginScreen() : const MainNavigation();
+                return CookieBannerWrapper(child: screen);
               },
             ),
           );
         },
       ),
+    );
+  }
+}
+
+class CookieBannerWrapper extends StatefulWidget {
+  final Widget child;
+  const CookieBannerWrapper({super.key, required this.child});
+  @override
+  State<CookieBannerWrapper> createState() => _CookieBannerWrapperState();
+}
+
+class _CookieBannerWrapperState extends State<CookieBannerWrapper> {
+  bool _showBanner = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkBanner();
+  }
+
+  Future<void> _checkBanner() async {
+    final show = await CookieConsentBanner.shouldShow();
+    if (show && mounted) {
+      setState(() => _showBanner = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        widget.child,
+        if (_showBanner)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: Material(
+              type: MaterialType.transparency,
+              child: CookieConsentBanner(
+                onDismiss: () {
+                  if (mounted) setState(() => _showBanner = false);
+                },
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

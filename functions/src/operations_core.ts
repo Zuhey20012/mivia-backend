@@ -103,7 +103,7 @@ export async function emitVatCompliantReceipt(order: {
   <p>Item Kept: ${order.keptGarmentTitle}</p>
   <p><strong>Total Charged: €${order.totalGrossEur}</strong></p>
   <p style="color: #64748b; font-size: 12px;">Includes Finnish ALV 25.5%: €${order.alvAmountEur}</p>
-  <p style="color: #64748b; font-size: 11px;">Nordic Q-Apparel Commerce Oy • Y-tunnus: 3491823-1 • Helsinki, Finland</p>
+  <p style="color: #64748b; font-size: 11px;">Malvoya Nordics Oy • Y-tunnus: FI-3491829-1 • Helsinki, Finland</p>
 </div>
 `,
   });

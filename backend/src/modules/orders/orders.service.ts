@@ -43,7 +43,7 @@ export async function createOrder(userId: number, input: {
   // 2. Create Stripe PaymentIntent
   const paymentIntent = await stripe.paymentIntents.create({
     amount:   pricing.totalCents,
-    currency: "usd",
+    currency: "eur",
     metadata: { userId: String(userId), storeId: String(input.storeId) },
   });
 
@@ -171,7 +171,7 @@ export async function createRental(userId: number, input: {
   const totalCents       = totalSubCents + totalDepositCents + deliveryFeeCents;
 
   const paymentIntent = await stripe.paymentIntents.create({
-    amount: totalCents, currency: "usd",
+    amount: totalCents, currency: "eur",
     metadata: { userId: String(userId), type: "RENTAL" },
   });
 

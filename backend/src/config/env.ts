@@ -27,5 +27,5 @@ export const env = {
 
   deliveryFeeCents:  299, // $2.99
   commissionRate:    0.10, // 10%
-  returnWindowDays:  7,
+  returnWindowDays:  14,
 };

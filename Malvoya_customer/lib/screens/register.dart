@@ -19,6 +19,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _loading = false;
   bool _obscurePass = true;
   bool _agreeToTerms = false;
+  bool _agreeToAge = false;
   String? _error;
 
   @override
