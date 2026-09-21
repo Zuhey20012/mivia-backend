@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
-import 'admin_dashboard.dart';
 import 'chatbot.dart';
 import 'profile_detail.dart';
 import '../locale_provider.dart';
+import '../l10n.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -62,54 +62,103 @@ All prices are displayed including VAT (where applicable). Transparent pricing a
     Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
   }
 
+  void _showLanguagePicker(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Select Language', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: ListView(
+                children: AppLocalizations.languages.entries.map((entry) {
+                  final provider = Provider.of<LocaleProvider>(context, listen: false);
+                  final isSelected = provider.locale.languageCode == entry.key;
+                  return ListTile(
+                    title: Text(entry.value, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
+                    trailing: isSelected ? const Icon(Icons.check, color: Colors.purple) : null,
+                    onTap: () {
+                      provider.setLocale(Locale(entry.key));
+                      Navigator.pop(ctx);
+                    },
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Profile')),
       body: ListView(
         children: [
-          Container(
-            padding: const EdgeInsets.all(24),
-            color: Theme.of(context).primaryColor.withOpacity(0.1),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 40,
-                  backgroundColor: Theme.of(context).primaryColor,
-                  child: const Text('M', style: TextStyle(fontSize: 32, color: Colors.white)),
-                ),
-                const SizedBox(width: 16),
-                const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          Consumer<AuthService>(
+            builder: (context, auth, _) {
+              final user = auth.currentUser;
+              final displayName = user?.name?.trim().isNotEmpty == true
+                  ? user!.name!
+                  : 'Malvoya Boutique Partner';
+              final displayEmail = user?.email ?? 'merchant@malvoya.com';
+              final initial = displayName.isNotEmpty ? displayName[0].toUpperCase() : 'M';
+              return Container(
+                padding: const EdgeInsets.all(24),
+                color: Theme.of(context).primaryColor.withOpacity(0.08),
+                child: Row(
                   children: [
-                    Text('Malvoya User', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                    SizedBox(height: 4),
-                    Text('+358 40 123 4567', style: TextStyle(color: Colors.grey)),
+                    CircleAvatar(
+                      radius: 36,
+                      backgroundColor: Theme.of(context).primaryColor,
+                      child: Text(initial, style: const TextStyle(fontSize: 28, color: Colors.white, fontWeight: FontWeight.bold)),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(displayName, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                          const SizedBox(height: 4),
+                          Text(displayEmail, style: const TextStyle(color: Colors.grey, fontSize: 13), overflow: TextOverflow.ellipsis),
+                          const SizedBox(height: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).primaryColor.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Text('VERIFIED MERCHANT', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.purple)),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
-                )
-              ],
-            ),
+                ),
+              );
+            },
           ),
           const SizedBox(height: 24),
           _buildSection(context, 'Account', [
             ListTile(
               leading: const Icon(Icons.language),
               title: const Text('Language'),
-              trailing: Consumer<LocaleProvider>(
-                builder: (context, provider, _) {
-                  return DropdownButton<String>(
-                    value: provider.locale.languageCode,
-                    underline: const SizedBox(),
-                    items: const [
-                      DropdownMenuItem(value: 'en', child: Text('English')),
-                      DropdownMenuItem(value: 'fi', child: Text('Suomi')),
-                    ],
-                    onChanged: (val) {
-                      if (val != null) provider.setLocale(Locale(val));
-                    },
-                  );
-                },
+              subtitle: Consumer<LocaleProvider>(
+                builder: (context, provider, _) => Text(
+                  AppLocalizations.languages[provider.locale.languageCode] ?? 'English',
+                  style: const TextStyle(color: Colors.grey, fontSize: 12),
+                ),
               ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _showLanguagePicker(context),
             ),
             const Divider(height: 1),
             ListTile(leading: const Icon(Icons.settings), title: const Text('Settings'), trailing: const Icon(Icons.chevron_right), onTap: () => _nav(context, const ProfileDetailScreen(title: 'Settings'))),
@@ -134,18 +183,6 @@ All prices are displayed including VAT (where applicable). Transparent pricing a
           ]),
           Consumer<AuthService>(
             builder: (context, auth, _) {
-              if (auth.isAdmin) {
-                return _buildSection(context, 'Admin Controls', [
-                  ListTile(
-                    leading: const Icon(Icons.admin_panel_settings, color: Colors.purple), 
-                    title: const Text('Owner Dashboard', style: TextStyle(color: Colors.purple, fontWeight: FontWeight.bold)), 
-                    trailing: const Icon(Icons.chevron_right, color: Colors.purple), 
-                    onTap: () {
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminDashboard()));
-                    },
-                  ),
-                ]);
-              }
               return const SizedBox.shrink();
             },
           ),

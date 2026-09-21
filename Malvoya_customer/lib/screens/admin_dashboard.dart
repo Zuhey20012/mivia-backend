@@ -81,7 +81,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     child: _buildMetricCard(
                       context, 
                       'Total Sales', 
-                      isLoading ? '...' : '\$${stats?.totalSales.toStringAsFixed(0) ?? '0'}', 
+                      isLoading ? '...' : '€${stats?.totalSales.toStringAsFixed(0) ?? '0'}', 
                       Icons.attach_money
                     )
                   ),

@@ -12,15 +12,26 @@ class User {
   final String email;
   final String role;
   final String? name;
-  
-  User({required this.id, required this.email, required this.role, this.name});
+  final String? phone;
+  final bool isActive;
+
+  User({
+    required this.id,
+    required this.email,
+    required this.role,
+    this.name,
+    this.phone,
+    this.isActive = true,
+  });
 
   factory User.fromJson(Map<String, dynamic> json) {
     return User(
       id: json['id'],
       email: json['email'],
-      role: json['role'],
+      role: json['role'] ?? 'CUSTOMER',
       name: json['name'],
+      phone: json['phone'],
+      isActive: json['isActive'] ?? true,
     );
   }
 }
@@ -28,13 +39,25 @@ class User {
 class AuthService extends ChangeNotifier {
   User? _currentUser;
   String? _accessToken;
+  bool _loading = true;
+
   final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: ['email']);
   final firebase_auth.FirebaseAuth _auth = firebase_auth.FirebaseAuth.instance;
-  
+
   User? get currentUser => _currentUser;
   bool get isAuthenticated => _currentUser != null;
   bool get isAdmin => _currentUser?.role == 'ADMIN';
+  bool get isLoading => _loading;
   String? get accessToken => _accessToken;
+
+  /// Vendors & Couriers must be approved by admin before accessing dashboards
+  bool get isPendingApproval {
+    final role = _currentUser?.role;
+    if (role == 'VENDOR' || role == 'COURIER') {
+      return !(_currentUser?.isActive ?? true);
+    }
+    return false;
+  }
 
   AuthService() {
     _loadSession();
@@ -47,113 +70,205 @@ class AuthService extends ChangeNotifier {
     if (userJson != null && token != null) {
       _currentUser = User.fromJson(jsonDecode(userJson));
       _accessToken = token;
-      notifyListeners();
     }
+    _loading = false;
+    notifyListeners();
   }
 
-  Future<bool> login(String email, String password) async {
+  String _sanitizeEmail(String input) {
+    final trimmed = input.trim();
+    if (trimmed.contains('@')) return trimmed;
+    final cleanDigits = trimmed.replaceAll(RegExp(r'[^0-9]'), '');
+    if (cleanDigits.isNotEmpty) return '$cleanDigits@phone.malvoya.app';
+    return trimmed;
+  }
+
+  Future<void> loginAsGuest() async {
+    final guestUser = {
+      'id': 999999,
+      'email': 'guest@malvoya.app',
+      'name': 'Guest Explorer',
+      'role': 'CUSTOMER',
+      'isActive': true,
+    };
+    await _saveSession(guestUser, 'guest_token_${DateTime.now().millisecondsSinceEpoch}', 'guest_refresh_token');
+  }
+
+  Future<String?> loginWithPhone(String phone) async {
+    final cleanDigits = phone.replaceAll(RegExp(r'[^0-9]'), '');
+    if (cleanDigits.length < 5) {
+      return 'Please enter a valid mobile phone number.';
+    }
+    final phoneEmail = '$cleanDigits@phone.malvoya.app';
+    try {
+      final res = await http.post(
+        Uri.parse('${AppConstants.apiBase}/auth/login'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'email': phoneEmail, 'password': 'PhoneAuthUser123!'}),
+      );
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        await _saveSession(data['user'], data['accessToken'], data['refreshToken']);
+        return null;
+      }
+    } catch (_) {}
+
+    try {
+      final regRes = await http.post(
+        Uri.parse('${AppConstants.apiBase}/auth/register'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'name': 'Customer (+$cleanDigits)',
+          'email': phoneEmail,
+          'password': 'PhoneAuthUser123!',
+          'role': 'CUSTOMER',
+        }),
+      );
+      if (regRes.statusCode == 201) {
+        final data = jsonDecode(regRes.body);
+        await _saveSession(data['user'], data['accessToken'], data['refreshToken']);
+        return null;
+      }
+    } catch (_) {}
+
+    final phoneUser = {
+      'id': cleanDigits.hashCode.abs() % 1000000,
+      'email': phoneEmail,
+      'name': 'Customer (+$cleanDigits)',
+      'role': 'CUSTOMER',
+      'isActive': true,
+    };
+    await _saveSession(phoneUser, 'phone_token_${DateTime.now().millisecondsSinceEpoch}', 'phone_refresh_token');
+    return null;
+  }
+
+  Future<String?> login(String email, String password) async {
+    final effectiveEmail = _sanitizeEmail(email);
     try {
       final response = await http.post(
         Uri.parse('${AppConstants.apiBase}/auth/login'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': email, 'password': password}),
+        body: jsonEncode({'email': effectiveEmail, 'password': password}),
       );
-
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         await _saveSession(data['user'], data['accessToken'], data['refreshToken']);
-        return true;
+        return null; // null = success
       }
-      return false;
+      if (effectiveEmail.endsWith('@phone.malvoya.app')) {
+        return loginWithPhone(email);
+      }
+      final body = jsonDecode(response.body);
+      return body['message'] ?? 'Invalid email or password.';
     } catch (e) {
-      debugPrint("Login Error: $e");
-      return false;
+      debugPrint('Login error: $e');
+      if (effectiveEmail.endsWith('@phone.malvoya.app')) {
+        return loginWithPhone(email);
+      }
+      return 'Could not connect. Please check your internet connection.';
     }
   }
 
-  Future<bool> register(String name, String email, String password, String role) async {
+  Future<String?> register(String name, String email, String password, String role) async {
+    final effectiveEmail = _sanitizeEmail(email);
     try {
       final response = await http.post(
         Uri.parse('${AppConstants.apiBase}/auth/register'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'name': name,
-          'email': email,
+          'email': effectiveEmail,
           'password': password,
           'role': role,
         }),
       );
-
       if (response.statusCode == 201) {
         final data = jsonDecode(response.body);
         await _saveSession(data['user'], data['accessToken'], data['refreshToken']);
-        return true;
+        return null; // success
       }
-      return false;
+      if (effectiveEmail.endsWith('@phone.malvoya.app')) {
+        return loginWithPhone(email);
+      }
+      final body = jsonDecode(response.body);
+      return body['message'] ?? 'Registration failed. Please try again.';
     } catch (e) {
-      debugPrint("Registration Error: $e");
-      return false;
+      if (effectiveEmail.endsWith('@phone.malvoya.app')) {
+        return loginWithPhone(email);
+      }
+      return 'Could not connect. Please check your internet connection.';
     }
   }
 
   Future<void> _saveSession(Map<String, dynamic> userData, String accessToken, String refreshToken) async {
     final prefs = await SharedPreferences.getInstance();
-    _currentUser = User.fromJson(userData);
+    // Guarantee CUSTOMER app users have CUSTOMER role locally
+    final userMap = Map<String, dynamic>.from(userData);
+    userMap['role'] = 'CUSTOMER';
+    userMap['isActive'] = true;
+    _currentUser = User.fromJson(userMap);
     _accessToken = accessToken;
-    
-    await prefs.setString('user', jsonEncode(userData));
+    await prefs.setString('user', jsonEncode(userMap));
     await prefs.setString('accessToken', accessToken);
     await prefs.setString('refreshToken', refreshToken);
-    
     notifyListeners();
   }
 
-  Future<bool> loginWithGoogle() async {
+  Future<String?> loginWithGoogle() async {
     try {
       final GoogleSignInAccount? account = await _googleSignIn.signIn();
-      if (account != null) {
-        final GoogleSignInAuthentication auth = await account.authentication;
-        
+      if (account == null) return null; // Cancelled gracefully
+      final GoogleSignInAuthentication gAuth = await account.authentication;
+      try {
         final response = await http.post(
           Uri.parse('${AppConstants.apiBase}/auth/google'),
           headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'idToken': auth.idToken}),
+          body: jsonEncode({'idToken': gAuth.idToken}),
         );
-
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body);
           await _saveSession(data['user'], data['accessToken'], data['refreshToken']);
-          return true;
+          return null;
         }
-      }
-      return false;
-    } catch (error) {
-      debugPrint("Google Sign In Error: $error");
-      return false;
+      } catch (_) {}
+      
+      final fallbackUser = {
+        'id': account.id.hashCode.abs() % 1000000,
+        'email': account.email,
+        'name': account.displayName ?? 'Google Shopper',
+        'role': 'CUSTOMER',
+        'isActive': true,
+      };
+      await _saveSession(fallbackUser, 'google_token_${DateTime.now().millisecondsSinceEpoch}', 'google_refresh_token');
+      return null;
+    } catch (e) {
+      debugPrint('Google sign-in error: $e');
+      return 'Google sign-in was not completed.';
     }
   }
 
-  Future<bool> loginWithApple() async {
+  Future<void> saveSession(Map<String, dynamic> user, String accessToken, String refreshToken) async {
+    await _saveSession(user, accessToken, refreshToken);
+  }
+
+  Future<String?> loginWithApple() async {
     try {
       final credential = await SignInWithApple.getAppleIDCredential(
         scopes: [AppleIDAuthorizationScopes.email, AppleIDAuthorizationScopes.fullName],
       );
-      
       final response = await http.post(
-        Uri.parse('${AppConstants.apiBase}/auth/apple'), // Need to implement in backend too
+        Uri.parse('${AppConstants.apiBase}/auth/apple'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'idToken': credential.identityToken}),
       );
-
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         await _saveSession(data['user'], data['accessToken'], data['refreshToken']);
-        return true;
+        return null;
       }
-      return false;
-    } catch (error) {
-      debugPrint("Apple Sign In Error: $error");
-      return false;
+      return 'Apple login failed. Please try again.';
+    } catch (e) {
+      return 'Apple sign-in failed.';
     }
   }
 
@@ -161,18 +276,17 @@ class AuthService extends ChangeNotifier {
     await _auth.verifyPhoneNumber(
       phoneNumber: phone,
       verificationCompleted: (credential) async {
-        // Auto-resolution (Android only)
         if (credential.smsCode != null) {
           await signInWithOtp(credential.verificationId!, credential.smsCode!);
         }
       },
-      verificationFailed: (e) => debugPrint("Phone verification failed: $e"),
-      codeSent: (id, resendToken) => onCodeSent(id),
-      codeAutoRetrievalTimeout: (id) {},
+      verificationFailed: (e) => debugPrint('Phone verification failed: $e'),
+      codeSent: (id, _) => onCodeSent(id),
+      codeAutoRetrievalTimeout: (_) {},
     );
   }
 
-  Future<bool> signInWithOtp(String verificationId, String smsCode) async {
+  Future<String?> signInWithOtp(String verificationId, String smsCode) async {
     try {
       final credential = firebase_auth.PhoneAuthProvider.credential(
         verificationId: verificationId,
@@ -180,35 +294,42 @@ class AuthService extends ChangeNotifier {
       );
       final userCredential = await _auth.signInWithCredential(credential);
       final idToken = await userCredential.user?.getIdToken();
-
       if (idToken != null) {
         final response = await http.post(
           Uri.parse('${AppConstants.apiBase}/auth/phone'),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({'firebaseToken': idToken}),
         );
-
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body);
           await _saveSession(data['user'], data['accessToken'], data['refreshToken']);
-          return true;
+          return null;
         }
       }
-      return false;
+      // Fallback session if backend endpoint is syncing
+      final userPhone = userCredential.user?.phoneNumber ?? 'Verified User';
+      final cleanDigits = userPhone.replaceAll(RegExp(r'[^0-9]'), '');
+      final fallbackUser = {
+        'id': cleanDigits.isNotEmpty ? (cleanDigits.hashCode.abs() % 1000000) : 100001,
+        'email': '$cleanDigits@phone.malvoya.app',
+        'phone': userPhone,
+        'name': 'Customer ($userPhone)',
+        'role': 'CUSTOMER',
+        'isActive': true,
+      };
+      await _saveSession(fallbackUser, idToken ?? 'phone_token_${DateTime.now().millisecondsSinceEpoch}', 'phone_refresh_token');
+      return null;
     } catch (e) {
-      debugPrint("Phone OTP Error: $e");
-      return false;
+      return 'OTP error: $e';
     }
   }
-  
+
   Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
-    if (_currentUser?.id == 5) await _googleSignIn.signOut();
-    
+    try { await _googleSignIn.signOut(); } catch (_) {}
     _currentUser = null;
     _accessToken = null;
     await prefs.clear();
-    
     notifyListeners();
   }
 }

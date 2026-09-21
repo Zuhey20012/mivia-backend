@@ -29,12 +29,12 @@ class CourierDashboard extends StatelessWidget {
                 const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Mikael K.', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text('Courier Partner', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
                     Text('Online & Looking for gigs', style: TextStyle(color: Colors.white70)),
                   ],
                 ),
                 const Spacer(),
-                Switch(value: true, onChanged: (v) {}, activeColor: Colors.green),
+                Switch(value: true, onChanged: (v) {}, activeThumbColor: Colors.green),
               ],
             ),
           ),
@@ -57,7 +57,7 @@ class CourierDashboard extends StatelessWidget {
                             const Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text('Pickup: Sakura Boutique'),
+                                Text('Pickup: Partner Boutique'),
                                 Text('2.5 km', style: TextStyle(color: Colors.grey)),
                               ],
                             ),
@@ -65,8 +65,8 @@ class CourierDashboard extends StatelessWidget {
                             const Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text('Dropoff: Home - Helsinki'),
-                                Text('Estimated: \$8.50', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+                                Text('Dropoff: Customer Address'),
+                                Text('Estimated Payout: Dynamic', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
                               ],
                             ),
                             const SizedBox(height: 16),

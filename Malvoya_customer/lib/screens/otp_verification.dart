@@ -27,15 +27,15 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
 
     setState(() => _loading = true);
     
-    final success = await Provider.of<AuthService>(context, listen: false)
+    final error = await Provider.of<AuthService>(context, listen: false)
         .signInWithOtp(widget.verificationId, otp);
 
-    if (success && mounted) {
+    if (error == null && mounted) {
       Navigator.of(context).popUntil((route) => route.isFirst);
     } else if (mounted) {
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid OTP. Please try again.')),
+        SnackBar(content: Text(error ?? 'Invalid OTP. Please try again.')),
       );
     }
   }

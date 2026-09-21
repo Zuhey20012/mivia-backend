@@ -1,17 +1,31 @@
 import 'package:flutter/material.dart';
 import 'models.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-import '../config/constants.dart';
 
 class CartService extends ChangeNotifier {
   final List<CartItem> _items = [];
+  int? _storeId;
+  String? _storeName;
 
   List<CartItem> get items => List.unmodifiable(_items);
-
+  int? get storeId => _storeId;
+  String? get storeName => _storeName;
+  int get itemCount => _items.fold(0, (s, i) => s + i.quantity);
   double get total => _items.fold(0.0, (s, i) => s + i.price * i.quantity);
 
-  void add(CartItem item) {
+  bool canAddDirectly(int? incomingStoreId) {
+    if (_items.isEmpty || _storeId == null || incomingStoreId == null) return true;
+    return _storeId == incomingStoreId;
+  }
+
+  void add(CartItem item, {bool forceClear = false}) {
+    if (forceClear) {
+      _items.clear();
+      _storeId = null;
+      _storeName = null;
+    }
+    _storeId ??= item.storeId;
+    _storeName ??= item.storeName;
+
     final existing = _items.indexWhere((it) =>
         it.productId == item.productId && it.variantId == item.variantId);
     if (existing >= 0) {
@@ -25,11 +39,17 @@ class CartService extends ChangeNotifier {
   void remove(CartItem item) {
     _items.removeWhere((it) =>
         it.productId == item.productId && it.variantId == item.variantId);
+    if (_items.isEmpty) {
+      _storeId = null;
+      _storeName = null;
+    }
     notifyListeners();
   }
 
   void clear() {
     _items.clear();
+    _storeId = null;
+    _storeName = null;
     notifyListeners();
   }
 
@@ -37,31 +57,16 @@ class CartService extends ChangeNotifier {
     final idx = _items.indexWhere((it) =>
         it.productId == item.productId && it.variantId == item.variantId);
     if (idx >= 0) {
-      _items[idx].quantity = qty;
-      if (qty <= 0) _items.removeAt(idx);
+      if (qty <= 0) {
+        _items.removeAt(idx);
+      } else {
+        _items[idx].quantity = qty;
+      }
+      if (_items.isEmpty) {
+        _storeId = null;
+        _storeName = null;
+      }
       notifyListeners();
-    }
-  }
-
-  Future<Map<String, dynamic>> checkout(int userId, String authToken) async {
-    final body = {
-      'userId': userId,
-      'items': _items.map((i) => i.toOrderItem()).toList(),
-      'total': total,
-    };
-    final res = await http.post(
-      Uri.parse('${AppConstants.apiBase}/orders'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $authToken',
-      },
-      body: jsonEncode(body),
-    );
-    if (res.statusCode == 201 || res.statusCode == 200) {
-      clear();
-      return jsonDecode(res.body) as Map<String, dynamic>;
-    } else {
-      throw Exception('Checkout failed: ${res.statusCode} ${res.body}');
     }
   }
 }

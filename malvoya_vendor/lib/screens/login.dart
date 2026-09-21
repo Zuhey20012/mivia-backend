@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
+import '../config/theme.dart';
+import '../l10n.dart';
+import '../locale_provider.dart';
+import 'register.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -13,109 +17,460 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   bool _loading = false;
+  bool _obscurePass = true;
   String? _error;
 
-  void _handleLogin() async {
+  @override
+  void initState() {
+    super.initState();
+    // Explicitly start with blank fields - no autofill or saved email at top
+    _emailCtrl.clear();
+    _passCtrl.clear();
+  }
+
+  @override
+  void dispose() {
+    _emailCtrl.dispose();
+    _passCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handleLogin() async {
+    if (_emailCtrl.text.trim().isEmpty || _passCtrl.text.isEmpty) {
+      setState(() => _error = 'Please enter your email and password.');
+      return;
+    }
     setState(() { _loading = true; _error = null; });
     final auth = Provider.of<AuthService>(context, listen: false);
-    final success = await auth.login(_emailCtrl.text, _passCtrl.text);
-    if (!success) {
-      setState(() { _error = 'Invalid email or password.'; _loading = false; });
+    final err = await auth.login(_emailCtrl.text.trim(), _passCtrl.text);
+    if (mounted && err != null) {
+      setState(() { _error = err; _loading = false; });
     }
-    // If success, the main.dart router will automatically show MainNavigation
+  }
+
+  Future<void> _handleGoogle() async {
+    setState(() { _loading = true; _error = null; });
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final err = await auth.loginWithGoogle();
+    if (mounted && err != null) {
+      setState(() { _error = err; _loading = false; });
+    }
+  }
+
+  void _showPhoneDialog() {
+    final phoneCtrl = TextEditingController();
+    final codeCtrl = TextEditingController();
+    bool codeSent = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => Container(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+            top: 24, left: 24, right: 24,
+          ),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40, height: 4,
+                  decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text('Phone Sign-In / Kirjaudu puhelimella', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              const Text("Sign in directly using your mobile number", style: TextStyle(color: Colors.grey)),
+              const SizedBox(height: 20),
+              if (!codeSent) ...[
+                TextField(
+                  controller: phoneCtrl,
+                  keyboardType: TextInputType.phone,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Phone Number',
+                    hintText: '+358 40 1234567',
+                    prefixIcon: Icon(Icons.phone_outlined),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _loading ? null : () async {
+                      final phone = phoneCtrl.text.trim();
+                      if (phone.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter your phone number')));
+                        return;
+                      }
+                      setModalState(() => _loading = true);
+                      final auth = Provider.of<AuthService>(context, listen: false);
+                      await auth.verifyPhone(
+                        phoneNumber: phone,
+                        onCodeSent: (verId) {
+                          setModalState(() {
+                            codeSent = true;
+                            _loading = false;
+                          });
+                        },
+                        onError: (err) {
+                          setModalState(() => _loading = false);
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+                        },
+                        onAutoVerified: () {
+                          Navigator.pop(ctx);
+                        },
+                      );
+                    },
+                    child: _loading 
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Text('Send Code'),
+                  ),
+                ),
+              ] else ...[
+                TextField(
+                  controller: codeCtrl,
+                  keyboardType: TextInputType.number,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: '6-digit Code',
+                    hintText: '123456',
+                    prefixIcon: Icon(Icons.password_outlined),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _loading ? null : () async {
+                      final code = codeCtrl.text.trim();
+                      if (code.isEmpty) return;
+                      setModalState(() => _loading = true);
+                      final auth = Provider.of<AuthService>(context, listen: false);
+                      final err = await auth.signInWithSmsCode(code);
+                      setModalState(() => _loading = false);
+                      if (err != null) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+                      } else {
+                        Navigator.pop(ctx);
+                      }
+                    },
+                    child: _loading 
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Text('Verify & Sign In'),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showLanguageSelector(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return Consumer<LocaleProvider>(
+          builder: (context, provider, _) {
+            return Container(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.75,
+              ),
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40, height: 4,
+                      decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text('Select Language / Valitse kieli', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  const Text('European Union & Universal Languages (25 languages)', style: TextStyle(fontSize: 13, color: Colors.grey)),
+                  const SizedBox(height: 12),
+                  const Divider(height: 1),
+                  Expanded(
+                    child: ListView(
+                      physics: const BouncingScrollPhysics(),
+                      children: AppLocalizations.languages.entries.map((entry) {
+                        final isSelected = provider.locale.languageCode == entry.key;
+                        return ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                          title: Text(
+                            entry.value,
+                            style: TextStyle(
+                              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                              fontSize: 16,
+                              color: isSelected ? Theme.of(context).primaryColor : Colors.black87,
+                            ),
+                          ),
+                          trailing: isSelected ? Icon(Icons.check_circle_rounded, color: Theme.of(context).primaryColor) : null,
+                          onTap: () {
+                            provider.setLocale(Locale(entry.key));
+                            Navigator.pop(ctx);
+                          },
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final currentLangKey = Provider.of<LocaleProvider>(context).locale.languageCode;
+    final currentLangLabel = AppLocalizations.languages[currentLangKey] ?? '🇬🇧 English';
+
     return Scaffold(
-      backgroundColor: Theme.of(context).primaryColor,
+      backgroundColor: Colors.white,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.shopping_bag, size: 80, color: Colors.white),
               const SizedBox(height: 16),
-              const Text('Malvoya', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: 40, fontWeight: FontWeight.bold)),
-              const Text('Your Premium Marketplace', textAlign: TextAlign.center, style: TextStyle(color: Colors.white70, fontSize: 16)),
-              const SizedBox(height: 48),
-              
-              Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(24),
+
+              // Language selector pill
+              Align(
+                alignment: Alignment.topRight,
+                child: GestureDetector(
+                  onTap: () => _showLanguageSelector(context),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF3F4F6),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.language_rounded, size: 16, color: AppTheme.primary),
+                        const SizedBox(width: 6),
+                        Text(
+                          currentLangLabel.split(' ').first,
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.arrow_drop_down, size: 18, color: Colors.black54),
+                      ],
+                    ),
+                  ),
                 ),
+              ),
+
+              const SizedBox(height: 24),
+
+              // Logo + Branding
+              Center(
                 child: Column(
                   children: [
-                    TextField(
-                      controller: _emailCtrl,
-                      decoration: InputDecoration(
-                        labelText: 'Email',
-                        prefixIcon: const Icon(Icons.email_outlined),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: _passCtrl,
-                      obscureText: true,
-                      decoration: InputDecoration(
-                        labelText: 'Password',
-                        prefixIcon: const Icon(Icons.lock_outline),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
-                    if (_error != null) ...[
-                      const SizedBox(height: 16),
-                      Text(_error!, style: const TextStyle(color: Colors.red)),
-                    ],
-                    const SizedBox(height: 24),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 50,
-                      child: _loading 
-                        ? const Center(child: CircularProgressIndicator()) 
-                        : ElevatedButton(
-                            onPressed: _handleLogin,
-                            child: const Text('Log In'),
+                    Container(
+                      width: 76,
+                      height: 76,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF2E7D32), Color(0xFF1B5E20)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(22),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF2E7D32).withOpacity(0.3),
+                            blurRadius: 18,
+                            offset: const Offset(0, 6),
                           ),
+                        ],
+                      ),
+                      child: const Icon(Icons.storefront_rounded, color: Colors.white, size: 40),
                     ),
                     const SizedBox(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Text("Don't have an account? "),
-                        TextButton(onPressed: () {}, child: const Text('Sign Up')),
-                      ],
-                    )
+                    const Text('Malvoya Vendor', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: AppTheme.textPrimary, letterSpacing: -0.5)),
+                    const SizedBox(height: 4),
+                    Text('Partner & Merchant Portal', style: TextStyle(fontSize: 14, color: Colors.grey.shade500, fontWeight: FontWeight.w500)),
                   ],
                 ),
               ),
+
+              const SizedBox(height: 36),
+
+              Text(l10n.translate('welcomeBack'), style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: AppTheme.textPrimary, letterSpacing: -0.5)),
+              const SizedBox(height: 6),
+              Text(l10n.translate('signIn'), style: const TextStyle(fontSize: 14, color: AppTheme.textSecondary)),
+              const SizedBox(height: 28),
+
+              // Email field
+              TextField(
+                controller: _emailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                textInputAction: TextInputAction.next,
+                autocorrect: false,
+                enableSuggestions: false,
+                decoration: InputDecoration(
+                  labelText: '${l10n.translate('email')} / Phone',
+                  prefixIcon: const Icon(Icons.mail_outline_rounded),
+                ),
+              ),
+              const SizedBox(height: 14),
+
+              // Password field
+              TextField(
+                controller: _passCtrl,
+                obscureText: _obscurePass,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => _handleLogin(),
+                decoration: InputDecoration(
+                  labelText: l10n.translate('password'),
+                  prefixIcon: const Icon(Icons.lock_outline_rounded),
+                  suffixIcon: IconButton(
+                    icon: Icon(_obscurePass ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                    onPressed: () => setState(() => _obscurePass = !_obscurePass),
+                  ),
+                ),
+              ),
+
+              // Error message
+              if (_error != null) ...[
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF0F0),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFFFCDD2)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.error_outline, color: Color(0xFFE53E3E), size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFE53E3E), fontSize: 13))),
+                    ],
+                  ),
+                ),
+              ],
+
               const SizedBox(height: 24),
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  side: const BorderSide(color: Colors.white),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-                onPressed: () {},
-                icon: const Icon(Icons.apple),
-                label: const Text('Continue with Apple'),
+
+              // Login button
+              SizedBox(
+                width: double.infinity,
+                child: _loading
+                    ? const Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5)))
+                    : ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
+                        onPressed: _handleLogin,
+                        child: Text(l10n.translate('login')),
+                      ),
               ),
+
+              const SizedBox(height: 24),
+
+              // Divider
+              Row(
+                children: [
+                  Expanded(child: Divider(color: Colors.grey.shade300)),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text('or', style: TextStyle(color: Colors.grey.shade500, fontSize: 13, fontWeight: FontWeight.w500)),
+                  ),
+                  Expanded(child: Divider(color: Colors.grey.shade300)),
+                ],
+              ),
+
+              const SizedBox(height: 20),
+
+              // Google Sign-In button
+              OutlinedButton(
+                onPressed: _handleGoogle,
+                style: OutlinedButton.styleFrom(
+                  side: BorderSide(color: Colors.grey.shade300),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  backgroundColor: Colors.white,
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.g_mobiledata_rounded, size: 24, color: Colors.black87),
+                    SizedBox(width: 8),
+                    Text('Continue with Google', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black87, fontSize: 15)),
+                  ],
+                ),
+              ),
+
               const SizedBox(height: 12),
-              OutlinedButton.icon(
+
+              // Phone Sign-In button
+              OutlinedButton(
+                onPressed: _showPhoneDialog,
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  side: const BorderSide(color: Colors.white),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  side: BorderSide(color: Colors.grey.shade300),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  backgroundColor: Colors.white,
                 ),
-                onPressed: () {},
-                icon: const Icon(Icons.g_mobiledata),
-                label: const Text('Continue with Google'),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.phone_iphone_rounded, size: 20, color: Colors.black87),
+                    SizedBox(width: 8),
+                    Text('Continue with Phone Number', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black87, fontSize: 15)),
+                  ],
+                ),
               ),
+
+              const SizedBox(height: 32),
+
+              // Register link
+              Center(
+                child: TextButton(
+                  onPressed: () {
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const RegisterScreen()));
+                  },
+                  child: RichText(
+                    text: TextSpan(
+                      text: "New vendor? ",
+                      style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
+                      children: const [
+                        TextSpan(
+                          text: 'Register here',
+                          style: TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 24),
             ],
           ),
         ),

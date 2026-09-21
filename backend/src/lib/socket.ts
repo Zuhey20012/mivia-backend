@@ -14,6 +14,11 @@ export function initSocket(httpServer: HttpServer): SocketServer {
       socket.join(`order:${orderId}`);
     });
 
+    socket.on('track:store', (storeId) => {
+      socket.join(`store:${storeId}`);
+      console.log(`[Socket] Client joined store room: store:${storeId}`);
+    });
+
     socket.on("track:rental", (rentalId: number) => {
       socket.join(`rental:${rentalId}`);
     });
@@ -98,3 +103,17 @@ export function emitOrderStatus(orderId: number, status: string) {
   io.to(`order:${orderId}`).emit("order:status", { status });
 }
 
+export function emitNewOrderToStore(storeId: number | string, orderData: any) {
+  const io = getIo();
+  if (io) {
+    io.to(`store:${storeId}`).emit('order:new', orderData);
+    console.log(`[Socket] Emitted order:new to store:${storeId}`);
+  }
+}
+
+export function emitOrderStatusToStore(storeId: number | string, statusData: any) {
+  const io = getIo();
+  if (io) {
+    io.to(`store:${storeId}`).emit('order:status', statusData);
+  }
+}

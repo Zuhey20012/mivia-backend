@@ -3,6 +3,7 @@ import { assignmentQueue } from "../../lib/queue";
 import { calcOrderPricing, calcRentalPricing } from "../../utils/pricing";
 import { env } from "../../config/env";
 import Stripe from "stripe";
+import { emitNewOrderToStore, emitOrderStatus } from '../../lib/socket';
 
 const stripe = new Stripe(env.stripeSecretKey, { apiVersion: "2023-10-16" as any });
 
@@ -97,6 +98,16 @@ export async function createOrder(userId: number, input: {
   if (assignmentQueue) {
     await assignmentQueue.add("assign-delivery", { orderId: order.id, type: "ORDER" });
   }
+
+  // Notify vendor's store in real-time
+  emitNewOrderToStore(order.storeId, {
+    id: order.id,
+    status: order.status,
+    totalCents: order.totalCents,
+    deliveryAddress: order.deliveryAddress,
+    items: order.items,
+    createdAt: order.createdAt,
+  });
 
   return { order, clientSecret: paymentIntent.client_secret };
 }

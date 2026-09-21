@@ -5,7 +5,7 @@ import { ingestCourierTelemetry, triggerGdprTelemetrySunset, createMaskedPhoneBr
 import { releaseEscrowOnDelivery, getEscrowRecord } from "../../services/paymentSplittingService";
 import { translateChatMessage } from "../../services/translationService";
 import { dispatchNotifications } from "../../services/notificationDeliveryService";
-import { getIo } from "../../lib/socket";
+import { getIo, emitOrderStatusToStore } from "../../lib/socket";
 
 const router = Router();
 
@@ -162,7 +162,42 @@ router.patch("/orders/:id/status", auth, async (req: AuthRequest, res: Response)
         orderId,
         timestamp: new Date().toISOString(),
       });
+      
+      emitOrderStatusToStore(order.storeId, {
+        status,
+        orderId,
+        timestamp: new Date().toISOString(),
+      });
+
+      if (status === 'CONFIRMED') {
+        io.emit('courier:dispatch_offer', {
+          orderId: order.id,
+          storeId: order.storeId,
+          storeName: order.store?.name || 'Boutique',
+          deliveryAddress: order.deliveryAddress,
+          totalCents: order.totalCents,
+          estimatedPayout: Math.round(order.totalCents * 0.15),
+        });
+      }
     } catch {}
+
+    if (status === "SHIPPED") {
+      dispatchNotifications({
+        event: "ORDER_SHIPPED",
+        orderId: `MLV-${orderId}`,
+        amount: order.totalCents / 100,
+        paymentMethod: "Google Pay (Verified Escrow)",
+        email: order.user.email,
+        phone: order.user.phone || "+358 40 123 4567",
+        name: order.user.name,
+        address: order.deliveryAddress || "Helsinki, Finland",
+        items: order.items.map((i) => ({
+          name: i.product.name,
+          quantity: i.quantity,
+          price: i.unitCents / 100,
+        })),
+      }).catch(() => {});
+    }
 
     // When status transitions to DELIVERED:
     // 1. Trigger Stripe Connect multi-sided escrow release

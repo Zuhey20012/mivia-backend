@@ -6,12 +6,18 @@ class LocaleProvider extends ChangeNotifier {
 
   Locale get locale => _locale;
 
+  static const List<String> supportedCodes = [
+    'en', 'fi', 'sv', 'de', 'fr', 'nl', 'it', 'es', 'pt',
+    'pl', 'ro', 'cs', 'hu', 'el', 'da', 'sk', 'bg', 'hr',
+    'no', 'ru', 'tr', 'uk', 'ar', 'zh', 'hi',
+  ];
+
   LocaleProvider() {
     _loadLocale();
   }
 
   void setLocale(Locale locale) async {
-    if (!['en', 'fi'].contains(locale.languageCode)) return;
+    if (!supportedCodes.contains(locale.languageCode)) return;
     _locale = locale;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
@@ -21,7 +27,7 @@ class LocaleProvider extends ChangeNotifier {
   void _loadLocale() async {
     final prefs = await SharedPreferences.getInstance();
     final languageCode = prefs.getString('languageCode');
-    if (languageCode != null) {
+    if (languageCode != null && supportedCodes.contains(languageCode)) {
       _locale = Locale(languageCode);
       notifyListeners();
     }
