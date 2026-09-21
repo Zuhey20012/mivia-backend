@@ -3,6 +3,7 @@ import express from "express";
 import http from "http";
 import cors from "cors";
 import pino from "pino";
+import helmet from "helmet";
 import { env } from "./config/env";
 import { errorHandler } from "./middleware/errorHandler";
 import { notFound } from "./middleware/notFound";
@@ -26,10 +27,15 @@ const server = http.createServer(app);
 initSocket(server);
 
 // Middleware
+app.use(helmet());
 app.use(cors({
   origin: env.allowedOrigins.includes("*") ? "*" : env.allowedOrigins,
   credentials: true,
 }));
+
+if (env.nodeEnv === "production" && env.allowedOrigins.includes("*")) {
+  logger.warn("SECURITY WARNING: CORS is wide open (*) in production environment");
+}
 app.use(express.json());
 app.use(globalLimiter);
 
@@ -71,7 +77,7 @@ app.post("/api/v1/notifications/dispatch", async (req, res) => {
 // Real launch database cleanup (purges fake seed demo stores, products, couriers)
 app.all("/api/v1/admin/purge-seed", async (req, res) => {
   const purgeKey = req.headers["x-purge-key"] || req.query.key;
-  if (purgeKey !== "malvoya-purge-secret-2026") {
+  if (!process.env.ADMIN_PURGE_SECRET || purgeKey !== process.env.ADMIN_PURGE_SECRET) {
     return res.status(403).json({ error: "Invalid purge key" });
   }
   try {

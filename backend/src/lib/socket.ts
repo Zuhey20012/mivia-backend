@@ -8,10 +8,33 @@ export function initSocket(httpServer: HttpServer): SocketServer {
     cors: { origin: "*" },
   });
 
+  io.use((socket, next) => {
+    try {
+      const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.split(" ")[1];
+      if (!token) return next(new Error("Authentication error"));
+      
+      const { verifyAccessToken } = require("../../utils/jwt");
+      const user = verifyAccessToken(token);
+      socket.data.user = user;
+      next();
+    } catch (err) {
+      next(new Error("Authentication error"));
+    }
+  });
+
   io.on("connection", (socket) => {
+    const user = socket.data.user;
+    
     // Client joins a room to track a specific order
-    socket.on("track:order", (orderId: number) => {
-      socket.join(`order:${orderId}`);
+    socket.on("track:order", async (orderId: number) => {
+      // Basic check: Ensure order exists and user has permission (customer or courier)
+      try {
+        const { prisma } = require("../../lib/prisma");
+        const order = await prisma.order.findUnique({ where: { id: orderId } });
+        if (order && (order.userId === user.id || order.courierId === user.id || user.role === "ADMIN")) {
+          socket.join(`order:${orderId}`);
+        }
+      } catch (err) {}
     });
 
     socket.on('track:store', (storeId) => {

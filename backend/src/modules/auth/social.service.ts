@@ -48,20 +48,7 @@ export async function loginWithPhone(firebaseToken: string) {
     const decodedToken = await admin.auth().verifyIdToken(firebaseToken);
     phoneNumber = decodedToken.phone_number;
   } catch (err) {
-    // Safe decode fallback for environments without Firebase service account credentials
-    try {
-      const decoded: any = jwt.decode(firebaseToken);
-      if (decoded) {
-        phoneNumber = decoded.phone_number || decoded.phoneNumber || (decoded.sub?.startsWith('+') ? decoded.sub : undefined);
-      }
-    } catch (_) {}
-
-    if (!phoneNumber) {
-      const rawDigits = firebaseToken.replace(/[^\d+]/g, '');
-      if (rawDigits.length >= 7) {
-        phoneNumber = rawDigits.startsWith('+') ? rawDigits : `+${rawDigits}`;
-      }
-    }
+    throw new Error("Invalid Phone Token");
   }
 
   if (!phoneNumber) throw new Error("Invalid Phone Token");

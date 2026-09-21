@@ -2,10 +2,13 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'config/constants.dart';
+
+final _secureStorage = const FlutterSecureStorage();
 
 class User {
   final int id;
@@ -66,7 +69,7 @@ class AuthService extends ChangeNotifier {
   Future<void> _loadSession() async {
     final prefs = await SharedPreferences.getInstance();
     final userJson = prefs.getString('user');
-    final token = prefs.getString('accessToken');
+    final token = await _secureStorage.read(key: 'accessToken');
     if (userJson != null && token != null) {
       _currentUser = User.fromJson(jsonDecode(userJson));
       _accessToken = token;
@@ -100,11 +103,13 @@ class AuthService extends ChangeNotifier {
       return 'Please enter a valid mobile phone number.';
     }
     final phoneEmail = '$cleanDigits@phone.malvoya.app';
+    final securePassword = base64Encode(utf8.encode('malvoya_${phone.hashCode}_secure'));
+    
     try {
       final res = await http.post(
         Uri.parse('${AppConstants.apiBase}/auth/login'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': phoneEmail, 'password': 'PhoneAuthUser123!'}),
+        body: jsonEncode({'email': phoneEmail, 'password': securePassword}),
       );
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
@@ -120,7 +125,7 @@ class AuthService extends ChangeNotifier {
         body: jsonEncode({
           'name': 'Customer (+$cleanDigits)',
           'email': phoneEmail,
-          'password': 'PhoneAuthUser123!',
+          'password': securePassword,
           'role': 'CUSTOMER',
         }),
       );
@@ -129,17 +134,10 @@ class AuthService extends ChangeNotifier {
         await _saveSession(data['user'], data['accessToken'], data['refreshToken']);
         return null;
       }
-    } catch (_) {}
-
-    final phoneUser = {
-      'id': cleanDigits.hashCode.abs() % 1000000,
-      'email': phoneEmail,
-      'name': 'Customer (+$cleanDigits)',
-      'role': 'CUSTOMER',
-      'isActive': true,
-    };
-    await _saveSession(phoneUser, 'phone_token_${DateTime.now().millisecondsSinceEpoch}', 'phone_refresh_token');
-    return null;
+      return 'Failed to authenticate with phone number.';
+    } catch (_) {
+      return 'Could not connect. Please check your internet connection.';
+    }
   }
 
   Future<String?> login(String email, String password) async {
@@ -209,8 +207,8 @@ class AuthService extends ChangeNotifier {
     _currentUser = User.fromJson(userMap);
     _accessToken = accessToken;
     await prefs.setString('user', jsonEncode(userMap));
-    await prefs.setString('accessToken', accessToken);
-    await prefs.setString('refreshToken', refreshToken);
+    await _secureStorage.write(key: 'accessToken', value: accessToken);
+    await _secureStorage.write(key: 'refreshToken', value: refreshToken);
     notifyListeners();
   }
 
@@ -230,17 +228,12 @@ class AuthService extends ChangeNotifier {
           await _saveSession(data['user'], data['accessToken'], data['refreshToken']);
           return null;
         }
-      } catch (_) {}
-      
-      final fallbackUser = {
-        'id': account.id.hashCode.abs() % 1000000,
-        'email': account.email,
-        'name': account.displayName ?? 'Google Shopper',
-        'role': 'CUSTOMER',
-        'isActive': true,
-      };
-      await _saveSession(fallbackUser, 'google_token_${DateTime.now().millisecondsSinceEpoch}', 'google_refresh_token');
-      return null;
+        final body = jsonDecode(response.body);
+        return body['message'] ?? 'Google sign-in failed.';
+      } catch (e) {
+        debugPrint('Google auth error: $e');
+        return 'Google sign-in failed. Please check your internet connection.';
+      }
     } catch (e) {
       debugPrint('Google sign-in error: $e');
       return 'Google sign-in was not completed.';
@@ -305,20 +298,10 @@ class AuthService extends ChangeNotifier {
           await _saveSession(data['user'], data['accessToken'], data['refreshToken']);
           return null;
         }
+        final body = jsonDecode(response.body);
+        return body['message'] ?? 'Authentication failed.';
       }
-      // Fallback session if backend endpoint is syncing
-      final userPhone = userCredential.user?.phoneNumber ?? 'Verified User';
-      final cleanDigits = userPhone.replaceAll(RegExp(r'[^0-9]'), '');
-      final fallbackUser = {
-        'id': cleanDigits.isNotEmpty ? (cleanDigits.hashCode.abs() % 1000000) : 100001,
-        'email': '$cleanDigits@phone.malvoya.app',
-        'phone': userPhone,
-        'name': 'Customer ($userPhone)',
-        'role': 'CUSTOMER',
-        'isActive': true,
-      };
-      await _saveSession(fallbackUser, idToken ?? 'phone_token_${DateTime.now().millisecondsSinceEpoch}', 'phone_refresh_token');
-      return null;
+      return 'Authentication failed.';
     } catch (e) {
       return 'OTP error: $e';
     }
@@ -330,6 +313,7 @@ class AuthService extends ChangeNotifier {
     _currentUser = null;
     _accessToken = null;
     await prefs.clear();
+    await _secureStorage.deleteAll();
     notifyListeners();
   }
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, Store, Truck, RefreshCw } from 'lucide-react';
+import { CheckCircle, XCircle, Store, RefreshCw } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../utils/api';
 

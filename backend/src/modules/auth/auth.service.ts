@@ -111,3 +111,65 @@ async function saveRefreshToken(userId: number, token: string) {
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
   await prisma.refreshToken.create({ data: { token, userId, expiresAt } });
 }
+
+export async function exportUserData(userId: number) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      orders: { include: { items: true } },
+      rentals: { include: { items: true } },
+      returns: true,
+      store: { include: { products: true } }
+    }
+  });
+  return user;
+}
+
+export async function deleteUserAccount(userId: number) {
+  await prisma.$transaction(async (tx) => {
+    // 1. Returns where user is returning party
+    await tx.return.deleteMany({ where: { userId } });
+
+    // 2. Orders and Rentals as a customer
+    const orders = await tx.order.findMany({ where: { userId }, select: { id: true } });
+    const orderIds = orders.map(o => o.id);
+    if (orderIds.length > 0) {
+      await tx.orderItem.deleteMany({ where: { orderId: { in: orderIds } } });
+      await tx.order.deleteMany({ where: { id: { in: orderIds } } });
+    }
+
+    const rentals = await tx.rental.findMany({ where: { userId }, select: { id: true } });
+    const rentalIds = rentals.map(r => r.id);
+    if (rentalIds.length > 0) {
+      await tx.rentalItem.deleteMany({ where: { rentalId: { in: rentalIds } } });
+      await tx.rental.deleteMany({ where: { id: { in: rentalIds } } });
+    }
+
+    // 3. Store data (if vendor)
+    const store = await tx.store.findUnique({ where: { ownerId: userId } });
+    if (store) {
+      const storeOrders = await tx.order.findMany({ where: { storeId: store.id }, select: { id: true } });
+      const storeOrderIds = storeOrders.map(o => o.id);
+      
+      if (storeOrderIds.length > 0) {
+        await tx.return.deleteMany({ where: { orderId: { in: storeOrderIds } } });
+        await tx.orderItem.deleteMany({ where: { orderId: { in: storeOrderIds } } });
+        await tx.order.deleteMany({ where: { id: { in: storeOrderIds } } });
+      }
+
+      const products = await tx.product.findMany({ where: { storeId: store.id }, select: { id: true } });
+      const productIds = products.map(p => p.id);
+      
+      if (productIds.length > 0) {
+        await tx.orderItem.deleteMany({ where: { productId: { in: productIds } } });
+        await tx.rentalItem.deleteMany({ where: { productId: { in: productIds } } });
+        await tx.productVariant.deleteMany({ where: { productId: { in: productIds } } });
+        await tx.product.deleteMany({ where: { storeId: store.id } });
+      }
+
+      await tx.store.delete({ where: { id: store.id } });
+    }
+
+    await tx.user.delete({ where: { id: userId } });
+  });
+}

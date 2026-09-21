@@ -1,3 +1,4 @@
+import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -8,7 +9,7 @@ import UsersPage from './pages/UsersPage';
 import Approvals from './pages/Approvals';
 import Settings from './pages/Settings';
 
-function RequireAuth({ children }: { children: JSX.Element }) {
+function RequireAuth({ children }: { children: React.ReactElement }) {
   const token = localStorage.getItem('token');
   if (!token) return <Navigate to="/login" replace />;
   return children;

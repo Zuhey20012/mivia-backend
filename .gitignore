@@ -1,8 +1,12 @@
-﻿# backend
+# backend
 backend/node_modules/
 backend/dist/
 backend/.env
 
-# flutter
-mivia_app/.dart_tool/
-mivia_app/build/
+# flutter & android builds
+**/build/
+**/build_corrupt/
+**/.dart_tool/
+**/*.hprof
+release_builds/
+node_modules/

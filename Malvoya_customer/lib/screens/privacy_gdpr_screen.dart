@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
+import '../config/constants.dart';
 import '../config/theme.dart';
 import '../l10n.dart';
 import '../locale_provider.dart';
@@ -62,40 +64,23 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
 
   Future<void> _exportUserData(AuthService auth, AppLocalizations l10n) async {
     HapticFeedback.mediumImpact();
-    final prefs = await SharedPreferences.getInstance();
-    final savedAddrs = prefs.getString('malvoya_addresses') ?? '[]';
-    final userPhone = prefs.getString('malvoya_user_phone') ?? 'Not configured';
-    final userCountry = prefs.getString('malvoya_country') ?? 'Finland 🇫🇮';
-
-    final exportData = {
-      'gdpr_export_metadata': {
-        'regulation': 'EU General Data Protection Regulation (GDPR 2016/679)',
-        'article': 'Article 15 (Right of Access) & Article 20 (Data Portability)',
-        'export_timestamp': DateTime.now().toIso8601String(),
-        'data_controller': 'Malvoya Platform, Helsinki, Finland (support@malvoya.com)',
-        'supervisory_authority': 'Office of the Data Protection Ombudsman (Tietosuojavaltuutetun toimisto)',
-      },
-      'profile': {
-        'user_id': auth.currentUser?.id ?? 'usr_guest_8492',
-        'full_name': auth.currentUser?.name ?? 'Customer',
-        'registered_email': auth.currentUser?.email ?? '',
-        'registered_phone': userPhone,
-        'country_jurisdiction': userCountry,
-      },
-      'privacy_consent_matrix': {
-        'analytics_telemetry': _consentAnalytics,
-        'boutique_personalization': _consentPersonalization,
-        'courier_radar_tracking': _consentRadar,
-        'promotional_marketing': _consentMarketing,
-      },
-      'saved_addresses': jsonDecode(savedAddrs),
-      'security_tokens': {
-        'pin_protection_active': prefs.getBool('malvoya_pin_enabled') ?? false,
-        'pci_dss_token_vault': 'Stripe & Adyen Encrypted Reference Token Active',
-      },
-    };
-
-    final prettyJson = const JsonEncoder.withIndent('  ').convert(exportData);
+    if (auth.accessToken == null) return;
+    
+    String prettyJson = '{}';
+    try {
+      final res = await http.get(
+        Uri.parse('${AppConstants.apiBase}/auth/me/data'),
+        headers: {'Authorization': 'Bearer ${auth.accessToken}'},
+      );
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        prettyJson = const JsonEncoder.withIndent('  ').convert(data);
+      } else {
+        prettyJson = '{"error": "Failed to fetch data from server."}';
+      }
+    } catch (e) {
+      prettyJson = '{"error": "Could not connect to server."}';
+    }
 
     if (!mounted) return;
 
@@ -260,9 +245,36 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
               ),
               onPressed: () async {
                 Navigator.pop(dialogCtx);
+                
+                if (auth.accessToken != null) {
+                  try {
+                    final res = await http.delete(
+                      Uri.parse('${AppConstants.apiBase}/auth/me'),
+                      headers: {'Authorization': 'Bearer ${auth.accessToken}'},
+                    );
+                    if (res.statusCode != 200) {
+                      throw Exception('Failed to delete account');
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      showDialog(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Error'),
+                          content: const Text('Could not delete account. Please try again.'),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))
+                          ]
+                        )
+                      );
+                    }
+                    return;
+                  }
+                }
+
                 final prefs = await SharedPreferences.getInstance();
                 await prefs.clear();
-                auth.logout();
+                await auth.logout();
 
                 if (mounted) {
                   Navigator.of(context).popUntil((route) => route.isFirst);

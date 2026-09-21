@@ -131,14 +131,21 @@ router.patch("/orders/:id/assign-courier", auth, async (req: AuthRequest, res: R
 });
 
 // ─── 4. UPDATE ORDER STATUS (PICKED UP / DELIVERED) ──────────────────────────
+import { z } from "zod";
+const courierStatusSchema = z.object({
+  status: z.enum(["CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"]),
+  doorstepPhotoUrl: z.string().optional(),
+  deliveryProofNotes: z.string().optional()
+});
+
 router.patch("/orders/:id/status", auth, async (req: AuthRequest, res: Response) => {
   try {
     const orderId = Number(req.params.id);
-    const { status, doorstepPhotoUrl, deliveryProofNotes } = req.body;
-
-    if (!["CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"].includes(status)) {
-      return res.status(400).json({ ok: false, error: "Invalid order status" });
+    const parsed = courierStatusSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, error: "Invalid input", details: parsed.error.flatten() });
     }
+    const { status, doorstepPhotoUrl, deliveryProofNotes } = parsed.data;
 
     const order = await prisma.order.findUnique({
       where: { id: orderId },

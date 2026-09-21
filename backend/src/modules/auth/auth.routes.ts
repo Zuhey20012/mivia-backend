@@ -1,6 +1,7 @@
 import { Router } from "express";
-import { register, login, refresh, logout, googleLogin, phoneLogin, appleLogin, sendOtpHandler, verifyOtpHandler } from "./auth.controller";
+import { register, login, refresh, logout, googleLogin, phoneLogin, appleLogin, sendOtpHandler, verifyOtpHandler, deleteMe, exportMyData } from "./auth.controller";
 import { authLimiter } from "../../middleware/rateLimiter";
+import { auth } from "../../middleware/auth";
 
 const router = Router();
 
@@ -14,5 +15,7 @@ router.post("/apple",      authLimiter, appleLogin);
 router.post("/refresh",    refresh);
 router.post("/logout",     logout);
 
-export default router;
+router.delete("/me",       auth, deleteMe);
+router.get("/me/data",     auth, exportMyData);
 
+export default router;

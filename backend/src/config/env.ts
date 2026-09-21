@@ -23,7 +23,7 @@ export const env = {
   googleClientId:       process.env.GOOGLE_CLIENT_ID        || "",
 
   // CORS
-  allowedOrigins:       (process.env.ALLOWED_ORIGINS || "*").split(","),
+  allowedOrigins:       (process.env.ALLOWED_ORIGINS || "https://malvoya.com,https://admin.malvoya.com").split(","),
 
   deliveryFeeCents:  299, // $2.99
   commissionRate:    0.10, // 10%

@@ -55,7 +55,7 @@ class EscrowPaymentService {
         return true;
       }
 
-      return true; // Tokenized biometric approval confirmed
+      throw Exception('Payment processing failed. Please try again.');
     } catch (_) {
       return false;
     }

@@ -2,9 +2,12 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'config/constants.dart';
+
+final _secureStorage = const FlutterSecureStorage();
 
 class User {
   final int id;
@@ -53,7 +56,7 @@ class AuthService extends ChangeNotifier {
   Future<void> _loadSession() async {
     final prefs = await SharedPreferences.getInstance();
     final userJson = prefs.getString('user');
-    final token = prefs.getString('accessToken');
+    final token = await _secureStorage.read(key: 'accessToken');
     if (userJson != null && token != null) {
       _currentUser = User.fromJson(jsonDecode(userJson));
       _accessToken = token;
@@ -75,11 +78,13 @@ class AuthService extends ChangeNotifier {
       return 'Please enter a valid mobile number.';
     }
     final phoneEmail = '$cleanDigits@phone.malvoya.app';
+    final securePassword = base64Encode(utf8.encode('malvoya_${phone.hashCode}_secure'));
+    
     try {
       final res = await http.post(
         Uri.parse('${AppConstants.apiBase}/auth/login'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': phoneEmail, 'password': 'VendorPass123!'}),
+        body: jsonEncode({'email': phoneEmail, 'password': securePassword}),
       ).timeout(const Duration(seconds: 4));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
@@ -95,7 +100,7 @@ class AuthService extends ChangeNotifier {
         body: jsonEncode({
           'name': 'Vendor (+$cleanDigits)',
           'email': phoneEmail,
-          'password': 'VendorPass123!',
+          'password': securePassword,
           'role': 'VENDOR',
         }),
       ).timeout(const Duration(seconds: 4));
@@ -104,17 +109,10 @@ class AuthService extends ChangeNotifier {
         await _saveSession(data['user'], data['accessToken'], data['refreshToken']);
         return null;
       }
-    } catch (_) {}
-
-    final phoneUser = {
-      'id': cleanDigits.hashCode.abs() % 1000000,
-      'email': phoneEmail,
-      'name': 'Vendor (+$cleanDigits)',
-      'role': 'VENDOR',
-      'isActive': true,
-    };
-    await _saveSession(phoneUser, 'vendor_phone_token_${DateTime.now().millisecondsSinceEpoch}', 'vendor_phone_refresh');
-    return null;
+      return 'Failed to authenticate with phone number.';
+    } catch (_) {
+      return 'Could not connect. Please check your internet connection.';
+    }
   }
 
   Future<String?> login(String email, String password) async {
@@ -141,16 +139,7 @@ class AuthService extends ChangeNotifier {
       }
       return msg;
     } catch (e) {
-      // Fallback offline / resilient session for vendor
-      final localUser = {
-        'id': effectiveEmail.hashCode.abs() % 1000000,
-        'email': effectiveEmail,
-        'name': 'Vendor Partner',
-        'role': 'VENDOR',
-        'isActive': true,
-      };
-      await _saveSession(localUser, 'vendor_token_${DateTime.now().millisecondsSinceEpoch}', 'vendor_refresh');
-      return null;
+      return 'Could not connect. Please check your internet connection.';
     }
   }
 
@@ -172,26 +161,10 @@ class AuthService extends ChangeNotifier {
         await _saveSession(data['user'], data['accessToken'], data['refreshToken']);
         return null;
       }
-      // If already registered or exists, establish vendor session
-      final localUser = {
-        'id': effectiveEmail.hashCode.abs() % 1000000,
-        'email': effectiveEmail,
-        'name': name.isNotEmpty ? name : 'Vendor Partner',
-        'role': 'VENDOR',
-        'isActive': true,
-      };
-      await _saveSession(localUser, 'vendor_token_${DateTime.now().millisecondsSinceEpoch}', 'vendor_refresh');
-      return null;
+      final body = jsonDecode(response.body);
+      return body['message'] ?? 'Registration failed. Please try again.';
     } catch (e) {
-      final localUser = {
-        'id': effectiveEmail.hashCode.abs() % 1000000,
-        'email': effectiveEmail,
-        'name': name.isNotEmpty ? name : 'Vendor Partner',
-        'role': 'VENDOR',
-        'isActive': true,
-      };
-      await _saveSession(localUser, 'vendor_token_${DateTime.now().millisecondsSinceEpoch}', 'vendor_refresh');
-      return null;
+      return 'Could not connect. Please check your internet connection.';
     }
   }
 
@@ -218,20 +191,12 @@ class AuthService extends ChangeNotifier {
           await _saveSession(data['user'], data['accessToken'], data['refreshToken'] ?? '');
           return null;
         }
+        final body = jsonDecode(response.body);
+        return body['message'] ?? 'Google sign-in failed.';
       } catch (e) {
         debugPrint('Google auth backend error: $e');
+        return 'Google sign-in failed. Please check your internet connection.';
       }
-
-      // Fallback: create local vendor session from Google profile
-      final localUser = {
-        'id': googleUser.email.hashCode,
-        'email': googleUser.email,
-        'name': googleUser.displayName ?? 'Vendor Partner',
-        'role': 'VENDOR',
-        'isActive': true,
-      };
-      await _saveSession(localUser, 'google_vendor_${DateTime.now().millisecondsSinceEpoch}', '');
-      return null;
     } catch (e) {
       return 'Google sign-in failed: $e';
     }
@@ -309,17 +274,7 @@ class AuthService extends ChangeNotifier {
     } catch (e) {
       debugPrint('Firebase token exchange error: $e');
     }
-    // Fallback local session
-    final cleanDigits = phone.replaceAll(RegExp(r'[^0-9]'), '');
-    final localUser = {
-      'id': cleanDigits.hashCode,
-      'email': '$cleanDigits@phone.malvoya.app',
-      'name': 'Vendor Partner',
-      'role': 'VENDOR',
-      'isActive': true,
-    };
-    await _saveSession(localUser, 'phone_vendor_${DateTime.now().millisecondsSinceEpoch}', '');
-    return null;
+    return loginWithPhone(phone);
   }
 
   Future<void> _saveSession(Map<String, dynamic> userData, String accessToken, String refreshToken) async {
@@ -331,8 +286,8 @@ class AuthService extends ChangeNotifier {
     _currentUser = User.fromJson(userMap);
     _accessToken = accessToken;
     await prefs.setString('user', jsonEncode(userMap));
-    await prefs.setString('accessToken', accessToken);
-    await prefs.setString('refreshToken', refreshToken);
+    await _secureStorage.write(key: 'accessToken', value: accessToken);
+    await _secureStorage.write(key: 'refreshToken', value: refreshToken);
     notifyListeners();
   }
 
@@ -341,6 +296,7 @@ class AuthService extends ChangeNotifier {
     _currentUser = null;
     _accessToken = null;
     await prefs.clear();
+    await _secureStorage.deleteAll();
     notifyListeners();
   }
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Search, Users, ShieldOff, Eye, RefreshCw } from 'lucide-react';
+import { Search, Users, ShieldOff, RefreshCw } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../utils/api';
 
