@@ -16,6 +16,8 @@ import productsRoutes from "./modules/products/products.routes";
 import ordersRoutes   from "./modules/orders/orders.routes";
 import adminRoutes    from "./modules/admin/admin.routes";
 import courierRoutes  from "./modules/orders/courier.routes";
+import raasRoutes     from "./modules/orders/raas.routes";
+import { mcpRouter }   from "./mcp/apparel_mcp_server";
 import { dispatchNotifications } from "./services/notificationDeliveryService";
 
 const logger = pino({ level: env.logLevel });
@@ -40,6 +42,8 @@ app.use("/api/v1/stores",   storesRoutes);
 app.use("/api/v1",          productsRoutes);
 app.use("/api/v1",          ordersRoutes);
 app.use("/api/v1",          courierRoutes);
+app.use("/api/v1",          raasRoutes);
+app.use("/api/v1",          mcpRouter);
 app.use("/api/v1/admin",    adminRoutes);
 
 // Real multi-channel notification dispatch webhook (SMS & Email tracking)

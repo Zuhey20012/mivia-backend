@@ -440,13 +440,12 @@ class _CheckoutPageState extends State<CheckoutPage> {
     const deliveryFee = 2.99;
     final total = subtotal + deliveryFee;
 
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final cardBg = isDark ? const Color(0xFF140D26) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF2E204A) : AppTheme.glassBorder;
-    final textPrimary = isDark ? const Color(0xFFFAF8FF) : AppTheme.textPrimary;
-    final textSecondary = isDark ? const Color(0xFFA09BAC) : AppTheme.textSecondary;
-    final inputBg = isDark ? const Color(0xFF1E1438) : const Color(0xFFF8F7FF);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardBg = AppTheme.cardBackground(context);
+    final borderColor = AppTheme.cardBorder(context);
+    final textPrimary = AppTheme.primaryText(context);
+    final textSecondary = AppTheme.secondaryText(context);
+    final inputBg = AppTheme.inputBackground(context);
 
     return Scaffold(
       appBar: AppBar(
@@ -497,7 +496,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
 
                       // Order items
                       _buildSection(
-                        title: '🛍️ Your Boutique Pieces',
+                        title: l10n.locale.languageCode == 'fi' ? '🛍️ Valitsemasi tuotteet' : '🛍️ Your Boutique Pieces',
                         cardBg: cardBg,
                         borderColor: borderColor,
                         textPrimary: textPrimary,
@@ -525,7 +524,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                                         style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary),
                                       ),
                                       Text(
-                                        '€${item.price.toStringAsFixed(2)} each',
+                                        '${item.price.toStringAsFixed(2)} € / kpl',
                                         style: TextStyle(color: textSecondary, fontSize: 12),
                                       ),
                                     ],
@@ -539,7 +538,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                                 ),
                                 const SizedBox(width: 12),
                                 Text(
-                                  '€${(item.price * item.quantity).toStringAsFixed(2)}',
+                                  '${(item.price * item.quantity).toStringAsFixed(2)} €',
                                   style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: textPrimary),
                                 ),
                               ],
@@ -551,19 +550,19 @@ class _CheckoutPageState extends State<CheckoutPage> {
 
                       // Order summary
                       _buildSection(
-                        title: '💳 Order Summary',
+                        title: l10n.locale.languageCode == 'fi' ? '💳 Tilauksen yhteenveto' : '💳 Order Summary',
                         cardBg: cardBg,
                         borderColor: borderColor,
                         textPrimary: textPrimary,
                         children: [
-                          _summaryRow('Subtotal', '€${subtotal.toStringAsFixed(2)}', textPrimary, textSecondary),
+                          _summaryRow(l10n.locale.languageCode == 'fi' ? 'Välisumma' : 'Subtotal', '${subtotal.toStringAsFixed(2)} €', textPrimary, textSecondary),
                           const SizedBox(height: 8),
-                          _summaryRow('Local Courier Delivery', '€${deliveryFee.toStringAsFixed(2)}', textPrimary, textSecondary),
+                          _summaryRow(l10n.locale.languageCode == 'fi' ? 'Lähikuriirin toimitus' : 'Local Courier Delivery', '${deliveryFee.toStringAsFixed(2)} €', textPrimary, textSecondary),
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 10),
                             child: Divider(color: borderColor),
                           ),
-                          _summaryRow('Total (Incl. ALV / VAT 25.5%)', '€${total.toStringAsFixed(2)}', textPrimary, textSecondary, bold: true),
+                          _summaryRow(l10n.locale.languageCode == 'fi' ? 'Yhteensä (sis. ALV 25,5%)' : 'Total (Incl. ALV / VAT 25.5%)', '${total.toStringAsFixed(2)} €', textPrimary, textSecondary, bold: true),
                         ],
                       ),
 

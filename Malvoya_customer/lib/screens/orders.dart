@@ -596,9 +596,15 @@ class _OrdersScreenState extends State<OrdersScreen> {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
-                  status,
+                  status == 'DELIVERED'
+                      ? (l10n.locale.languageCode == 'fi' ? 'Toimitettu ✅' : 'Delivered ✅')
+                      : (status == 'SHIPPED'
+                          ? (l10n.locale.languageCode == 'fi' ? 'Kuljetuksessa ⚡' : 'In Transit ⚡')
+                          : (status == 'CANCELLED'
+                              ? (l10n.locale.languageCode == 'fi' ? 'Peruutettu' : 'Cancelled')
+                              : status)),
                   style: TextStyle(
-                    color: status == 'DELIVERED' ? const Color(0xFF10B981) : Colors.red,
+                    color: status == 'DELIVERED' ? const Color(0xFF10B981) : (status == 'SHIPPED' ? AppTheme.primary : Colors.red),
                     fontWeight: FontWeight.w800,
                     fontSize: 11,
                   ),

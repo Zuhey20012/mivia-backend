@@ -249,15 +249,49 @@ class _LoginScreenState extends State<LoginScreen> {
                                   debugPrint('Auto verification error: $e');
                                 }
                               },
-                              verificationFailed: (fb_auth.FirebaseAuthException e) {
-                                debugPrint('Firebase verification failed: ${e.code} - ${e.message}');
-                                setDialogState(() => isProcessing = false);
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(e.message ?? 'Vahvistuskoodin lähetys epäonnistui. Tarkista puhelinnumero.'),
-                                    backgroundColor: Colors.red.shade700,
-                                  ),
+                              verificationFailed: (fb_auth.FirebaseAuthException e) async {
+                                debugPrint('Firebase verification failed (${e.code}): falling back to backend Twilio SMS OTP');
+                                final res = await RealtimeNotificationService.sendRealOtp(
+                                  destination: destination,
+                                  channel: 'sms',
                                 );
+                                setDialogState(() => isProcessing = false);
+                                if (res['ok'] == true) {
+                                  verificationId = null; // Mark as backend Twilio OTP
+                                  countdown = 60;
+                                  timer?.cancel();
+                                  timer = Timer.periodic(const Duration(seconds: 1), (t) {
+                                    if (countdown > 0) {
+                                      setDialogState(() => countdown--);
+                                    } else {
+                                      t.cancel();
+                                    }
+                                  });
+                                  setDialogState(() => step = 2);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Row(
+                                        children: [
+                                          const Icon(Icons.sms_rounded, color: Color(0xFF10B981), size: 20),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Text('Vahvistuskoodi lähetetty tekstiviestillä kohteeseen $destination. Syötä koodi alle.'),
+                                          ),
+                                        ],
+                                      ),
+                                      backgroundColor: const Color(0xFF1E293B),
+                                      behavior: SnackBarBehavior.floating,
+                                      duration: const Duration(seconds: 5),
+                                    ),
+                                  );
+                                } else {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(res['error'] ?? e.message ?? 'Vahvistuskoodin lähetys epäonnistui.'),
+                                      backgroundColor: Colors.red.shade700,
+                                    ),
+                                  );
+                                }
                               },
                               codeSent: (String verId, int? token) {
                                 verificationId = verId;
@@ -297,10 +331,29 @@ class _LoginScreenState extends State<LoginScreen> {
                               },
                             );
                           } catch (e) {
-                            setDialogState(() => isProcessing = false);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Virhe: $e'), backgroundColor: Colors.red.shade700),
+                            debugPrint('Phone verification exception: $e, falling back to Twilio SMS');
+                            final res = await RealtimeNotificationService.sendRealOtp(
+                              destination: destination,
+                              channel: 'sms',
                             );
+                            setDialogState(() => isProcessing = false);
+                            if (res['ok'] == true) {
+                              verificationId = null;
+                              countdown = 60;
+                              timer?.cancel();
+                              timer = Timer.periodic(const Duration(seconds: 1), (t) {
+                                if (countdown > 0) {
+                                  setDialogState(() => countdown--);
+                                } else {
+                                  t.cancel();
+                                }
+                              });
+                              setDialogState(() => step = 2);
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Virhe: $e'), backgroundColor: Colors.red.shade700),
+                              );
+                            }
                           }
                         } else {
                           // Email OTP

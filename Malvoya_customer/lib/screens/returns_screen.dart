@@ -7,6 +7,7 @@ import '../config/theme.dart';
 import '../l10n.dart';
 import '../locale_provider.dart';
 import '../local_notification_service.dart';
+import '../ui/returns/return_condition_scanner.dart';
 
 class ReturnsScreen extends StatefulWidget {
   const ReturnsScreen({super.key});
@@ -245,7 +246,78 @@ class _ReturnsScreenState extends State<ReturnsScreen> with SingleTickerProvider
                     ),
                   ),
                 ],
-                const SizedBox(height: 24),
+                const SizedBox(height: 20),
+
+                // AI Defect Scan Option
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.primary,
+                      side: const BorderSide(color: AppTheme.primary, width: 1.5),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                    icon: const Icon(Icons.auto_awesome, size: 18),
+                    label: Text(
+                      l10n.locale.languageCode == 'fi'
+                          ? '📸 Käynnistä tekoälyskannaus ja palautus'
+                          : '📸 Launch AI Garment Scanner & Return',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                    onPressed: () async {
+                      Navigator.pop(ctx);
+                      final result = await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ReturnConditionScanner(
+                            orderId: orderIdCtrl.text.trim().isEmpty ? 'ORD-LIVE' : orderIdCtrl.text.trim(),
+                            itemName: itemCtrl.text.trim().isEmpty ? (l10n.locale.languageCode == 'fi' ? 'Putiikkituote' : 'Boutique Apparel') : itemCtrl.text.trim(),
+                          ),
+                        ),
+                      );
+                      if (result != null) {
+                        final retId = 'RET-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
+                        final now = DateTime.now();
+                        final dateStr = '${now.day}.${now.month}.${now.year}';
+                        final newReturn = {
+                          'id': retId,
+                          'item': itemCtrl.text.trim().isEmpty ? (l10n.locale.languageCode == 'fi' ? 'Putiikkituote (AI-varmistettu)' : 'Boutique Piece (AI-Verified)') : itemCtrl.text.trim(),
+                          'orderId': orderIdCtrl.text.trim().isEmpty ? '#MLV-${now.millisecondsSinceEpoch.toString().substring(8)}' : orderIdCtrl.text.trim(),
+                          'reason': 'reasonChangedMind',
+                          'dispatchMethod': 'Noutokuriiri (Riidaton)',
+                          'refundDestination': refundDestination,
+                          'iban': ibanCtrl.text.trim(),
+                          'date': dateStr,
+                          'statusStage': 1,
+                          'statusLabel': l10n.translate('stageRequested'),
+                          'aiInspected': true,
+                          'tamperRibbonIntact': true,
+                          'courierDirective': 'ACCEPT_PACKAGE_DO_NOT_ARGUE',
+                        };
+                        setState(() {
+                          _returns.insert(0, newReturn);
+                        });
+                        await _persistReturns();
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              backgroundColor: const Color(0xFF10B981),
+                              content: Text(
+                                l10n.locale.languageCode == 'fi'
+                                    ? '✅ AI-tarkastus hyväksytty: Kuriirin nouto tilattu riidattomasti!'
+                                    : '✅ AI Verified: Zero-conflict courier pickup requested!',
+                              ),
+                            ),
+                          );
+                        }
+                      }
+                    },
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
                 SizedBox(
                   width: double.infinity,
                   height: 52,

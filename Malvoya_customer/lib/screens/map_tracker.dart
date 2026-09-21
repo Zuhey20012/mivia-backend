@@ -6,6 +6,7 @@ import 'package:latlong2/latlong.dart';
 import '../config/theme.dart';
 import '../services/socket_service.dart';
 import '../auth_service.dart';
+import '../l10n.dart';
 import 'package:provider/provider.dart';
 
 class MapTrackerScreen extends StatefulWidget {
@@ -45,7 +46,7 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
   LatLng _currentCourierPos = LatLng(60.1841, 24.9493);
   double _currentBearing = 205.0;
   double _distanceMeters = 450.0;
-  int _etaMinutes = 4;
+  int _etaMinutes = 15;
   bool _smsFallbackEnabled = true;
   double _lastSheetExtent = 0.32;
 
@@ -663,13 +664,18 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
     );
   }
 
-  Widget _buildFiveStageProgressBar() {
-    const stages = [
-      {'label': 'Placed', 'done': true},
-      {'label': 'Preparing', 'done': true},
-      {'label': 'Assigned', 'done': true},
-      {'label': 'In Transit', 'done': true, 'active': true},
-      {'label': 'Delivered', 'done': false},
+  Widget _buildFiveStageProgressBar(BuildContext context, AppLocalizations l10n) {
+    final isFi = l10n.locale.languageCode == 'fi';
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textPrimary = AppTheme.primaryText(context);
+    final textSecondary = AppTheme.secondaryText(context);
+
+    final stages = [
+      {'label': isFi ? 'Vastaanotettu' : 'Placed', 'done': true},
+      {'label': isFi ? 'Valmistellaan' : 'Preparing', 'done': true},
+      {'label': isFi ? 'Noudettu' : 'Picked Up', 'done': true},
+      {'label': isFi ? 'Matkalla' : 'On the Way', 'done': true, 'active': true},
+      {'label': isFi ? 'Toimitettu' : 'Delivered', 'done': false},
     ];
 
     return Row(
@@ -682,8 +688,14 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
           final isPast = isDone && !isActive;
           return Expanded(
             child: Container(
-              height: 2.5,
-              color: isPast ? AppTheme.primary : Colors.grey.shade300,
+              height: 3,
+              margin: const EdgeInsets.symmetric(horizontal: 2),
+              decoration: BoxDecoration(
+                color: isPast
+                    ? AppTheme.primary
+                    : (isDark ? const Color(0xFF2E1F52) : const Color(0xFFE5E0F2)),
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
           );
         } else {
@@ -696,34 +708,43 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 22, height: 22,
+                width: 24, height: 24,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: active
                       ? AppTheme.primary
                       : done
                           ? AppTheme.primary.withValues(alpha: 0.15)
-                          : Colors.grey.shade200,
+                          : (isDark ? const Color(0xFF1E133C) : Colors.grey.shade200),
                   border: Border.all(
-                    color: active || done ? AppTheme.primary : Colors.grey.shade300,
+                    color: active || done ? AppTheme.primary : (isDark ? const Color(0xFF2E1F52) : Colors.grey.shade300),
                     width: active ? 2.5 : 1.2,
                   ),
+                  boxShadow: active
+                      ? [
+                          BoxShadow(
+                            color: AppTheme.primary.withValues(alpha: 0.4),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : null,
                 ),
                 child: Center(
                   child: active
                       ? Container(width: 8, height: 8, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle))
                       : done
-                          ? const Icon(Icons.check, size: 13, color: AppTheme.primary)
+                          ? const Icon(Icons.check, size: 14, color: AppTheme.primary)
                           : null,
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 5),
               Text(
                 s['label'] as String,
                 style: TextStyle(
-                  fontSize: 9.5,
+                  fontSize: 10,
                   fontWeight: active ? FontWeight.w800 : FontWeight.w600,
-                  color: active ? AppTheme.primary : (done ? Colors.black87 : Colors.grey),
+                  color: active ? AppTheme.primary : (done ? textPrimary : textSecondary),
                 ),
               ),
             ],
@@ -733,17 +754,21 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
     );
   }
 
-  Widget _manifestRow(String label, String value) {
+  Widget _manifestRow(String label, String value, [BuildContext? ctx]) {
+    final effectiveContext = ctx ?? context;
+    final textPrimary = AppTheme.primaryText(effectiveContext);
+    final textSecondary = AppTheme.secondaryText(effectiveContext);
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w600)),
+        Text(label, style: TextStyle(fontSize: 12.5, color: textSecondary, fontWeight: FontWeight.w600)),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
             value,
             textAlign: TextAlign.end,
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.black87),
+            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: textPrimary),
             overflow: TextOverflow.ellipsis,
           ),
         ),
@@ -895,12 +920,32 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
               snap: true,
               snapSizes: const [0.18, 0.32, 0.88],
               builder: (context, scrollController) {
+                final l10n = AppLocalizations.of(context);
+                final isFi = l10n.locale.languageCode == 'fi';
+                final isDark = Theme.of(context).brightness == Brightness.dark;
+                final sheetBg = isDark ? const Color(0xFF140D28) : Colors.white;
+                final cardBg = isDark ? const Color(0xFF1E133C) : const Color(0xFFF8F7FF);
+                final cardBorder = isDark ? const Color(0xFF2E1F52) : const Color(0xFFEDE8F5);
+                final textPrimary = AppTheme.primaryText(context);
+                final textSecondary = AppTheme.secondaryText(context);
+
+                final etaDisplay = _distanceMeters < 80
+                    ? (isFi ? 'Ovelle saapumassa 📍' : 'Arriving at Doorstep 📍')
+                    : '$_etaMinutes–${_etaMinutes + 10} min';
+                final etaSubtitle = _distanceMeters < 80
+                    ? (isFi ? 'Kuriiri astuu sisään' : 'Courier arriving now')
+                    : (isFi ? 'Arvioitu toimitusaika • ⚡ Nopea nouto' : 'Estimated delivery time • Express drop');
+
                 return Container(
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+                  decoration: BoxDecoration(
+                    color: sheetBg,
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
                     boxShadow: [
-                      BoxShadow(color: Colors.black12, blurRadius: 24, offset: Offset(0, -6)),
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: isDark ? 0.45 : 0.12),
+                        blurRadius: 24,
+                        offset: const Offset(0, -6),
+                      ),
                     ],
                   ),
                   child: ListView(
@@ -913,25 +958,37 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
                         child: Container(
                           width: 44,
                           height: 4.5,
-                          decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF382662) : Colors.grey.shade300,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 14),
 
-                      // ETA & Telemetry Badge
+                      // Wolt-Style ETA & Telemetry Badge
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                _distanceMeters < 80
-                                    ? 'Arriving at Doorstep 📍'
-                                    : 'Arriving in ~$_etaMinutes mins (${(_distanceMeters / 1000).toStringAsFixed(1)} km)',
-                                style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w900, color: AppTheme.textPrimary),
+                                etaDisplay,
+                                style: TextStyle(
+                                  fontSize: 26,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: -0.5,
+                                  color: textPrimary,
+                                ),
                               ),
                               const SizedBox(height: 2),
+                              Text(
+                                etaSubtitle,
+                                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: textSecondary),
+                              ),
+                              const SizedBox(height: 6),
                               Row(
                                 children: [
                                   Container(
@@ -940,7 +997,9 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
                                   ),
                                   const SizedBox(width: 5),
                                   Text(
-                                    'Live Radar: ${_distanceMeters.round()}m away • 60Hz Telemetry',
+                                    isFi
+                                        ? 'Live-tutka: ${_distanceMeters.round()} m päässä • 60 Hz'
+                                        : 'Live Radar: ${_distanceMeters.round()}m away • 60Hz',
                                     style: const TextStyle(color: Color(0xFF10B981), fontSize: 11.5, fontWeight: FontWeight.w700),
                                   ),
                                 ],
@@ -950,8 +1009,9 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF3E8FF),
+                              color: isDark ? const Color(0xFF27174A) : const Color(0xFFF3E8FF),
                               borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
                             ),
                             child: Text(
                               widget.orderId,
@@ -961,35 +1021,65 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
                         ],
                       ),
 
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 16),
 
-                      // 5-Stage Visual Progress Stepper
-                      _buildFiveStageProgressBar(),
+                      // 5-Stage Visual Progress Stepper (Wolt Glow Style)
+                      _buildFiveStageProgressBar(context, l10n),
 
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 16),
 
                       // In-Transit Masked Communications Bridge (Courier Card)
                       Container(
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF8FAFC),
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(color: Colors.grey.shade200),
+                          color: cardBg,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: cardBorder),
                         ),
                         child: Row(
                           children: [
                             CircleAvatar(
-                              radius: 20,
-                              backgroundColor: AppTheme.primary.withValues(alpha: 0.12),
-                              child: const Icon(Icons.person_rounded, color: AppTheme.primary, size: 22),
+                              radius: 22,
+                              backgroundColor: AppTheme.primary.withValues(alpha: 0.18),
+                              child: const Icon(Icons.delivery_dining_rounded, color: AppTheme.primary, size: 24),
                             ),
-                            const SizedBox(width: 10),
+                            const SizedBox(width: 12),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(widget.courierName.isNotEmpty ? widget.courierName : 'Malvoya Courier Dispatch', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
-                                  const Text('Suojattu yhteys • Kuriirivalmiudessa', style: TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.w600)),
+                                  Row(
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          widget.courierName.isNotEmpty ? widget.courierName : (isFi ? 'Malvoya Pikalähetti' : 'Malvoya Courier Dispatch'),
+                                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: textPrimary),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFFEF3C7),
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: const Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.star_rounded, size: 12, color: Color(0xFFD97706)),
+                                            SizedBox(width: 2),
+                                            Text('4.9', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: Color(0xFFD97706))),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    isFi ? 'Sähköskootteri • Suojattu yhteys' : 'Electric Scooter • Protected',
+                                    style: const TextStyle(color: Color(0xFF10B981), fontSize: 11.5, fontWeight: FontWeight.w600),
+                                  ),
                                 ],
                               ),
                             ),
@@ -998,13 +1088,13 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
                             IconButton(
                               onPressed: _showMaskedProxyCallDialog,
                               icon: Container(
-                                padding: const EdgeInsets.all(7),
+                                padding: const EdgeInsets.all(8),
                                 decoration: BoxDecoration(
                                   color: const Color(0xFFEFF6FF),
-                                  borderRadius: BorderRadius.circular(10),
+                                  borderRadius: BorderRadius.circular(12),
                                   border: Border.all(color: const Color(0xFFBFDBFE)),
                                 ),
-                                child: const Icon(Icons.phone_in_talk_rounded, color: Color(0xFF0284C7), size: 17),
+                                child: const Icon(Icons.phone_in_talk_rounded, color: Color(0xFF0284C7), size: 18),
                               ),
                               tooltip: 'Masked VoIP Call (Private)',
                             ),
@@ -1013,13 +1103,13 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
                             IconButton(
                               onPressed: _showInTransitChatDialog,
                               icon: Container(
-                                padding: const EdgeInsets.all(7),
+                                padding: const EdgeInsets.all(8),
                                 decoration: BoxDecoration(
                                   color: const Color(0xFFF5F3FF),
-                                  borderRadius: BorderRadius.circular(10),
+                                  borderRadius: BorderRadius.circular(12),
                                   border: Border.all(color: const Color(0xFFDDD6FE)),
                                 ),
-                                child: const Icon(Icons.chat_bubble_outline_rounded, color: AppTheme.primary, size: 17),
+                                child: const Icon(Icons.chat_bubble_outline_rounded, color: AppTheme.primary, size: 18),
                               ),
                               tooltip: 'Encrypted Chat',
                             ),
@@ -1028,13 +1118,13 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
                             IconButton(
                               onPressed: _showDoorstepProofDialog,
                               icon: Container(
-                                padding: const EdgeInsets.all(7),
+                                padding: const EdgeInsets.all(8),
                                 decoration: BoxDecoration(
                                   color: const Color(0xFFF0FDF4),
-                                  borderRadius: BorderRadius.circular(10),
+                                  borderRadius: BorderRadius.circular(12),
                                   border: Border.all(color: const Color(0xFFBBF7D0)),
                                 ),
-                                child: const Icon(Icons.camera_alt_outlined, color: Color(0xFF16A34A), size: 17),
+                                child: const Icon(Icons.camera_alt_outlined, color: Color(0xFF16A34A), size: 18),
                               ),
                               tooltip: 'Doorstep Photo Proof',
                             ),
@@ -1048,9 +1138,9 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF8FAFC),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.grey.shade200),
+                          color: cardBg,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: cardBorder),
                         ),
                         child: Row(
                           children: [
@@ -1059,14 +1149,14 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
                             Expanded(
                               child: Text(
                                 _smsFallbackEnabled
-                                    ? 'Fallback SMS active: Arrival text sent if connection drops in elevators.'
-                                    : 'SMS fallback paused.',
-                                style: const TextStyle(fontSize: 11, color: Colors.black87),
+                                    ? (isFi ? 'SMS-varaviesti aktiivinen hissikatveita varten.' : 'Fallback SMS active for elevator signal drops.')
+                                    : (isFi ? 'SMS-varaviesti tauotettu.' : 'SMS fallback paused.'),
+                                style: TextStyle(fontSize: 11, color: textPrimary),
                               ),
                             ),
                             Switch(
                               value: _smsFallbackEnabled,
-                              activeThumbColor: const Color(0xFF0284C7),
+                              activeColor: const Color(0xFF0284C7),
                               onChanged: (v) => setState(() => _smsFallbackEnabled = v),
                             ),
                           ],
@@ -1077,26 +1167,26 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with SingleTickerPr
 
                       // Detailed Order Manifest (Expanded view at 88% snap)
                       Text(
-                        'Delivery Manifest & Instructions',
-                        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: Colors.grey.shade900),
+                        isFi ? 'Toimituserittely & Ohjeet' : 'Delivery Manifest & Instructions',
+                        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: textPrimary),
                       ),
                       const SizedBox(height: 8),
                       Container(
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFAF5FF),
+                          color: cardBg,
                           borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: const Color(0xFFE9D5FF)),
+                          border: Border.all(color: cardBorder),
                         ),
                         child: Column(
                           children: [
-                            _manifestRow('Boutique Dispatch', widget.merchantName),
+                            _manifestRow(isFi ? 'Lähettävä liike' : 'Boutique Dispatch', widget.merchantName, context),
                             const Divider(height: 16),
-                            _manifestRow('Destination Address', widget.deliveryAddress ?? 'Verified Customer Entrance'),
+                            _manifestRow(isFi ? 'Toimitusosoite' : 'Destination Address', widget.deliveryAddress ?? (isFi ? 'Vahvistettu sisäänkäynti' : 'Verified Customer Entrance'), context),
                             const Divider(height: 16),
-                            _manifestRow('VAT ALV (25.5%)', 'Inclusive Legal Digital Receipt'),
+                            _manifestRow('ALV / VAT (25.5%)', isFi ? 'Sisältyy digitaaliseen kuittiin' : 'Inclusive Legal Digital Receipt', context),
                             const Divider(height: 16),
-                            _manifestRow('Payment Escrow', 'PSD2 SCA Pre-Auth Held in Escrow'),
+                            _manifestRow(isFi ? 'Maksusuoja' : 'Payment Escrow', isFi ? 'PSD2 SCA -katevaraus pidätettynä' : 'PSD2 SCA Pre-Auth Held in Escrow', context),
                           ],
                         ),
                       ),

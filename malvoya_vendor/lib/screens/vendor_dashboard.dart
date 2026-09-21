@@ -87,7 +87,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       final res = await http.get(
         Uri.parse('${AppConstants.apiBase}/stores/my'),
         headers: {'Authorization': _authHeader()},
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 4));
       if (res.statusCode == 200 && mounted) {
         setState(() { _store = jsonDecode(res.body); });
         await _fetchProducts();
@@ -136,7 +136,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       final res = await http.get(
         Uri.parse('${AppConstants.apiBase}/orders'),
         headers: {'Authorization': _authHeader()},
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 4));
       if (res.statusCode == 200 && mounted) {
         final data = jsonDecode(res.body);
         setState(() { _orders = data is List ? data : (data['orders'] ?? []); });
@@ -153,7 +153,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       final res = await http.get(
         Uri.parse('${AppConstants.apiBase}/stores/${_store!['id']}/products'),
         headers: {'Authorization': _authHeader()},
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 4));
       if (res.statusCode == 200 && mounted) {
         final data = jsonDecode(res.body);
         setState(() { _products = data['products'] ?? data ?? []; });
@@ -169,7 +169,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
         Uri.parse('${AppConstants.apiBase}/orders/$orderId/status'),
         headers: {'Authorization': _authHeader(), 'Content-Type': 'application/json'},
         body: jsonEncode({'status': status}),
-      );
+      ).timeout(const Duration(seconds: 4));
       if (res.statusCode == 200) {
         _fetchOrders();
         if (mounted) {
@@ -534,7 +534,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                 Uri.parse('${AppConstants.apiBase}/products/${product['id']}'),
                 headers: {'Authorization': _authHeader(), 'Content-Type': 'application/json'},
                 body: jsonEncode({'isAvailable': val}),
-              );
+              ).timeout(const Duration(seconds: 4));
               _fetchProducts();
             },
           ),

@@ -81,7 +81,7 @@ class AuthService extends ChangeNotifier {
         Uri.parse('${AppConstants.apiBase}/auth/login'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'email': phoneEmail, 'password': 'CourierPass123!'}),
-      );
+      ).timeout(const Duration(seconds: 4));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         await _saveSession(data['user'], data['accessToken'], data['refreshToken']);
@@ -99,7 +99,7 @@ class AuthService extends ChangeNotifier {
           'password': 'CourierPass123!',
           'role': 'COURIER',
         }),
-      );
+      ).timeout(const Duration(seconds: 4));
       if (regRes.statusCode == 201) {
         final data = jsonDecode(regRes.body);
         await _saveSession(data['user'], data['accessToken'], data['refreshToken']);
@@ -125,7 +125,7 @@ class AuthService extends ChangeNotifier {
         Uri.parse('${AppConstants.apiBase}/auth/login'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'email': effectiveEmail, 'password': password}),
-      );
+      ).timeout(const Duration(seconds: 4));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         await _saveSession(data['user'], data['accessToken'], data['refreshToken']);
@@ -166,7 +166,7 @@ class AuthService extends ChangeNotifier {
           'password': password,
           'role': 'COURIER',
         }),
-      );
+      ).timeout(const Duration(seconds: 4));
       if (response.statusCode == 201) {
         final data = jsonDecode(response.body);
         await _saveSession(data['user'], data['accessToken'], data['refreshToken']);
@@ -206,7 +206,7 @@ class AuthService extends ChangeNotifier {
         Uri.parse('${AppConstants.apiBase}/auth/google'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'idToken': idToken, 'role': 'COURIER'}),
-      );
+      ).timeout(const Duration(seconds: 4));
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final data = jsonDecode(response.body);
@@ -297,7 +297,7 @@ class AuthService extends ChangeNotifier {
           'phone': phone,
           'role': 'COURIER'
         }),
-      );
+      ).timeout(const Duration(seconds: 4));
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final data = jsonDecode(response.body);

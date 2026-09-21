@@ -301,17 +301,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
               const SizedBox(height: 20),
 
-              // Legal Terms & Privacy Policy Checkbox (High Contrast OLED Compliant)
+              // Legal Terms & Privacy Policy Checkbox (Ultra-High Contrast OLED & Light Compliant)
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   color: isDark
-                      ? (_agreeToTerms ? const Color(0xFF27174A) : const Color(0xFF1B1033))
-                      : (_agreeToTerms ? AppTheme.primaryLight.withValues(alpha: 0.3) : cardBg),
+                      ? (_agreeToTerms ? const Color(0xFF27174A) : const Color(0xFF1E133C))
+                      : (_agreeToTerms ? const Color(0xFFEDE9FE) : const Color(0xFFF6F4FB)),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: _agreeToTerms ? AppTheme.primary : (isDark ? const Color(0x668B5CF6) : cardBorder),
-                    width: _agreeToTerms ? 1.5 : 1.0,
+                    color: _agreeToTerms ? AppTheme.primary : (isDark ? const Color(0xFF8B5CF6) : const Color(0xFFDDD6FE)),
+                    width: 1.5,
                   ),
                 ),
                 child: Row(
@@ -326,8 +326,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         checkColor: Colors.white,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                         side: BorderSide(
-                          color: isDark ? const Color(0xFFA78BFA) : Colors.grey.shade500,
-                          width: 1.5,
+                          color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF8B5CF6),
+                          width: 1.8,
                         ),
                         onChanged: (v) {
                           setState(() {
@@ -354,8 +354,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           l10n.translate('agreeTermsText'),
                           style: TextStyle(
                             fontSize: 13,
-                            color: isDark ? const Color(0xFFFAF5FF) : textPrimary,
-                            fontWeight: FontWeight.w600,
+                            color: isDark ? const Color(0xFFFAF7FF) : const Color(0xFF0F0B1E),
+                            fontWeight: FontWeight.w700,
                             height: 1.45,
                           ),
                         ),

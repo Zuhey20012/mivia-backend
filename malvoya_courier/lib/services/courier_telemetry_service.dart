@@ -132,7 +132,7 @@ class CourierTelemetryService extends ChangeNotifier {
           'Authorization': 'Bearer $_accessToken',
         },
         body: jsonEncode(_lastPoint!.toJson()),
-      );
+      ).timeout(const Duration(seconds: 4));
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         // Flush any offline buffer
@@ -163,7 +163,7 @@ class CourierTelemetryService extends ChangeNotifier {
             'Authorization': 'Bearer $_accessToken',
           },
           body: jsonEncode(point.toJson()),
-        );
+        ).timeout(const Duration(seconds: 4));
       } catch (_) {}
     }
     debugPrint('[Telemetry] Flushed ${batch.length} buffered points');

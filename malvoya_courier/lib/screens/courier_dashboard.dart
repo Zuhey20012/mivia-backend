@@ -78,7 +78,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
           Uri.parse('${AppConstants.apiBase}/courier/status'),
           headers: {'Authorization': _authHeader(), 'Content-Type': 'application/json'},
           body: jsonEncode({'isOnline': nextState, 'latitude': 60.1841, 'longitude': 24.9493}),
-        );
+        ).timeout(const Duration(seconds: 4));
       } catch (_) {}
     }
 
@@ -108,7 +108,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
       final res = await http.get(
         Uri.parse('${AppConstants.apiBase}/orders/available'),
         headers: {'Authorization': _authHeader()},
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 4));
       if (res.statusCode == 200 && mounted) {
         final data = jsonDecode(res.body);
         setState(() { _availableOrders = data is List ? data : (data['orders'] ?? []); });
@@ -124,7 +124,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
       final res = await http.get(
         Uri.parse('${AppConstants.apiBase}/orders/courier/mine'),
         headers: {'Authorization': _authHeader()},
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 4));
       if (res.statusCode == 200 && mounted) {
         final data = jsonDecode(res.body);
         final deliveries = data is List ? data : (data['orders'] ?? []);
@@ -150,7 +150,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
       final res = await http.patch(
         Uri.parse('${AppConstants.apiBase}/orders/${order['id']}/assign-courier'),
         headers: {'Authorization': _authHeader(), 'Content-Type': 'application/json'},
-      );
+      ).timeout(const Duration(seconds: 4));
       if (res.statusCode == 200) {
         CourierSocketService().trackOrder(order['id']);
         CourierTelemetryService().startLiveBroadcast(orderId: order['id']);
@@ -192,7 +192,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
         Uri.parse('${AppConstants.apiBase}/orders/$orderId/status'),
         headers: {'Authorization': _authHeader(), 'Content-Type': 'application/json'},
         body: jsonEncode({'status': 'SHIPPED'}),
-      );
+      ).timeout(const Duration(seconds: 4));
       _fetchAll();
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('📦 Items picked up! Out for delivery.')));
     } catch (_) {}
@@ -208,7 +208,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
           'doorstepPhotoUrl': 'https://malvoya.com/proof/verified.jpg',
           'deliveryProofNotes': 'Contactless doorstep drop verified with GPS geotag',
         }),
-      );
+      ).timeout(const Duration(seconds: 4));
       CourierTelemetryService().stopBroadcast();
       _fetchAll();
       if (mounted) {

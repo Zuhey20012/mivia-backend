@@ -152,37 +152,37 @@ class AppTheme {
     ),
   ];
 
-  // 1. Neo-Vibrant Light Theme (Option B)
+  // 1. Neo-Vibrant Luxury Light Theme (Wolt-Superior Crisp White)
   static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.light,
       primaryColor: primary,
-      scaffoldBackgroundColor: background,
+      scaffoldBackgroundColor: Colors.white,
       colorScheme: const ColorScheme.light(
         primary: primary,
         secondary: accent,
-        surface: surface,
+        surface: Colors.white,
         error: Color(0xFFEF4444),
       ),
       appBarTheme: const AppBarTheme(
-        backgroundColor: surface,
+        backgroundColor: Colors.white,
         elevation: 0,
         scrolledUnderElevation: 0.5,
         shadowColor: Color(0x1A8B5CF6),
-        iconTheme: IconThemeData(color: textPrimary),
+        iconTheme: IconThemeData(color: Color(0xFF0F0B1E)),
         titleTextStyle: TextStyle(
-          color: textPrimary,
+          color: Color(0xFF0F0B1E),
           fontSize: 18,
-          fontWeight: FontWeight.w700,
+          fontWeight: FontWeight.w800,
           letterSpacing: -0.3,
         ),
         surfaceTintColor: Colors.transparent,
       ),
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: surface,
+        backgroundColor: Colors.white,
         selectedItemColor: primary,
-        unselectedItemColor: textSecondary,
+        unselectedItemColor: Color(0xFF6B7280),
         showUnselectedLabels: true,
         elevation: 0,
         type: BottomNavigationBarType.fixed,
@@ -190,11 +190,11 @@ class AppTheme {
         unselectedLabelStyle: TextStyle(fontWeight: FontWeight.w500, fontSize: 11),
       ),
       cardTheme: CardThemeData(
-        color: surface,
+        color: Colors.white,
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(24),
-          side: const BorderSide(color: glassBorder, width: 1.2),
+          side: const BorderSide(color: Color(0x1A8B5CF6), width: 1.2),
         ),
         margin: EdgeInsets.zero,
       ),
@@ -389,7 +389,7 @@ class AppTheme {
     );
   }
 
-  // ── Dynamic Semantic Theme Helpers ─────────────────────────────
+  // ── Dynamic Semantic Theme Helpers (Wolt-Superior 2-Mode System) ─────────────
   static bool isDarkMode(BuildContext context) {
     return Theme.of(context).brightness == Brightness.dark;
   }
@@ -398,45 +398,33 @@ class AppTheme {
     return Theme.of(context).scaffoldBackgroundColor;
   }
 
-  static bool isEyeComfort(BuildContext context) {
-    final theme = Theme.of(context);
-    return theme.brightness == Brightness.dark &&
-        theme.scaffoldBackgroundColor.toARGB32() == const Color(0xFF14110E).toARGB32();
-  }
-
   static Color cardBackground(BuildContext context) {
-    if (isEyeComfort(context)) return const Color(0xFF1E1813);
     if (isDarkMode(context)) return const Color(0xFF140D28);
     return Colors.white;
   }
 
   static Color cardBorder(BuildContext context) {
-    if (isEyeComfort(context)) return const Color(0xFF382C22);
     if (isDarkMode(context)) return const Color(0xFF2E1F52);
     return const Color(0x1F8B5CF6);
   }
 
   static Color primaryText(BuildContext context) {
-    if (isEyeComfort(context)) return const Color(0xFFFDE8CF);
     if (isDarkMode(context)) return const Color(0xFFFAF7FF);
-    return textPrimary;
+    return const Color(0xFF0F0B1E); // Crisp deep velvet obsidian in Light mode
   }
 
   static Color secondaryText(BuildContext context) {
-    if (isEyeComfort(context)) return const Color(0xFFC7B299);
     if (isDarkMode(context)) return const Color(0xFFA8A2B8);
-    return textSecondary;
+    return const Color(0xFF4B5563); // Rich neutral slate in Light mode
   }
 
   static Color inputBackground(BuildContext context) {
-    if (isEyeComfort(context)) return const Color(0xFF2A2119);
     if (isDarkMode(context)) return const Color(0xFF1E133C);
-    return const Color(0xFFF3F1FA);
+    return const Color(0xFFF6F4FB);
   }
 
   static Color subtleDivider(BuildContext context) {
-    if (isEyeComfort(context)) return const Color(0xFF2D231B);
     if (isDarkMode(context)) return const Color(0xFF20163A);
-    return const Color(0xFFF1EEF8);
+    return const Color(0xFFEDE8F5);
   }
 }
