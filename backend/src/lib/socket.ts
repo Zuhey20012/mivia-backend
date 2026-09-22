@@ -47,30 +47,24 @@ export function initSocket(httpServer: HttpServer): SocketServer {
     });
 
     // Courier updates location during delivery transit (high-precision telemetry stream)
-    socket.on("courier:telemetry", (data: {
-      courierId: number;
-      orderId?: number;
-      lat: number;
-      lng: number;
-      bearing?: number;
-      speed?: number;
-      accuracy?: number;
-      etaMinutes?: number;
-    }) => {
-      if (data && data.lat && data.lng) {
-        if (data.orderId) {
-          io.to(`order:${data.orderId}`).emit("courier:location", {
-            courierId: data.courierId,
-            orderId: data.orderId,
-            lat: data.lat,
-            lng: data.lng,
-            bearing: data.bearing ?? 0,
-            speed: data.speed ?? 0,
-            accuracy: data.accuracy ?? 5.0,
-            etaMinutes: data.etaMinutes ?? 15,
-            timestamp: Date.now(),
-          });
-        }
+    socket.on("courier:telemetry", (data: any) => {
+      const lat = data?.lat ?? data?.latitude;
+      const lng = data?.lng ?? data?.longitude;
+      const orderId = data?.orderId;
+      const courierId = data?.courierId ?? (socket.data?.user?.id ?? 0);
+
+      if (lat !== undefined && lng !== undefined && orderId) {
+        io.to(`order:${orderId}`).emit("courier:location", {
+          courierId: Number(courierId),
+          orderId: Number(orderId),
+          lat: Number(lat),
+          lng: Number(lng),
+          bearing: Number(data?.bearing ?? 0),
+          speed: Number(data?.speed ?? 0),
+          accuracy: Number(data?.accuracy ?? 5.0),
+          etaMinutes: Number(data?.etaMinutes ?? 15),
+          timestamp: Date.now(),
+        });
       }
     });
 
