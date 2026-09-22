@@ -245,10 +245,9 @@ function buildVatReceiptHtml(payload: NotificationDispatchPayload): string {
         </div>
       </div>
 
-      <!-- Legal & Tax Footer -->
       <div style="background: #F1F5F9; padding: 24px 28px; font-size: 11px; color: #94A3B8; text-align: center; border-top: 1px solid #E2E8F0;">
-        <p style="margin: 0 0 6px 0;"><strong>Malvoya Nordics Oy</strong> • Business ID (Y-tunnus): FI-3491829-1</p>
-        <p style="margin: 0 0 6px 0;">Mannerheimintie 12, 00100 Helsinki, Finland</p>
+        <p style="margin: 0 0 6px 0;"><strong>Malvoya</strong> • Helsinki, Finland</p>
+        <p style="margin: 0 0 6px 0;">Trade Registry: Finnish Patent and Registration Office (PRH) registration in progress</p>
         <p style="margin: 0;">Support: <a href="mailto:support@malvoya.com" style="color: #8B5CF6; text-decoration: none;">support@malvoya.com</a> • Privacy & GDPR: <a href="mailto:privacy@malvoya.com" style="color: #8B5CF6; text-decoration: none;">privacy@malvoya.com</a></p>
       </div>
 

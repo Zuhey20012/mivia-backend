@@ -41,6 +41,7 @@ const express_1 = __importDefault(require("express"));
 const http_1 = __importDefault(require("http"));
 const cors_1 = __importDefault(require("cors"));
 const pino_1 = __importDefault(require("pino"));
+const helmet_1 = __importDefault(require("helmet"));
 const env_1 = require("./config/env");
 const errorHandler_1 = require("./middleware/errorHandler");
 const notFound_1 = require("./middleware/notFound");
@@ -53,16 +54,22 @@ const products_routes_1 = __importDefault(require("./modules/products/products.r
 const orders_routes_1 = __importDefault(require("./modules/orders/orders.routes"));
 const admin_routes_1 = __importDefault(require("./modules/admin/admin.routes"));
 const courier_routes_1 = __importDefault(require("./modules/orders/courier.routes"));
+const raas_routes_1 = __importDefault(require("./modules/orders/raas.routes"));
+const apparel_mcp_server_1 = require("./mcp/apparel_mcp_server");
 const notificationDeliveryService_1 = require("./services/notificationDeliveryService");
 const logger = (0, pino_1.default)({ level: env_1.env.logLevel });
 const app = (0, express_1.default)();
 const server = http_1.default.createServer(app);
 (0, socket_1.initSocket)(server);
 // Middleware
+app.use((0, helmet_1.default)());
 app.use((0, cors_1.default)({
     origin: env_1.env.allowedOrigins.includes("*") ? "*" : env_1.env.allowedOrigins,
     credentials: true,
 }));
+if (env_1.env.nodeEnv === "production" && env_1.env.allowedOrigins.includes("*")) {
+    logger.warn("SECURITY WARNING: CORS is wide open (*) in production environment");
+}
 app.use(express_1.default.json());
 app.use(rateLimiter_1.globalLimiter);
 // Health check
@@ -73,6 +80,8 @@ app.use("/api/v1/stores", stores_routes_1.default);
 app.use("/api/v1", products_routes_1.default);
 app.use("/api/v1", orders_routes_1.default);
 app.use("/api/v1", courier_routes_1.default);
+app.use("/api/v1", raas_routes_1.default);
+app.use("/api/v1", apparel_mcp_server_1.mcpRouter);
 app.use("/api/v1/admin", admin_routes_1.default);
 // Real multi-channel notification dispatch webhook (SMS & Email tracking)
 app.post("/api/v1/notifications/dispatch", async (req, res) => {
@@ -96,7 +105,7 @@ app.post("/api/v1/notifications/dispatch", async (req, res) => {
 // Real launch database cleanup (purges fake seed demo stores, products, couriers)
 app.all("/api/v1/admin/purge-seed", async (req, res) => {
     const purgeKey = req.headers["x-purge-key"] || req.query.key;
-    if (purgeKey !== "malvoya-purge-secret-2026") {
+    if (!process.env.ADMIN_PURGE_SECRET || purgeKey !== process.env.ADMIN_PURGE_SECRET) {
         return res.status(403).json({ error: "Invalid purge key" });
     }
     try {
