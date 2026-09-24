@@ -246,23 +246,16 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
       final res = await http.patch(
         Uri.parse('${AppConstants.apiBase}/orders/$orderId/status'),
         headers: {'Authorization': _authHeader(), 'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'status': 'DELIVERED',
-          'doorstepPhotoUrl': 'https://malvoya.com/proof/verified.jpg',
-          'deliveryProofNotes': 'Contactless doorstep drop verified with GPS geotag',
-        }),
+        body: jsonEncode({'status': 'DELIVERED'}),
       ).timeout(const Duration(seconds: 4));
       CourierTelemetryService().stopBroadcast();
       _fetchAll();
       if (mounted) {
-        final data = res.statusCode == 200 ? jsonDecode(res.body) : null;
-        final fee = data?['settlement']?['split']?['courierPayoutCents'] != null
-            ? (data['settlement']['split']['courierPayoutCents'] / 100).toStringAsFixed(2)
-            : '4.80';
+        final ok = res.statusCode == 200;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            backgroundColor: const Color(0xFF16A34A),
-            content: Text('🎉 Delivery completed! €$fee payout settled into your account.'),
+            backgroundColor: ok ? const Color(0xFF248A52) : AppTheme.accent,
+            content: Text(ok ? 'Delivery completed. Thank you!' : 'Could not mark as delivered. Please try again.'),
           ),
         );
       }
@@ -275,7 +268,10 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     final l10n = AppLocalizations.of(context);
     final name = auth.currentUser?.name?.split(' ').first ?? 'Courier';
     final completedCount = _myDeliveries.where((d) => d['status'] == 'DELIVERED').length;
-    final estimatedEarnings = completedCount * 3.00; // €3.00 base rate per trip + distance + tips
+    // Sum of the delivery fees on completed trips. Actual courier pay follows the signed courier agreement.
+    final estimatedEarnings = _myDeliveries
+        .where((d) => d['status'] == 'DELIVERED')
+        .fold<double>(0, (sum, d) => sum + ((d['deliveryFeeCents'] as int? ?? 0) / 100));
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -313,7 +309,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
                 margin: const EdgeInsets.symmetric(vertical: 14),
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
-                  color: _isOnline ? AppTheme.success.withOpacity(0.15) : const Color(0xFFF4F4F8),
+                  color: _isOnline ? AppTheme.success.withOpacity(0.15) : const Color(0xFFEFEBF1),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(color: _isOnline ? AppTheme.success : AppTheme.divider),
                 ),
@@ -380,14 +376,14 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: const BoxDecoration(
-                gradient: LinearGradient(colors: [Color(0xFF0F172A), Color(0xFF1E293B)]),
+                gradient: LinearGradient(colors: [Color(0xFF17131C), Color(0xFF1E293B)]),
               ),
               child: Row(
                 children: [
                   Container(
                     width: 8,
                     height: 8,
-                    decoration: const BoxDecoration(color: Color(0xFF22C55E), shape: BoxShape.circle),
+                    decoration: const BoxDecoration(color: Color(0xFF248A52), shape: BoxShape.circle),
                   ),
                   const SizedBox(width: 8),
                   const Expanded(
@@ -411,7 +407,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(8),
-              color: const Color(0xFF8B5CF6),
+              color: const Color(0xFF6D2E8C),
               child: const Text(
                 'No connection. Please check your network and try again.',
                 textAlign: TextAlign.center,
@@ -478,7 +474,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
               const SizedBox(height: 16),
               ElevatedButton.icon(
                 onPressed: _fetchAvailableOrders,
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8B5CF6), foregroundColor: Colors.white),
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF6D2E8C), foregroundColor: Colors.white),
                 icon: const Icon(Icons.refresh_rounded),
                 label: const Text('Retry'),
               ),
@@ -527,9 +523,11 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
   }
 
   Widget _buildAvailableOrderCard(Map<String, dynamic> order) {
-    final totalCents = order['totalCents'] as int? ?? 0;
-    final deliveryFee = totalCents > 0 ? '€${(totalCents * 0.15 / 100).toStringAsFixed(2)}' : '€5.50';
-    final address = order['deliveryAddress'] ?? 'Address not specified';
+    // The exact customer address is only revealed after accepting (data minimisation).
+    final feeCents = order['deliveryFeeCents'] as int? ?? 0;
+    final deliveryFee = '€${(feeCents / 100).toStringAsFixed(2)}';
+    final itemCount = order['itemCount'] as int? ?? 0;
+    final address = '$itemCount item${itemCount == 1 ? '' : 's'} • delivery address shown after you accept';
     final storeName = order['store']?['name'] ?? 'Store';
 
     return Container(
@@ -714,7 +712,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
                 height: 110,
                 width: double.infinity,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF0F172A),
+                  color: const Color(0xFF17131C),
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Stack(
@@ -950,7 +948,8 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
             ),
           ),
           if (isDelivered)
-            const Text('€5.50', style: TextStyle(color: AppTheme.success, fontWeight: FontWeight.w800, fontSize: 14)),
+            Text('€${((delivery['deliveryFeeCents'] as int? ?? 0) / 100).toStringAsFixed(2)}',
+                style: const TextStyle(color: AppTheme.success, fontWeight: FontWeight.w800, fontSize: 14)),
         ],
       ),
     );
@@ -975,7 +974,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
           ),
           child: Column(
             children: [
-              Text(l10n.translate('todaysEarnings'), style: const TextStyle(color: Colors.white70, fontSize: 14)),
+              Text('Completed trips — delivery fees', style: const TextStyle(color: Colors.white70, fontSize: 14)),
               const SizedBox(height: 8),
               Text('€${estimatedEarnings.toStringAsFixed(2)}',
                 style: const TextStyle(color: Colors.white, fontSize: 48, fontWeight: FontWeight.w900, letterSpacing: -2)),
@@ -987,9 +986,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
         ),
         const SizedBox(height: 20),
 
-        _earningRow(l10n.translate('pickup'), '€3.00+', Icons.local_shipping_outlined),
-        _earningRow('Bonus (>10/day)', '€15.00', Icons.emoji_events_outlined),
-        _earningRow(l10n.translate('totalEarnings'), '€${estimatedEarnings.toStringAsFixed(2)}', Icons.euro_rounded, highlight: true),
+        _earningRow('Delivery fees on completed trips', '€${estimatedEarnings.toStringAsFixed(2)}', Icons.euro_rounded, highlight: true),
 
         const SizedBox(height: 24),
         Container(
@@ -1004,10 +1001,10 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
             children: [
               Text(l10n.translate('howEarningsWork'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: AppTheme.textPrimary)),
               const SizedBox(height: 14),
-              _infoRow(l10n.translate('baseRateInfo')),
-              _infoRow('Bonus for peak hours (17–21)'),
-              _infoRow(l10n.translate('weeklyPayout')),
-              _infoRow('100% of customer tips passed through'),
+              _infoRow('Every job shows its delivery fee before you accept it.'),
+              _infoRow('You choose which jobs to take — nothing is assigned automatically.'),
+              _infoRow('Offers go first to online couriers nearest the store (within 7.5 km).'),
+              _infoRow('Your pay and payout schedule are set out in your courier agreement.'),
             ],
           ),
         ),

@@ -214,10 +214,10 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFEF4444).withValues(alpha: 0.12),
+                  color: const Color(0xFFD93025).withValues(alpha: 0.12),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.delete_forever_rounded, color: Color(0xFFDC2626), size: 24),
+                child: const Icon(Icons.delete_forever_rounded, color: Color(0xFFB3261E), size: 24),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -239,7 +239,7 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFDC2626),
+                backgroundColor: const Color(0xFFB3261E),
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
@@ -253,7 +253,9 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                       headers: {'Authorization': 'Bearer ${auth.accessToken}'},
                     );
                     if (res.statusCode != 200) {
-                      throw Exception('Failed to delete account');
+                      String reason = 'Could not delete account. Please try again.';
+                      try { reason = jsonDecode(res.body)['error'] ?? reason; } catch (_) {}
+                      throw Exception(reason);
                     }
                   } catch (e) {
                     if (mounted) {
@@ -261,7 +263,7 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                         context: context,
                         builder: (ctx) => AlertDialog(
                           title: const Text('Error'),
-                          content: const Text('Could not delete account. Please try again.'),
+                          content: Text(e.toString().replaceFirst('Exception: ', '')),
                           actions: [
                             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))
                           ]
@@ -286,7 +288,7 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(l10n.translate('accountErasedNotifBody')),
-                      backgroundColor: const Color(0xFF7C3AED),
+                      backgroundColor: const Color(0xFF55226E),
                       behavior: SnackBarBehavior.floating,
                       duration: const Duration(seconds: 4),
                     ),
@@ -389,7 +391,7 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                         ),
                         Divider(height: 1, indent: 56, color: dividerColor),
                         ListTile(
-                          leading: const Icon(Icons.edit_location_alt_outlined, color: Color(0xFF10B981)),
+                          leading: const Icon(Icons.edit_location_alt_outlined, color: Color(0xFF248A52)),
                           title: Text(l10n.translate('rightToRectificationArt16'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
                           subtitle: Text(l10n.translate('rightToRectificationArt16Sub'), style: TextStyle(fontSize: 12, color: textSecondary)),
                           trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
@@ -475,7 +477,7 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                         ),
                         Divider(height: 1, indent: 56, color: dividerColor),
                         ListTile(
-                          leading: const Icon(Icons.shield_outlined, color: Color(0xFF10B981)),
+                          leading: const Icon(Icons.shield_outlined, color: Color(0xFF248A52)),
                           title: Text(l10n.translate('privacyDeskInquiries'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
                           subtitle: Text('privacy@malvoya.com • ${l10n.translate("promptGdprResponse")}', style: TextStyle(fontSize: 12, color: textSecondary)),
                           trailing: const Icon(Icons.arrow_forward_rounded, color: Colors.grey, size: 18),
@@ -497,14 +499,14 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                       decoration: BoxDecoration(
                         color: cardBg,
                         borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.4), width: 1.5),
+                        border: Border.all(color: const Color(0xFFD93025).withValues(alpha: 0.4), width: 1.5),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
                             children: [
-                              const Icon(Icons.warning_amber_rounded, color: Color(0xFFDC2626), size: 22),
+                              const Icon(Icons.warning_amber_rounded, color: Color(0xFFB3261E), size: 22),
                               const SizedBox(width: 8),
                               Text(
                                 l10n.translate('rightToErasureArt17'),
@@ -521,10 +523,10 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                           SizedBox(
                             width: double.infinity,
                             child: OutlinedButton.icon(
-                              icon: const Icon(Icons.delete_forever_rounded, color: Color(0xFFDC2626)),
-                              label: Text(l10n.translate('eraseAccountPersonalData'), style: const TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.w800)),
+                              icon: const Icon(Icons.delete_forever_rounded, color: Color(0xFFB3261E)),
+                              label: Text(l10n.translate('eraseAccountPersonalData'), style: const TextStyle(color: Color(0xFFB3261E), fontWeight: FontWeight.w800)),
                               style: OutlinedButton.styleFrom(
-                                side: const BorderSide(color: Color(0xFFDC2626), width: 1.5),
+                                side: const BorderSide(color: Color(0xFFB3261E), width: 1.5),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                                 padding: const EdgeInsets.symmetric(vertical: 14),
                               ),

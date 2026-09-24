@@ -74,7 +74,7 @@ class _ApparelRunwayFeedScreenState extends State<ApparelRunwayFeedScreen>
         fabricComposition: '100% Recycled Italian Wool • Dry Clean Only',
         modelMetrics: 'Model is 186cm • Wearing Size L',
         availableSizes: ['S', 'M', 'L', 'XL'],
-        accentColor: const Color(0xFF00C2E8),
+        accentColor: const Color(0xFF8E4FAE),
         garmentIcon: Icons.checkroom_rounded,
       ),
       ApparelGarmentModel(
@@ -86,7 +86,7 @@ class _ApparelRunwayFeedScreenState extends State<ApparelRunwayFeedScreen>
         fabricComposition: '100% Certified Organic European Linen',
         modelMetrics: 'Model is 178cm • Wearing Size M',
         availableSizes: ['XS', 'S', 'M', 'L'],
-        accentColor: const Color(0xFFEC4899),
+        accentColor: const Color(0xFF9B5DB8),
         garmentIcon: Icons.dry_cleaning_rounded,
       ),
       ApparelGarmentModel(
@@ -98,7 +98,7 @@ class _ApparelRunwayFeedScreenState extends State<ApparelRunwayFeedScreen>
         fabricComposition: '100% Extra-Fine Merino Wool • Mulesing-Free',
         modelMetrics: 'Model is 182cm • Wearing Size M',
         availableSizes: ['S', 'M', 'L', 'XL', 'XXL'],
-        accentColor: const Color(0xFF8B5CF6),
+        accentColor: const Color(0xFF6D2E8C),
         garmentIcon: Icons.style_rounded,
       ),
       ApparelGarmentModel(
@@ -110,7 +110,7 @@ class _ApparelRunwayFeedScreenState extends State<ApparelRunwayFeedScreen>
         fabricComposition: '100% Mulberry Silk Crepe • OEKO-TEX Standard',
         modelMetrics: 'Model is 176cm • Wearing Size S',
         availableSizes: ['XS', 'S', 'M'],
-        accentColor: const Color(0xFF10B981),
+        accentColor: const Color(0xFF248A52),
         garmentIcon: Icons.woman_rounded,
       ),
     ];
@@ -135,7 +135,7 @@ class _ApparelRunwayFeedScreenState extends State<ApparelRunwayFeedScreen>
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF0F172A),
+      backgroundColor: const Color(0xFF17131C),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
@@ -221,7 +221,7 @@ class _ApparelRunwayFeedScreenState extends State<ApparelRunwayFeedScreen>
                       const Text("Concierge Fitting Fee (Courier Wait):", style: TextStyle(color: Colors.white70, fontSize: 13)),
                       Text(
                         garment.fittingFee > 0 ? "€${garment.fittingFee.toStringAsFixed(2)}" : "Free / Included",
-                        style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold),
+                        style: const TextStyle(color: Color(0xFF248A52), fontWeight: FontWeight.bold),
                       ),
                     ],
                   ),
@@ -239,7 +239,7 @@ class _ApparelRunwayFeedScreenState extends State<ApparelRunwayFeedScreen>
             const SizedBox(height: 14),
             Row(
               children: [
-                const Icon(Icons.shield_outlined, color: Color(0xFF10B981), size: 16),
+                const Icon(Icons.shield_outlined, color: Color(0xFF248A52), size: 16),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -306,11 +306,11 @@ class _ApparelRunwayFeedScreenState extends State<ApparelRunwayFeedScreen>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: const Color(0xFF00C2E8).withValues(alpha: 0.2),
+                color: const Color(0xFF8E4FAE).withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFF00C2E8).withValues(alpha: 0.4)),
+                border: Border.all(color: const Color(0xFF8E4FAE).withValues(alpha: 0.4)),
               ),
-              child: const Text("120Hz RUNWAY", style: TextStyle(color: Color(0xFF00C2E8), fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.8)),
+              child: const Text("120Hz RUNWAY", style: TextStyle(color: Color(0xFF8E4FAE), fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.8)),
             ),
             const SizedBox(width: 8),
             Text(l10n.translate('tryAtHome'), style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
@@ -358,7 +358,7 @@ class _ApparelRunwayFeedScreenState extends State<ApparelRunwayFeedScreen>
                         radius: 1.2,
                         colors: [
                           garment.accentColor.withValues(alpha: 0.35),
-                          const Color(0xFF0F172A),
+                          const Color(0xFF17131C),
                           const Color(0xFF050811),
                         ],
                       ),
@@ -395,7 +395,7 @@ class _ApparelRunwayFeedScreenState extends State<ApparelRunwayFeedScreen>
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.motion_photos_on_rounded, color: Color(0xFF00C2E8), size: 14),
+                                const Icon(Icons.motion_photos_on_rounded, color: Color(0xFF8E4FAE), size: 14),
                                 const SizedBox(width: 6),
                                 Text(
                                   "Impeller GLSL Luxury Fabric Glint",
@@ -468,7 +468,7 @@ class _ApparelFittingCardState extends State<_ApparelFittingCard> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF0F172A).withValues(alpha: 0.94),
+        color: const Color(0xFF17131C).withValues(alpha: 0.94),
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: Colors.white12),
         boxShadow: [
@@ -500,12 +500,12 @@ class _ApparelFittingCardState extends State<_ApparelFittingCard> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                  color: const Color(0xFF248A52).withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
                   "~${widget.garment.etaMinutes} min delivery",
-                  style: const TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.bold),
+                  style: const TextStyle(color: Color(0xFF248A52), fontSize: 11, fontWeight: FontWeight.bold),
                 ),
               ),
             ],

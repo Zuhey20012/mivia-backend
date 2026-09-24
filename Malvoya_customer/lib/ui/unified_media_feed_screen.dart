@@ -166,7 +166,7 @@ class _UnifiedMediaFeedScreenState extends State<UnifiedMediaFeedScreen> {
                           onPressed: () => _toggleLike(item.id),
                           icon: Icon(
                             isLiked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                            color: isLiked ? const Color(0xFFEF4444) : Colors.white,
+                            color: isLiked ? const Color(0xFFD93025) : Colors.white,
                             size: 32,
                           ),
                         ),
@@ -232,7 +232,7 @@ class _UnifiedMediaFeedScreenState extends State<UnifiedMediaFeedScreen> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.flash_on_rounded, color: Color(0xFF00C2E8), size: 16),
+                      const Icon(Icons.flash_on_rounded, color: Color(0xFF8E4FAE), size: 16),
                       const SizedBox(width: 4),
                       Text(
                         'LIVE COMMERCE REEL • ${_activeIdx + 1}/${widget.items.length}',
@@ -283,7 +283,7 @@ class _VariantOrderOverlayState extends State<_VariantOrderOverlay> {
         Text(
           widget.item.brand.toUpperCase(),
           style: const TextStyle(
-            color: Color(0xFF00C2E8),
+            color: Color(0xFF8E4FAE),
             fontWeight: FontWeight.w900,
             fontSize: 12,
             letterSpacing: 1.2,
@@ -308,14 +308,14 @@ class _VariantOrderOverlayState extends State<_VariantOrderOverlay> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
           decoration: BoxDecoration(
-            color: const Color(0xFF00C2E8).withValues(alpha: 0.25),
+            color: const Color(0xFF8E4FAE).withValues(alpha: 0.25),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: const Color(0xFF00C2E8).withValues(alpha: 0.4)),
+            border: Border.all(color: const Color(0xFF8E4FAE).withValues(alpha: 0.4)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.delivery_dining_rounded, color: Color(0xFF00C2E8), size: 16),
+              const Icon(Icons.delivery_dining_rounded, color: Color(0xFF8E4FAE), size: 16),
               const SizedBox(width: 6),
               Text(
                 'Courier Express: ~${widget.item.etaMinutes} min • €${widget.item.price.toStringAsFixed(2)}',
@@ -350,7 +350,7 @@ class _VariantOrderOverlayState extends State<_VariantOrderOverlay> {
                       color: isSelected ? Colors.white : Colors.white24,
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
-                        color: isSelected ? const Color(0xFF00C2E8) : Colors.transparent,
+                        color: isSelected ? const Color(0xFF8E4FAE) : Colors.transparent,
                         width: 1.5,
                       ),
                     ),
@@ -375,7 +375,7 @@ class _VariantOrderOverlayState extends State<_VariantOrderOverlay> {
           height: 48,
           child: ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF00C2E8),
+              backgroundColor: const Color(0xFF8E4FAE),
               foregroundColor: Colors.black,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               elevation: 4,

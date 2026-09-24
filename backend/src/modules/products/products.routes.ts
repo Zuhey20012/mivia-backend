@@ -1,13 +1,13 @@
 import { Router } from "express";
 import { listProducts, getProduct, createProduct, updateProduct, deleteProduct } from "./products.controller";
-import { auth, requireRole } from "../../middleware/auth";
+import { auth, optionalAuth, requireRole } from "../../middleware/auth";
 
 const router = Router({ mergeParams: true });
 
-router.get("/stores/:storeId/products", listProducts);
-router.get("/products/:id",             getProduct);
-router.post("/products",                auth, requireRole("VENDOR","ADMIN"), createProduct);
-router.patch("/products/:id",           auth, requireRole("VENDOR","ADMIN"), updateProduct);
-router.delete("/products/:id",          auth, requireRole("VENDOR","ADMIN"), deleteProduct);
+router.get("/stores/:storeId(\\d+)/products", optionalAuth, listProducts);
+router.get("/products/:id(\\d+)",             getProduct);
+router.post("/products",                      auth, requireRole("VENDOR"), createProduct);
+router.patch("/products/:id(\\d+)",           auth, requireRole("VENDOR"), updateProduct);
+router.delete("/products/:id(\\d+)",          auth, requireRole("VENDOR"), deleteProduct);
 
 export default router;

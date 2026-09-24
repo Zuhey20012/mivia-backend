@@ -1,32 +1,57 @@
-# Courier Partner Agreement for Malvoya
+# Malvoya Courier Agreement / Lähettisopimus
 
-**Last Updated: April 23, 2026**
+**Last updated:** [DATE OF PUBLICATION]
 
-This Courier Partner Agreement ("Agreement") is between Malvoya and the independent contractor ("Courier") who wishes to provide delivery services via the Malvoya platform.
+> **Before publishing:** have this agreement reviewed by a Finnish employment lawyer. Under the EU Platform Work Directive (2024/2831, to be applied from 2 December 2026), a courier is presumed to be an employee when the platform directs and controls the work. The terms below are designed so that couriers genuinely control their work. The way the service is run in practice must match them.
 
-## 1. Independent Contractor Relationship
-The Courier is an independent contractor and not an employee, agent, or partner of Malvoya. The Courier has the right to determine the manner and means of performing delivery services.
+## 1. Parties
 
-## 2. Delivery Services
-- The Courier agrees to perform delivery services in a professional and timely manner.
-- The Courier is responsible for providing their own vehicle and equipment.
-- The Courier must maintain all necessary licenses and insurance.
+[COMPANY LEGAL NAME] (Y-tunnus [Y-TUNNUS]) ("Malvoya") and the courier named in the app ("Courier").
 
-## 3. Compensation
-- The Courier will receive a fee for each completed delivery, as specified in the app.
-- Malvoya will process payments to the Courier on a regular basis.
-- The Courier is responsible for their own taxes and expenses.
+## 2. Nature of the relationship
 
-## 4. Conduct and Safety
-- The Courier agrees to follow all traffic laws and safety regulations.
-- The Courier agrees to treat Customers and Vendors with respect.
-- Malvoya maintains a zero-tolerance policy for harassment or discrimination.
+The Courier is an independent entrepreneur. The Courier decides:
+- **when** to be online;
+- **which jobs** to accept (every job can be declined without consequence);
+- **how** to perform deliveries.
 
-## 5. Termination
-Either party may terminate this Agreement at any time with or without cause.
+The Courier may work for other platforms. The Courier needs a Y-tunnus (or a light-entrepreneur service) and handles their own taxes and YEL insurance where applicable.
 
-## 6. Confidentiality
-The Courier agrees to keep all Customer and Vendor information confidential.
+## 3. Onboarding
 
-## 7. Governing Law
-This Agreement is governed by the laws of the jurisdiction in which the services are performed.
+Before approval, Malvoya checks:
+- the Courier's identity;
+- their right to work in Finland;
+- that they are at least 18 years old.
+
+Documents are checked through [VERIFICATION METHOD], not collected in the app.
+
+## 4. How jobs are offered (transparency of automated systems)
+
+- Jobs are offered to approved, online couriers within 7.5 km of the store, nearest first. If none is nearby, the job is shown to all online couriers.
+- The only factor used is distance to the store. Ratings, acceptance rates and past declines are **not** used.
+- Every offer shows the pickup store and the delivery fee before the Courier accepts.
+- Malvoya does not use automated systems to suspend or terminate couriers. Any such decision is made by a person, with written reasons, and the Courier may request a review.
+
+## 5. Fees and payment
+
+- The fee for each job is shown before acceptance: [FEE MODEL, e.g. "the delivery fee shown on the job"].
+- Payouts are made [WEEKLY] to the Courier's account, through [PAYOUT PROVIDER].
+- Malvoya provides a monthly statement of completed jobs and fees.
+
+## 6. Location data
+
+The Courier's location is processed only while they are online, as described in the Privacy Policy. Only the latest location is kept, and it is deleted when the Courier goes offline.
+
+## 7. Conduct and safety
+
+The Courier follows traffic law and treats customers and stores respectfully. The customer's address and door codes are used only to complete the delivery.
+
+## 8. Ending the agreement
+
+- The Courier may stop at any time.
+- Malvoya may end the agreement with [14] days' notice, or immediately for serious breach, always with written reasons and the option of a review.
+
+## 9. Law and disputes
+
+This agreement is governed by Finnish law. Disputes go to [Helsinki District Court].

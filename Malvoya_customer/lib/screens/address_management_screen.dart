@@ -61,11 +61,11 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
       backgroundColor: Colors.transparent,
       builder: (ctx) {
         final isDark = Theme.of(context).brightness == Brightness.dark;
-        final modalBg = isDark ? const Color(0xFF140D26) : Colors.white;
+        final modalBg = isDark ? const Color(0xFF221C29) : Colors.white;
         final textPrimary = isDark ? Colors.white : AppTheme.textPrimary;
-        final textSecondary = isDark ? const Color(0xFFA09BAC) : AppTheme.textSecondary;
-        final inputBg = isDark ? const Color(0xFF1D1438) : const Color(0xFFF8F7FF);
-        final cardBorder = isDark ? const Color(0xFF2E204A) : const Color(0xFFE2E8F0);
+        final textSecondary = isDark ? const Color(0xFFA79EAF) : AppTheme.textSecondary;
+        final inputBg = isDark ? const Color(0xFF1D1438) : const Color(0xFFF6F3EE);
+        final cardBorder = isDark ? const Color(0xFF3A3242) : const Color(0xFFE6E1EA);
 
         return StatefulBuilder(
           builder: (context, setModalState) => Container(
@@ -329,7 +329,7 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             content: Text(editIndex != null ? l10n.translate('addressUpdated') : l10n.translate('newAddressSaved')),
-                            backgroundColor: const Color(0xFF10B981),
+                            backgroundColor: const Color(0xFF248A52),
                             behavior: SnackBarBehavior.floating,
                           ),
                         );
@@ -352,10 +352,10 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
     final l10n = AppLocalizations.of(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final scaffoldBg = Theme.of(context).scaffoldBackgroundColor;
-    final cardBg = isDark ? const Color(0xFF140D26) : Colors.white;
+    final cardBg = isDark ? const Color(0xFF221C29) : Colors.white;
     final textPrimary = isDark ? Colors.white : AppTheme.textPrimary;
-    final textSecondary = isDark ? const Color(0xFFA09BAC) : AppTheme.textSecondary;
-    final borderColor = isDark ? const Color(0xFF2E204A) : const Color(0xFFE2E8F0);
+    final textSecondary = isDark ? const Color(0xFFA79EAF) : AppTheme.textSecondary;
+    final borderColor = isDark ? const Color(0xFF3A3242) : const Color(0xFFE6E1EA);
 
     return Scaffold(
       backgroundColor: scaffoldBg,
@@ -517,7 +517,7 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
                               value: 'default',
                               child: Row(
                                 children: [
-                                  const Icon(Icons.star_outline_rounded, size: 18, color: Color(0xFFF59E0B)),
+                                  const Icon(Icons.star_outline_rounded, size: 18, color: Color(0xFFE08A00)),
                                   const SizedBox(width: 10),
                                   Text(l10n.translate('setAsDefault'), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                                 ],

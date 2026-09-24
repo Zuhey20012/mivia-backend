@@ -146,7 +146,7 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
   void _showMaskedProxyCallDialog() {
     HapticFeedback.mediumImpact();
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardBg = isDark ? const Color(0xFF1E1438) : Colors.white;
+    final cardBg = isDark ? const Color(0xFF2A2331) : Colors.white;
     final textPrimary = AppTheme.primaryText(context);
 
     showModalBottomSheet(
@@ -169,10 +169,10 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                    color: const Color(0xFF248A52).withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(14),
                   ),
-                  child: const Icon(Icons.phone_in_talk_rounded, color: Color(0xFF10B981), size: 24),
+                  child: const Icon(Icons.phone_in_talk_rounded, color: Color(0xFF248A52), size: 24),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -180,7 +180,7 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(AppLocalizations.of(context).translate('maskedVoipCall'), style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: textPrimary)),
-                      Text(AppLocalizations.of(context).translate('zeroPiiRelay'), style: const TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.w700)),
+                      Text(AppLocalizations.of(context).translate('zeroPiiRelay'), style: const TextStyle(color: Color(0xFF248A52), fontSize: 11, fontWeight: FontWeight.w700)),
                     ],
                   ),
                 ),
@@ -198,7 +198,7 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                 icon: const Icon(Icons.call, size: 18),
                 label: Text('Connect via Encrypted Relay (${widget.courierName})'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF10B981),
+                  backgroundColor: const Color(0xFF248A52),
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   padding: const EdgeInsets.symmetric(vertical: 14),
@@ -208,7 +208,7 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text('Connecting to ${widget.courierName} via encrypted proxy... 📞'),
-                      backgroundColor: const Color(0xFF10B981),
+                      backgroundColor: const Color(0xFF248A52),
                       behavior: SnackBarBehavior.floating,
                     ),
                   );
@@ -226,7 +226,7 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textPrimary = AppTheme.primaryText(context);
     final textSecondary = AppTheme.secondaryText(context);
-    final cardBg = isDark ? const Color(0xFF1E1438) : Colors.white;
+    final cardBg = isDark ? const Color(0xFF2A2331) : Colors.white;
 
     final messages = <Map<String, String>>[];
     final textCtrl = TextEditingController();
@@ -264,7 +264,7 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(widget.courierName, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: textPrimary)),
-                        const Text('Masked In-Transit Relay • PII Redacted', style: TextStyle(color: Color(0xFF10B981), fontSize: 10, fontWeight: FontWeight.bold)),
+                        const Text('Masked In-Transit Relay • PII Redacted', style: TextStyle(color: Color(0xFF248A52), fontSize: 10, fontWeight: FontWeight.bold)),
                       ],
                     ),
                   ),
@@ -357,7 +357,7 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                         hintStyle: TextStyle(color: textSecondary, fontSize: 13),
                         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         filled: true,
-                        fillColor: isDark ? const Color(0xFF2A1F4C) : const Color(0xFFF8FAFC),
+                        fillColor: isDark ? const Color(0xFF2A1F4C) : const Color(0xFFF6F3EE),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
                       ),
                     ),
@@ -415,8 +415,8 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
   void _showDoorstepProofDialog() {
     HapticFeedback.mediumImpact();
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardBg = isDark ? const Color(0xFF1B1033) : Colors.white;
-    final textPrimary = isDark ? const Color(0xFFFAF5FF) : Colors.black87;
+    final cardBg = isDark ? const Color(0xFF221C29) : Colors.white;
+    final textPrimary = isDark ? const Color(0xFFF6F3EE) : Colors.black87;
 
     showDialog(
       context: context,
@@ -427,7 +427,7 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
           decoration: BoxDecoration(
             color: cardBg,
             borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: isDark ? const Color(0x558B5CF6) : const Color(0x1F8B5CF6)),
+            border: Border.all(color: isDark ? const Color(0x556D2E8C) : const Color(0x1F6D2E8C)),
             boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 24, offset: Offset(0, 10))],
           ),
           padding: const EdgeInsets.all(22),
@@ -443,17 +443,17 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF10B981).withValues(alpha: 0.18),
+                          color: const Color(0xFF248A52).withValues(alpha: 0.18),
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: const Icon(Icons.verified_rounded, color: Color(0xFF10B981), size: 20),
+                        child: const Icon(Icons.verified_rounded, color: Color(0xFF248A52), size: 20),
                       ),
                       const SizedBox(width: 10),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(AppLocalizations.of(context).translate('contactlessProof'), style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: textPrimary)),
-                          Text(AppLocalizations.of(context).translate('gpsGeotagged'), style: const TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.w700)),
+                          Text(AppLocalizations.of(context).translate('gpsGeotagged'), style: const TextStyle(color: Color(0xFF248A52), fontSize: 11, fontWeight: FontWeight.w700)),
                         ],
                       ),
                     ],
@@ -471,9 +471,9 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                   height: 200,
                   width: double.infinity,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0F081D),
+                    color: const Color(0xFF17131C),
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0x448B5CF6)),
+                    border: Border.all(color: const Color(0x446D2E8C)),
                   ),
                   child: Stack(
                     alignment: Alignment.center,
@@ -490,12 +490,12 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                         height: 110,
                         decoration: BoxDecoration(
                           gradient: const LinearGradient(
-                            colors: [Color(0xFF27174A), Color(0xFF1B1033)],
+                            colors: [Color(0xFF27174A), Color(0xFF221C29)],
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
                           ),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFF8B5CF6), width: 1.5),
+                          border: Border.all(color: const Color(0xFF6D2E8C), width: 1.5),
                           boxShadow: [
                             BoxShadow(
                               color: Colors.black.withValues(alpha: 0.7),
@@ -503,7 +503,7 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                               offset: const Offset(0, 8),
                             ),
                             BoxShadow(
-                              color: const Color(0xFF8B5CF6).withValues(alpha: 0.25),
+                              color: const Color(0xFF6D2E8C).withValues(alpha: 0.25),
                               blurRadius: 14,
                             ),
                           ],
@@ -515,14 +515,14 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                               child: Container(
                                 width: 14,
                                 height: 110,
-                                color: const Color(0xFFEC4899).withValues(alpha: 0.65),
+                                color: const Color(0xFF9B5DB8).withValues(alpha: 0.65),
                               ),
                             ),
                             Center(
                               child: Container(
                                 width: 150,
                                 height: 14,
-                                color: const Color(0xFFEC4899).withValues(alpha: 0.65),
+                                color: const Color(0xFF9B5DB8).withValues(alpha: 0.65),
                               ),
                             ),
                             // Wax Seal
@@ -533,7 +533,7 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
                                   gradient: const LinearGradient(
-                                    colors: [Color(0xFF8B5CF6), Color(0xFF6D28D9)],
+                                    colors: [Color(0xFF6D2E8C), Color(0xFF55226E)],
                                   ),
                                   border: Border.all(color: const Color(0xFFE9D5FF), width: 1.5),
                                   boxShadow: [
@@ -584,7 +584,7 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: const [
-                                  Icon(Icons.gps_fixed_rounded, color: Color(0xFF10B981), size: 11),
+                                  Icon(Icons.gps_fixed_rounded, color: Color(0xFF248A52), size: 11),
                                   SizedBox(width: 4),
                                   Text(
                                     '60.1699° N, 24.9384° E • HELSINKI',
@@ -596,7 +596,7 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF10B981),
+                                color: const Color(0xFF248A52),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
@@ -632,7 +632,7 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                               ),
                               Text(
                                 AppLocalizations.of(context).translate('tamperSealVerified'),
-                                style: const TextStyle(color: Color(0xFF10B981), fontSize: 10, fontWeight: FontWeight.w700),
+                                style: const TextStyle(color: Color(0xFF248A52), fontSize: 10, fontWeight: FontWeight.w700),
                               ),
                             ],
                           ),
@@ -697,7 +697,7 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
               decoration: BoxDecoration(
                 color: isPast
                     ? AppTheme.primary
-                    : (isDark ? const Color(0xFF2E1F52) : const Color(0xFFE5E0F2)),
+                    : (isDark ? const Color(0xFF3A3242) : const Color(0xFFE5E0F2)),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -719,9 +719,9 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                       ? AppTheme.primary
                       : done
                           ? AppTheme.primary.withValues(alpha: 0.15)
-                          : (isDark ? const Color(0xFF1E133C) : Colors.grey.shade200),
+                          : (isDark ? const Color(0xFF2A2331) : Colors.grey.shade200),
                   border: Border.all(
-                    color: active || done ? AppTheme.primary : (isDark ? const Color(0xFF2E1F52) : Colors.grey.shade300),
+                    color: active || done ? AppTheme.primary : (isDark ? const Color(0xFF3A3242) : Colors.grey.shade300),
                     width: active ? 2.5 : 1.2,
                   ),
                   boxShadow: active
@@ -809,7 +809,7 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xFF10B981), shape: BoxShape.circle)),
+                Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xFF248A52), shape: BoxShape.circle)),
                 const SizedBox(width: 6),
                 const Text('Live GPS 60Hz', style: TextStyle(color: Colors.black87, fontSize: 11, fontWeight: FontWeight.bold)),
               ],
@@ -863,7 +863,7 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                     width: 44,
                     height: 44,
                     builder: (ctx) => Container(
-                      decoration: const BoxDecoration(color: Color(0xFF10B981), shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 6)]),
+                      decoration: const BoxDecoration(color: Color(0xFF248A52), shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 6)]),
                       child: const Center(
                         child: Icon(Icons.home_rounded, color: Colors.white, size: 24),
                       ),
@@ -978,9 +978,9 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                 final l10n = AppLocalizations.of(context);
                 final isFi = l10n.locale.languageCode == 'fi';
                 final isDark = Theme.of(context).brightness == Brightness.dark;
-                final sheetBg = isDark ? const Color(0xFF140D28) : Colors.white;
-                final cardBg = isDark ? const Color(0xFF1E133C) : const Color(0xFFF8F7FF);
-                final cardBorder = isDark ? const Color(0xFF2E1F52) : const Color(0xFFEDE8F5);
+                final sheetBg = isDark ? const Color(0xFF221C29) : Colors.white;
+                final cardBg = isDark ? const Color(0xFF2A2331) : const Color(0xFFF6F3EE);
+                final cardBorder = isDark ? const Color(0xFF3A3242) : const Color(0xFFEDE8F5);
                 final textPrimary = AppTheme.primaryText(context);
                 final textSecondary = AppTheme.secondaryText(context);
 
@@ -1048,14 +1048,14 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                                 children: [
                                   Container(
                                     width: 7, height: 7,
-                                    decoration: const BoxDecoration(color: Color(0xFF10B981), shape: BoxShape.circle),
+                                    decoration: const BoxDecoration(color: Color(0xFF248A52), shape: BoxShape.circle),
                                   ),
                                   const SizedBox(width: 5),
                                   Text(
                                     isFi
                                         ? 'Live-tutka: ${_distanceMeters.round()} m päässä • 60 Hz'
                                         : 'Live Radar: ${_distanceMeters.round()}m away • 60Hz',
-                                    style: const TextStyle(color: Color(0xFF10B981), fontSize: 11.5, fontWeight: FontWeight.w700),
+                                    style: const TextStyle(color: Color(0xFF248A52), fontSize: 11.5, fontWeight: FontWeight.w700),
                                   ),
                                 ],
                               ),
@@ -1122,9 +1122,9 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                                         child: const Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            Icon(Icons.star_rounded, size: 12, color: Color(0xFFD97706)),
+                                            Icon(Icons.star_rounded, size: 12, color: Color(0xFFB86E00)),
                                             SizedBox(width: 2),
-                                            Text('4.9', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: Color(0xFFD97706))),
+                                            Text('4.9', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: Color(0xFFB86E00))),
                                           ],
                                         ),
                                       ),
@@ -1133,7 +1133,7 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                                   const SizedBox(height: 2),
                                   Text(
                                     isFi ? 'Sähköskootteri • Suojattu yhteys' : 'Electric Scooter • Protected',
-                                    style: const TextStyle(color: Color(0xFF10B981), fontSize: 11.5, fontWeight: FontWeight.w600),
+                                    style: const TextStyle(color: Color(0xFF248A52), fontSize: 11.5, fontWeight: FontWeight.w600),
                                   ),
                                 ],
                               ),
@@ -1160,7 +1160,7 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                               icon: Container(
                                 padding: const EdgeInsets.all(8),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFF5F3FF),
+                                  color: const Color(0xFFF6F0F9),
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(color: const Color(0xFFDDD6FE)),
                                 ),
@@ -1179,7 +1179,7 @@ class _MapTrackerScreenState extends State<MapTrackerScreen> with TickerProvider
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(color: const Color(0xFFBBF7D0)),
                                 ),
-                                child: const Icon(Icons.camera_alt_outlined, color: Color(0xFF16A34A), size: 18),
+                                child: const Icon(Icons.camera_alt_outlined, color: Color(0xFF248A52), size: 18),
                               ),
                               tooltip: 'Doorstep Photo Proof',
                             ),
@@ -1262,7 +1262,7 @@ class _DoorstepBackgroundPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = const Color(0x228B5CF6)
+      ..color = const Color(0x226D2E8C)
       ..strokeWidth = 1.0;
 
     // Floor perspective lines
@@ -1275,7 +1275,7 @@ class _DoorstepBackgroundPainter extends CustomPainter {
     }
     // Horizontal floor joints
     final jointPaint = Paint()
-      ..color = const Color(0x1AFAF5FF)
+      ..color = const Color(0x1AF6F3EE)
       ..strokeWidth = 0.8;
     for (double y = 40; y < size.height; y += 35) {
       canvas.drawLine(Offset(0, y), Offset(size.width, y), jointPaint);

@@ -94,12 +94,12 @@ class _MainNavigationState extends State<MainNavigation> {
                 child: Container(
                   decoration: BoxDecoration(
                     color: isDark
-                        ? const Color(0xEB0F0B1E)
+                        ? const Color(0xEB1C1820)
                         : Colors.white.withValues(alpha: 0.94),
                     borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
                     border: Border(
                       top: BorderSide(
-                        color: isDark ? const Color(0x338B5CF6) : AppTheme.glassBorder,
+                        color: isDark ? const Color(0x336D2E8C) : AppTheme.glassBorder,
                         width: 1.2,
                       ),
                     ),
@@ -260,12 +260,12 @@ class _MainNavigationState extends State<MainNavigation> {
               duration: const Duration(milliseconds: 200),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               decoration: BoxDecoration(
-                color: isSelected ? const Color(0x248B5CF6) : Colors.transparent,
+                color: isSelected ? const Color(0x246D2E8C) : Colors.transparent,
                 borderRadius: BorderRadius.circular(14),
               ),
               child: Icon(
                 isSelected ? Icons.bolt_rounded : Icons.bolt_outlined,
-                color: isSelected ? const Color(0xFF8B5CF6) : AppTheme.textSecondary,
+                color: isSelected ? const Color(0xFF6D2E8C) : AppTheme.textSecondary,
                 size: 24,
               ),
             ),
@@ -275,7 +275,7 @@ class _MainNavigationState extends State<MainNavigation> {
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
-                color: isSelected ? const Color(0xFF8B5CF6) : AppTheme.textSecondary,
+                color: isSelected ? const Color(0xFF6D2E8C) : AppTheme.textSecondary,
                 letterSpacing: 0.1,
               ),
             ),

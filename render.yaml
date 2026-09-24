@@ -1,25 +1,48 @@
 services:
   - type: web
     name: malvoya-api
-    env: node
-    plan: free
+    runtime: node
+    plan: starter
+    # EU region keeps personal data inside the EEA (GDPR Chapter V). The current live service
+    # (malvoya-api-n065) is in Oregon; Render cannot move a service between regions, so a new
+    # Frankfurt service + database is needed — see CLAUDE.md "Deployment".
+    region: frankfurt
     rootDir: backend
-    buildCommand: npm install --include=dev && npx prisma generate && npx prisma migrate deploy && npm run build
+    # --include=dev: NODE_ENV=production would otherwise skip TypeScript and the Prisma CLI
+    buildCommand: npm ci --include=dev && npx prisma generate && npx prisma migrate deploy && npm run build
     startCommand: npm start
+    healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
         sync: false
       - key: JWT_SECRET
-        sync: false
+        generateValue: true
       - key: JWT_REFRESH_SECRET
-        sync: false
+        generateValue: true
       - key: STRIPE_SECRET_KEY
         sync: false
-      - key: CLOUDINARY_URL
+      - key: STRIPE_WEBHOOK_SECRET
         sync: false
       - key: GOOGLE_CLIENT_ID
         sync: false
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
+      # Browser origins only (admin panel). Mobile apps are not affected by CORS.
       - key: ALLOWED_ORIGINS
-        value: "*"
+        value: "https://admin.malvoya.com"
       - key: NODE_ENV
         value: production

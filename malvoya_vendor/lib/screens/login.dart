@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/brand_mark.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
@@ -292,30 +293,11 @@ class _LoginScreenState extends State<LoginScreen> {
               Center(
                 child: Column(
                   children: [
-                    Container(
-                      width: 76,
-                      height: 76,
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF2E7D32), Color(0xFF1B5E20)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(22),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFF2E7D32).withOpacity(0.3),
-                            blurRadius: 18,
-                            offset: const Offset(0, 6),
-                          ),
-                        ],
-                      ),
-                      child: const Icon(Icons.storefront_rounded, color: Colors.white, size: 40),
-                    ),
+                    BrandTile(size: 76, background: AppTheme.primary),
                     const SizedBox(height: 16),
-                    const Text('Malvoya Vendor', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: AppTheme.textPrimary, letterSpacing: -0.5)),
+                    const Text('Malvoya Store', style: TextStyle(fontSize: 30, fontWeight: FontWeight.w700, color: AppTheme.textPrimary, letterSpacing: -0.5)),
                     const SizedBox(height: 4),
-                    Text('Partner & Merchant Portal', style: TextStyle(fontSize: 14, color: Colors.grey.shade500, fontWeight: FontWeight.w500)),
+                    Text('Myy paikallisesti / Sell locally', style: TextStyle(fontSize: 14, color: Colors.grey.shade500, fontWeight: FontWeight.w500)),
                   ],
                 ),
               ),
@@ -369,9 +351,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.error_outline, color: Color(0xFFE53E3E), size: 18),
+                      const Icon(Icons.error_outline, color: Color(0xFFD93025), size: 18),
                       const SizedBox(width: 8),
-                      Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFE53E3E), fontSize: 13))),
+                      Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFD93025), fontSize: 13))),
                     ],
                   ),
                 ),

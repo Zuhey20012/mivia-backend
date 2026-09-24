@@ -93,7 +93,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
     HapticFeedback.mediumImpact();
     final l10n = AppLocalizations.of(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardBg = isDark ? const Color(0xFF1E1438) : Colors.white;
+    final cardBg = isDark ? const Color(0xFF2A2331) : Colors.white;
     final courier = order['courier'];
     final courierPhone = (courier?['phone'] ?? order['courierPhone'] ?? '').toString().trim();
     final courierName = (courier?['name'] ?? order['courierName'] ?? l10n.translate('courierNameDefault')).toString();
@@ -162,17 +162,17 @@ class _OrdersScreenState extends State<OrdersScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                color: const Color(0xFF248A52).withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.lock_outline_rounded, color: Color(0xFF10B981), size: 16),
+                  const Icon(Icons.lock_outline_rounded, color: Color(0xFF248A52), size: 16),
                   const SizedBox(width: 6),
                   Text(
                     l10n.translate('sessionToken'),
-                    style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.w800, fontSize: 12),
+                    style: const TextStyle(color: Color(0xFF248A52), fontWeight: FontWeight.w800, fontSize: 12),
                   ),
                 ],
               ),
@@ -182,7 +182,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
               width: double.infinity,
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF10B981),
+                  backgroundColor: const Color(0xFF248A52),
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -196,7 +196,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(l10n.translate('nativeDialerOpened')),
-                        backgroundColor: const Color(0xFF10B981),
+                        backgroundColor: const Color(0xFF248A52),
                         behavior: SnackBarBehavior.floating,
                       ),
                     );
@@ -273,7 +273,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(l10n.translate('nativeEmailInvoiceOpened').replaceAll('{id}', shortId)),
-          backgroundColor: const Color(0xFF10B981),
+          backgroundColor: const Color(0xFF248A52),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -314,12 +314,12 @@ class _OrdersScreenState extends State<OrdersScreen> {
         color: isDark ? const Color(0xEB16102E) : Colors.white,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(
-          color: const Color(0xFF8B5CF6).withValues(alpha: 0.35),
+          color: const Color(0xFF6D2E8C).withValues(alpha: 0.35),
           width: 1.5,
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF8B5CF6).withValues(alpha: isDark ? 0.15 : 0.08),
+            color: const Color(0xFF6D2E8C).withValues(alpha: isDark ? 0.15 : 0.08),
             blurRadius: 20,
             offset: const Offset(0, 8),
           ),
@@ -336,7 +336,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(colors: [Color(0xFF8B5CF6), Color(0xFF7C3AED)]),
+                    gradient: const LinearGradient(colors: [Color(0xFF6D2E8C), Color(0xFF55226E)]),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: const Icon(Icons.radar_rounded, color: Colors.white, size: 18),
@@ -354,21 +354,21 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF8B5CF6).withValues(alpha: 0.15),
+                    color: const Color(0xFF6D2E8C).withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFF8B5CF6).withValues(alpha: 0.3)),
+                    border: Border.all(color: const Color(0xFF6D2E8C).withValues(alpha: 0.3)),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Container(
                         width: 7, height: 7,
-                        decoration: const BoxDecoration(color: Color(0xFF8B5CF6), shape: BoxShape.circle),
+                        decoration: const BoxDecoration(color: Color(0xFF6D2E8C), shape: BoxShape.circle),
                       ),
                       const SizedBox(width: 5),
                       Text(
                         l10n.translate('statusEnRoute'),
-                        style: const TextStyle(color: Color(0xFF8B5CF6), fontWeight: FontWeight.w900, fontSize: 11),
+                        style: const TextStyle(color: Color(0xFF6D2E8C), fontWeight: FontWeight.w900, fontSize: 11),
                       ),
                     ],
                   ),
@@ -390,12 +390,12 @@ class _OrdersScreenState extends State<OrdersScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0x22FFFFFF) : const Color(0xFFF3F1FA),
+                color: isDark ? const Color(0x22FFFFFF) : const Color(0xFFEFEBF1),
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.two_wheeler_rounded, color: Color(0xFF8B5CF6), size: 22),
+                  const Icon(Icons.two_wheeler_rounded, color: Color(0xFF6D2E8C), size: 22),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
@@ -428,11 +428,11 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () => _initiateVoipRelay(order),
-                    icon: const Icon(Icons.call_rounded, size: 15, color: Color(0xFF8B5CF6)),
-                    label: Text(l10n.translate('callRelay'), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Color(0xFF8B5CF6))),
+                    icon: const Icon(Icons.call_rounded, size: 15, color: Color(0xFF6D2E8C)),
+                    label: Text(l10n.translate('callRelay'), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Color(0xFF6D2E8C))),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 8),
-                      side: BorderSide(color: const Color(0xFF8B5CF6).withValues(alpha: 0.3)),
+                      side: BorderSide(color: const Color(0xFF6D2E8C).withValues(alpha: 0.3)),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                   ),
@@ -441,11 +441,11 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () => _openEncryptedSmsRelay(order),
-                    icon: const Icon(Icons.chat_bubble_outline_rounded, size: 15, color: Color(0xFF7C3AED)),
-                    label: Text(l10n.translate('maskedSms'), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Color(0xFF7C3AED))),
+                    icon: const Icon(Icons.chat_bubble_outline_rounded, size: 15, color: Color(0xFF55226E)),
+                    label: Text(l10n.translate('maskedSms'), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Color(0xFF55226E))),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 8),
-                      side: BorderSide(color: const Color(0xFF7C3AED).withValues(alpha: 0.3)),
+                      side: BorderSide(color: const Color(0xFF55226E).withValues(alpha: 0.3)),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                   ),
@@ -454,11 +454,11 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () => _resendVatInvoice(orderId),
-                    icon: const Icon(Icons.email_outlined, size: 15, color: Color(0xFF8B5CF6)),
-                    label: Text(l10n.translate('vatReceipt'), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Color(0xFF8B5CF6))),
+                    icon: const Icon(Icons.email_outlined, size: 15, color: Color(0xFF6D2E8C)),
+                    label: Text(l10n.translate('vatReceipt'), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Color(0xFF6D2E8C))),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 8),
-                      side: BorderSide(color: const Color(0xFF8B5CF6).withValues(alpha: 0.3)),
+                      side: BorderSide(color: const Color(0xFF6D2E8C).withValues(alpha: 0.3)),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                   ),
@@ -473,7 +473,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
               width: double.infinity,
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF8B5CF6),
+                  backgroundColor: const Color(0xFF6D2E8C),
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   padding: const EdgeInsets.symmetric(vertical: 13),
@@ -503,15 +503,15 @@ class _OrdersScreenState extends State<OrdersScreen> {
               width: double.infinity,
               child: OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF8B5CF6),
-                  side: const BorderSide(color: Color(0xFF8B5CF6), width: 1.5),
+                  foregroundColor: const Color(0xFF6D2E8C),
+                  side: const BorderSide(color: Color(0xFF6D2E8C), width: 1.5),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
-                icon: const Icon(Icons.swap_horiz_rounded, size: 20, color: Color(0xFF8B5CF6)),
+                icon: const Icon(Icons.swap_horiz_rounded, size: 20, color: Color(0xFF6D2E8C)),
                 label: Text(
                   AppLocalizations.of(context).translate('swipeToSwap'),
-                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: Color(0xFF8B5CF6)),
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: Color(0xFF6D2E8C)),
                 ),
                 onPressed: () {
                   final firstItem = (order['items'] is List && (order['items'] as List).isNotEmpty)
@@ -591,7 +591,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: status == 'DELIVERED'
-                      ? const Color(0xFF10B981).withValues(alpha: 0.12)
+                      ? const Color(0xFF248A52).withValues(alpha: 0.12)
                       : Colors.red.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
@@ -604,7 +604,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                               ? (l10n.locale.languageCode == 'fi' ? 'Peruutettu' : 'Cancelled')
                               : status)),
                   style: TextStyle(
-                    color: status == 'DELIVERED' ? const Color(0xFF10B981) : (status == 'SHIPPED' ? AppTheme.primary : Colors.red),
+                    color: status == 'DELIVERED' ? const Color(0xFF248A52) : (status == 'SHIPPED' ? AppTheme.primary : Colors.red),
                     fontWeight: FontWeight.w800,
                     fontSize: 11,
                   ),
@@ -711,7 +711,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                        Container(
                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                          decoration: BoxDecoration(
-                           color: const Color(0xFF10B981),
+                           color: const Color(0xFF248A52),
                            borderRadius: BorderRadius.circular(10),
                          ),
                          child: Text(

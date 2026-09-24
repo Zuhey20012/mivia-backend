@@ -24,7 +24,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
       'title': 'Order Questions',
       'subtitle': 'Delivery tracking, courier arrival, item status & missing items',
       'icon': Icons.inventory_2_outlined,
-      'color': const Color(0xFF8B5CF6),
+      'color': const Color(0xFF6D2E8C),
       'examples': ['Where is my courier?', 'Change delivery address', 'Missing item in order'],
     },
     {
@@ -40,7 +40,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
       'title': 'Payments & Credits',
       'subtitle': 'Billing questions, Stripe card charges, SEPA refunds & receipts',
       'icon': Icons.credit_card_outlined,
-      'color': const Color(0xFF10B981),
+      'color': const Color(0xFF248A52),
       'examples': ['Card declined assistance', 'SEPA refund status', 'Download VAT receipt'],
     },
     {
@@ -48,7 +48,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
       'title': 'Malvoya in the Future & Drops',
       'subtitle': 'Roadmap, Nordic city launches, creator program & drop invitations',
       'icon': Icons.rocket_launch_outlined,
-      'color': const Color(0xFFEC4899),
+      'color': const Color(0xFF9B5DB8),
       'examples': ['Upcoming city launches', 'Exclusive drops access', 'Creator program criteria'],
     },
     {
@@ -56,7 +56,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
       'title': 'Malvoya Advantages & Returns',
       'subtitle': 'Zero video spam drops, verified local boutiques & 14-day statutory returns',
       'icon': Icons.verified_outlined,
-      'color': const Color(0xFFF59E0B),
+      'color': const Color(0xFFE08A00),
       'examples': ['Finnish 14-day return rights', 'Express local courier speeds', 'Verified boutique guarantee'],
     },
     {
@@ -72,7 +72,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
       'title': 'My Chats & Active Tickets',
       'subtitle': 'Conversation history with support agents and ticket resolution tracking',
       'icon': Icons.chat_bubble_outline_rounded,
-      'color': const Color(0xFF06B6D4),
+      'color': const Color(0xFF8E4FAE),
       'examples': ['Ticket #MLV-9428', 'Chat with Malvoya Concierge', 'View closed cases'],
     },
   ];
@@ -252,7 +252,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
                               ),
                             ],
                           ),
-                          backgroundColor: const Color(0xFF10B981),
+                          backgroundColor: const Color(0xFF248A52),
                           behavior: SnackBarBehavior.floating,
                         ),
                       );
@@ -465,7 +465,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const Icon(Icons.smart_toy_outlined, color: Color(0xFF10B981), size: 22),
+                              const Icon(Icons.smart_toy_outlined, color: Color(0xFF248A52), size: 22),
                               const SizedBox(height: 6),
                               Text(l10n.translate('aiSupport'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: textPrimary)),
                               Text(l10n.translate('aiSupportSub'), style: TextStyle(fontSize: 10, color: textSecondary)),
@@ -589,13 +589,13 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
                 child: Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                    color: const Color(0xFF248A52).withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+                    border: Border.all(color: const Color(0xFF248A52).withValues(alpha: 0.3)),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.shield_outlined, color: Color(0xFF10B981), size: 24),
+                      const Icon(Icons.shield_outlined, color: Color(0xFF248A52), size: 24),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Column(

@@ -61,7 +61,7 @@ class SwipeToSwapSheet extends StatelessWidget {
         borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
         border: Border(
           top: BorderSide(
-            color: const Color(0xFF8B5CF6).withValues(alpha: 0.4),
+            color: const Color(0xFF6D2E8C).withValues(alpha: 0.4),
             width: 1.5,
           ),
         ),
@@ -87,14 +87,14 @@ class SwipeToSwapSheet extends StatelessWidget {
             height: 80,
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [Color(0xFF8B5CF6), Color(0xFF7C3AED)],
+                colors: [Color(0xFF6D2E8C), Color(0xFF55226E)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF8B5CF6).withValues(alpha: 0.5),
+                  color: const Color(0xFF6D2E8C).withValues(alpha: 0.5),
                   blurRadius: 32,
                   spreadRadius: 4,
                 ),
@@ -142,12 +142,12 @@ class SwipeToSwapSheet extends StatelessWidget {
             decoration: BoxDecoration(
               color: const Color(0xFF1E1B4B).withValues(alpha: 0.7),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFF8B5CF6).withValues(alpha: 0.35), width: 1.0),
+              border: Border.all(color: const Color(0xFF6D2E8C).withValues(alpha: 0.35), width: 1.0),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.checkroom_rounded, size: 16, color: Color(0xFF8B5CF6)),
+                const Icon(Icons.checkroom_rounded, size: 16, color: Color(0xFF6D2E8C)),
                 const SizedBox(width: 8),
                 Text(
                   itemName,

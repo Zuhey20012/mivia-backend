@@ -350,7 +350,7 @@ class _NotificationCenterDrawerState extends State<NotificationCenterDrawer> {
                 gradient: LinearGradient(
                   colors: [
                     AppTheme.primary.withValues(alpha: 0.15),
-                    const Color(0xFF10B981).withValues(alpha: 0.12),
+                    const Color(0xFF248A52).withValues(alpha: 0.12),
                   ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
@@ -390,21 +390,21 @@ class _NotificationCenterDrawerState extends State<NotificationCenterDrawer> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
               decoration: BoxDecoration(
-                color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                color: const Color(0xFF248A52).withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+                border: Border.all(color: const Color(0xFF248A52).withValues(alpha: 0.3)),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.check_circle_outline_rounded, size: 13, color: Color(0xFF10B981)),
+                  const Icon(Icons.check_circle_outline_rounded, size: 13, color: Color(0xFF248A52)),
                   const SizedBox(width: 5),
                   Text(
                     l10n.translate('telemetryStreamActive'),
                     style: const TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w800,
-                      color: Color(0xFF10B981),
+                      color: Color(0xFF248A52),
                       letterSpacing: 0.5,
                     ),
                   ),
@@ -451,7 +451,7 @@ class _NotificationCenterDrawerState extends State<NotificationCenterDrawer> {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: isDark
-            ? (item.isRead ? const Color(0x1AFFFFFF) : const Color(0x2E8B5CF6))
+            ? (item.isRead ? const Color(0x1AFFFFFF) : const Color(0x2E6D2E8C))
             : (item.isRead ? const Color(0xFFF9F8FD) : const Color(0xFFF3EFFF)),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(

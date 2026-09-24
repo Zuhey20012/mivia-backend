@@ -1,186 +1,175 @@
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import { prisma } from "../../lib/prisma";
-import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../../utils/jwt";
+import { verifyRefreshToken } from "../../utils/jwt";
 import { RegisterInput, LoginInput } from "./auth.schema";
-import { env } from "../../config/env";
-import { dispatchNotifications } from "../../services/notificationDeliveryService";
+import { issueSession, hashToken, revokeAllSessions } from "./session";
+
+export class AuthError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+  }
+}
+
+const PHONE_EMAIL_DOMAIN = "phone.malvoya.app";
+const DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(16).toString("hex"), 12);
+
+function isPhoneIdentifier(value: string) {
+  return !value.includes("@") && /^[0-9+ ()-]+$/.test(value);
+}
+
+/** Phone-only accounts get a synthetic, non-deliverable email so `email` stays unique. */
+export function phoneToSyntheticEmail(phone: string) {
+  return `${phone.replace(/[^0-9]/g, "")}@${PHONE_EMAIL_DOMAIN}`;
+}
+
+export function isSyntheticEmail(email: string) {
+  return email.endsWith(`@${PHONE_EMAIL_DOMAIN}`) || email.endsWith("@deleted.invalid");
+}
 
 export async function registerUser(input: RegisterInput) {
   const identifier = input.email.trim();
-  const isPhone = !identifier.includes('@') && /^[0-9+ ]+$/.test(identifier);
-  const emailToUse = isPhone ? `${identifier.replace(/[^0-9]/g, '')}@phone.malvoya.app` : identifier.toLowerCase();
-  const phoneToUse = isPhone ? identifier : input.phone;
+  const isPhone = isPhoneIdentifier(identifier);
+  const email = isPhone ? phoneToSyntheticEmail(identifier) : identifier.toLowerCase();
+  const phone = isPhone ? identifier.replace(/[^0-9+]/g, "") : input.phone;
+
+  if (!isPhone && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new AuthError("Enter a valid email address or phone number", 400);
+  }
 
   const existing = await prisma.user.findFirst({
     where: {
       OR: [
-        { email: { equals: emailToUse, mode: "insensitive" } },
-        ...(phoneToUse ? [{ phone: phoneToUse }] : []),
-      ]
-    }
+        { email: { equals: email, mode: "insensitive" } },
+        ...(phone ? [{ phone }] : []),
+      ],
+    },
+    select: { id: true },
   });
-
-  if (existing) {
-    if (input.role && input.role !== "CUSTOMER") {
-      await prisma.user.update({
-        where: { id: existing.id },
-        data: { role: input.role }
-      });
-    }
-    const safeUser = { id: existing.id, name: existing.name, email: existing.email, role: input.role || existing.role };
-    const tokens = generateTokens(safeUser);
-    await saveRefreshToken(existing.id, tokens.refreshToken);
-    return { user: safeUser, ...tokens };
-  }
+  // Never hand out a session for an existing account from the register endpoint.
+  if (existing) throw new AuthError("An account with this email or phone already exists. Please sign in.", 409);
 
   const passwordHash = await bcrypt.hash(input.password, 12);
   const user = await prisma.user.create({
-    data: { name: input.name, email: emailToUse, phone: phoneToUse, passwordHash, role: input.role },
-    select: { id: true, name: true, email: true, role: true, createdAt: true },
+    data: { name: input.name, email, phone, passwordHash, role: input.role },
+    select: { id: true, name: true, email: true, role: true },
   });
 
-  // Real multi-channel dispatch (Nodemailer email + Twilio SMS gateway)
-  try {
-    const regCode = String(Math.floor(100000 + Math.random() * 900000));
-    dispatchNotifications({
-      event: 'CUSTOMER_REGISTERED',
-      name: input.name,
-      email: isPhone ? undefined : emailToUse,
-      phone: phoneToUse,
-      code: regCode,
-    }).catch(() => {});
-  } catch (_) {}
+  if (input.role === "COURIER") {
+    // Couriers start unapproved; an admin approves them after identity / right-to-work checks.
+    await prisma.courier.create({ data: { userId: user.id, name: user.name, email: isPhone ? null : email, phone, isActive: false } });
+  }
 
-  const tokens = generateTokens(user);
-  await saveRefreshToken(user.id, tokens.refreshToken);
-  return { user, ...tokens };
+  return issueSession(user);
 }
 
 export async function loginUser(input: LoginInput) {
   const identifier = input.email.trim();
-  const user = await prisma.user.findFirst({
-    where: {
-      OR: [
-        { email: { equals: identifier, mode: "insensitive" } },
-        { phone: identifier },
-        { phone: identifier.replace(/[^0-9+]/g, '') },
-        { email: `${identifier.replace(/[^0-9]/g, '')}@phone.malvoya.app` },
-      ]
-    }
-  });
-  if (!user) throw new Error("Invalid credentials");
+  const candidates = isPhoneIdentifier(identifier)
+    ? [{ phone: identifier.replace(/[^0-9+]/g, "") }, { email: phoneToSyntheticEmail(identifier) }]
+    : [{ email: { equals: identifier.toLowerCase(), mode: "insensitive" as const } }];
 
-  const valid = await bcrypt.compare(input.password, user.passwordHash);
-  if (!valid) throw new Error("Invalid credentials");
+  const user = await prisma.user.findFirst({ where: { OR: candidates } });
 
-  const safeUser = { id: user.id, name: user.name, email: user.email, role: user.role };
-  const tokens = generateTokens(safeUser);
-  await saveRefreshToken(user.id, tokens.refreshToken);
-  return { user: safeUser, ...tokens };
+  // Compare against a dummy hash when the user does not exist so response timing does not reveal accounts.
+  // Social/OTP-only accounts have no bcrypt hash, so they can't sign in with a password.
+  const hash = user?.passwordHash?.startsWith("$2") ? user.passwordHash : DUMMY_HASH;
+  const valid = await bcrypt.compare(input.password, hash);
+  if (!user || !valid || !user.isActive) throw new AuthError("Invalid credentials", 401);
+
+  return issueSession(user);
 }
 
 export async function refreshTokens(refreshToken: string) {
-  const payload = verifyRefreshToken(refreshToken);
-  const stored = await prisma.refreshToken.findUnique({ where: { token: refreshToken } });
-  if (!stored || stored.expiresAt < new Date()) throw new Error("Refresh token expired or invalid");
+  try {
+    verifyRefreshToken(refreshToken);
+  } catch {
+    throw new AuthError("Refresh token expired or invalid", 401);
+  }
+  const tokenHash = hashToken(refreshToken);
+  const stored = await prisma.refreshToken.findUnique({ where: { token: tokenHash }, include: { user: true } });
+  if (!stored || stored.expiresAt < new Date() || !stored.user.isActive) {
+    throw new AuthError("Refresh token expired or invalid", 401);
+  }
 
-  await prisma.refreshToken.delete({ where: { token: refreshToken } });
-
-  const user = await prisma.user.findUniqueOrThrow({
-    where: { id: stored.userId },
-    select: { id: true, name: true, email: true, role: true },
-  });
-  const tokens = generateTokens(user);
-  await saveRefreshToken(user.id, tokens.refreshToken);
-  return { user, ...tokens };
+  // Rotation: each refresh token is single use
+  await prisma.refreshToken.delete({ where: { token: tokenHash } });
+  return issueSession(stored.user);
 }
 
 export async function logoutUser(refreshToken: string) {
-  await prisma.refreshToken.deleteMany({ where: { token: refreshToken } });
+  await prisma.refreshToken.deleteMany({ where: { token: hashToken(refreshToken) } });
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-function generateTokens(user: { id: number; email: string; role: string }) {
-  const accessToken  = signAccessToken({ id: user.id, email: user.email, role: user.role });
-  const refreshToken = signRefreshToken({ id: user.id });
-  return { accessToken, refreshToken };
-}
-
-async function saveRefreshToken(userId: number, token: string) {
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
-  await prisma.refreshToken.create({ data: { token, userId, expiresAt } });
-}
+// ─── GDPR: access (Art. 15/20) and erasure (Art. 17) ────────────────────────
 
 export async function exportUserData(userId: number) {
-  const user = await prisma.user.findUnique({
+  return prisma.user.findUnique({
     where: { id: userId },
-    include: {
+    select: {
+      id: true, email: true, name: true, phone: true, role: true, avatarUrl: true,
+      address: true, latitude: true, longitude: true, createdAt: true, updatedAt: true,
       orders: { include: { items: true } },
       rentals: { include: { items: true } },
       returns: true,
-      store: { include: { products: true } }
-    }
+      store: { include: { products: true } },
+      courier: { select: { id: true, name: true, phone: true, email: true, isApproved: true, createdAt: true } },
+    },
   });
-  return user;
 }
 
+const OPEN_ORDER_STATUSES = ["PENDING", "CONFIRMED", "PROCESSING", "SHIPPED"] as const;
+
+/**
+ * Erases personal data while keeping the transaction records that Finnish bookkeeping law
+ * (Kirjanpitolaki 2:10) requires us to retain. Orders stay linked to an anonymised user row.
+ */
 export async function deleteUserAccount(userId: number) {
+  const openOrders = await prisma.order.count({
+    where: {
+      status: { in: [...OPEN_ORDER_STATUSES] },
+      OR: [{ userId }, { store: { ownerId: userId } }, { courier: { userId } }],
+    },
+  });
+  if (openOrders > 0) {
+    throw new AuthError("You have orders in progress. Your account can be deleted once they are completed or cancelled.", 409);
+  }
+
   await prisma.$transaction(async (tx) => {
-    // 1. Returns where user is returning party
-    await tx.return.deleteMany({ where: { userId } });
+    // Delivery addresses and notes are not needed for bookkeeping once an order is closed
+    await tx.order.updateMany({
+      where: { userId },
+      data: { deliveryAddress: null, deliveryLat: null, deliveryLng: null, notes: null },
+    });
 
-    let deletedUser = await tx.user.findFirst({ where: { email: 'deleted@malvoya.app' } });
-    if (!deletedUser) {
-      deletedUser = await tx.user.create({
-        data: { email: 'deleted@malvoya.app', name: 'DELETED_USER', passwordHash: 'DELETED', role: 'CUSTOMER' }
-      });
-    }
-
-    // 2. Orders and Rentals as a customer
-    const orders = await tx.order.findMany({ where: { userId }, select: { id: true } });
-    const orderIds = orders.map(o => o.id);
-    if (orderIds.length > 0) {
-      await tx.order.updateMany({
-        where: { id: { in: orderIds } },
-        data: { userId: deletedUser.id, deliveryAddress: null, deliveryLat: null, deliveryLng: null, notes: null }
-      });
-    }
-
-    const rentals = await tx.rental.findMany({ where: { userId }, select: { id: true } });
-    const rentalIds = rentals.map(r => r.id);
-    if (rentalIds.length > 0) {
-      await tx.rental.updateMany({
-        where: { id: { in: rentalIds } },
-        data: { userId: deletedUser.id }
-      });
-    }
-
-    // 3. Store data (if vendor)
     const store = await tx.store.findUnique({ where: { ownerId: userId } });
     if (store) {
-      const storeOrders = await tx.order.findMany({ where: { storeId: store.id }, select: { id: true } });
-      const storeOrderIds = storeOrders.map(o => o.id);
-      
-      if (storeOrderIds.length > 0) {
-        await tx.return.deleteMany({ where: { orderId: { in: storeOrderIds } } });
-        await tx.orderItem.deleteMany({ where: { orderId: { in: storeOrderIds } } });
-        await tx.order.deleteMany({ where: { id: { in: storeOrderIds } } });
-      }
-
-      const products = await tx.product.findMany({ where: { storeId: store.id }, select: { id: true } });
-      const productIds = products.map(p => p.id);
-      
-      if (productIds.length > 0) {
-        await tx.orderItem.deleteMany({ where: { productId: { in: productIds } } });
-        await tx.rentalItem.deleteMany({ where: { productId: { in: productIds } } });
-        await tx.productVariant.deleteMany({ where: { productId: { in: productIds } } });
-        await tx.product.deleteMany({ where: { storeId: store.id } });
-      }
-
-      await tx.store.delete({ where: { id: store.id } });
+      // The store's legal identity stays on past orders; it just stops trading.
+      await tx.product.updateMany({ where: { storeId: store.id }, data: { isAvailable: false } });
+      await tx.store.update({ where: { id: store.id }, data: { isVerified: false, phone: null, email: null } });
     }
 
-    await tx.user.delete({ where: { id: userId } });
+    await tx.courier.updateMany({
+      where: { userId },
+      data: { name: "Deleted courier", phone: null, email: null, passwordHash: null, isActive: false, isApproved: false, latitude: null, longitude: null },
+    });
+
+    await tx.user.update({
+      where: { id: userId },
+      data: {
+        name: "Deleted user",
+        email: `deleted-${userId}-${crypto.randomBytes(4).toString("hex")}@deleted.invalid`,
+        phone: null,
+        avatarUrl: null,
+        address: null,
+        latitude: null,
+        longitude: null,
+        passwordHash: crypto.randomBytes(32).toString("hex"),
+        isActive: false,
+        deletedAt: new Date(),
+      },
+    });
   });
+
+  await revokeAllSessions(userId);
 }

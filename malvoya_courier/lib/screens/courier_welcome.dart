@@ -167,14 +167,14 @@ class CourierWelcomeScreen extends StatelessWidget {
                       padding: const EdgeInsets.all(22),
                       decoration: BoxDecoration(
                         gradient: const LinearGradient(
-                          colors: [Color(0xFFFF6B35), Color(0xFFFF8E53), Color(0xFFE0521C)],
+                          colors: [Color(0xFFC2412D), Color(0xFFFF8E53), Color(0xFF9E3222)],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         ),
                         borderRadius: BorderRadius.circular(24),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFFFF6B35).withValues(alpha: 0.35),
+                            color: const Color(0xFFC2412D).withValues(alpha: 0.35),
                             blurRadius: 20,
                             offset: const Offset(0, 8),
                           ),
@@ -269,14 +269,14 @@ class CourierWelcomeScreen extends StatelessWidget {
 
                     _buildPillarCard(
                       icon: Icons.access_time_filled_rounded,
-                      iconColor: const Color(0xFF6C54EC),
+                      iconColor: const Color(0xFF6D2E8C),
                       title: l10n.translate('perkFlexible'),
                       description: l10n.translate('perkFlexibleDesc'),
                     ),
                     const SizedBox(height: 10),
                     _buildPillarCard(
                       icon: Icons.account_balance_wallet_rounded,
-                      iconColor: const Color(0xFF2DC653),
+                      iconColor: const Color(0xFF248A52),
                       title: l10n.translate('perkEarnings'),
                       description: l10n.translate('perkEarningsDesc'),
                     ),
@@ -393,7 +393,7 @@ class CourierWelcomeScreen extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFF9F7F5),
+        color: const Color(0xFFF6F3EE),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.black.withValues(alpha: 0.04)),
       ),

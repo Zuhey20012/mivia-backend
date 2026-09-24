@@ -55,16 +55,14 @@ export default function Settings() {
             </div>
             <div>
               <h2 className="font-semibold">Platform Info</h2>
-              <p className="text-xs text-gray-400">Current environment variables</p>
+              <p className="text-xs text-gray-400">Build-time configuration of this admin panel</p>
             </div>
           </div>
           <div className="flex flex-col gap-3 text-sm">
             {[
-              { label: 'App Name',        value: 'Malvoya'         },
-              { label: 'Backend',         value: 'localhost:4000'  },
-              { label: 'Stripe',          value: 'sk_test_51To...  (connected)' },
-              { label: 'Cloudinary',      value: 'dsoowear6 (connected)'       },
-              { label: 'Environment',     value: 'Development'     },
+              { label: 'App Name',    value: 'Malvoya' },
+              { label: 'API',         value: (import.meta.env.VITE_API_URL as string) || 'http://localhost:4000/api/v1' },
+              { label: 'Environment', value: import.meta.env.MODE },
             ].map(({ label, value }) => (
               <div key={label} className="flex justify-between py-2 border-b border-gray-50 last:border-0">
                 <span className="text-gray-500">{label}</span>

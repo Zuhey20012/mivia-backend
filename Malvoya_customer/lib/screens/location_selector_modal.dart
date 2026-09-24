@@ -131,7 +131,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('📍 Delivery address updated: $addressText'),
-          backgroundColor: const Color(0xFF10B981),
+          backgroundColor: const Color(0xFF248A52),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -229,7 +229,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text('📍 Delivery pin set: ${result.fullAddress}'),
-                          backgroundColor: const Color(0xFF10B981),
+                          backgroundColor: const Color(0xFF248A52),
                           behavior: SnackBarBehavior.floating,
                         ),
                       );
@@ -310,7 +310,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text('📍 Live GPS pin saved: ${res.fullAddress}'),
-                                backgroundColor: const Color(0xFF10B981),
+                                backgroundColor: const Color(0xFF248A52),
                                 behavior: SnackBarBehavior.floating,
                               ),
                             );
@@ -636,7 +636,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text('📍 Delivery area updated: $locName'),
-                              backgroundColor: const Color(0xFF10B981),
+                              backgroundColor: const Color(0xFF248A52),
                               behavior: SnackBarBehavior.floating,
                             ),
                           );
@@ -678,7 +678,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                                   fontWeight: FontWeight.w700,
                                   color: isCurrent
                                       ? AppTheme.primary
-                                      : (isActive ? const Color(0xFF10B981) : textSecondary),
+                                      : (isActive ? const Color(0xFF248A52) : textSecondary),
                                 ),
                               ),
                             ],

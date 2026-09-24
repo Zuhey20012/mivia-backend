@@ -1,9 +1,13 @@
 import { prisma } from "../../lib/prisma";
 
-export async function getProductsByStore(storeId: number, query: Record<string, string>) {
+export async function getProductsByStore(storeId: number, query: Record<string, string>, viewerId?: number) {
   const page  = Math.max(1, Number(query.page || 1));
   const limit = Math.min(50, Math.max(1, Number(query.limit || 20)));
-  const where: any = { storeId, isAvailable: true };
+  const store = await prisma.store.findUnique({ where: { id: storeId }, select: { isVerified: true, ownerId: true } });
+  const isOwner = !!store && store.ownerId === viewerId;
+  if (!store || (!store.isVerified && !isOwner)) return { products: [], total: 0, page, limit };
+  // Owners also see their hidden products so they can re-enable them
+  const where: any = isOwner ? { storeId } : { storeId, isAvailable: true };
 
   if (query.canBeSold)     where.canBeSold     = query.canBeSold === "true";
   if (query.canBeRented)   where.canBeRented   = query.canBeRented === "true";
@@ -29,8 +33,8 @@ export async function getProductsByStore(storeId: number, query: Record<string, 
 }
 
 export async function getProductById(id: number) {
-  return prisma.product.findUniqueOrThrow({
-    where: { id },
+  return prisma.product.findFirstOrThrow({
+    where: { id, store: { isVerified: true } },
     include: { variants: true, store: { select: { id: true, name: true, logoUrl: true, rating: true } } },
   });
 }

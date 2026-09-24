@@ -1,7 +1,7 @@
 name: malvoya_customer
 description: Malvoya - Premium Marketplace App
 publish_to: "none"
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: ">=2.18.0 <4.0.0"
@@ -44,5 +44,8 @@ flutter:
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
-  image_path: "assets/logo.png"
+  remove_alpha_ios: true
+  image_path: "assets/brand/icon.png"
+  adaptive_icon_background: "#6D2E8C"
+  adaptive_icon_foreground: "assets/brand/icon_fg.png"
   min_sdk_android: 21

@@ -139,7 +139,7 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
-                        colors: [Color(0xFFEC4899), Color(0xFF8B5CF6)],
+                        colors: [Color(0xFF9B5DB8), Color(0xFF6D2E8C)],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
@@ -266,7 +266,7 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
               height: 140,
               width: double.infinity,
               decoration: const BoxDecoration(
-                gradient: LinearGradient(colors: [Color(0xFFEC4899), Color(0xFF8B5CF6)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                gradient: LinearGradient(colors: [Color(0xFF9B5DB8), Color(0xFF6D2E8C)], begin: Alignment.topLeft, end: Alignment.bottomRight),
                 borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
               ),
               child: const Center(child: Icon(Icons.storefront_outlined, size: 54, color: Colors.white38)),

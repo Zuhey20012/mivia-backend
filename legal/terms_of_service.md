@@ -1,41 +1,74 @@
-# Terms of Service for Malvoya
+# Malvoya Terms of Service for Customers / Käyttöehdot
 
-**Last Updated: April 23, 2026**
+**Last updated:** [DATE OF PUBLICATION]
 
-These Terms of Service ("Terms") govern your access to and use of the Malvoya mobile applications and services ("Services"). By using our Services, you agree to be bound by these Terms.
+> **Before publishing:** fill in the `[BRACKETED]` items and have this document reviewed by a Finnish consumer-law lawyer. Nothing here limits your rights under mandatory Finnish or EU consumer law.
 
-## 1. Description of Services
-Malvoya provides a marketplace platform that connects Customers, Vendors, and Couriers for the ordering, sale, and delivery of goods.
+## 1. Who we are
 
-## 2. User Accounts
-- You must be at least 18 years old to create an account.
-- You are responsible for maintaining the confidentiality of your account credentials.
-- You agree to provide accurate and complete information.
+The Malvoya marketplace is operated by [COMPANY LEGAL NAME] (Y-tunnus [Y-TUNNUS]), [ADDRESS], Finland. Contact: [support@malvoya.com], [PHONE].
 
-## 3. Payments and Refunds
-- Payments are processed via third-party providers (Stripe).
-- Fees and charges are non-refundable unless otherwise stated or required by law.
-- Malvoya reserves the right to change its fees at any time.
+## 2. What Malvoya is
 
-## 4. User Conduct
-- You agree not to use the Services for any unlawful purpose.
-- You agree not to interfere with the operation of the Services.
-- You agree not to harass or harm other users.
+Malvoya is an **online marketplace**. Products are sold by independent stores, not by Malvoya.
+- Each store page shows **who the seller is** and **whether the seller is a business (trader) or a private individual**.
+- Consumer protection rights, including the right of withdrawal, apply only when you buy from a **business seller**.
 
-## 5. Intellectual Property
-All content and materials on the Services are the property of Malvoya or its licensors and are protected by intellectual property laws.
+Malvoya arranges payment and local delivery by independent couriers.
 
-## 6. Limitation of Liability
-To the maximum extent permitted by law, Malvoya shall not be liable for any indirect, incidental, or consequential damages arising out of your use of the Services.
+## 3. Account
 
-## 7. Termination
-We reserve the right to suspend or terminate your account at any time for any reason, including violation of these Terms.
+- You must be at least 18 years old.
+- Keep your sign-in details secret. You can delete your account at any time in the app.
 
-## 8. Governing Law
-These Terms shall be governed by and construed in accordance with the laws of the jurisdiction in which Malvoya operates (Finland/EU).
+## 4. Prices and payment
 
-## 9. Changes to Terms
-We may update these Terms from time to time. Your continued use of the Services after such changes constitutes acceptance of the new Terms.
+- All prices are in euros and include VAT where the seller is VAT-registered.
+- The total price, including the delivery fee, is shown before you pay.
+- Payment is processed by Stripe. The order is confirmed only after the payment has been confirmed.
+- Malvoya never sees your card or bank details.
 
-## 10. Contact Us
-For any questions regarding these Terms, please contact legal@malvoya.com.
+## 5. Delivery
+
+The estimated delivery time is shown in the app. If a delivery cannot be completed, we will contact you. If the delay is substantial, you may cancel and get a full refund.
+
+## 6. Cancelling before the store accepts
+
+You can cancel an order in the app until the store accepts it. The full amount is refunded.
+
+## 7. Right of withdrawal (14 days) — business sellers
+
+- You may withdraw from a purchase within **14 days of receiving the item**, without giving a reason (Consumer Protection Act, chapter 6).
+- Start the return in the app (Profile → Returns) or send an unambiguous statement to [support@malvoya.com].
+- We refund the price and the original standard delivery fee within 14 days of receiving your withdrawal. The refund goes to your original payment method.
+- A refund may be delayed until the item has been received back.
+- You pay the cost of returning the item unless the seller has agreed otherwise [OR: "Malvoya arranges and pays for courier pick-up"].
+- A deduction may be made only if the item has lost value because it was handled beyond what is necessary to establish its nature, characteristics and functioning. Any deduction is explained to you in writing.
+
+## 8. Defects
+
+If an item is defective or not as described, you have the rights of the Consumer Protection Act, chapter 5 (repair, replacement, price reduction or cancellation), regardless of the withdrawal period.
+
+## 9. Your conduct
+
+Do not misuse the service, harass couriers or sellers, or attempt to access other people's data.
+
+## 10. Suspension
+
+We may suspend or close an account that seriously or repeatedly breaches these terms or the law. We will tell you the reason, and you can ask us to review the decision.
+
+## 11. Liability
+
+Nothing in these terms limits liability that cannot be limited under mandatory law.
+
+## 12. Complaints and disputes
+
+1. Contact us first at [support@malvoya.com].
+2. If we cannot resolve the matter, you can take the dispute to the **Consumer Disputes Board (Kuluttajariitalautakunta)**, kuluttajariita.fi. Consumer advice is available from the **Consumer Advisory Services**, kkv.fi.
+3. EU residents can also use the EU ODR platform.
+
+Finnish law applies. As a consumer you may also bring a claim in the district court of your home municipality.
+
+## 13. Changes
+
+Material changes are announced in the app at least 30 days in advance.

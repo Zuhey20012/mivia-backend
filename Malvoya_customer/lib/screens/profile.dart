@@ -84,7 +84,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             Divider(height: 1, indent: 56, color: dividerColor),
             ListTile(
-              leading: const Icon(Icons.dark_mode_rounded, color: Color(0xFF8B5CF6), size: 22),
+              leading: const Icon(Icons.dark_mode_rounded, color: Color(0xFF6D2E8C), size: 22),
               title: Text(l10n.translate('themeOledMidnight'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
               trailing: themeProvider.mode == AppThemeMode.dark ? const Icon(Icons.check_circle_rounded, color: AppTheme.primary) : null,
               onTap: () {
@@ -94,7 +94,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             Divider(height: 1, indent: 56, color: dividerColor),
             ListTile(
-              leading: const Icon(Icons.wb_sunny_outlined, color: Color(0xFFD97706), size: 22),
+              leading: const Icon(Icons.wb_sunny_outlined, color: Color(0xFFB86E00), size: 22),
               title: Text(l10n.translate('themeEyeComfort'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
               trailing: themeProvider.mode == AppThemeMode.eyeComfort ? const Icon(Icons.check_circle_rounded, color: AppTheme.primary) : null,
               onTap: () {
@@ -220,7 +220,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         title: Row(
           children: [
-            const Icon(Icons.delete_outline_rounded, color: Color(0xFFEF4444), size: 24),
+            const Icon(Icons.delete_outline_rounded, color: Color(0xFFD93025), size: 24),
             const SizedBox(width: 8),
             Text(l10n.translate('confirmDelete'), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: textPrimary)),
           ],
@@ -236,7 +236,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFEF4444),
+              backgroundColor: const Color(0xFFD93025),
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
@@ -247,7 +247,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(l10n.translate('deleteAccountSimpleMsg')),
-                    backgroundColor: const Color(0xFF7C3AED),
+                    backgroundColor: const Color(0xFF55226E),
                   ),
                 );
               }
@@ -279,7 +279,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFEF4444),
+              backgroundColor: const Color(0xFFD93025),
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
@@ -499,7 +499,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                         Container(
                           padding: const EdgeInsets.all(3),
-                          decoration: const BoxDecoration(color: Color(0xFF10B981), shape: BoxShape.circle),
+                          decoration: const BoxDecoration(color: Color(0xFF248A52), shape: BoxShape.circle),
                           child: const Icon(Icons.check, color: Colors.white, size: 12),
                         ),
                       ],
@@ -524,18 +524,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF10B981).withValues(alpha: 0.14),
+                                  color: const Color(0xFF248A52).withValues(alpha: 0.14),
                                   borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.4), width: 0.8),
+                                  border: Border.all(color: const Color(0xFF248A52).withValues(alpha: 0.4), width: 0.8),
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(Icons.verified_rounded, color: Color(0xFF10B981), size: 12),
+                                    const Icon(Icons.verified_rounded, color: Color(0xFF248A52), size: 12),
                                     const SizedBox(width: 4),
                                     Text(
                                       verificationBadgeText,
-                                      style: const TextStyle(color: Color(0xFF10B981), fontSize: 10, fontWeight: FontWeight.w800),
+                                      style: const TextStyle(color: Color(0xFF248A52), fontSize: 10, fontWeight: FontWeight.w800),
                                     ),
                                   ],
                                 ),
@@ -567,7 +567,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     _buildQuickCard(
                       context: context,
                       icon: Icons.receipt_long_rounded,
-                      iconColor: const Color(0xFF8B5CF6),
+                      iconColor: const Color(0xFF6D2E8C),
                       title: l10n.translate('orders'),
                       subtitle: l10n.translate('liveTracking'),
                       onTap: () => _nav(context, const OrdersScreen()),
@@ -576,7 +576,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     _buildQuickCard(
                       context: context,
                       icon: Icons.swap_horiz_rounded,
-                      iconColor: const Color(0xFF7C3AED),
+                      iconColor: const Color(0xFF55226E),
                       title: l10n.translate('swipeToSwap'),
                       subtitle: l10n.translate('refundsReturns'),
                       onTap: () => _nav(context, const ReturnsScreen()),
@@ -592,7 +592,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     _buildQuickCard(
                       context: context,
                       icon: Icons.location_on_rounded,
-                      iconColor: const Color(0xFF8B5CF6),
+                      iconColor: const Color(0xFF6D2E8C),
                       title: l10n.translate('deliveryAddresses'),
                       subtitle: l10n.translate('savedLocations'),
                       onTap: () => _nav(context, const AddressManagementScreen()),
@@ -601,7 +601,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     _buildQuickCard(
                       context: context,
                       icon: Icons.language_rounded,
-                      iconColor: const Color(0xFF7C3AED),
+                      iconColor: const Color(0xFF55226E),
                       title: currentLangName.split(' ').first,
                       subtitle: currentLangName.replaceFirst(currentLangName.split(' ').first, '').trim(),
                       onTap: () => _showLanguageBottomSheet(context),
@@ -620,7 +620,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _buildTile(
                     context: context,
                     icon: Icons.palette_outlined,
-                    iconColor: const Color(0xFF8B5CF6),
+                    iconColor: const Color(0xFF6D2E8C),
                     title: l10n.translate('displayAppearance'),
                     subtitle: l10n.translate('displayAppearanceSubtitle'),
                     onTap: () => _showThemePicker(context, themeProvider),
@@ -629,7 +629,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _buildTile(
                     context: context,
                     icon: Icons.language_rounded,
-                    iconColor: const Color(0xFF7C3AED),
+                    iconColor: const Color(0xFF55226E),
                     title: l10n.translate('language'),
                     subtitle: currentLangName,
                     onTap: () => _showLanguageBottomSheet(context),
@@ -638,7 +638,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _buildTile(
                     context: context,
                     icon: Icons.notifications_none_rounded,
-                    iconColor: const Color(0xFF8B5CF6),
+                    iconColor: const Color(0xFF6D2E8C),
                     title: l10n.translate('multiChannelAlerts'),
                     subtitle: l10n.translate('multiChannelAlertsSubtitle'),
                     onTap: () => NotificationCenterDrawer.show(context),
@@ -654,7 +654,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _buildTile(
                     context: context,
                     icon: Icons.account_balance_wallet_outlined,
-                    iconColor: const Color(0xFF8B5CF6),
+                    iconColor: const Color(0xFF6D2E8C),
                     title: l10n.translate('paymentMethods'),
                     subtitle: l10n.translate('paymentMethodsSubtitle'),
                     onTap: () => _nav(context, const PaymentMethodsScreen()),
@@ -663,7 +663,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _buildTile(
                     context: context,
                     icon: Icons.assignment_return_outlined,
-                    iconColor: const Color(0xFF7C3AED),
+                    iconColor: const Color(0xFF55226E),
                     title: l10n.translate('refundsReturns'),
                     subtitle: l10n.translate('refundsReturnsSubtitle'),
                     onTap: () => _nav(context, const ReturnsScreen()),
@@ -688,7 +688,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _buildTile(
                     context: context,
                     icon: Icons.gavel_rounded,
-                    iconColor: const Color(0xFFD97706),
+                    iconColor: const Color(0xFFB86E00),
                     title: l10n.translate('legalTerms'),
                     subtitle: l10n.translate('legalTermsSubtitle'),
                     onTap: () => _nav(context, const TermsLegalScreen()),
@@ -713,7 +713,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _buildTile(
                     context: context,
                     icon: Icons.support_agent_rounded,
-                    iconColor: const Color(0xFF06B6D4),
+                    iconColor: const Color(0xFF8E4FAE),
                     title: l10n.translate('customerSupport'),
                     subtitle: l10n.translate('customerSupportSubtitle'),
                     onTap: () => _nav(context, const SupportHubScreen()),
@@ -753,19 +753,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     TextButton.icon(
-                      icon: const Icon(Icons.logout_rounded, color: Color(0xFFEF4444), size: 17),
+                      icon: const Icon(Icons.logout_rounded, color: Color(0xFFD93025), size: 17),
                       label: Text(
                         l10n.translate('logOut'),
-                        style: const TextStyle(color: Color(0xFFEF4444), fontSize: 13, fontWeight: FontWeight.w700),
+                        style: const TextStyle(color: Color(0xFFD93025), fontSize: 13, fontWeight: FontWeight.w700),
                       ),
                       onPressed: () => _confirmLogout(context, auth),
                     ),
                     Text('  •  ', style: TextStyle(color: textSecondary)),
                     TextButton.icon(
-                      icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFDC2626), size: 17),
+                      icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFB3261E), size: 17),
                       label: Text(
                         l10n.translate('deleteAccountGdpr'),
-                        style: const TextStyle(color: Color(0xFFDC2626), fontSize: 12, fontWeight: FontWeight.w800),
+                        style: const TextStyle(color: Color(0xFFB3261E), fontSize: 12, fontWeight: FontWeight.w800),
                       ),
                       onPressed: () => _confirmDeleteAccount(context, auth),
                     ),

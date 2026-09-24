@@ -1,430 +1,269 @@
 import 'package:flutter/material.dart';
 
+/// Malvoya brand theme — "Thread M" identity.
+/// Quiet, premium, native: system fonts (SF Pro on iOS, Roboto on Android), one brand colour
+/// (Malva), warm Birch/Night neutrals and platform-standard status colours.
+/// Member names are kept from earlier versions so every screen keeps compiling.
 class AppTheme {
-  // ── Malvoya Option B: Neo-Vibrant Glassmorphism Signature Palette ──────────
-  static const Color primary = Color(0xFF8B5CF6);       // Electric Violet / Iris
-  static const Color primaryDark = Color(0xFF7C3AED);   // Deep Violet
-  static const Color primaryLight = Color(0xFFEDE9FE);  // Soft Violet tint
-  static const Color accent = Color(0xFFEC4899);        // Hot Fuchsia / Pink
-  static const Color accentLight = Color(0xFFFCE7F3);   // Soft Pink tint
-  static const Color emerald = Color(0xFF10B981);       // Sub-second Dispatch Emerald
-  static const Color emeraldLight = Color(0xFFD1FAE5);  // Soft Emerald tint
-  static const Color success = Color(0xFF10B981);
-  static const Color warning = Color(0xFFF59E0B);       // Radiant Amber
-  static const Color background = Color(0xFF0F081D);    // Deep Velvet Violet Canvas
-  static const Color surface = Color(0xFF1B1033);       // Velvet Amethyst Surface
-  static const Color textPrimary = Color(0xFFFAF5FF);   // Luminous Velvet White
-  static const Color textSecondary = Color(0xFFC4B5FD); // Soft Lavender Violet
-  static const Color divider = Color(0xFF2E1B50);
-  static const Color glassBorder = Color(0x3D8B5CF6);   // Frosted Violet stroke
+  // ── Brand ────────────────────────────────────────────────────────────────
+  static const Color primary = Color(0xFF6D2E8C);       // Malva
+  static const Color primaryDark = Color(0xFF55226E);
+  static const Color primaryLight = Color(0xFFF1E7F6);
+  static const Color accent = Color(0xFF9B5DB8);        // Malva, lighter
+  static const Color accentLight = Color(0xFFF3E8F7);
+  static const Color emerald = Color(0xFF248A52);       // success (AA on white)
+  static const Color emeraldLight = Color(0xFFE3F2E9);
+  static const Color success = Color(0xFF248A52);
+  static const Color warning = Color(0xFFE08A00);
 
-  // ── Glossy Vibrant Style Flavors & Specular Glass Decorators ─────────────
-  // 1. Electric Iris & Fuchsia Glow (Signature)
+  // Dark-surface constants (screens use these on dark backgrounds)
+  static const Color background = Color(0xFF17131C);    // Night
+  static const Color surface = Color(0xFF221C29);
+  static const Color textPrimary = Color(0xFFF6F3EE);   // Birch
+  static const Color textSecondary = Color(0xFFB9AFC2);
+  static const Color divider = Color(0xFF3A3242);
+  static const Color glassBorder = Color(0x1F6D2E8C);
+
+  // Light neutrals
+  static const Color birch = Color(0xFFF6F3EE);
+  static const Color night = Color(0xFF17131C);
+  static const Color ink = Color(0xFF1C1820);
+  static const Color inkSecondary = Color(0xFF6B6472);
+
+  // ── Tonal fills (kept as gradients for API compatibility, intentionally subtle) ──
   static const LinearGradient irisFuchsiaGradient = LinearGradient(
-    colors: [Color(0xFF8B5CF6), Color(0xFFD946EF), Color(0xFFEC4899)],
+    colors: [Color(0xFF6D2E8C), Color(0xFF5E2779)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
-
-  // 2. Cyber Mint & Emerald Aurora (Fintech Luxury)
   static const LinearGradient cyberMintGradient = LinearGradient(
-    colors: [Color(0xFF10B981), Color(0xFF0D9488), Color(0xFF06B6D4)],
+    colors: [Color(0xFF248A52), Color(0xFF1E7545)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
-
-  // 3. Cosmic Coral & Sunset Prism (High Energy)
   static const LinearGradient cosmicCoralGradient = LinearGradient(
-    colors: [Color(0xFFF97316), Color(0xFFF43F5E), Color(0xFFEC4899)],
+    colors: [Color(0xFFC2412D), Color(0xFFA83725)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
-
-  // 4. Crystal Pearl & Liquid Ice (VisionOS Specular Glass)
   static const LinearGradient crystalPearlGradient = LinearGradient(
-    colors: [Color(0xFF0F172A), Color(0xFF312E81), Color(0xFF1E1B4B)],
+    colors: [Color(0xFF221C29), Color(0xFF17131C)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
-  /// Builds a liquid frosted glass decoration with 1.5px top specular highlight
-  /// and dual-layer ambient chromatic glow.
+  /// Clean card: solid surface, hairline border, soft shadow.
   static BoxDecoration glossyCardDecoration({
-    Color glowColor = const Color(0xFF8B5CF6),
-    double radius = 24.0,
+    Color glowColor = primary,
+    double radius = 20.0,
     bool isDark = false,
   }) {
     return BoxDecoration(
+      color: isDark ? const Color(0xFF221C29) : Colors.white,
       borderRadius: BorderRadius.circular(radius),
-      gradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: isDark
-            ? [
-                const Color(0xFF1E1438).withValues(alpha: 0.88),
-                const Color(0xFF120B24).withValues(alpha: 0.70),
-              ]
-            : [
-                Colors.white.withValues(alpha: 0.92),
-                const Color(0xFFF8F7FF).withValues(alpha: 0.75),
-              ],
-      ),
-      border: Border(
-        top: BorderSide(
-          color: Colors.white.withValues(alpha: isDark ? 0.35 : 0.95),
-          width: 1.5,
-        ),
-        left: BorderSide(
-          color: Colors.white.withValues(alpha: isDark ? 0.20 : 0.65),
-          width: 1.0,
-        ),
-        right: BorderSide(
-          color: glowColor.withValues(alpha: 0.18),
-          width: 1.0,
-        ),
-        bottom: BorderSide(
-          color: glowColor.withValues(alpha: 0.22),
-          width: 1.0,
-        ),
-      ),
-      boxShadow: [
-        BoxShadow(
-          color: glowColor.withValues(alpha: isDark ? 0.25 : 0.18),
-          blurRadius: 24,
-          offset: const Offset(0, 10),
-        ),
-        BoxShadow(
-          color: Colors.black.withValues(alpha: 0.04),
-          blurRadius: 6,
-          offset: const Offset(0, 2),
-        ),
-      ],
+      border: Border.all(color: isDark ? const Color(0xFF332B3B) : const Color(0xFFE9E4EC), width: 0.8),
+      boxShadow: isDark
+          ? const []
+          : [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 16, offset: const Offset(0, 4))],
     );
   }
 
-  // Keep legacy alias so existing code doesn't break
   static const Color primaryColor = primary;
 
-  // Option B Signature Gradients
   static const LinearGradient primaryGradient = LinearGradient(
-    colors: [Color(0xFFEC4899), Color(0xFF8B5CF6)],
+    colors: [Color(0xFF7A3599), Color(0xFF6D2E8C)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
+  static const LinearGradient violetGradient = primaryGradient;
+  static const LinearGradient emeraldGradient = cyberMintGradient;
+  static const LinearGradient darkCardGradient = crystalPearlGradient;
 
-  static const LinearGradient violetGradient = LinearGradient(
-    colors: [Color(0xFF8B5CF6), Color(0xFF6D28D9)],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  );
-
-  static const LinearGradient emeraldGradient = LinearGradient(
-    colors: [Color(0xFF10B981), Color(0xFF059669)],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  );
-
-  static const LinearGradient darkCardGradient = LinearGradient(
-    colors: [Color(0xFF18102C), Color(0xFF100A20)],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  );
-
-  // Option B Ambient Glass Shadows
   static List<BoxShadow> get cardShadow => [
-    BoxShadow(
-      color: const Color(0xFF8B5CF6).withValues(alpha: 0.08),
-      blurRadius: 20,
-      offset: const Offset(0, 8),
-    ),
-    BoxShadow(
-      color: Colors.black.withValues(alpha: 0.03),
-      blurRadius: 6,
-      offset: const Offset(0, 2),
-    ),
-  ];
+        BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 16, offset: const Offset(0, 4)),
+      ];
 
   static List<BoxShadow> get glowShadow => [
-    BoxShadow(
-      color: const Color(0xFF8B5CF6).withValues(alpha: 0.35),
-      blurRadius: 18,
-      offset: const Offset(0, 6),
-    ),
-  ];
+        BoxShadow(color: primary.withValues(alpha: 0.18), blurRadius: 12, offset: const Offset(0, 4)),
+      ];
 
-  // 1. Neo-Vibrant Luxury Light Theme (Wolt-Superior Crisp White)
-  static ThemeData get lightTheme {
+  // ── Shared component styling ─────────────────────────────────────────────
+  static const _radius = 14.0;
+  static const _pageTransitions = PageTransitionsTheme(builders: {
+    TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+    TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+    TargetPlatform.android: PredictiveBackPageTransitionsBuilder(),
+  });
+
+  static ThemeData _base({
+    required Brightness brightness,
+    required Color bg,
+    required Color surfaceColor,
+    required Color fill,
+    required Color border,
+    required Color text,
+    required Color subtext,
+    Color brand = primary,
+  }) {
+    final scheme = ColorScheme.fromSeed(seedColor: brand, brightness: brightness).copyWith(
+      primary: brightness == Brightness.dark ? const Color(0xFFC9A3DD) : brand,
+      onPrimary: brightness == Brightness.dark ? const Color(0xFF2A0F38) : Colors.white,
+      secondary: accent,
+      surface: surfaceColor,
+      onSurface: text,
+      onSurfaceVariant: subtext,
+      outlineVariant: border,
+      error: brightness == Brightness.dark ? const Color(0xFFFF6B5E) : const Color(0xFFD93025),
+    );
+    final buttonShape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(_radius));
+    const buttonText = TextStyle(fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: -0.2);
+    const buttonSize = Size.fromHeight(52);
+
     return ThemeData(
       useMaterial3: true,
-      brightness: Brightness.light,
-      primaryColor: primary,
-      scaffoldBackgroundColor: Colors.white,
-      colorScheme: const ColorScheme.light(
-        primary: primary,
-        secondary: accent,
-        surface: Colors.white,
-        error: Color(0xFFEF4444),
-      ),
-      appBarTheme: const AppBarTheme(
-        backgroundColor: Colors.white,
+      brightness: brightness,
+      colorScheme: scheme,
+      primaryColor: scheme.primary,
+      scaffoldBackgroundColor: bg,
+      pageTransitionsTheme: _pageTransitions,
+      splashFactory: InkSparkle.splashFactory,
+      dividerTheme: DividerThemeData(color: border, thickness: 0.6, space: 0.6),
+      appBarTheme: AppBarTheme(
+        backgroundColor: bg,
+        foregroundColor: text,
         elevation: 0,
-        scrolledUnderElevation: 0.5,
-        shadowColor: Color(0x1A8B5CF6),
-        iconTheme: IconThemeData(color: Color(0xFF0F0B1E)),
-        titleTextStyle: TextStyle(
-          color: Color(0xFF0F0B1E),
-          fontSize: 18,
-          fontWeight: FontWeight.w800,
-          letterSpacing: -0.3,
-        ),
+        scrolledUnderElevation: 0,
+        centerTitle: true,
         surfaceTintColor: Colors.transparent,
+        iconTheme: IconThemeData(color: text),
+        titleTextStyle: TextStyle(color: text, fontSize: 17, fontWeight: FontWeight.w600, letterSpacing: -0.3),
       ),
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: Colors.white,
-        selectedItemColor: primary,
-        unselectedItemColor: Color(0xFF6B7280),
+      bottomNavigationBarTheme: BottomNavigationBarThemeData(
+        backgroundColor: surfaceColor,
+        selectedItemColor: scheme.primary,
+        unselectedItemColor: subtext,
         showUnselectedLabels: true,
         elevation: 0,
         type: BottomNavigationBarType.fixed,
-        selectedLabelStyle: TextStyle(fontWeight: FontWeight.w700, fontSize: 11),
-        unselectedLabelStyle: TextStyle(fontWeight: FontWeight.w500, fontSize: 11),
+        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 11),
+        unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 11),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: surfaceColor,
+        indicatorColor: scheme.primary.withValues(alpha: 0.12),
+        elevation: 0,
+        labelTextStyle: WidgetStateProperty.all(const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
       ),
       cardTheme: CardThemeData(
-        color: Colors.white,
+        color: surfaceColor,
         elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
-          side: const BorderSide(color: Color(0x1A8B5CF6), width: 1.2),
-        ),
         margin: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18), side: BorderSide(color: border, width: 0.8)),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: primary,
-          foregroundColor: Colors.white,
-          elevation: 2,
-          shadowColor: const Color(0xFF8B5CF6).withValues(alpha: 0.4),
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          textStyle: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.2,
-          ),
+          backgroundColor: scheme.primary,
+          foregroundColor: scheme.onPrimary,
+          elevation: 0,
+          minimumSize: buttonSize,
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          shape: buttonShape,
+          textStyle: buttonText,
         ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(minimumSize: buttonSize, shape: buttonShape, textStyle: buttonText),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: primary,
-          side: const BorderSide(color: primary, width: 1.5),
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          textStyle: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-          ),
+          foregroundColor: scheme.primary,
+          minimumSize: buttonSize,
+          side: BorderSide(color: border, width: 1),
+          shape: buttonShape,
+          textStyle: buttonText,
         ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(foregroundColor: scheme.primary, textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: const Color(0xFFF3F1FA),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(20),
-          borderSide: const BorderSide(color: Color(0x1F8B5CF6)),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(20),
-          borderSide: const BorderSide(color: Color(0x1F8B5CF6)),
-        ),
+        fillColor: fill,
+        labelStyle: TextStyle(color: subtext),
+        hintStyle: TextStyle(color: subtext.withValues(alpha: 0.8)),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(_radius), borderSide: BorderSide.none),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(_radius), borderSide: BorderSide.none),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(20),
-          borderSide: const BorderSide(color: primary, width: 1.8),
+          borderRadius: BorderRadius.circular(_radius),
+          borderSide: BorderSide(color: scheme.primary, width: 1.5),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       ),
-    );
-  }
-
-  // 2. Midnight OLED Dark Theme (#0A0518) - Malvoya Signature
-  static ThemeData get darkTheme {
-    const darkBg = Color(0xFF0A0518);
-    const darkSurface = Color(0xFF140D28);
-    const darkElevated = Color(0xFF1E133C);
-    const darkTextPrimary = Color(0xFFFAF7FF);
-    const darkTextSecondary = Color(0xFFA8A2B8);
-    const darkBorder = Color(0xFF2E1F52);
-
-    return ThemeData(
-      useMaterial3: true,
-      brightness: Brightness.dark,
-      primaryColor: primary,
-      scaffoldBackgroundColor: darkBg,
-      colorScheme: const ColorScheme.dark(
-        primary: primary,
-        secondary: accent,
-        surface: darkSurface,
-        error: Color(0xFFEF4444),
+      chipTheme: ChipThemeData(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        side: BorderSide(color: border),
+        labelStyle: TextStyle(color: text, fontWeight: FontWeight.w500),
       ),
-      appBarTheme: const AppBarTheme(
-        backgroundColor: darkSurface,
-        elevation: 0,
-        iconTheme: IconThemeData(color: darkTextPrimary),
-        titleTextStyle: TextStyle(
-          color: darkTextPrimary,
-          fontSize: 18,
-          fontWeight: FontWeight.w700,
-          letterSpacing: -0.3,
-        ),
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: brightness == Brightness.dark ? const Color(0xFF3A3242) : night,
+        contentTextStyle: const TextStyle(color: Colors.white, fontSize: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: surfaceColor,
         surfaceTintColor: Colors.transparent,
+        showDragHandle: true,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
       ),
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: darkSurface,
-        selectedItemColor: primary,
-        unselectedItemColor: darkTextSecondary,
-        showUnselectedLabels: true,
-        elevation: 0,
-        type: BottomNavigationBarType.fixed,
-      ),
-      cardTheme: CardThemeData(
-        color: darkSurface,
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
-          side: const BorderSide(color: Color(0x338B5CF6), width: 1.2),
-        ),
-        margin: EdgeInsets.zero,
-      ),
-      elevatedButtonTheme: ElevatedButtonThemeData(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: primary,
-          foregroundColor: Colors.white,
-          elevation: 4,
-          shadowColor: const Color(0xFF8B5CF6).withValues(alpha: 0.5),
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        ),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: darkElevated,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: const BorderSide(color: darkBorder)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: const BorderSide(color: darkBorder)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: const BorderSide(color: primary, width: 1.8)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      ),
-    );
-  }
-
-  // 3. Eye-Protection Amber Theme (3400K Warm Filter for Blue Light Reduction)
-  static ThemeData get eyeComfortTheme {
-    const amberBg = Color(0xFF14110E);
-    const amberSurface = Color(0xFF1E1813);
-    const amberElevated = Color(0xFF2A2119);
-    const amberTextPrimary = Color(0xFFFDE8CF);
-    const amberTextSecondary = Color(0xFFC7B299);
-    const amberBorder = Color(0xFF382C22);
-    const amberPrimary = Color(0xFFE08A28);
-
-    return ThemeData(
-      useMaterial3: true,
-      brightness: Brightness.dark,
-      primaryColor: amberPrimary,
-      scaffoldBackgroundColor: amberBg,
-      colorScheme: const ColorScheme.dark(
-        primary: amberPrimary,
-        secondary: Color(0xFFE06040),
-        surface: amberSurface,
-        error: Color(0xFFEF4444),
-      ),
-      appBarTheme: const AppBarTheme(
-        backgroundColor: amberSurface,
-        elevation: 0,
-        iconTheme: IconThemeData(color: amberTextPrimary),
-        titleTextStyle: TextStyle(
-          color: amberTextPrimary,
-          fontSize: 18,
-          fontWeight: FontWeight.w700,
-          letterSpacing: -0.3,
-        ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: surfaceColor,
         surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       ),
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: amberSurface,
-        selectedItemColor: amberPrimary,
-        unselectedItemColor: amberTextSecondary,
-        showUnselectedLabels: true,
-        elevation: 0,
-        type: BottomNavigationBarType.fixed,
-      ),
-      cardTheme: CardThemeData(
-        color: amberSurface,
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
-          side: const BorderSide(color: amberBorder, width: 1),
-        ),
-        margin: EdgeInsets.zero,
-      ),
-      elevatedButtonTheme: ElevatedButtonThemeData(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: amberPrimary,
-          foregroundColor: Colors.white,
-          elevation: 0,
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        ),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: amberElevated,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: const BorderSide(color: amberBorder)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: const BorderSide(color: amberBorder)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: const BorderSide(color: amberPrimary, width: 1.5)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      ),
+      listTileTheme: ListTileThemeData(iconColor: subtext, textColor: text),
     );
   }
 
-  // ── Dynamic Semantic Theme Helpers (Wolt-Superior 2-Mode System) ─────────────
-  static bool isDarkMode(BuildContext context) {
-    return Theme.of(context).brightness == Brightness.dark;
-  }
+  static ThemeData get lightTheme => _base(
+        brightness: Brightness.light,
+        bg: birch,
+        surfaceColor: Colors.white,
+        fill: const Color(0xFFEFEBF1),
+        border: const Color(0xFFE6E1EA),
+        text: ink,
+        subtext: inkSecondary,
+      );
 
-  static Color scaffoldBackground(BuildContext context) {
-    return Theme.of(context).scaffoldBackgroundColor;
-  }
+  static ThemeData get darkTheme => _base(
+        brightness: Brightness.dark,
+        bg: const Color(0xFF121015),
+        surfaceColor: surface,
+        fill: const Color(0xFF2A2331),
+        border: const Color(0xFF332B3B),
+        text: textPrimary,
+        subtext: textSecondary,
+      );
 
-  static Color cardBackground(BuildContext context) {
-    if (isDarkMode(context)) return const Color(0xFF140D28);
-    return Colors.white;
-  }
+  /// Warm, low-blue-light variant of the dark theme.
+  static ThemeData get eyeComfortTheme => _base(
+        brightness: Brightness.dark,
+        bg: const Color(0xFF14110E),
+        surfaceColor: const Color(0xFF1E1813),
+        fill: const Color(0xFF2A2119),
+        border: const Color(0xFF382C22),
+        text: const Color(0xFFFDE8CF),
+        subtext: const Color(0xFFC7B299),
+        brand: const Color(0xFFB9772A),
+      );
 
-  static Color cardBorder(BuildContext context) {
-    if (isDarkMode(context)) return const Color(0xFF2E1F52);
-    return const Color(0x1F8B5CF6);
-  }
-
-  static Color primaryText(BuildContext context) {
-    if (isDarkMode(context)) return const Color(0xFFFAF7FF);
-    return const Color(0xFF0F0B1E); // Crisp deep velvet obsidian in Light mode
-  }
-
-  static Color secondaryText(BuildContext context) {
-    if (isDarkMode(context)) return const Color(0xFFA8A2B8);
-    return const Color(0xFF4B5563); // Rich neutral slate in Light mode
-  }
-
-  static Color inputBackground(BuildContext context) {
-    if (isDarkMode(context)) return const Color(0xFF1E133C);
-    return const Color(0xFFF6F4FB);
-  }
-
-  static Color subtleDivider(BuildContext context) {
-    if (isDarkMode(context)) return const Color(0xFF20163A);
-    return const Color(0xFFEDE8F5);
-  }
+  // ── Context helpers ──────────────────────────────────────────────────────
+  static bool isDarkMode(BuildContext context) => Theme.of(context).brightness == Brightness.dark;
+  static Color scaffoldBackground(BuildContext context) => Theme.of(context).scaffoldBackgroundColor;
+  static Color cardBackground(BuildContext context) => isDarkMode(context) ? surface : Colors.white;
+  static Color cardBorder(BuildContext context) => isDarkMode(context) ? const Color(0xFF332B3B) : const Color(0xFFE6E1EA);
+  static Color primaryText(BuildContext context) => isDarkMode(context) ? textPrimary : ink;
+  static Color secondaryText(BuildContext context) => isDarkMode(context) ? textSecondary : inkSecondary;
+  static Color inputBackground(BuildContext context) => isDarkMode(context) ? const Color(0xFF2A2331) : const Color(0xFFEFEBF1);
+  static Color subtleDivider(BuildContext context) => isDarkMode(context) ? const Color(0xFF2A2331) : const Color(0xFFEDE8F0);
 }

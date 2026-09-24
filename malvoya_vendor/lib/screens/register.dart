@@ -121,9 +121,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.error_outline, color: Color(0xFFE53E3E), size: 18),
+                      const Icon(Icons.error_outline, color: Color(0xFFD93025), size: 18),
                       const SizedBox(width: 8),
-                      Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFE53E3E), fontSize: 13))),
+                      Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFD93025), fontSize: 13))),
                     ],
                   ),
                 ),

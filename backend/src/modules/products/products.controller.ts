@@ -6,9 +6,9 @@ import * as productsService from "./products.service";
 export async function listProducts(req: AuthRequest, res: Response) {
   try {
     const query = productQuerySchema.parse(req.query);
-    const data  = await productsService.getProductsByStore(Number(req.params.storeId), query as any);
+    const data  = await productsService.getProductsByStore(Number(req.params.storeId), query as any, req.user?.id);
     res.json({ ok: true, ...data });
-  } catch (e: any) { res.status(400).json({ ok: false, error: e.message }); }
+  } catch (e: any) { console.error(e); res.status(400).json({ ok: false, error: "Invalid request" }); }
 }
 
 export async function getProduct(req: AuthRequest, res: Response) {
@@ -28,7 +28,7 @@ export async function createProduct(req: AuthRequest, res: Response) {
     if (!store) return res.status(404).json({ ok: false, error: "Create your store first" });
     const product = await productsService.createProduct(store.id, result.data);
     res.status(201).json({ ok: true, product });
-  } catch (e: any) { res.status(400).json({ ok: false, error: e.message }); }
+  } catch (e: any) { console.error(e); res.status(400).json({ ok: false, error: "Invalid request" }); }
 }
 
 export async function updateProduct(req: AuthRequest, res: Response) {
@@ -38,7 +38,7 @@ export async function updateProduct(req: AuthRequest, res: Response) {
     const product = await productsService.updateProduct(Number(req.params.id), req.user!.id, result.data);
     res.json({ ok: true, product });
   } catch (e: any) {
-    res.status(e.message === "Forbidden" ? 403 : 404).json({ ok: false, error: e.message });
+    res.status(e.message === "Forbidden" ? 403 : 404).json({ ok: false, error: e.message === "Forbidden" ? "Forbidden" : "Product not found" });
   }
 }
 
@@ -47,6 +47,6 @@ export async function deleteProduct(req: AuthRequest, res: Response) {
     await productsService.deleteProduct(Number(req.params.id), req.user!.id);
     res.json({ ok: true });
   } catch (e: any) {
-    res.status(e.message === "Forbidden" ? 403 : 404).json({ ok: false, error: e.message });
+    res.status(e.message === "Forbidden" ? 403 : 404).json({ ok: false, error: e.message === "Forbidden" ? "Forbidden" : "Product not found" });
   }
 }

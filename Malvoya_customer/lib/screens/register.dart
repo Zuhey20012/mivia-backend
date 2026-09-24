@@ -291,9 +291,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.error_outline, color: Color(0xFFE53E3E), size: 18),
+                      const Icon(Icons.error_outline, color: Color(0xFFD93025), size: 18),
                       const SizedBox(width: 8),
-                      Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFE53E3E), fontSize: 13))),
+                      Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFD93025), fontSize: 13))),
                     ],
                   ),
                 ),
@@ -306,11 +306,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   color: isDark
-                      ? (_agreeToTerms ? const Color(0xFF27174A) : const Color(0xFF1E133C))
-                      : (_agreeToTerms ? const Color(0xFFEDE9FE) : const Color(0xFFF6F4FB)),
+                      ? (_agreeToTerms ? const Color(0xFF27174A) : const Color(0xFF2A2331))
+                      : (_agreeToTerms ? const Color(0xFFF1E7F6) : const Color(0xFFF6F4FB)),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: _agreeToTerms ? AppTheme.primary : (isDark ? const Color(0xFF8B5CF6) : const Color(0xFFDDD6FE)),
+                    color: _agreeToTerms ? AppTheme.primary : (isDark ? const Color(0xFF6D2E8C) : const Color(0xFFDDD6FE)),
                     width: 1.5,
                   ),
                 ),
@@ -326,7 +326,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         checkColor: Colors.white,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                         side: BorderSide(
-                          color: isDark ? const Color(0xFFA78BFA) : const Color(0xFF8B5CF6),
+                          color: isDark ? const Color(0xFF9B5DB8) : const Color(0xFF6D2E8C),
                           width: 1.8,
                         ),
                         onChanged: (v) {
@@ -354,7 +354,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           l10n.translate('agreeTermsText'),
                           style: TextStyle(
                             fontSize: 13,
-                            color: isDark ? const Color(0xFFFAF7FF) : const Color(0xFF0F0B1E),
+                            color: isDark ? const Color(0xFFF6F3EE) : const Color(0xFF1C1820),
                             fontWeight: FontWeight.w700,
                             height: 1.45,
                           ),

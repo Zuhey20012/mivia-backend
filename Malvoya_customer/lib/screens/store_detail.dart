@@ -226,7 +226,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                             shape: BoxShape.circle,
                             color: isOutOfStock
                                 ? Colors.red
-                                : (stock <= 3 ? const Color(0xFFF59E0B) : const Color(0xFF10B981)),
+                                : (stock <= 3 ? const Color(0xFFE08A00) : const Color(0xFF248A52)),
                           ),
                         ),
                         const SizedBox(width: 6),
@@ -241,7 +241,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                             fontWeight: FontWeight.w700,
                             color: isOutOfStock
                                 ? Colors.red
-                                : (stock <= 3 ? const Color(0xFFF59E0B) : const Color(0xFF10B981)),
+                                : (stock <= 3 ? const Color(0xFFE08A00) : const Color(0xFF248A52)),
                           ),
                         ),
                       ],

@@ -1,28 +1,6 @@
 /**
- * Dynamic In-Transit Machine Translation Service
- *
- * Implements bidirectional real-time translation for in-transit chat between
- * couriers, customers, and boutique vendors across 25 EU/Nordic/universal languages.
+ * Quick-reply phrasebook for courier ↔ customer chat.
  */
-
-export interface ChatTranslationRequest {
-  text: string;
-  sourceLanguage?: string;
-  targetLanguage: string;
-  orderId?: number;
-  senderRole: "CUSTOMER" | "COURIER" | "VENDOR";
-}
-
-export interface ChatTranslationResponse {
-  originalText: string;
-  translatedText: string;
-  sourceLanguage: string;
-  targetLanguage: string;
-  detectedConfidence: number;
-  timestamp: string;
-}
-
-// Core delivery and logistics phrasebook mappings for instant zero-latency translation
 const COMMON_PHRASES: Record<string, Record<string, string>> = {
   arrived: {
     en: "I have arrived at your building entrance.",
@@ -75,37 +53,21 @@ const COMMON_PHRASES: Record<string, Record<string, string>> = {
 };
 
 /**
- * Translates message bidirectionally into recipient's target language.
+ * Translates the courier/customer quick-reply phrases. Free text is returned unchanged with
+ * `translated: false` — there is no machine translation provider wired up.
  */
-export async function translateChatMessage(req: ChatTranslationRequest): Promise<ChatTranslationResponse> {
+export function translateChatMessage(req: { text: string; targetLanguage: string }) {
   const target = req.targetLanguage.toLowerCase().slice(0, 2);
-  const text = req.text.trim();
+  const normalized = req.text.trim().toLowerCase();
 
-  // 1. Check quick phrasebook lookup
-  for (const phraseKey of Object.keys(COMMON_PHRASES)) {
-    const translations = COMMON_PHRASES[phraseKey];
+  for (const translations of Object.values(COMMON_PHRASES)) {
     for (const [lang, phrase] of Object.entries(translations)) {
-      if (text.toLowerCase().includes(phrase.toLowerCase()) || phrase.toLowerCase().includes(text.toLowerCase())) {
-        const translatedText = translations[target] || translations["en"] || text;
-        return {
-          originalText: text,
-          translatedText,
-          sourceLanguage: lang,
-          targetLanguage: target,
-          detectedConfidence: 0.98,
-          timestamp: new Date().toISOString(),
-        };
+      if (normalized === phrase.toLowerCase()) {
+        const translatedText = translations[target];
+        if (!translatedText) break;
+        return { originalText: req.text, translatedText, sourceLanguage: lang, targetLanguage: target, translated: true };
       }
     }
   }
-
-  // 2. High-precision dynamic translation fallback
-  return {
-    originalText: text,
-    translatedText: text, // transparent pass-through when languages match
-    sourceLanguage: req.sourceLanguage || "en",
-    targetLanguage: target,
-    detectedConfidence: 0.95,
-    timestamp: new Date().toISOString(),
-  };
+  return { originalText: req.text, translatedText: req.text, sourceLanguage: null, targetLanguage: target, translated: false };
 }

@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../config/theme.dart';
+import 'payment_methods_screen.dart';
 import '../theme_provider.dart';
 import '../auth_service.dart';
 import 'chatbot.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../realtime_notification_service.dart';
 import 'map_address_picker.dart';
 
 class ProfileDetailScreen extends StatefulWidget {
@@ -20,7 +20,6 @@ class ProfileDetailScreen extends StatefulWidget {
 class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
   // Authentic State: Starts completely EMPTY (Zero fake data)
   List<Map<String, String>> _addresses = [];
-  List<Map<String, String>> _paymentMethods = [];
   List<Map<String, dynamic>> _returns = [];
 
   // Settings Toggles
@@ -46,12 +45,8 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
         _addresses = decoded.map((e) => Map<String, String>.from(e)).toList();
       }
 
-      // 2. Payment Methods
-      final savedPm = prefs.getString('malvoya_saved_payment_methods');
-      if (savedPm != null) {
-        final List<dynamic> decoded = jsonDecode(savedPm);
-        _paymentMethods = decoded.map((e) => Map<String, String>.from(e)).toList();
-      }
+      // 2. Card/bank details are no longer kept on the device; clear anything older builds stored.
+      await prefs.remove('malvoya_saved_payment_methods');
 
       // 3. Returns
       final savedRet = prefs.getString('malvoya_saved_returns');
@@ -71,13 +66,6 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
     } catch (_) {}
   }
 
-  Future<void> _persistPaymentMethods() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('malvoya_saved_payment_methods', jsonEncode(_paymentMethods));
-    } catch (_) {}
-  }
-
   // ignore: unused_element
   Future<void> _persistReturns() async {
     try {
@@ -86,59 +74,6 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
     } catch (_) {}
   }
 
-  // ==========================================
-  // LUHN ALGORITHM FOR CARD VALIDATION
-  // ==========================================
-  bool _isValidLuhn(String cardNumber) {
-    final cleaned = cardNumber.replaceAll(RegExp(r'\s+'), '');
-    if (cleaned.length < 13 || cleaned.length > 19) return false;
-    if (!RegExp(r'^\d+$').hasMatch(cleaned)) return false;
-
-    int sum = 0;
-    bool alternate = false;
-    for (int i = cleaned.length - 1; i >= 0; i--) {
-      int digit = int.parse(cleaned[i]);
-      if (alternate) {
-        digit *= 2;
-        if (digit > 9) digit -= 9;
-      }
-      sum += digit;
-      alternate = !alternate;
-    }
-    return (sum % 10 == 0);
-  }
-
-  // ==========================================
-  // MODULO-97 FOR EUROPEAN SEPA IBAN VALIDATION
-  // ==========================================
-  bool _isValidIBAN(String iban) {
-    final cleaned = iban.replaceAll(RegExp(r'\s+'), '').toUpperCase();
-    if (cleaned.length < 15 || cleaned.length > 34) return false;
-    if (!RegExp(r'^[A-Z]{2}[0-9]{2}[A-Z0-9]+$').hasMatch(cleaned)) return false;
-
-    // Rearrange: move first 4 characters to end
-    final rearranged = cleaned.substring(4) + cleaned.substring(0, 4);
-
-    // Convert letters to numbers (A=10, B=11, etc.)
-    final sb = StringBuffer();
-    for (int i = 0; i < rearranged.length; i++) {
-      final code = rearranged.codeUnitAt(i);
-      if (code >= 65 && code <= 90) {
-        sb.write(code - 55);
-      } else {
-        sb.write(rearranged[i]);
-      }
-    }
-
-    // BigInt Modulo 97 check
-    final numStr = sb.toString();
-    try {
-      BigInt bigVal = BigInt.parse(numStr);
-      return (bigVal % BigInt.from(97)) == BigInt.one;
-    } catch (_) {
-      return false;
-    }
-  }
 
   // ==========================================
   // 1. DELIVERY ADDRESSES OVERHAUL
@@ -165,7 +100,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
 
             // Option 1: GPS Pinpoint
             ListTile(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: Color(0xFFE2E8F0))),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: Color(0xFFE6E1EA))),
               leading: Container(
                 width: 44, height: 44,
                 decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(12)),
@@ -200,10 +135,10 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
 
             // Option 2: Interactive Map Picker
             ListTile(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: Color(0xFFE2E8F0))),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: Color(0xFFE6E1EA))),
               leading: Container(
                 width: 44, height: 44,
-                decoration: BoxDecoration(color: const Color(0xFFFAF5FF), borderRadius: BorderRadius.circular(12)),
+                decoration: BoxDecoration(color: const Color(0xFFF6F3EE), borderRadius: BorderRadius.circular(12)),
                 child: const Icon(Icons.map_outlined, color: AppTheme.primary, size: 22),
               ),
               title: const Text('Pick on Interactive Map', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
@@ -218,7 +153,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
 
             // Option 3: Manual Form
             ListTile(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: Color(0xFFE2E8F0))),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: Color(0xFFE6E1EA))),
               leading: Container(
                 width: 44, height: 44,
                 decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(12)),
@@ -255,7 +190,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('📍 OpenStreetMap address pinned: ${result.fullAddress}'),
-          backgroundColor: const Color(0xFF10B981),
+          backgroundColor: const Color(0xFF248A52),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -333,326 +268,6 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
   }
 
   // ==========================================
-  // 2. PAYMENT METHODS (LUHN & SEPA IBAN)
-  // ==========================================
-  void _openAddPaymentMethodModal() {
-    int selectedTab = 0; // 0 = Card, 1 = European Bank (SEPA IBAN)
-
-    // Card Controllers
-    final cardNameCtrl = TextEditingController();
-    final cardNumberCtrl = TextEditingController();
-    final cardExpiryCtrl = TextEditingController();
-    final cardCvvCtrl = TextEditingController();
-
-    // Bank Controllers
-    final bankHolderCtrl = TextEditingController();
-    final bankIbanCtrl = TextEditingController();
-    final bankSwiftCtrl = TextEditingController(text: 'NDEAFIHH');
-
-    String? validationError;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) => Padding(
-          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom + 24, left: 24, right: 24, top: 20),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2))),
-                ),
-                const SizedBox(height: 18),
-                const Text('Add Payment Method', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppTheme.textPrimary)),
-                const SizedBox(height: 6),
-                const Text('Protected by Stripe Level 1 PCI-DSS and SEPA banking standards.', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
-                const SizedBox(height: 16),
-
-                // Tab Switcher
-                Container(
-                  decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(12)),
-                  padding: const EdgeInsets.all(4),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => setSheet(() { selectedTab = 0; validationError = null; }),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                            decoration: BoxDecoration(
-                              color: selectedTab == 0 ? Colors.white : Colors.transparent,
-                              borderRadius: BorderRadius.circular(10),
-                              boxShadow: selectedTab == 0 ? [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4)] : null,
-                            ),
-                            child: Center(
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.credit_card_rounded, size: 18, color: selectedTab == 0 ? AppTheme.primary : Colors.grey),
-                                  const SizedBox(width: 6),
-                                  Text('Credit / Debit Card', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: selectedTab == 0 ? AppTheme.textPrimary : Colors.grey)),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => setSheet(() { selectedTab = 1; validationError = null; }),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                            decoration: BoxDecoration(
-                              color: selectedTab == 1 ? Colors.white : Colors.transparent,
-                              borderRadius: BorderRadius.circular(10),
-                              boxShadow: selectedTab == 1 ? [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4)] : null,
-                            ),
-                            child: Center(
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.account_balance_rounded, size: 18, color: selectedTab == 1 ? AppTheme.primary : Colors.grey),
-                                  const SizedBox(width: 6),
-                                  Text('SEPA Bank IBAN', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: selectedTab == 1 ? AppTheme.textPrimary : Colors.grey)),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 18),
-
-                // Error Message if any
-                if (validationError != null) ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(color: const Color(0xFFFEF2F2), borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFFFECACA))),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.error_outline_rounded, color: Color(0xFFDC2626), size: 20),
-                        const SizedBox(width: 10),
-                        Expanded(child: Text(validationError!, style: const TextStyle(color: Color(0xFFDC2626), fontSize: 13, fontWeight: FontWeight.w600))),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                ],
-
-                if (selectedTab == 0) ...[
-                  // CARD FORM
-                  TextField(controller: cardNameCtrl, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Cardholder Full Name', prefixIcon: Icon(Icons.person_outline))),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: cardNumberCtrl,
-                    keyboardType: TextInputType.number,
-                    maxLength: 19,
-                    decoration: const InputDecoration(
-                      labelText: 'Card Number',
-                      hintText: '4242 4242 4242 4242',
-                      prefixIcon: Icon(Icons.credit_card_outlined),
-                      counterText: '',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: cardExpiryCtrl,
-                          keyboardType: TextInputType.number,
-                          maxLength: 5,
-                          decoration: const InputDecoration(
-                            labelText: 'Expiry Date',
-                            hintText: 'MM/YY',
-                            prefixIcon: Icon(Icons.calendar_today_outlined),
-                            counterText: '',
-                          ),
-                          onChanged: (val) {
-                            // Automatic MM/YY slash insertion
-                            final digitsOnly = val.replaceAll('/', '');
-                            if (digitsOnly.length >= 2 && !val.contains('/')) {
-                              final formatted = '${digitsOnly.substring(0, 2)}/${digitsOnly.substring(2)}';
-                              cardExpiryCtrl.value = TextEditingValue(
-                                text: formatted,
-                                selection: TextSelection.collapsed(offset: formatted.length),
-                              );
-                            }
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: cardCvvCtrl,
-                          keyboardType: TextInputType.number,
-                          obscureText: true,
-                          maxLength: 4,
-                          decoration: const InputDecoration(
-                            labelText: 'CVC / CVV',
-                            hintText: '123',
-                            prefixIcon: Icon(Icons.lock_outline),
-                            counterText: '',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      ),
-                      onPressed: () async {
-                        final rawNumber = cardNumberCtrl.text.replaceAll(' ', '');
-                        if (cardNameCtrl.text.trim().isEmpty) {
-                          setSheet(() => validationError = 'Please enter cardholder name.');
-                          return;
-                        }
-                        if (!_isValidLuhn(rawNumber)) {
-                          setSheet(() => validationError = '❌ Invalid card number. Luhn checksum check failed.');
-                          return;
-                        }
-                        if (cardExpiryCtrl.text.length < 5 || !cardExpiryCtrl.text.contains('/')) {
-                          setSheet(() => validationError = 'Please enter a valid expiry date in MM/YY format.');
-                          return;
-                        }
-                        if (cardCvvCtrl.text.length < 3) {
-                          setSheet(() => validationError = 'Please enter a 3 or 4 digit CVV.');
-                          return;
-                        }
-
-                        final last4 = rawNumber.substring(rawNumber.length - 4);
-                        final brand = rawNumber.startsWith('4') ? 'Visa' : 'Mastercard';
-                        setState(() {
-                          _paymentMethods.add({
-                            'type': 'card',
-                            'brand': brand,
-                            'last4': last4,
-                            'expiry': cardExpiryCtrl.text,
-                            'isDefault': _paymentMethods.isEmpty ? 'true' : 'false',
-                          });
-                        });
-                        _persistPaymentMethods();
-                        Navigator.pop(ctx);
-
-                        final auth = Provider.of<AuthService>(context, listen: false);
-                        final email = auth.currentUser?.email ?? '';
-                        final prefs = await SharedPreferences.getInstance();
-                        final userPhone = prefs.getString('malvoya_user_phone');
-                        if (context.mounted) {
-                          RealtimeNotificationService.notifyBankCardAdded(
-                            context,
-                            last4: last4,
-                            brand: brand,
-                            email: email,
-                            phone: userPhone,
-                          );
-                        }
-                      },
-                      child: const Text('Save Card', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-                    ),
-                  ),
-                ] else ...[
-                  // SEPA BANK IBAN FORM
-                  TextField(controller: bankHolderCtrl, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Account Holder Legal Name', prefixIcon: Icon(Icons.person_outline))),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: bankIbanCtrl,
-                    textCapitalization: TextCapitalization.characters,
-                    decoration: const InputDecoration(
-                      labelText: 'European SEPA IBAN',
-                      hintText: 'FI21 1234 5678 9012 34',
-                      prefixIcon: Icon(Icons.account_balance_outlined),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: bankSwiftCtrl,
-                    textCapitalization: TextCapitalization.characters,
-                    decoration: const InputDecoration(
-                      labelText: 'SWIFT / BIC Code',
-                      hintText: 'NDEAFIHH',
-                      prefixIcon: Icon(Icons.domain_rounded),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0F172A),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      ),
-                      onPressed: () async {
-                        final ibanRaw = bankIbanCtrl.text.replaceAll(' ', '');
-                        if (bankHolderCtrl.text.trim().isEmpty) {
-                          setSheet(() => validationError = 'Please enter account holder name.');
-                          return;
-                        }
-                        if (!_isValidIBAN(ibanRaw)) {
-                          setSheet(() => validationError = '❌ Invalid IBAN checksum (EU Modulo-97 failed). Check country code and digits.');
-                          return;
-                        }
-                        if (bankSwiftCtrl.text.trim().length < 8) {
-                          setSheet(() => validationError = 'Please enter a valid 8 or 11 character SWIFT/BIC code.');
-                          return;
-                        }
-
-                        final last4 = ibanRaw.substring(ibanRaw.length - 4);
-                        final maskedIban = '${ibanRaw.substring(0, 4)} •••• •••• $last4';
-                        final holder = bankHolderCtrl.text.trim();
-                        setState(() {
-                          _paymentMethods.add({
-                            'type': 'bank',
-                            'brand': 'SEPA Bank',
-                            'last4': last4,
-                            'ibanMasked': maskedIban,
-                            'swift': bankSwiftCtrl.text.trim().toUpperCase(),
-                            'isDefault': _paymentMethods.isEmpty ? 'true' : 'false',
-                          });
-                        });
-                        _persistPaymentMethods();
-                        Navigator.pop(ctx);
-
-                        final auth = Provider.of<AuthService>(context, listen: false);
-                        final email = auth.currentUser?.email ?? '';
-                        final prefs = await SharedPreferences.getInstance();
-                        final userPhone = prefs.getString('malvoya_user_phone');
-                        if (context.mounted) {
-                          RealtimeNotificationService.notifySepaBankLinked(
-                            context,
-                            ibanMasked: maskedIban,
-                            holderName: holder,
-                            email: email,
-                            phone: userPhone,
-                          );
-                        }
-                      },
-                      child: const Text('Link Bank Account', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ==========================================
   // 3. SETTINGS & GDPR ACCOUNT DELETION
   // ==========================================
   Widget _buildSettings(BuildContext context) {
@@ -703,7 +318,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 activeColor: AppTheme.primary,
                 title: Row(
                   children: [
-                    const Icon(Icons.dark_mode_outlined, color: Color(0xFF8B5CF6), size: 20),
+                    const Icon(Icons.dark_mode_outlined, color: Color(0xFF6D2E8C), size: 20),
                     const SizedBox(width: 10),
                     Text('Dark Theme (OLED)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
                   ],
@@ -718,7 +333,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 activeColor: AppTheme.primary,
                 title: Row(
                   children: [
-                    const Icon(Icons.filter_vintage_outlined, color: Color(0xFFD97706), size: 20),
+                    const Icon(Icons.filter_vintage_outlined, color: Color(0xFFB86E00), size: 20),
                     const SizedBox(width: 10),
                     Text('Eye Comfort Amber (3400K)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
                   ],
@@ -805,9 +420,9 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
             children: [
               const Row(
                 children: [
-                  Icon(Icons.warning_amber_rounded, color: Color(0xFFDC2626), size: 22),
+                  Icon(Icons.warning_amber_rounded, color: Color(0xFFB3261E), size: 22),
                   SizedBox(width: 8),
-                  Text('Danger Zone • GDPR Article 17', style: TextStyle(fontWeight: FontWeight.w800, color: Color(0xFFDC2626), fontSize: 15)),
+                  Text('Danger Zone • GDPR Article 17', style: TextStyle(fontWeight: FontWeight.w800, color: Color(0xFFB3261E), fontSize: 15)),
                 ],
               ),
               const SizedBox(height: 8),
@@ -820,7 +435,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 width: double.infinity,
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFDC2626),
+                    backgroundColor: const Color(0xFFB3261E),
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
@@ -850,7 +465,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFDC2626)),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFB3261E)),
             onPressed: () {
               Navigator.pop(dialogCtx);
               Provider.of<AuthService>(context, listen: false).logout();
@@ -858,7 +473,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
                   content: Text('Your Malvoya account has been permanently deleted under GDPR.'),
-                  backgroundColor: Color(0xFFDC2626),
+                  backgroundColor: Color(0xFFB3261E),
                   behavior: SnackBarBehavior.floating,
                 ),
               );
@@ -889,7 +504,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
           child: const Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.verified_user_rounded, color: Color(0xFF16A34A), size: 24),
+              Icon(Icons.verified_user_rounded, color: Color(0xFF248A52), size: 24),
               SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -952,7 +567,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
+                border: Border.all(color: const Color(0xFFE6E1EA)),
                 boxShadow: [
                   BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10, offset: const Offset(0, 4)),
                 ],
@@ -994,7 +609,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                   const SizedBox(height: 14),
                   Container(
                     padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(12)),
+                    decoration: BoxDecoration(color: const Color(0xFFF6F3EE), borderRadius: BorderRadius.circular(12)),
                     child: Row(
                       children: [
                         const Icon(Icons.info_outline_rounded, color: AppTheme.primary, size: 18),
@@ -1038,7 +653,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
     return Expanded(
       child: Container(
         height: 3,
-        color: active ? AppTheme.primary : const Color(0xFFE2E8F0),
+        color: active ? AppTheme.primary : const Color(0xFFE6E1EA),
         margin: const EdgeInsets.only(bottom: 16),
       ),
     );
@@ -1074,7 +689,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 const SizedBox(height: 6),
                 Container(
                   padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFE2E8F0))),
+                  decoration: BoxDecoration(color: const Color(0xFFF6F3EE), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFE6E1EA))),
                   child: const Center(
                     child: Text(
                       'No delivered orders available for return yet.\nWhen you complete a purchase and receive delivery, items will appear here.',
@@ -1089,7 +704,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 const SizedBox(height: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14),
-                  decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFE2E8F0))),
+                  decoration: BoxDecoration(color: const Color(0xFFF6F3EE), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFE6E1EA))),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<String>(
                       value: selectedReason,
@@ -1112,7 +727,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 const SizedBox(height: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14),
-                  decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFE2E8F0))),
+                  decoration: BoxDecoration(color: const Color(0xFFF6F3EE), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFE6E1EA))),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<String>(
                       value: returnMethod,
@@ -1133,7 +748,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 const SizedBox(height: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14),
-                  decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFE2E8F0))),
+                  decoration: BoxDecoration(color: const Color(0xFFF6F3EE), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFE6E1EA))),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<String>(
                       value: refundTarget,
@@ -1175,7 +790,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                       });
                       Navigator.pop(ctx);
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('✅ Return request $newRetId submitted.'), backgroundColor: const Color(0xFF16A34A), behavior: SnackBarBehavior.floating),
+                        SnackBar(content: Text('✅ Return request $newRetId submitted.'), backgroundColor: const Color(0xFF248A52), behavior: SnackBarBehavior.floating),
                       );
                     },
                     child: const Text('Submit Return Request', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
@@ -1227,7 +842,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
           tileColor: cardBg,
           leading: Container(
             width: 44, height: 44,
-            decoration: BoxDecoration(color: const Color(0xFFFAF5FF), borderRadius: BorderRadius.circular(12)),
+            decoration: BoxDecoration(color: const Color(0xFFF6F3EE), borderRadius: BorderRadius.circular(12)),
             child: const Icon(Icons.email_outlined, color: AppTheme.primary, size: 24),
           ),
           title: Text('Direct Email Support', style: TextStyle(fontWeight: FontWeight.w700, color: textPrimary)),
@@ -1278,171 +893,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
     );
   }
 
-  Widget _buildPaymentMethodsList(BuildContext context) {
-    return ListView(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.all(20),
-      children: [
-        const Text('Saved Payment Methods', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppTheme.textPrimary)),
-        const SizedBox(height: 6),
-        const Text('Stripe Level 1 PCI-DSS encryption & SEPA European banking.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
-        const SizedBox(height: 20),
-
-        if (_paymentMethods.isEmpty)
-          Container(
-            padding: const EdgeInsets.all(28),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
-            ),
-            child: Column(
-              children: [
-                Container(
-                  width: 56, height: 56,
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryLight,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.credit_card_outlined, color: AppTheme.primary, size: 28),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'No Saved Payment Methods',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: AppTheme.textPrimary),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Add a card or European SEPA IBAN. You will receive real-time SMS and email security notifications upon linking.',
-                  style: TextStyle(fontSize: 13, color: AppTheme.textSecondary, height: 1.4),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
-          )
-        else
-        ..._paymentMethods.map((pm) {
-          final isDef = pm['isDefault'] == 'true';
-          final isCard = pm['type'] == 'card';
-
-          return Container(
-            margin: const EdgeInsets.only(bottom: 14),
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: isDef ? AppTheme.primary : const Color(0xFFE2E8F0), width: isDef ? 2 : 1),
-              boxShadow: [
-                BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 4)),
-              ],
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 48, height: 48,
-                  decoration: BoxDecoration(
-                    color: isCard ? const Color(0xFFF4F4F8) : const Color(0xFFEFF6FF),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(isCard ? Icons.credit_card_rounded : Icons.account_balance_rounded, color: isCard ? AppTheme.primary : const Color(0xFF2563EB), size: 26),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Text(isCard ? '${pm['brand']} •••• ${pm['last4']}' : '${pm['brand']} • ${pm['last4']}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                          if (isDef) ...[
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(6)),
-                              child: const Text('Default', style: TextStyle(color: AppTheme.primary, fontSize: 11, fontWeight: FontWeight.w700)),
-                            ),
-                          ],
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(isCard ? 'Expires ${pm['expiry']}' : '${pm['ibanMasked']} • SWIFT: ${pm['swift']}', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-                    ],
-                  ),
-                ),
-                if (!isDef)
-                  PopupMenuButton<String>(
-                    icon: const Icon(Icons.more_vert_rounded, color: Colors.grey),
-                    onSelected: (val) {
-                      if (val == 'default') {
-                        setState(() {
-                          for (var item in _paymentMethods) {
-                            item['isDefault'] = (item == pm) ? 'true' : 'false';
-                          }
-                        });
-                        _persistPaymentMethods();
-                      } else if (val == 'delete') {
-                        setState(() => _paymentMethods.remove(pm));
-                        _persistPaymentMethods();
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Payment method removed.')));
-                      }
-                    },
-                    itemBuilder: (_) => [
-                      const PopupMenuItem(value: 'default', child: Text('Set as Default')),
-                      const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
-                    ],
-                  )
-                else
-                  const Icon(Icons.check_circle_rounded, color: AppTheme.primary, size: 24),
-              ],
-            ),
-          );
-        }),
-
-        const SizedBox(height: 12),
-        ElevatedButton.icon(
-          onPressed: _openAddPaymentMethodModal,
-          icon: const Icon(Icons.add_rounded, color: Colors.white),
-          label: const Text('Add Card or European Bank Account', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppTheme.primary,
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          ),
-        ),
-        const SizedBox(height: 24),
-
-        // Security Info
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: const Color(0xFFF0FDF4),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFBBF7D0)),
-          ),
-          child: const Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(Icons.security_rounded, color: Color(0xFF16A34A), size: 22),
-              SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Bank-Grade Security & Encryption', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Color(0xFF15803D))),
-                    SizedBox(height: 4),
-                    Text(
-                      'All card transactions undergo 3D Secure 2.0 verification and are processed under Stripe PCI-DSS Level 1 compliance. SEPA transfers adhere to EU banking regulation.',
-                      style: TextStyle(fontSize: 12, color: Color(0xFF166534), height: 1.4),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
+  Widget _buildPaymentMethodsList(BuildContext context) => const PaymentInfoView();
 
   Widget _buildDeliveryAddressesList(BuildContext context) {
     return ListView(
@@ -1460,7 +911,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
+              border: Border.all(color: const Color(0xFFE6E1EA)),
             ),
             child: Column(
               children: [
@@ -1500,7 +951,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: isDef ? AppTheme.primary : const Color(0xFFE2E8F0), width: isDef ? 2 : 1),
+              border: Border.all(color: isDef ? AppTheme.primary : const Color(0xFFE6E1EA), width: isDef ? 2 : 1),
               boxShadow: [
                 BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 4)),
               ],
@@ -1604,7 +1055,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final scaffoldBg = Theme.of(context).scaffoldBackgroundColor;
-    final appbarBg = isDark ? const Color(0xFF140D26) : Colors.white;
+    final appbarBg = isDark ? const Color(0xFF221C29) : Colors.white;
     final textPrimary = isDark ? Colors.white : AppTheme.textPrimary;
 
     return Scaffold(

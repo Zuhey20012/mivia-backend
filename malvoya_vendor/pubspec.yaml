@@ -1,7 +1,7 @@
 name: malvoya_vendor
 description: Malvoya Vendor - Premium Store Management App
 publish_to: "none"
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: ">=2.18.0 <4.0.0"
@@ -23,6 +23,7 @@ dependencies:
   shimmer: ^3.0.0
   socket_io_client: ^3.0.2
   firebase_auth: ^4.15.3
+  geolocator: ^13.0.2
 
 dev_dependencies:
   flutter_launcher_icons: ^0.14.4
@@ -37,5 +38,8 @@ flutter:
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
-  image_path: "assets/logo.png"
+  remove_alpha_ios: true
+  image_path: "assets/brand/icon.png"
+  adaptive_icon_background: "#2E6B4F"
+  adaptive_icon_foreground: "assets/brand/icon_fg.png"
   min_sdk_android: 21

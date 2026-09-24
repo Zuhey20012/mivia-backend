@@ -2,6 +2,15 @@ import { Request, Response } from "express";
 import { registerSchema, loginSchema, refreshSchema } from "./auth.schema";
 import * as authService from "./auth.service";
 import * as socialService from "./social.service";
+import { sendOtp, verifyOtp } from "./otp.service";
+import { AuthRequest } from "../../middleware/auth";
+
+/** AuthErrors carry a safe message + status; anything else is logged and hidden. */
+function sendError(res: Response, e: unknown, fallbackStatus = 500) {
+  if (e instanceof authService.AuthError) return res.status(e.status).json({ ok: false, error: e.message });
+  console.error(e);
+  return res.status(fallbackStatus).json({ ok: false, error: fallbackStatus === 401 ? "Authentication failed" : "Something went wrong" });
+}
 
 export async function register(req: Request, res: Response) {
   const result = registerSchema.safeParse(req.body);
@@ -9,8 +18,8 @@ export async function register(req: Request, res: Response) {
   try {
     const data = await authService.registerUser(result.data);
     res.status(201).json({ ok: true, ...data });
-  } catch (e: any) {
-    res.status(409).json({ ok: false, error: e.message });
+  } catch (e) {
+    sendError(res, e);
   }
 }
 
@@ -20,8 +29,8 @@ export async function login(req: Request, res: Response) {
   try {
     const data = await authService.loginUser(result.data);
     res.json({ ok: true, ...data });
-  } catch (e: any) {
-    res.status(401).json({ ok: false, error: e.message });
+  } catch (e) {
+    sendError(res, e);
   }
 }
 
@@ -31,100 +40,81 @@ export async function refresh(req: Request, res: Response) {
   try {
     const data = await authService.refreshTokens(result.data.refreshToken);
     res.json({ ok: true, ...data });
-  } catch (e: any) {
-    res.status(401).json({ ok: false, error: e.message });
+  } catch (e) {
+    sendError(res, e, 401);
   }
 }
 
 export async function logout(req: Request, res: Response) {
-  const { refreshToken } = req.body;
-  if (refreshToken) await authService.logoutUser(refreshToken);
+  const { refreshToken } = req.body ?? {};
+  if (typeof refreshToken === "string" && refreshToken) await authService.logoutUser(refreshToken);
   res.json({ ok: true });
 }
 
-export async function googleLogin(req: Request, res: Response) {
-  const { idToken } = req.body;
-  if (!idToken) return res.status(400).json({ ok: false, error: "idToken is required" });
-  try {
-    const data = await socialService.loginWithGoogle(idToken);
-    res.json({ ok: true, ...data });
-  } catch (e: any) {
-    res.status(401).json({ ok: false, error: e.message });
-  }
+const SIGNUP_ROLES = ["CUSTOMER", "VENDOR", "COURIER"] as const;
+
+function tokenHandler(field: "idToken" | "firebaseToken", login: (token: string, role: socialService.SignupRole) => Promise<unknown>) {
+  return async (req: Request, res: Response) => {
+    const token = req.body?.[field];
+    if (typeof token !== "string" || !token) return res.status(400).json({ ok: false, error: `${field} is required` });
+    const role = SIGNUP_ROLES.includes(req.body?.role) ? (req.body.role as socialService.SignupRole) : "CUSTOMER";
+    try {
+      const data = await login(token, role);
+      res.json({ ok: true, ...(data as object) });
+    } catch (e) {
+      sendError(res, e, 401);
+    }
+  };
 }
 
-export async function phoneLogin(req: Request, res: Response) {
-  const { firebaseToken } = req.body;
-  if (!firebaseToken) return res.status(400).json({ ok: false, error: "firebaseToken is required" });
-  try {
-    const data = await socialService.loginWithPhone(firebaseToken);
-    res.json({ ok: true, ...data });
-  } catch (e: any) {
-    res.status(401).json({ ok: false, error: e.message });
-  }
-}
-
-export async function appleLogin(req: Request, res: Response) {
-  const { idToken } = req.body;
-  if (!idToken) return res.status(400).json({ ok: false, error: "idToken is required" });
-  try {
-    const data = await socialService.loginWithApple(idToken);
-    res.json({ ok: true, ...data });
-  } catch (e: any) {
-    res.status(401).json({ ok: false, error: e.message });
-  }
-}
+export const googleLogin = tokenHandler("idToken", socialService.loginWithGoogle);
+export const phoneLogin  = tokenHandler("firebaseToken", socialService.loginWithPhone);
+export const appleLogin  = tokenHandler("idToken", socialService.loginWithApple);
 
 export async function sendOtpHandler(req: Request, res: Response) {
-  const { target, phone, email, channel } = req.body;
+  const { target, phone, email, channel } = req.body ?? {};
   const destination = target || phone || email;
-  if (!destination) {
+  if (typeof destination !== "string" || !destination) {
     return res.status(400).json({ ok: false, error: "Phone number or email address is required" });
   }
   try {
-    const { sendOtp } = await import("./otp.service");
-    const data = await sendOtp(destination, channel);
-    res.json(data);
-  } catch (e: any) {
-    res.status(400).json({ ok: false, error: e.message });
+    res.json(await sendOtp(destination, channel === "email" || channel === "sms" ? channel : undefined));
+  } catch (e) {
+    sendError(res, e);
   }
 }
 
 export async function verifyOtpHandler(req: Request, res: Response) {
-  const { target, phone, email, code } = req.body;
+  const { target, phone, email, code } = req.body ?? {};
   const destination = target || phone || email;
-  if (!destination || !code) {
-    return res.status(400).json({ ok: false, error: "Target destination and verification code are required" });
+  if (typeof destination !== "string" || typeof code !== "string" || !destination || !code) {
+    return res.status(400).json({ ok: false, error: "Destination and verification code are required" });
   }
   try {
-    const { verifyOtp } = await import("./otp.service");
-    const data = await verifyOtp(destination, code);
-    res.json(data);
-  } catch (e: any) {
-    res.status(401).json({ ok: false, error: e.message });
+    res.json(await verifyOtp(destination, code));
+  } catch (e) {
+    sendError(res, e, 401);
   }
 }
 
-export async function exportMyData(req: any, res: Response) {
+export async function exportMyData(req: AuthRequest, res: Response) {
   try {
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
-
-    const data = await authService.exportUserData(userId);
-    res.json({ success: true, data });
-  } catch (e: any) {
-    res.status(500).json({ success: false, error: e.message });
+    const data = await authService.exportUserData(req.user!.id);
+    res.setHeader("Content-Disposition", 'attachment; filename="malvoya-my-data.json"');
+    res.json({ ok: true, exportedAt: new Date().toISOString(), data });
+  } catch (e) {
+    sendError(res, e);
   }
 }
 
-export async function deleteMe(req: any, res: Response) {
+export async function deleteMe(req: AuthRequest, res: Response) {
   try {
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
-
-    await authService.deleteUserAccount(userId);
-    res.json({ success: true, message: 'Account and all associated data permanently deleted' });
-  } catch (e: any) {
-    res.status(500).json({ success: false, error: e.message });
+    await authService.deleteUserAccount(req.user!.id);
+    res.json({
+      ok: true,
+      message: "Your account has been deleted. Order records required by Finnish bookkeeping law are kept in anonymised form.",
+    });
+  } catch (e) {
+    sendError(res, e);
   }
 }

@@ -4,15 +4,14 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../config/constants.dart';
-import '../config/theme.dart';
-import '../auth_service.dart';
+import 'config/constants.dart';
+import 'config/theme.dart';
+import 'auth_service.dart';
 import 'cart.dart';
 import 'realtime_notification_service.dart';
 import 'local_notification_service.dart';
 import 'l10n.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
-import 'screens/map_tracker.dart';
 
 class CheckoutPage extends StatefulWidget {
   const CheckoutPage({super.key});
@@ -25,11 +24,8 @@ class _CheckoutPageState extends State<CheckoutPage> {
   String? _errorMessage;
   final _addressCtrl = TextEditingController();
   
-  // Payment methods: 'card', 'sepa_bank'
-  String _selectedPaymentMethod = 'card';
-  // SEPA Bank input (blank for real user entry)
-  final _ibanCtrl = TextEditingController();
-  String? _ibanError;
+  // Payment details are entered only in Stripe's payment sheet (card, Apple/Google Pay, SEPA…)
+  final String _selectedPaymentMethod = 'stripe';
 
   @override
   void initState() {
@@ -54,33 +50,10 @@ class _CheckoutPageState extends State<CheckoutPage> {
   @override
   void dispose() {
     _addressCtrl.dispose();
-    _ibanCtrl.dispose();
     super.dispose();
   }
 
   // European SEPA IBAN Modulo-97 Algorithm
-  bool _validateSepaIban(String iban) {
-    final clean = iban.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toUpperCase();
-    if (clean.length < 15 || clean.length > 34) return false;
-    final rearranged = clean.substring(4) + clean.substring(0, 4);
-    final sb = StringBuffer();
-    for (int i = 0; i < rearranged.length; i++) {
-      final code = rearranged.codeUnitAt(i);
-      if (code >= 65 && code <= 90) {
-        sb.write((code - 55).toString());
-      } else {
-        sb.write(rearranged[i]);
-      }
-    }
-    final expanded = sb.toString();
-    int remainder = 0;
-    for (int i = 0; i < expanded.length; i += 7) {
-      final end = (i + 7 < expanded.length) ? i + 7 : expanded.length;
-      final part = remainder.toString() + expanded.substring(i, end);
-      remainder = int.parse(part) % 97;
-    }
-    return remainder == 1;
-  }
 
   Future<void> _placeOrder(CartService cart) async {
     if (_addressCtrl.text.trim().isEmpty) {
@@ -95,18 +68,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
       await prefs.setString('malvoya_active_address', _addressCtrl.text.trim());
     } catch (_) {}
 
-    if (_selectedPaymentMethod == 'sepa_bank') {
-      if (!_validateSepaIban(_ibanCtrl.text)) {
-        HapticFeedback.heavyImpact();
-        setState(() {
-          _ibanError = 'Bank account declined: Invalid European SEPA IBAN (Failed Modulo-97).';
-          _errorMessage = 'Invalid European IBAN. Declined immediately on device.';
-        });
-        return;
-      }
-    }
-
-    setState(() { _loading = true; _errorMessage = null; _ibanError = null; });
+    setState(() { _loading = true; _errorMessage = null; });
     HapticFeedback.mediumImpact();
 
     final auth = Provider.of<AuthService>(context, listen: false);
@@ -125,7 +87,6 @@ class _CheckoutPageState extends State<CheckoutPage> {
         body: jsonEncode({
           'storeId': cart.storeId,
           'deliveryAddress': _addressCtrl.text.trim(),
-          'paymentMethod': _selectedPaymentMethod,
           'items': cart.items.map((i) => {
             'productId': i.productId,
             'quantity': i.quantity,
@@ -137,26 +98,28 @@ class _CheckoutPageState extends State<CheckoutPage> {
         final resData = jsonDecode(response.body);
         final orderData = resData['order'];
         final clientSecret = resData['clientSecret'];
-        final totalCharged = cart.total + 2.99;
-        final orderId = orderData['id']?.toString() ?? 'MLV-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
-
-        // Official Stripe PaymentSheet execution (3DS2 / PSD2 & SCA Compliant)
-        if (_selectedPaymentMethod == 'card' && clientSecret != null && clientSecret.toString().isNotEmpty) {
-          await Stripe.instance.initPaymentSheet(
-            paymentSheetParameters: SetupPaymentSheetParameters(
-              paymentIntentClientSecret: clientSecret.toString(),
-              merchantDisplayName: 'Malvoya',
-              style: ThemeMode.dark,
-              appearance: const PaymentSheetAppearance(
-                colors: PaymentSheetAppearanceColors(
-                  primary: Color(0xFF8B5CF6),
-                ),
-              ),
-            ),
-          );
-          // Presents native bank verification / biometric / 3D Secure modal
-          await Stripe.instance.presentPaymentSheet();
+        // The server calculates the price; show exactly what is charged.
+        final totalCharged = ((orderData['totalCents'] as num?) ?? 0) / 100;
+        final orderId = orderData['id'].toString();
+        if (clientSecret == null || clientSecret.toString().isEmpty) {
+          throw Exception('Payment could not be started. Please try again.');
         }
+
+        // Stripe PaymentSheet: card details never touch Malvoya; 3-D Secure (PSD2 SCA) is handled by Stripe.
+        await Stripe.instance.initPaymentSheet(
+          paymentSheetParameters: SetupPaymentSheetParameters(
+            paymentIntentClientSecret: clientSecret.toString(),
+            merchantDisplayName: 'Malvoya',
+            style: ThemeMode.system,
+            allowsDelayedPaymentMethods: true, // SEPA Direct Debit settles after a few days
+            googlePay: PaymentSheetGooglePay(
+              merchantCountryCode: 'FI',
+              currencyCode: 'EUR',
+              testEnv: AppConstants.stripePublishableKey.startsWith('pk_test_'),
+            ),
+          ),
+        );
+        await Stripe.instance.presentPaymentSheet();
 
         // Reached ONLY after payment verification succeeds
         await _dispatchRealtimeAlerts(totalCharged, auth, orderId: orderId);
@@ -166,7 +129,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
         if (mounted) _showSuccessDialog(orderData, totalCharged, auth);
       } else {
         final errBody = jsonDecode(response.body);
-        throw Exception(errBody['message'] ?? 'Failed to place order');
+        throw Exception(errBody['error'] ?? 'Failed to place order');
       }
 
     } on StripeException catch (e) {
@@ -180,7 +143,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
-                child: const Text('OK', style: TextStyle(color: Color(0xFF8B5CF6), fontWeight: FontWeight.bold)),
+                child: const Text('OK', style: TextStyle(color: Color(0xFF6D2E8C), fontWeight: FontWeight.bold)),
               ),
             ],
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -197,7 +160,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
-                child: const Text('OK', style: TextStyle(color: Color(0xFF8B5CF6), fontWeight: FontWeight.bold)),
+                child: const Text('OK', style: TextStyle(color: Color(0xFF6D2E8C), fontWeight: FontWeight.bold)),
               ),
             ],
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -210,240 +173,69 @@ class _CheckoutPageState extends State<CheckoutPage> {
   }
 
   Future<void> _dispatchRealtimeAlerts(double amount, AuthService auth, {String? orderId}) async {
-    final cleanOrderId = orderId ?? ('MLV-' + DateTime.now().millisecondsSinceEpoch.toString().substring(7));
-    final userEmail = auth.currentUser?.email ?? '';
-    String phone = auth.currentUser?.phone ?? '';
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final savedPhone = prefs.getString('malvoya_user_phone');
-      if (savedPhone != null && savedPhone.isNotEmpty) {
-        phone = savedPhone;
-      }
-    } catch (_) {}
-    
-    // 1. High priority heads-up local notification
+    // The confirmation email is sent by the server once Stripe confirms the payment.
     try {
       await LocalNotificationService.showNotification(
         id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
-        title: 'Order #$cleanOrderId Confirmed! 🎉',
-        body: 'Payment of €${amount.toStringAsFixed(2)} confirmed. Fast boutique dispatch underway.',
-      );
-    } catch (_) {}
-
-    // 2. Dispatch to backend webhook
-    try {
-      await http.post(
-        Uri.parse('${AppConstants.apiBase}/notifications/dispatch'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'event': 'ORDER_PAYMENT_CONFIRMED',
-          'orderId': cleanOrderId,
-          'email': userEmail,
-          'phone': phone,
-          'amount': amount,
-          'paymentMethod': _selectedPaymentMethod,
-          'name': auth.currentUser?.name ?? 'Customer',
-          'address': _addressCtrl.text.trim(),
-          'currency': 'EUR',
-        }),
+        title: 'Tilaus #$orderId vastaanotettu / Order #$orderId received',
+        body: 'Payment of €${amount.toStringAsFixed(2)} submitted. We will email you when it is confirmed.',
       );
     } catch (_) {}
 
     if (!mounted) return;
     RealtimeNotificationService.notifyOrderPlaced(
       context,
-      orderId: cleanOrderId,
+      orderId: orderId ?? '',
       total: amount,
       paymentMethod: _selectedPaymentMethod,
-      email: userEmail,
-      phone: phone,
+      email: auth.currentUser?.email ?? '',
+      phone: auth.currentUser?.phone,
     );
   }
 
-  void _showSuccessDialog(dynamic order, double total, AuthService auth) async {
-    final userEmail = auth.currentUser?.email ?? '';
-    String userPhone = auth.currentUser?.phone ?? '';
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final p = prefs.getString('malvoya_user_phone');
-      if (p != null && p.isNotEmpty) userPhone = p;
-    } catch (_) {}
-
-    final rawId = order?['id']?.toString() ?? ('MLV-' + DateTime.now().millisecondsSinceEpoch.toString().substring(7));
-    final cleanId = rawId.length > 8 ? rawId.substring(0, 8).toUpperCase() : rawId.toUpperCase();
-
+  void _showSuccessDialog(dynamic order, double total, AuthService auth) {
+    final orderId = order?['id']?.toString() ?? '';
+    final email = auth.currentUser?.email ?? '';
+    final hasRealEmail = email.isNotEmpty && !email.endsWith('@phone.malvoya.app');
     if (!mounted) return;
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final modalBg = isDark ? const Color(0xFF140D26) : Colors.white;
-    final textPrimary = isDark ? const Color(0xFFFAF8FF) : AppTheme.textPrimary;
-    final textSecondary = isDark ? const Color(0xFFA09BAC) : AppTheme.textSecondary;
-    final boxBg = isDark ? const Color(0xFF1E1438) : const Color(0xFFF8F7FF);
-    final borderColor = isDark ? const Color(0xFF2E204A) : AppTheme.glassBorder;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final secondary = isDark ? const Color(0xFF98989D) : const Color(0xFF6E6E73);
 
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => Dialog(
-        backgroundColor: modalBg,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        child: Padding(
-          padding: const EdgeInsets.all(26),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 76,
-                height: 76,
-                decoration: BoxDecoration(
-                  gradient: AppTheme.primaryGradient,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppTheme.primary.withValues(alpha: 0.35),
-                      blurRadius: 18,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
-                ),
-                child: const Icon(Icons.check_rounded, color: Colors.white, size: 44),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                'Order Confirmed! 🎉',
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  color: textPrimary,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Order #$cleanId has been placed.\n⚡ Fast local courier dispatch in progress.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: textSecondary, fontSize: 13, height: 1.4),
-              ),
-              const SizedBox(height: 16),
-              
-              // Real-Time Notification Verification Box
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: boxBg,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: borderColor),
-                ),
-                child: Column(
-                  children: [
-                    InkWell(
-                      onTap: () {
-                        HapticFeedback.lightImpact();
-                        LocalNotificationService.openSmsApp(
-                          phone: userPhone,
-                          body: 'Malvoya Order #$cleanId confirmed for €${total.toStringAsFixed(2)}. Fast boutique courier dispatch in progress.',
-                        );
-                      },
-                      borderRadius: BorderRadius.circular(10),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.sms_outlined, color: Color(0xFF10B981), size: 18),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                userPhone.isNotEmpty ? 'SMS dispatched to $userPhone' : 'SMS dispatch alert active',
-                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: textPrimary),
-                              ),
-                            ),
-                            const Icon(Icons.open_in_new_rounded, color: Color(0xFF10B981), size: 15),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    InkWell(
-                      onTap: () {
-                        HapticFeedback.lightImpact();
-                        LocalNotificationService.openEmailApp(
-                          email: userEmail,
-                          subject: 'Malvoya Official Tax Receipt - Order #$cleanId',
-                          body: 'Malvoya Official Order Confirmation & Tax Receipt\n\n'
-                              'Order ID: #$cleanId\n'
-                              'Total Paid: €${total.toStringAsFixed(2)} (incl. 25.5% VAT)\n'
-                              'Status: Dispatched via Local Courier\n'
-                              'Support: support@malvoya.com\n\n'
-                              'Thank you for shopping local with Malvoya!',
-                        );
-                      },
-                      borderRadius: BorderRadius.circular(10),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.mark_email_read_outlined, color: Color(0xFF4285F4), size: 20),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                userEmail.isNotEmpty ? 'Tax receipt sent to $userEmail' : 'Official VAT 25.5% tax receipt generated',
-                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: textPrimary),
-                              ),
-                            ),
-                            const Icon(Icons.open_in_new_rounded, color: Color(0xFF4285F4), size: 15),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 22),
-              // Direct Track Live Delivery action
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.radar_rounded, size: 20),
-                  label: const Text('Track Live Delivery ⚡', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                    backgroundColor: AppTheme.primary,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    Navigator.pushReplacement(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => MapTrackerScreen(
-                          orderId: '#$cleanId',
-                          merchantName: 'Partner Boutique',
-                          deliveryAddress: _addressCtrl.text.trim().isNotEmpty ? _addressCtrl.text.trim() : null,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                  ),
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    Navigator.pop(context);
-                  },
-                  child: const Text('Return to Marketplace'),
-                ),
-              ),
-            ],
-          ),
+      builder: (ctx) => AlertDialog.adaptive(
+        title: const Text('Kiitos! / Thank you!'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            const Icon(Icons.check_circle_rounded, color: Color(0xFF34C759), size: 56),
+            const SizedBox(height: 12),
+            Text(
+              'Order #$orderId • €${total.toStringAsFixed(2)}',
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              hasRealEmail
+                  ? 'Your payment was submitted. We will email the order confirmation to $email once the payment is confirmed. The store will then prepare your order.'
+                  : 'Your payment was submitted. You can follow your order in the Orders tab once the payment is confirmed.',
+              style: TextStyle(color: secondary, fontSize: 14, height: 1.4),
+              textAlign: TextAlign.center,
+            ),
+          ],
         ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              Navigator.of(context).popUntil((r) => r.isFirst);
+            },
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
   }
@@ -578,7 +370,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                             padding: const EdgeInsets.symmetric(vertical: 10),
                             child: Divider(color: borderColor),
                           ),
-                          _summaryRow(l10n.locale.languageCode == 'fi' ? 'Yhteensä (sis. ALV 25,5%)' : 'Total (Incl. ALV / VAT 25.5%)', '${total.toStringAsFixed(2)} €', textPrimary, textSecondary, bold: true),
+                          _summaryRow(l10n.locale.languageCode == 'fi' ? 'Yhteensä (sis. ALV)' : 'Total (incl. VAT)', '${total.toStringAsFixed(2)} €', textPrimary, textSecondary, bold: true),
                         ],
                       ),
 
@@ -592,7 +384,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                             border: Border.all(color: const Color(0xFFFECACA)),
                           ),
                           child: Row(children: [
-                            const Icon(Icons.error_outline_rounded, color: Color(0xFFEF4444), size: 20),
+                            const Icon(Icons.error_outline_rounded, color: Color(0xFFD93025), size: 20),
                             const SizedBox(width: 10),
                             Expanded(child: Text(_errorMessage!, style: const TextStyle(color: Color(0xFFB91C1C), fontSize: 13, fontWeight: FontWeight.w600))),
                           ]),
@@ -670,96 +462,24 @@ class _CheckoutPageState extends State<CheckoutPage> {
           '💳 ${AppLocalizations.of(context).translate('paymentMethods')}',
           style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: textPrimary),
         ),
-        // 1. Credit/Debit Card
-        // 1. Credit/Debit Card, Apple Pay, Google Pay via Stripe
-        _paymentOptionTile(
-          id: 'card',
-          title: 'Card / Apple Pay / Google Pay',
-          subtitle: 'Secured by Stripe • 3D Secure & PSD2 Protected',
-          icon: Icons.credit_card_rounded,
-          iconColor: const Color(0xFF8B5CF6),
-          cardBg: cardBg,
-          borderColor: borderColor,
-          textPrimary: textPrimary,
-          textSecondary: textSecondary,
-          isDark: isDark,
-        ),
-        if (_selectedPaymentMethod == 'card') ...[
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: inputBg,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: borderColor),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.verified_user_rounded, color: Color(0xFF10B981), size: 20),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Zero-Touch Encrypted Escrow',
-                        style: TextStyle(color: textPrimary, fontWeight: FontWeight.w700, fontSize: 13),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Your card data never touches unencrypted storage. When you tap "Pay & Place Order", native Stripe sheet opens for biometric or 3D Secure bank authorization.',
-                        style: TextStyle(color: textSecondary, fontSize: 12, height: 1.3),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
         const SizedBox(height: 10),
-
-        // 3. European SEPA Bank IBAN
         _paymentOptionTile(
-          id: 'sepa_bank',
-          title: 'European SEPA Bank Account',
-          subtitle: 'Direct debit with Modulo-97 checksum verification',
-          icon: Icons.account_balance_rounded,
-          iconColor: const Color(0xFF10B981),
+          id: 'stripe',
+          title: 'Card, Apple Pay, Google Pay or bank',
+          subtitle: 'Choose in the secure Stripe payment sheet',
+          icon: Icons.lock_rounded,
+          iconColor: const Color(0xFF6D2E8C),
           cardBg: cardBg,
           borderColor: borderColor,
           textPrimary: textPrimary,
           textSecondary: textSecondary,
           isDark: isDark,
         ),
-        if (_selectedPaymentMethod == 'sepa_bank') ...[
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: inputBg,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: borderColor),
-            ),
-            child: TextField(
-              controller: _ibanCtrl,
-              style: TextStyle(color: textPrimary),
-              decoration: InputDecoration(
-                labelText: 'European IBAN',
-                labelStyle: TextStyle(color: textSecondary),
-                hintText: 'FI21 1234 5600 0007 85',
-                hintStyle: TextStyle(color: textSecondary),
-                prefixIcon: const Icon(Icons.account_balance_wallet_outlined, size: 20, color: Color(0xFF10B981)),
-                errorText: _ibanError,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-              onChanged: (val) {
-                if (_ibanError != null) setState(() => _ibanError = null);
-              },
-            ),
-          ),
-        ],
+        const SizedBox(height: 10),
+        Text(
+          'Malvoya never sees or stores your card or bank details. Your bank may ask you to confirm the payment (3-D Secure).',
+          style: TextStyle(color: textSecondary, fontSize: 12, height: 1.35),
+        ),
       ],
     );
   }
@@ -779,10 +499,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
   }) {
     final isSelected = _selectedPaymentMethod == id;
     return GestureDetector(
-      onTap: () {
-        HapticFeedback.lightImpact();
-        setState(() => _selectedPaymentMethod = id);
-      },
+      onTap: () => HapticFeedback.lightImpact(),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.all(14),
@@ -818,7 +535,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF10B981),
+                            color: const Color(0xFF248A52),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(badge, style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w800)),
@@ -1052,7 +769,7 @@ class _SwipeToPaySliderState extends State<SwipeToPaySlider> with SingleTickerPr
         return Container(
           height: height,
           decoration: BoxDecoration(
-            color: widget.isDark ? const Color(0xFF1E1438) : const Color(0xFFF1EFF8),
+            color: widget.isDark ? const Color(0xFF2A2331) : const Color(0xFFF1EFF8),
             borderRadius: BorderRadius.circular(height / 2),
             border: Border.all(
               color: AppTheme.primary.withValues(alpha: widget.isDark ? 0.4 : 0.25),

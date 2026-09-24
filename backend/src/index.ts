@@ -1,140 +1,105 @@
 import "dotenv/config";
 import express from "express";
 import http from "http";
+import crypto from "crypto";
 import cors from "cors";
 import pino from "pino";
+import pinoHttp from "pino-http";
 import helmet from "helmet";
+import compression from "compression";
 import { env } from "./config/env";
 import { errorHandler } from "./middleware/errorHandler";
 import { notFound } from "./middleware/notFound";
 import { globalLimiter } from "./middleware/rateLimiter";
-import { initSocket } from "./lib/socket";
+import { initSocket, getIo } from "./lib/socket";
+import { prisma } from "./lib/prisma";
 
 // Routes
 import authRoutes     from "./modules/auth/auth.routes";
 import storesRoutes   from "./modules/stores/stores.routes";
 import productsRoutes from "./modules/products/products.routes";
 import ordersRoutes   from "./modules/orders/orders.routes";
-import adminRoutes    from "./modules/admin/admin.routes";
 import courierRoutes  from "./modules/orders/courier.routes";
-import raasRoutes     from "./modules/orders/raas.routes";
-import { mcpRouter }   from "./mcp/apparel_mcp_server";
-import { dispatchNotifications } from "./services/notificationDeliveryService";
+import adminRoutes    from "./modules/admin/admin.routes";
+import paymentsRoutes from "./modules/payments/payments.routes";
 
 const logger = pino({ level: env.logLevel });
 const app    = express();
 const server = http.createServer(app);
 initSocket(server);
 
-// Middleware
-app.use(helmet());
-app.use(cors({
-  origin: env.allowedOrigins.includes("*") ? "*" : env.allowedOrigins,
-  credentials: true,
+// Render (and most PaaS) sit behind one proxy hop; needed for per-client rate limiting.
+app.set("trust proxy", 1);
+app.disable("x-powered-by");
+
+// One log line per request with a request id; tokens, cookies and bodies are never logged.
+app.use(pinoHttp({
+  logger,
+  genReqId: (req, res) => {
+    const id = (req.headers["x-request-id"] as string) || crypto.randomUUID();
+    res.setHeader("x-request-id", id);
+    return id;
+  },
+  redact: ["req.headers.authorization", "req.headers.cookie", "req.headers['stripe-signature']"],
+  serializers: { req: (req) => ({ id: req.id, method: req.method, url: req.url?.split("?")[0] }) },
+  autoLogging: { ignore: (req) => req.url === "/health" },
 }));
 
-if (env.nodeEnv === "production" && env.allowedOrigins.includes("*")) {
-  logger.warn("SECURITY WARNING: CORS is wide open (*) in production environment");
-}
-app.use(express.json());
+app.use(helmet());
+app.use(cors({
+  // Mobile apps send no Origin header and are unaffected; browsers must be on the allow-list.
+  origin: env.allowedOrigins.length ? env.allowedOrigins : false,
+  credentials: true,
+}));
+app.use(compression());
+
+// Stripe webhook needs the raw body, so it is mounted before the JSON parser.
+app.use("/api/v1", paymentsRoutes);
+
+app.use(express.json({ limit: "100kb" }));
 app.use(globalLimiter);
 
-// Health check
-app.get("/health", (_req, res) => res.json({ ok: true, status: "healthy", version: "2.0.0" }));
-
-// API routes
-app.use("/api/v1/auth",     authRoutes);
-app.use("/api/v1/stores",   storesRoutes);
-app.use("/api/v1",          productsRoutes);
-app.use("/api/v1",          ordersRoutes);
-app.use("/api/v1",          courierRoutes);
-app.use("/api/v1",          raasRoutes);
-app.use("/api/v1",          mcpRouter);
-app.use("/api/v1/admin",    adminRoutes);
-
-// Real multi-channel notification dispatch webhook (SMS & Email tracking)
-app.post("/api/v1/notifications/dispatch", async (req, res) => {
-  const { event, orderId, amount, paymentMethod, email, phone, name, address, items, code, channel } = req.body;
-  logger.info({ event, orderId, amount, email, phone, code, channel }, "📨 Realtime Notification Webhook Received via Backend");
-  
-  const result = await dispatchNotifications({
-    event: event || "ORDER_PAYMENT_CONFIRMED",
-    orderId: orderId || `MLV-${Date.now().toString().slice(-6)}`,
-    amount: Number(amount) || 0,
-    paymentMethod: paymentMethod || "Bank-Grade Card / SEPA",
-    email: email || "",
-    phone: phone || "",
-    name,
-    address,
-    items,
-    code,
-    channel,
-  });
-
-  return res.status(200).json(result);
-});
-
-// Real launch database cleanup (purges fake seed demo stores, products, couriers)
-app.all("/api/v1/admin/purge-seed", async (req, res) => {
-  const purgeKey = req.headers["x-purge-key"] || req.query.key;
-  if (!process.env.ADMIN_PURGE_SECRET || purgeKey !== process.env.ADMIN_PURGE_SECRET) {
-    return res.status(403).json({ error: "Invalid purge key" });
-  }
+// Liveness: the process is up. Readiness: it can also reach the database.
+app.get("/health", (_req, res) => res.json({ ok: true, status: "healthy", version: "2.2.0" }));
+app.get("/health/ready", async (_req, res) => {
   try {
-    const { prisma } = await import("./lib/prisma");
-    await prisma.orderItem.deleteMany({});
-    await prisma.order.deleteMany({});
-    await prisma.product.deleteMany({});
-    await prisma.store.deleteMany({});
-    await prisma.courier.deleteMany({});
-    await prisma.user.deleteMany({
-      where: {
-        email: {
-          in: ["sarah.crochet@malvoya.app", "leo.vintage@malvoya.app", "elena.green@malvoya.app", "customer@malvoya.app"]
-        }
-      }
-    });
-    return res.json({
-      ok: true,
-      message: "Successfully purged all seed stores, demo products, demo couriers, and test vendors from database."
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ ok: true, database: "up" });
+  } catch {
+    res.status(503).json({ ok: false, database: "down" });
   }
 });
 
-// Auto-purge demo data on startup to guarantee clean production state
-async function autoPurgeDemoData() {
-  try {
-    const { prisma } = await import("./lib/prisma");
-    const demoStores = await prisma.store.findMany({
-      where: {
-        name: { in: ["Sarah's Crochet Studio", "Leo's Retro Finds", "Elena's Eco Home"] }
-      }
-    });
-    if (demoStores.length > 0) {
-      const demoIds = demoStores.map(s => s.id);
-      await prisma.product.deleteMany({ where: { storeId: { in: demoIds } } });
-      await prisma.store.deleteMany({ where: { id: { in: demoIds } } });
-      await prisma.user.deleteMany({
-        where: { email: { in: ["sarah.crochet@malvoya.app", "leo.vintage@malvoya.app", "elena.green@malvoya.app"] } }
-      });
-      await prisma.courier.deleteMany({
-        where: { name: { in: ["Mikael K.", "Aisha R."] } }
-      });
-      console.log("🧹 Auto-purged all demo seed stores and couriers successfully.");
-    }
-  } catch (e) {
-    console.error("Auto-purge demo check:", e);
-  }
-}
-autoPurgeDemoData();
+// API routes. Courier routes come before orders so /orders/available etc. are matched first.
+app.use("/api/v1/auth",   authRoutes);
+app.use("/api/v1/stores", storesRoutes);
+app.use("/api/v1",        productsRoutes);
+app.use("/api/v1",        courierRoutes);
+app.use("/api/v1",        ordersRoutes);
+app.use("/api/v1/admin",  adminRoutes);
 
-// Error handling
 app.use(notFound);
 app.use(errorHandler);
 
-const port = env.port;
-server.listen(port, () => {
-  logger.info(`Ã°Å¸Å¡â‚¬ MALVOYA backend v2.0 listening on port ${port}`);
+server.keepAliveTimeout = 65_000; // longer than typical load-balancer idle timeouts
+server.headersTimeout = 66_000;
+server.listen(env.port, () => {
+  logger.info(`Malvoya API v2.2 listening on port ${env.port} (${env.nodeEnv})`);
 });
+
+// Zero-downtime deploys: stop taking new work, let in-flight requests finish, then exit.
+let shuttingDown = false;
+function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info({ signal }, "Shutting down gracefully");
+  getIo()?.close();
+  server.close(async () => {
+    await prisma.$disconnect().catch(() => {});
+    process.exit(0);
+  });
+  setTimeout(() => process.exit(1), 25_000).unref();
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("unhandledRejection", (reason) => logger.error({ reason }, "Unhandled promise rejection"));

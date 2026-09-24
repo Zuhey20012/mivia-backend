@@ -65,6 +65,12 @@ class _AddProductScreenState extends State<AddProductScreen> {
     final colorsStr = _selectedColors.join(',');
     final salePriceCents = _canBeSold ? (price * 100).round() : null;
 
+    final imageUrl = _imageCtrl.text.trim();
+    if (imageUrl.isNotEmpty && !imageUrl.startsWith('https://')) {
+      setState(() { _loading = false; _error = 'Image link must start with https://'; });
+      return;
+    }
+
     try {
       final res = await http.post(
         Uri.parse('${AppConstants.apiBase}/products'),
@@ -73,50 +79,41 @@ class _AddProductScreenState extends State<AddProductScreen> {
           'Authorization': 'Bearer ${auth.accessToken}',
         },
         body: jsonEncode({
-          'storeId': widget.storeId,
           'name': _nameCtrl.text.trim(),
           'description': _descCtrl.text.trim(),
           'category': _category,
-          'imageUrl': _imageCtrl.text.trim().isEmpty ? null : _imageCtrl.text.trim(),
+          'images': imageUrl.isEmpty ? [] : [imageUrl],
           'salePriceCents': salePriceCents,
-          'stockQuantity': int.tryParse(_stockCtrl.text) ?? 10,
-          'sizes': sizesStr,
-          'colors': colorsStr,
+          'stockQuantity': int.tryParse(_stockCtrl.text) ?? 1,
+          'tags': [
+            ..._selectedSizes.map((s) => 'size:$s'),
+            ..._selectedColors.map((c) => 'color:$c'),
+          ],
           'canBeSold': _canBeSold,
           'canBeRented': _canBeRented,
-          'isAvailable': true,
         }),
-      );
+      ).timeout(const Duration(seconds: 15));
 
-      Map<String, dynamic>? responseProduct;
-      if (res.statusCode == 201 || res.statusCode == 200) {
-        try { responseProduct = jsonDecode(res.body) as Map<String, dynamic>?; } catch (_) {}
+      if (res.statusCode == 201) {
+        final responseProduct = (jsonDecode(res.body) as Map<String, dynamic>)['product'] as Map<String, dynamic>?;
         await _saveLocalDrop(responseProduct, salePriceCents, sizesStr, colorsStr);
         if (mounted) {
           Navigator.pop(context, true);
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('✅ Tuote lisätty onnistuneesti! / Product added successfully!')),
+            const SnackBar(content: Text('Tuote lisätty / Product added')),
           );
         }
       } else {
-        // Even on API error, save locally and proceed
-        await _saveLocalDrop(null, salePriceCents, sizesStr, colorsStr);
-        if (mounted) {
-          Navigator.pop(context, true);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('✅ Tuote tallennettu paikallisesti!')),
-          );
-        }
+        // Never pretend a product was saved when the server refused it.
+        String message = 'Could not save the product. Please check the details.';
+        try {
+          final body = jsonDecode(res.body);
+          message = body['error'] ?? (body['errors']?['formErrors'] as List?)?.join(', ') ?? message;
+        } catch (_) {}
+        if (mounted) setState(() { _loading = false; _error = message; });
       }
     } catch (_) {
-      // Offline — save locally
-      await _saveLocalDrop(null, salePriceCents, sizesStr, colorsStr);
-      if (mounted) {
-        Navigator.pop(context, true);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('✅ Tuote tallennettu paikallisesti!')),
-        );
-      }
+      if (mounted) setState(() { _loading = false; _error = 'No connection. Your product was not saved — please try again.'; });
     }
   }
 
@@ -154,7 +151,7 @@ class _AddProductScreenState extends State<AddProductScreen> {
         flexibleSpace: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
-              colors: [Color(0xFF7C3AED), Color(0xFF4F46E5)],
+              colors: [Color(0xFF6D2E8C), Color(0xFF4F46E5)],
               begin: Alignment.centerLeft,
               end: Alignment.centerRight,
             ),
@@ -270,7 +267,7 @@ class _AddProductScreenState extends State<AddProductScreen> {
                   label: Text(s, style: TextStyle(fontWeight: FontWeight.w700, color: sel ? AppTheme.primary : AppTheme.textPrimary, fontSize: 13)),
                   selected: sel,
                   selectedColor: AppTheme.primaryLight,
-                  backgroundColor: const Color(0xFFF4F4F8),
+                  backgroundColor: const Color(0xFFEFEBF1),
                   checkmarkColor: AppTheme.primary,
                   side: BorderSide(color: sel ? AppTheme.primary.withOpacity(0.4) : Colors.transparent),
                   onSelected: (v) => setState(() { if (v) _selectedSizes.add(s); else _selectedSizes.remove(s); }),
@@ -291,7 +288,7 @@ class _AddProductScreenState extends State<AddProductScreen> {
                   label: Text(c, style: TextStyle(fontWeight: FontWeight.w700, color: sel ? AppTheme.primary : AppTheme.textPrimary, fontSize: 13)),
                   selected: sel,
                   selectedColor: AppTheme.primaryLight,
-                  backgroundColor: const Color(0xFFF4F4F8),
+                  backgroundColor: const Color(0xFFEFEBF1),
                   checkmarkColor: AppTheme.primary,
                   side: BorderSide(color: sel ? AppTheme.primary.withOpacity(0.4) : Colors.transparent),
                   onSelected: (v) => setState(() { if (v) _selectedColors.add(c); else _selectedColors.remove(c); }),
@@ -325,9 +322,9 @@ class _AddProductScreenState extends State<AddProductScreen> {
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(color: const Color(0xFFFFF0F0), borderRadius: BorderRadius.circular(10)),
                 child: Row(children: [
-                  const Icon(Icons.error_outline, color: Color(0xFFE53E3E), size: 18),
+                  const Icon(Icons.error_outline, color: Color(0xFFD93025), size: 18),
                   const SizedBox(width: 8),
-                  Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFE53E3E), fontSize: 13))),
+                  Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFD93025), fontSize: 13))),
                 ]),
               ),
             ],
@@ -340,14 +337,14 @@ class _AddProductScreenState extends State<AddProductScreen> {
               child: _loading
                   ? Container(
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(colors: [Color(0xFF7C3AED), Color(0xFF4F46E5)]),
+                        gradient: const LinearGradient(colors: [Color(0xFF6D2E8C), Color(0xFF4F46E5)]),
                         borderRadius: BorderRadius.circular(14),
                       ),
                       child: const Center(child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))),
                     )
                   : DecoratedBox(
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(colors: [Color(0xFF7C3AED), Color(0xFF4F46E5)]),
+                        gradient: const LinearGradient(colors: [Color(0xFF6D2E8C), Color(0xFF4F46E5)]),
                         borderRadius: BorderRadius.circular(14),
                       ),
                       child: ElevatedButton.icon(

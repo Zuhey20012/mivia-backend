@@ -1,45 +1,90 @@
-# Privacy Policy for Malvoya
+# Malvoya Privacy Policy / Tietosuojaseloste
 
-**Last Updated: April 23, 2026**
+**Last updated:** [DATE OF PUBLICATION]
 
-Welcome to Malvoya. We are committed to protecting your personal data and your privacy. This Privacy Policy explains how we collect, use, and share your information when you use our mobile applications (Customer, Courier, and Vendor) and our services.
+> **Before publishing:** fill in every `[BRACKETED]` item once the company is registered, and have this document reviewed by a Finnish data-protection lawyer. It describes how the Malvoya apps and API actually process data as of this version.
 
-## 1. Information We Collect
+## 1. Controller
 
-### 1.1 Information You Provide to Us
-- **Account Information**: Name, email address, phone number, and password.
-- **Profile Information**: Photos, addresses, and preferences.
-- **Payment Information**: Credit card details (processed securely via Stripe).
-- **Courier/Vendor Information**: Business licenses, identification documents, and vehicle details.
+[COMPANY LEGAL NAME], Business ID (Y-tunnus) [Y-TUNNUS], [STREET ADDRESS], [POSTCODE] [CITY], Finland.
+Contact for privacy matters: [privacy@malvoya.com]
 
-### 1.2 Information Collected Automatically
-- **Location Data**: We collect precise or approximate location data from your mobile device if you enable it. For Couriers, this is required for delivery tracking.
-- **Usage Data**: Information about how you interact with our services.
-- **Device Information**: Hardware model, operating system, and unique device identifiers.
+Malvoya is a marketplace. Stores that sell through Malvoya are independent sellers. For the order data they need to fulfil your purchase, each store is a separate controller.
 
-## 2. How We Use Your Information
-- To provide, maintain, and improve our services.
-- To facilitate transactions and deliveries.
-- To verify the identity of Couriers and Vendors.
-- To communicate with you about orders, services, and promotions.
-- To ensure the safety and security of our users.
+## 2. What we process, why, and on what legal basis
 
-## 3. Sharing of Information
-- **With other users**: We share necessary information between Customers, Couriers, and Vendors to complete deliveries.
-- **With Service Providers**: We share information with vendors who perform services on our behalf (e.g., payment processing, data analysis).
-- **For Legal Reasons**: We may share information if required by law or to protect our rights.
+| Data | Purpose | Legal basis (GDPR Art. 6) |
+|---|---|---|
+| Name, email and/or phone number, password (stored only as a one-way hash) | Create and secure your account; sign-in codes | Contract (6(1)(b)) |
+| Delivery address, delivery location and order notes | Deliver your order | Contract (6(1)(b)) |
+| Orders, prices, refunds and returns | Sale, returns and bookkeeping | Contract; legal obligation under the Accounting Act (6(1)(c)) |
+| Payment status and Stripe payment reference | Confirm payment and issue refunds. **We never receive or store card or bank account numbers**; Stripe processes them. | Contract; legal obligation |
+| Courier location, only while the courier is online | Show the courier's position to the customer and store of an active order; offer jobs to nearby couriers | Contract with the courier (6(1)(b)) |
+| Store business details (for sellers) | Verify sellers; tax reporting on marketplace sellers (DAC7) | Contract; legal obligation |
+| Technical logs (IP address, error logs) | Security and abuse prevention | Legitimate interest (6(1)(f)) |
 
-## 4. Your Rights and Choices
-- **Location Services**: You can opt-out of location sharing in your device settings, but this may limit functionality.
-- **Account Information**: You can update or delete your account information at any time via the app.
-- **Data Deletion**: You have the right to request the deletion of your personal data.
+We do not sell personal data, and we do not use your data for advertising profiling.
 
-## 5. Security
-We implement industry-standard security measures to protect your data, including encryption and secure server environments.
+## 3. Location data
 
-## 6. International Data Transfers
-Your information may be transferred to and processed in countries other than your own. We ensure appropriate safeguards are in place for such transfers.
+- **Customers:** we use the delivery address and coordinates you enter. The app does not track you in the background.
+- **Couriers:** while you are online, your position is shared with the customer and store of the order you are delivering. We keep only your latest position, and it is deleted as soon as you go offline. We do not store a history of your routes.
 
-## 7. Contact Us
-If you have any questions about this Privacy Policy, please contact us at:
-support@malvoya.com
+## 4. Automated decisions
+
+Delivery jobs are offered to approved, online couriers within 7.5 km of the store, nearest first. Couriers choose which jobs to accept. No job is assigned automatically, and no decision with legal or similarly significant effects is made solely by automated means (GDPR Art. 22). Couriers can ask a person at [support@malvoya.com] to explain or review any decision.
+
+## 5. Who receives your data
+
+- **The store** you buy from: your name, the items ordered and the delivery address.
+- **Your courier:** the delivery address, but only after they accept the job. Before that, couriers see only the approximate area.
+- **Service providers (processors)** under data-processing agreements:
+  - Stripe Payments Europe (payments)
+  - Render (hosting and database)
+  - Google Firebase (phone and Apple sign-in)
+  - Twilio (SMS codes)
+  - [EMAIL PROVIDER] (email)
+- **Authorities**, where the law requires it (for example the Finnish Tax Administration for DAC7 seller reporting).
+
+## 6. Transfers outside the EU/EEA
+
+Hosting is provided by Render. [STATE REGION: "in Frankfurt, Germany (EU)" once migrated. Until then: "in the United States under the EU Standard Contractual Clauses / EU–US Data Privacy Framework".] Some providers (Google, Twilio, Stripe) may process data in the United States under the EU–US Data Privacy Framework or Standard Contractual Clauses.
+
+## 7. How long we keep data
+
+| Data | Retention |
+|---|---|
+| Account data | Until you delete your account |
+| Orders, receipts, refunds | 6 years from the end of the financial year (Accounting Act 2:10); anonymised if you delete your account earlier |
+| Courier live location | Until the courier goes offline |
+| Sign-in codes | 10 minutes |
+| Refresh tokens (sessions) | 7 days |
+| Security logs | [30] days |
+
+## 8. Your rights
+
+You can:
+- **access** your data and **export** it (Profile → Privacy → Download my data);
+- **correct** your data;
+- **delete** your account (Profile → Privacy → Delete account). Order records we must keep by law are anonymised rather than deleted;
+- **object** to processing based on legitimate interest;
+- **restrict** processing.
+
+Contact [privacy@malvoya.com]. We reply within one month.
+
+You also have the right to lodge a complaint with the **Data Protection Ombudsman (Tietosuojavaltuutetun toimisto)**, tietosuoja.fi, PL 800, 00531 Helsinki.
+
+## 9. Security
+
+- Passwords are hashed with bcrypt.
+- Sessions use short-lived tokens, and refresh tokens are stored only as hashes.
+- All traffic is encrypted (HTTPS).
+- Access to live order data is limited to the customer, store and courier of that order.
+
+## 10. Children
+
+Malvoya is intended for people aged 18 or over. Couriers and sellers must be adults.
+
+## 11. Changes
+
+We will notify you in the app before material changes take effect.

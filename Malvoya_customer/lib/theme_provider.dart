@@ -10,7 +10,13 @@ enum AppThemeMode {
 
 class ThemeProvider extends ChangeNotifier {
   static const String _prefKey = 'malvoya_theme_preference';
-  AppThemeMode _mode = AppThemeMode.dark;
+  // Until the user picks a theme, follow the phone's light/dark setting.
+  AppThemeMode _mode = _systemMode();
+
+  static AppThemeMode _systemMode() =>
+      WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.dark
+          ? AppThemeMode.dark
+          : AppThemeMode.light;
 
   AppThemeMode get mode => _mode;
 
@@ -50,8 +56,10 @@ class ThemeProvider extends ChangeNotifier {
         _mode = AppThemeMode.light;
       } else if (saved == 'eyeComfort') {
         _mode = AppThemeMode.eyeComfort;
-      } else {
+      } else if (saved == 'dark') {
         _mode = AppThemeMode.dark;
+      } else {
+        _mode = _systemMode();
       }
       notifyListeners();
     } catch (_) {}

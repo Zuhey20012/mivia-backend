@@ -94,7 +94,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) {
         final isDark = Theme.of(context).brightness == Brightness.dark;
-        final bg = isDark ? const Color(0xFF140D26) : Colors.white;
+        final bg = isDark ? const Color(0xFF221C29) : Colors.white;
         final textPrimary = isDark ? Colors.white : AppTheme.textPrimary;
 
         return SafeArea(
@@ -162,7 +162,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) {
         final isDark = Theme.of(context).brightness == Brightness.dark;
-        final bg = isDark ? const Color(0xFF140D26) : Colors.white;
+        final bg = isDark ? const Color(0xFF221C29) : Colors.white;
         final textPrimary = isDark ? Colors.white : AppTheme.textPrimary;
 
         return Container(
@@ -182,7 +182,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 8),
               Text(
                 l10n.translate('securityPinSubActive'),
-                style: TextStyle(fontSize: 13, color: isDark ? const Color(0xFFA09BAC) : AppTheme.textSecondary),
+                style: TextStyle(fontSize: 13, color: isDark ? const Color(0xFFA79EAF) : AppTheme.textSecondary),
               ),
               const SizedBox(height: 20),
               ListTile(
@@ -407,7 +407,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ],
         ),
-        backgroundColor: const Color(0xFF7C3AED),
+        backgroundColor: const Color(0xFF55226E),
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 4),
       ),
@@ -461,7 +461,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ],
         ),
-        backgroundColor: const Color(0xFF8B5CF6),
+        backgroundColor: const Color(0xFF6D2E8C),
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 4),
       ),
@@ -480,7 +480,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         title: Row(
           children: [
-            const Icon(Icons.delete_outline_rounded, color: Color(0xFFEF4444), size: 24),
+            const Icon(Icons.delete_outline_rounded, color: Color(0xFFD93025), size: 24),
             const SizedBox(width: 8),
             Text(l10n.translate('confirmDelete'), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: textPrimary)),
           ],
@@ -496,7 +496,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFEF4444),
+              backgroundColor: const Color(0xFFD93025),
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
@@ -510,7 +510,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(l10n.translate('deleteAccountSimpleMsg')),
-                    backgroundColor: const Color(0xFF7C3AED),
+                    backgroundColor: const Color(0xFF55226E),
                   ),
                 );
               }
@@ -651,7 +651,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     title: Text(l10n.translate('securityPinTitle'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: textPrimary)),
                     subtitle: Text(
                       _pinEnabled && _userPin.isNotEmpty ? l10n.translate('securityPinSubActive') : l10n.translate('securityPinSubDisabled'),
-                      style: TextStyle(fontSize: 12, color: _pinEnabled ? const Color(0xFF10B981) : textSecondary, fontWeight: _pinEnabled ? FontWeight.bold : FontWeight.normal),
+                      style: TextStyle(fontSize: 12, color: _pinEnabled ? const Color(0xFF248A52) : textSecondary, fontWeight: _pinEnabled ? FontWeight.bold : FontWeight.normal),
                     ),
                     trailing: TextButton(
                       onPressed: () => _showPinManagementDialog(l10n),
@@ -709,12 +709,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                         minimumSize: Size.zero,
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        side: BorderSide(color: const Color(0xFF8B5CF6).withValues(alpha: 0.4)),
+                        side: BorderSide(color: const Color(0xFF6D2E8C).withValues(alpha: 0.4)),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
                       onPressed: () => _sendTestSms(_userPhone, l10n),
-                      icon: const Icon(Icons.sms_outlined, size: 14, color: Color(0xFF8B5CF6)),
-                      label: Text(l10n.translate('sendTestSms'), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF8B5CF6))),
+                      icon: const Icon(Icons.sms_outlined, size: 14, color: Color(0xFF6D2E8C)),
+                      label: Text(l10n.translate('sendTestSms'), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF6D2E8C))),
                     ),
                   ),
                   Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
@@ -865,7 +865,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     },
                                   ),
                                   ListTile(
-                                    leading: const Icon(Icons.dark_mode_outlined, color: Color(0xFF8B5CF6)),
+                                    leading: const Icon(Icons.dark_mode_outlined, color: Color(0xFF6D2E8C)),
                                     title: Text(l10n.translate('themeDark'), style: TextStyle(color: mText, fontWeight: FontWeight.w600)),
                                     trailing: themeProvider.mode == AppThemeMode.dark ? const Icon(Icons.check, color: AppTheme.primary) : null,
                                     onTap: () {
@@ -874,7 +874,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     },
                                   ),
                                   ListTile(
-                                    leading: const Icon(Icons.wb_sunny_outlined, color: Color(0xFFD97706)),
+                                    leading: const Icon(Icons.wb_sunny_outlined, color: Color(0xFFB86E00)),
                                     title: Text(l10n.translate('themeAmber'), style: TextStyle(color: mText, fontWeight: FontWeight.w600)),
                                     trailing: themeProvider.mode == AppThemeMode.eyeComfort ? const Icon(Icons.check, color: AppTheme.primary) : null,
                                     onTap: () {
@@ -930,7 +930,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
                   ListTile(
-                    leading: const Icon(Icons.gavel_rounded, color: Color(0xFFD97706), size: 22),
+                    leading: const Icon(Icons.gavel_rounded, color: Color(0xFFB86E00), size: 22),
                     title: Text(l10n.translate('termsOfServiceLaw'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: textPrimary)),
                     subtitle: Text(l10n.translate('fourteenDayWithdrawal'), style: TextStyle(fontSize: 12, color: textSecondary)),
                     trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
@@ -938,8 +938,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
                   ListTile(
-                    leading: const Icon(Icons.delete_forever_rounded, color: Color(0xFFDC2626), size: 22),
-                    title: Text(l10n.translate('deleteAccount'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Color(0xFFDC2626))),
+                    leading: const Icon(Icons.delete_forever_rounded, color: Color(0xFFB3261E), size: 22),
+                    title: Text(l10n.translate('deleteAccount'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Color(0xFFB3261E))),
                     subtitle: Text(l10n.translate('eraseAccountArt17'), style: TextStyle(fontSize: 12, color: textSecondary)),
                     trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
                     onTap: () => _confirmDeleteAccount(Provider.of<AuthService>(context, listen: false), l10n),

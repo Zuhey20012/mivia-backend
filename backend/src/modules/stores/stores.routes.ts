@@ -1,12 +1,13 @@
 import { Router } from "express";
-import { listStores, getStore, createStore, updateStore } from "./stores.controller";
-import { auth, requireRole } from "../../middleware/auth";
+import { listStores, getStore, getMyStore, createStore, updateStore } from "./stores.controller";
+import { auth, optionalAuth, requireRole } from "../../middleware/auth";
 
 const router = Router();
 
 router.get("/",        listStores);
-router.get("/:id",     getStore);
-router.post("/",       auth, requireRole("VENDOR", "ADMIN"), createStore);
-router.patch("/:id",   auth, requireRole("VENDOR", "ADMIN"), updateStore);
+router.get("/my",     auth, requireRole("VENDOR"), getMyStore);
+router.get("/:id(\\d+)", optionalAuth, getStore);
+router.post("/",       auth, requireRole("VENDOR"), createStore);
+router.patch("/:id(\\d+)", auth, requireRole("VENDOR"), updateStore);
 
 export default router;

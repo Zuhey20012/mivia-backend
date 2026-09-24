@@ -89,46 +89,22 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       final res = await http.get(
         Uri.parse('${AppConstants.apiBase}/stores/my'),
         headers: {'Authorization': _authHeader()},
-      ).timeout(const Duration(seconds: 4));
-      if (res.statusCode == 200 && mounted) {
-        setState(() { _store = jsonDecode(res.body); });
+      ).timeout(const Duration(seconds: 10));
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        setState(() { _store = body['store'] ?? body; });
         await _fetchProducts();
+      } else if (res.statusCode == 404) {
+        // No store yet: go through setup (the server is the only source of truth)
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const StoreSetupScreen()));
+        });
       } else {
-        final prefs = await SharedPreferences.getInstance();
-        final localStoreName = prefs.getString('vendor_store_name');
-        if (localStoreName != null && localStoreName.isNotEmpty && mounted) {
-          setState(() {
-            _store = {
-              'id': 101,
-              'name': localStoreName,
-              'description': prefs.getString('vendor_store_desc') ?? 'Local boutique store',
-              'category': prefs.getString('vendor_store_category') ?? 'Apparel',
-              'isActive': true,
-            };
-          });
-        } else if (res.statusCode == 404 && mounted) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const StoreSetupScreen()));
-          });
-        }
+        setState(() => _connectionError = true);
       }
     } catch (_) {
-      final prefs = await SharedPreferences.getInstance();
-      final localStoreName = prefs.getString('vendor_store_name') ?? 'My Boutique Store';
-      if (mounted) {
-        setState(() {
-          _store = {
-            'id': 101,
-            'name': localStoreName,
-            'description': prefs.getString('vendor_store_desc') ?? 'Local boutique store',
-            'category': prefs.getString('vendor_store_category') ?? 'Apparel',
-            'isActive': true,
-          };
-        });
-      }
-    }
-    if (_store != null) {
-      VendorSocketService().joinStoreRoom(_store!['id']);
+      if (mounted) setState(() => _connectionError = true);
     }
   }
 
@@ -277,7 +253,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(8),
-              color: const Color(0xFF8B5CF6),
+              color: const Color(0xFF6D2E8C),
               child: const Text(
                 'No connection. Please check your network and try again.',
                 textAlign: TextAlign.center,
@@ -315,7 +291,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             const SizedBox(height: 16),
             ElevatedButton.icon(
               onPressed: _fetchOrders,
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8B5CF6), foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF6D2E8C), foregroundColor: Colors.white),
               icon: const Icon(Icons.refresh_rounded),
               label: const Text('Retry'),
             ),
@@ -355,7 +331,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       case 'CONFIRMED': statusColor = AppTheme.primary; statusLabel = 'Confirmed'; break;
       case 'PROCESSING': statusColor = Colors.blue; statusLabel = 'Preparing'; break;
       case 'SHIPPED': statusColor = Colors.indigo; statusLabel = 'Shipped'; break;
-      case 'DELIVERED': statusColor = const Color(0xFF2DC653); statusLabel = 'Delivered'; break;
+      case 'DELIVERED': statusColor = const Color(0xFF2E6B4F); statusLabel = 'Delivered'; break;
       case 'CANCELLED': statusColor = AppTheme.accent; statusLabel = 'Cancelled'; break;
       default: statusColor = AppTheme.textSecondary; statusLabel = status;
     }
@@ -509,7 +485,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             const SizedBox(height: 16),
             ElevatedButton.icon(
               onPressed: _fetchProducts,
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8B5CF6), foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF6D2E8C), foregroundColor: Colors.white),
               icon: const Icon(Icons.refresh_rounded),
               label: const Text('Retry'),
             ),
@@ -1033,7 +1009,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                 _metricItem(Icons.visibility_rounded, '${drop['views'] ?? 0} views'),
                 _metricItem(Icons.favorite_rounded, '${drop['likes'] ?? 0} likes', color: const Color(0xFFE0245E)),
                 _metricItem(Icons.chat_bubble_rounded, '${drop['commentsCount'] ?? 0} comments'),
-                _metricItem(Icons.shopping_bag_rounded, '${drop['salesCount'] ?? 0} sales', color: const Color(0xFF2DC653)),
+                _metricItem(Icons.shopping_bag_rounded, '${drop['salesCount'] ?? 0} sales', color: const Color(0xFF2E6B4F)),
               ],
             ),
           ),
@@ -1211,7 +1187,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
                                 content: Text('🎉 Videopudotus julkaistu! Se näkyy heti Malvoya Asiakassovelluksen Reels-syötteessä.'),
-                                backgroundColor: Color(0xFF2DC653),
+                                backgroundColor: Color(0xFF2E6B4F),
                               ),
                             );
                           },

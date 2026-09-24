@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../widgets/brand_mark.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
@@ -87,7 +88,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ],
             ),
-            backgroundColor: const Color(0xFF0F172A),
+            backgroundColor: const Color(0xFF17131C),
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 4),
           ),
@@ -227,14 +228,10 @@ class _LoginScreenState extends State<LoginScreen> {
                                   final cleanDigits = userPhone.replaceAll(RegExp(r'[^0-9]'), '');
                                   final idToken = await userCred.user?.getIdToken();
                                   final auth = Provider.of<AuthService>(context, listen: false);
-                                  await auth.saveSession({
-                                    'id': cleanDigits.isNotEmpty ? (cleanDigits.hashCode.abs() % 1000000) : 100001,
-                                    'email': '$cleanDigits@phone.malvoya.app',
-                                    'phone': userPhone,
-                                    'name': 'Customer ($userPhone)',
-                                    'role': 'CUSTOMER',
-                                    'isActive': true,
-                                  }, idToken ?? 'phone_token_${DateTime.now().millisecondsSinceEpoch}', 'phone_refresh_token');
+                                  final phoneErr = idToken == null
+                                    ? 'Phone verification failed'
+                                    : await auth.exchangeFirebasePhoneToken(idToken);
+                                if (phoneErr != null) throw Exception(phoneErr);
 
                                   if (mounted) {
                                     RealtimeNotificationService.notifyCustomerJoined(
@@ -272,7 +269,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                     SnackBar(
                                       content: Row(
                                         children: [
-                                          const Icon(Icons.sms_rounded, color: Color(0xFF10B981), size: 20),
+                                          const Icon(Icons.sms_rounded, color: Color(0xFF248A52), size: 20),
                                           const SizedBox(width: 10),
                                           Expanded(
                                             child: Text('Vahvistuskoodi lähetetty tekstiviestillä kohteeseen $destination. Syötä koodi alle.'),
@@ -313,7 +310,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   SnackBar(
                                     content: Row(
                                       children: [
-                                        const Icon(Icons.sms_rounded, color: Color(0xFF10B981), size: 20),
+                                        const Icon(Icons.sms_rounded, color: Color(0xFF248A52), size: 20),
                                         const SizedBox(width: 10),
                                         Expanded(
                                           child: Text('Vahvistuskoodi lähetetty tekstiviestillä kohteeseen $destination. Syötä koodi alle.'),
@@ -376,7 +373,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               SnackBar(
                                 content: Row(
                                   children: [
-                                    const Icon(Icons.mark_email_read_rounded, color: Color(0xFF10B981), size: 20),
+                                    const Icon(Icons.mark_email_read_rounded, color: Color(0xFF248A52), size: 20),
                                     const SizedBox(width: 10),
                                     Expanded(
                                       child: Text('Vahvistuskoodi lähetetty sähköpostiin $destination. Tarkista saapuneet viestit.'),
@@ -409,7 +406,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       Container(
                         width: 44, height: 44,
                         decoration: BoxDecoration(color: const Color(0xFFDCFCE7), borderRadius: BorderRadius.circular(20)),
-                        child: const Icon(Icons.mark_chat_read_rounded, color: Color(0xFF16A34A), size: 24),
+                        child: const Icon(Icons.mark_chat_read_rounded, color: Color(0xFF248A52), size: 24),
                       ),
                       const SizedBox(width: 14),
                       Expanded(
@@ -539,14 +536,10 @@ class _LoginScreenState extends State<LoginScreen> {
                             final cleanDigits = userPhone.replaceAll(RegExp(r'[^0-9]'), '');
                             final idToken = await userCred.user?.getIdToken();
 
-                            await auth.saveSession({
-                              'id': cleanDigits.isNotEmpty ? (cleanDigits.hashCode.abs() % 1000000) : 100001,
-                              'email': '$cleanDigits@phone.malvoya.app',
-                              'phone': userPhone,
-                              'name': 'Customer ($userPhone)',
-                              'role': 'CUSTOMER',
-                              'isActive': true,
-                            }, idToken ?? 'phone_token_${DateTime.now().millisecondsSinceEpoch}', 'phone_refresh_token');
+                            final phoneErr = idToken == null
+                                    ? 'Phone verification failed'
+                                    : await auth.exchangeFirebasePhoneToken(idToken);
+                                if (phoneErr != null) throw Exception(phoneErr);
 
                             timer?.cancel();
                             if (ctx.mounted) Navigator.pop(ctx);
@@ -560,7 +553,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
                                   content: Text('Kirjauduttu sisään onnistuneesti! Tervetuloa.'),
-                                  backgroundColor: Color(0xFF10B981),
+                                  backgroundColor: Color(0xFF248A52),
                                 ),
                               );
                             }
@@ -609,7 +602,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
                                   content: Text('Kirjauduttu sisään onnistuneesti!'),
-                                  backgroundColor: Color(0xFF10B981),
+                                  backgroundColor: Color(0xFF248A52),
                                 ),
                               );
                             }
@@ -783,28 +776,9 @@ class _LoginScreenState extends State<LoginScreen> {
               Center(
                 child: Column(
                   children: [
-                    Container(
-                      width: 76,
-                      height: 76,
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFFEC4899), Color(0xFF8B5CF6)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(22),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppTheme.primary.withValues(alpha: 0.35),
-                            blurRadius: 18,
-                            offset: const Offset(0, 6),
-                          ),
-                        ],
-                      ),
-                      child: const Icon(Icons.shopping_bag_outlined, color: Colors.white, size: 40),
-                    ),
+                    BrandTile(size: 76, background: AppTheme.primary),
                     const SizedBox(height: 16),
-                    Text('Malvoya', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: textPrimary, letterSpacing: -0.5)),
+                    Text('Malvoya', style: TextStyle(fontSize: 30, fontWeight: FontWeight.w700, color: textPrimary, letterSpacing: -0.8)),
                     const SizedBox(height: 4),
                     Text(l10n.translate('boutiques'), style: TextStyle(fontSize: 14, color: textSecondary, fontWeight: FontWeight.w500)),
                   ],
@@ -862,9 +836,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.error_outline, color: Color(0xFFE53E3E), size: 18),
+                      const Icon(Icons.error_outline, color: Color(0xFFD93025), size: 18),
                       const SizedBox(width: 8),
-                      Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFE53E3E), fontSize: 13))),
+                      Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFD93025), fontSize: 13))),
                     ],
                   ),
                 ),

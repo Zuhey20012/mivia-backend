@@ -2,26 +2,26 @@ import { z } from "zod";
 
 export const createOrderSchema = z.object({
   storeId:         z.number().int().positive(),
-  deliveryAddress: z.string().min(5),
-  deliveryLat:     z.number().optional(),
-  deliveryLng:     z.number().optional(),
+  deliveryAddress: z.string().trim().min(5).max(300),
+  deliveryLat:     z.number().min(-90).max(90).optional(),
+  deliveryLng:     z.number().min(-180).max(180).optional(),
   notes:           z.string().max(500).optional(),
   items: z.array(z.object({
     productId: z.number().int().positive(),
     variantId: z.number().int().positive().optional(),
-    quantity:  z.number().int().min(1),
-  })).min(1),
+    quantity:  z.number().int().min(1).max(20),
+  })).min(1).max(50),
 });
 
 export const createRentalSchema = z.object({
   startDate: z.string().datetime(),
   endDate:   z.string().datetime(),
-  deliveryAddress: z.string().min(5),
+  deliveryAddress: z.string().trim().min(5).max(300),
   items: z.array(z.object({
     productId: z.number().int().positive(),
     variantId: z.number().int().positive().optional(),
-    quantity:  z.number().int().min(1),
-  })).min(1),
+    quantity:  z.number().int().min(1).max(10),
+  })).min(1).max(20),
 }).refine(d => new Date(d.endDate) > new Date(d.startDate), {
   message: "endDate must be after startDate",
 }).refine(d => new Date(d.startDate) > new Date(), {
@@ -44,4 +44,8 @@ export const updateReturnStatusSchema = z.object({
   conditionNote:  z.string().max(500).optional(),
   refundCents:    z.number().int().min(0).optional(),
   damageDedCents: z.number().int().min(0).optional(),
+});
+
+export const updateOrderStatusSchema = z.object({
+  status: z.enum(["CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"]),
 });

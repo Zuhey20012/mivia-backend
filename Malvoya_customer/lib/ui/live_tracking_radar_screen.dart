@@ -182,7 +182,7 @@ class _LiveTrackingRadarScreenState extends State<LiveTrackingRadarScreen>
               const SizedBox(height: 20),
               const CircleAvatar(
                 radius: 28,
-                backgroundColor: Color(0xFF00C2E8),
+                backgroundColor: Color(0xFF8E4FAE),
                 child: Icon(Icons.shield_outlined, color: Colors.black, size: 30),
               ),
               const SizedBox(height: 14),
@@ -216,7 +216,7 @@ class _LiveTrackingRadarScreenState extends State<LiveTrackingRadarScreen>
                         const Text(
                           'MALVOYA SECURE VOICE RELAY',
                           style: TextStyle(
-                            color: Color(0xFF00C2E8),
+                            color: Color(0xFF8E4FAE),
                             fontSize: 11,
                             fontWeight: FontWeight.w900,
                             letterSpacing: 0.8,
@@ -236,13 +236,13 @@ class _LiveTrackingRadarScreenState extends State<LiveTrackingRadarScreen>
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF00C2E8).withValues(alpha: 0.18),
+                        color: const Color(0xFF8E4FAE).withValues(alpha: 0.18),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: const Text(
                         'Encrypted • Active',
                         style: TextStyle(
-                          color: Color(0xFF00C2E8),
+                          color: Color(0xFF8E4FAE),
                           fontWeight: FontWeight.w800,
                           fontSize: 12,
                         ),
@@ -257,7 +257,7 @@ class _LiveTrackingRadarScreenState extends State<LiveTrackingRadarScreen>
                 height: 50,
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF00C2E8),
+                    backgroundColor: const Color(0xFF8E4FAE),
                     foregroundColor: Colors.black,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
@@ -295,7 +295,7 @@ class _LiveTrackingRadarScreenState extends State<LiveTrackingRadarScreen>
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Row(
           children: [
-            Icon(Icons.gavel_rounded, color: Color(0xFF00C2E8), size: 22),
+            Icon(Icons.gavel_rounded, color: Color(0xFF8E4FAE), size: 22),
             SizedBox(width: 8),
             Text(
               'Algorithmic Audit Log',
@@ -309,7 +309,7 @@ class _LiveTrackingRadarScreenState extends State<LiveTrackingRadarScreen>
           children: [
             const Text(
               'EU Platform Work Directive (Art. 6 Compliance):',
-              style: TextStyle(color: Color(0xFF00C2E8), fontSize: 12, fontWeight: FontWeight.bold),
+              style: TextStyle(color: Color(0xFF8E4FAE), fontSize: 12, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 10),
             _buildAuditRow('Dispatch Optimization Epoch', '15.0s Bipartite Buffer'),
@@ -321,7 +321,7 @@ class _LiveTrackingRadarScreenState extends State<LiveTrackingRadarScreen>
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: const Color(0xFF00C2E8).withValues(alpha: 0.1),
+                color: const Color(0xFF8E4FAE).withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Text(
@@ -334,7 +334,7 @@ class _LiveTrackingRadarScreenState extends State<LiveTrackingRadarScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close Audit', style: TextStyle(color: Color(0xFF00C2E8))),
+            child: const Text('Close Audit', style: TextStyle(color: Color(0xFF8E4FAE))),
           ),
         ],
       ),
@@ -387,8 +387,8 @@ class _LiveTrackingRadarScreenState extends State<LiveTrackingRadarScreen>
                     circles: [
                       CircleMarker(
                         point: _homePos,
-                        color: const Color(0xFF00C2E8).withValues(alpha: 0.12),
-                        borderColor: const Color(0xFF00C2E8).withValues(alpha: 0.6),
+                        color: const Color(0xFF8E4FAE).withValues(alpha: 0.12),
+                        borderColor: const Color(0xFF8E4FAE).withValues(alpha: 0.6),
                         borderStrokeWidth: 2.0,
                         useRadiusInMeter: true,
                         radius: _radarRadius * pulseScale,
@@ -397,7 +397,7 @@ class _LiveTrackingRadarScreenState extends State<LiveTrackingRadarScreen>
                       CircleMarker(
                         point: _homePos,
                         color: Colors.transparent,
-                        borderColor: isProximityGeofence ? const Color(0xFF10B981) : Colors.white24,
+                        borderColor: isProximityGeofence ? const Color(0xFF248A52) : Colors.white24,
                         borderStrokeWidth: 1.5,
                         useRadiusInMeter: true,
                         radius: 200.0,
@@ -413,7 +413,7 @@ class _LiveTrackingRadarScreenState extends State<LiveTrackingRadarScreen>
                   Polyline(
                     points: _routePoints,
                     strokeWidth: 4.5,
-                    color: const Color(0xFF00C2E8).withValues(alpha: 0.85),
+                    color: const Color(0xFF8E4FAE).withValues(alpha: 0.85),
                   ),
                 ],
               ),
@@ -443,11 +443,11 @@ class _LiveTrackingRadarScreenState extends State<LiveTrackingRadarScreen>
                     height: 44,
                     builder: (_) => Container(
                       decoration: BoxDecoration(
-                        color: const Color(0xFFEF4444),
+                        color: const Color(0xFFD93025),
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFFEF4444).withValues(alpha: 0.5),
+                            color: const Color(0xFFD93025).withValues(alpha: 0.5),
                             blurRadius: 14,
                             spreadRadius: 2,
                           ),
@@ -466,11 +466,11 @@ class _LiveTrackingRadarScreenState extends State<LiveTrackingRadarScreen>
                       angle: _renderBearing * math.pi / 180.0,
                       child: Container(
                         decoration: BoxDecoration(
-                          color: const Color(0xFF00C2E8),
+                          color: const Color(0xFF8E4FAE),
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(0xFF00C2E8).withValues(alpha: 0.6),
+                              color: const Color(0xFF8E4FAE).withValues(alpha: 0.6),
                               blurRadius: 16,
                               spreadRadius: 3,
                             ),
@@ -512,12 +512,12 @@ class _LiveTrackingRadarScreenState extends State<LiveTrackingRadarScreen>
                     decoration: BoxDecoration(
                       color: const Color(0xFF181528).withValues(alpha: 0.9),
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: const Color(0xFF00C2E8).withValues(alpha: 0.5)),
+                      border: Border.all(color: const Color(0xFF8E4FAE).withValues(alpha: 0.5)),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.radar_rounded, color: Color(0xFF00C2E8), size: 16),
+                        const Icon(Icons.radar_rounded, color: Color(0xFF8E4FAE), size: 16),
                         const SizedBox(width: 6),
                         Text(
                           'ORDER #${widget.orderId.length > 7 ? widget.orderId.substring(0, 7) : widget.orderId} • ART. 6 AUDIT',
@@ -599,7 +599,7 @@ class _LiveTrackingRadarScreenState extends State<LiveTrackingRadarScreen>
                                 width: 8,
                                 height: 8,
                                 decoration: const BoxDecoration(
-                                  color: Color(0xFF10B981),
+                                  color: Color(0xFF248A52),
                                   shape: BoxShape.circle,
                                 ),
                               ),
@@ -629,9 +629,9 @@ class _LiveTrackingRadarScreenState extends State<LiveTrackingRadarScreen>
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF00C2E8).withValues(alpha: 0.15),
+                          color: const Color(0xFF8E4FAE).withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFF00C2E8).withValues(alpha: 0.3)),
+                          border: Border.all(color: const Color(0xFF8E4FAE).withValues(alpha: 0.3)),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.end,
@@ -639,7 +639,7 @@ class _LiveTrackingRadarScreenState extends State<LiveTrackingRadarScreen>
                             const Text(
                               'DISTANCE',
                               style: TextStyle(
-                                color: Color(0xFF00C2E8),
+                                color: Color(0xFF8E4FAE),
                                 fontSize: 10,
                                 fontWeight: FontWeight.w900,
                               ),
@@ -669,8 +669,8 @@ class _LiveTrackingRadarScreenState extends State<LiveTrackingRadarScreen>
                     children: [
                       CircleAvatar(
                         radius: 22,
-                        backgroundColor: const Color(0xFF00C2E8).withValues(alpha: 0.2),
-                        child: const Icon(Icons.two_wheeler_rounded, color: Color(0xFF00C2E8)),
+                        backgroundColor: const Color(0xFF8E4FAE).withValues(alpha: 0.2),
+                        child: const Icon(Icons.two_wheeler_rounded, color: Color(0xFF8E4FAE)),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -694,7 +694,7 @@ class _LiveTrackingRadarScreenState extends State<LiveTrackingRadarScreen>
                       ),
                       IconButton(
                         style: IconButton.styleFrom(
-                          backgroundColor: const Color(0xFF00C2E8),
+                          backgroundColor: const Color(0xFF8E4FAE),
                           foregroundColor: Colors.black,
                         ),
                         onPressed: _showMaskedProxyDialog,
@@ -709,13 +709,13 @@ class _LiveTrackingRadarScreenState extends State<LiveTrackingRadarScreen>
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                        color: const Color(0xFF248A52).withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.4)),
+                        border: Border.all(color: const Color(0xFF248A52).withValues(alpha: 0.4)),
                       ),
                       child: const Row(
                         children: [
-                          Icon(Icons.door_sliding_outlined, color: Color(0xFF10B981), size: 18),
+                          Icon(Icons.door_sliding_outlined, color: Color(0xFF248A52), size: 18),
                           SizedBox(width: 8),
                           Expanded(
                             child: Text(

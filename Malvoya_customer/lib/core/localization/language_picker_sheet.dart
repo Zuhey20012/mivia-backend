@@ -9,7 +9,7 @@ class LanguagePickerSheet {
   static void show(BuildContext context) {
     HapticFeedback.mediumImpact();
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final modalBg = isDark ? const Color(0xFA120B24) : Colors.white;
+    final modalBg = isDark ? const Color(0xFA1A161F) : Colors.white;
     final textPrimary = AppTheme.primaryText(context);
     final textSecondary = AppTheme.secondaryText(context);
     final dividerColor = isDark ? Colors.white12 : Colors.grey.shade200;

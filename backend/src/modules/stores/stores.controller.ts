@@ -13,9 +13,15 @@ export async function listStores(req: AuthRequest, res: Response) {
   }
 }
 
+export async function getMyStore(req: AuthRequest, res: Response) {
+  const store = await storesService.getMyStore(req.user!.id);
+  if (!store) return res.status(404).json({ ok: false, error: "You have not created a store yet" });
+  res.json({ ok: true, store });
+}
+
 export async function getStore(req: AuthRequest, res: Response) {
   try {
-    const store = await storesService.getStoreById(Number(req.params.id));
+    const store = await storesService.getStoreById(Number(req.params.id), req.user?.id);
     res.json({ ok: true, store });
   } catch {
     res.status(404).json({ ok: false, error: "Store not found" });
@@ -29,7 +35,8 @@ export async function createStore(req: AuthRequest, res: Response) {
     const store = await storesService.createStore(req.user!.id, result.data);
     res.status(201).json({ ok: true, store });
   } catch (e: any) {
-    res.status(409).json({ ok: false, error: e.message });
+    console.error(e);
+    res.status(400).json({ ok: false, error: "Could not save store" });
   }
 }
 

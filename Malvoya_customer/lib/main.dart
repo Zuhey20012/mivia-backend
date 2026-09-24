@@ -113,7 +113,7 @@ class MalvoyaApp extends StatelessWidget {
             ],
             home: Consumer<AuthService>(
               builder: (context, auth, child) {
-                final screen = !auth.isAuthenticated ? const LoginScreen() : const MainNavigation();
+                final screen = !auth.canBrowse ? const LoginScreen() : const MainNavigation();
                 return CookieBannerWrapper(child: screen);
               },
             ),

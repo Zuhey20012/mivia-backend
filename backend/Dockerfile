@@ -1,25 +1,18 @@
-﻿# Use Debian-based Node so Prisma linux engines can load libssl
-FROM node:20-bullseye-slim
-
+# Prisma 7 needs Node ^20.19 / ^22.12 / >=24
+FROM node:22-bookworm-slim
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 
-# Install build deps for native modules (if needed)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    openssl \
-    && rm -rf /var/lib/apt/lists/*
+COPY package.json package-lock.json ./
+# Dev dependencies stay installed: TypeScript builds the app and the Prisma CLI runs migrations at start-up
+RUN npm ci --include=dev
 
-# copy package files first for cached install
-COPY package.json package-lock.json* ./
+COPY prisma.config.ts tsconfig.json ./
+COPY prisma ./prisma
+COPY src ./src
+RUN npx prisma generate && npm run build
 
-# install production deps
-RUN npm ci --omit=dev
-
-# copy rest of the project
-COPY . .
-
-# build TypeScript
-RUN npm run build
-
+ENV NODE_ENV=production
+USER node
 EXPOSE 4000
-CMD ["node", "dist/index.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]

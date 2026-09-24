@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/brand_mark.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
@@ -59,7 +60,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _showPhoneDialog() {
     final phoneCtrl = TextEditingController();
-    final passCtrl = TextEditingController();
+    final codeCtrl = TextEditingController();
+    bool codeSent = false;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -87,49 +90,87 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 20),
               const Text('Phone Sign-In / Kirjaudu puhelimella', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              const Text("Sign in or register directly using your mobile number", style: TextStyle(color: Colors.grey)),
+              const Text("Sign in directly using your mobile number", style: TextStyle(color: Colors.grey)),
               const SizedBox(height: 20),
-              TextField(
-                controller: phoneCtrl,
-                keyboardType: TextInputType.phone,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'Phone Number',
-                  hintText: '+358 40 1234567',
-                  prefixIcon: Icon(Icons.phone_outlined),
+              if (!codeSent) ...[
+                TextField(
+                  controller: phoneCtrl,
+                  keyboardType: TextInputType.phone,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Phone Number',
+                    hintText: '+358 40 1234567',
+                    prefixIcon: Icon(Icons.phone_outlined),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: passCtrl,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Password',
-                  hintText: 'Enter your password (or set one)',
-                  prefixIcon: Icon(Icons.lock_outline),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _loading ? null : () async {
+                      final phone = phoneCtrl.text.trim();
+                      if (phone.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter your phone number')));
+                        return;
+                      }
+                      setModalState(() => _loading = true);
+                      final auth = Provider.of<AuthService>(context, listen: false);
+                      await auth.verifyPhone(
+                        phoneNumber: phone,
+                        onCodeSent: (verId) {
+                          setModalState(() {
+                            codeSent = true;
+                            _loading = false;
+                          });
+                        },
+                        onError: (err) {
+                          setModalState(() => _loading = false);
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+                        },
+                        onAutoVerified: () {
+                          Navigator.pop(ctx);
+                        },
+                      );
+                    },
+                    child: _loading 
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Text('Send Code'),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () async {
-                    final phone = phoneCtrl.text.trim();
-                    if (phone.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter your phone number')));
-                      return;
-                    }
-                    Navigator.pop(ctx);
-                    setState(() { _loading = true; _error = null; });
-                    final auth = Provider.of<AuthService>(context, listen: false);
-                    final err = await auth.loginWithPhone(phone);
-                    if (mounted && err != null) {
-                      setState(() { _error = err; _loading = false; });
-                    }
-                  },
-                  child: const Text('Sign In with Phone'),
+              ] else ...[
+                TextField(
+                  controller: codeCtrl,
+                  keyboardType: TextInputType.number,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: '6-digit Code',
+                    hintText: '123456',
+                    prefixIcon: Icon(Icons.password_outlined),
+                  ),
                 ),
-              ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _loading ? null : () async {
+                      final code = codeCtrl.text.trim();
+                      if (code.isEmpty) return;
+                      setModalState(() => _loading = true);
+                      final auth = Provider.of<AuthService>(context, listen: false);
+                      final err = await auth.signInWithSmsCode(code);
+                      setModalState(() => _loading = false);
+                      if (err != null) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+                      } else {
+                        Navigator.pop(ctx);
+                      }
+                    },
+                    child: _loading 
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Text('Verify & Sign In'),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -232,7 +273,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.language_rounded, size: 16, color: Color(0xFFE65100)),
+                        const Icon(Icons.language_rounded, size: 16, color: Color(0xFF9E3222)),
                         const SizedBox(width: 6),
                         Text(
                           currentLangLabel.split(' ').first,
@@ -252,26 +293,7 @@ class _LoginScreenState extends State<LoginScreen> {
               Center(
                 child: Column(
                   children: [
-                    Container(
-                      width: 76,
-                      height: 76,
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFFFF8C42), Color(0xFFE65100)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(22),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFFE65100).withOpacity(0.3),
-                            blurRadius: 18,
-                            offset: const Offset(0, 6),
-                          ),
-                        ],
-                      ),
-                      child: const Icon(Icons.delivery_dining_rounded, color: Colors.white, size: 42),
-                    ),
+                    BrandTile(size: 76, background: AppTheme.primary),
                     const SizedBox(height: 16),
                     Text(AppLocalizations.of(context).translate('malvoyaCourier'), style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: AppTheme.textPrimary, letterSpacing: -0.5)),
                     const SizedBox(height: 4),
@@ -329,9 +351,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.error_outline, color: Color(0xFFE53E3E), size: 18),
+                      const Icon(Icons.error_outline, color: Color(0xFFD93025), size: 18),
                       const SizedBox(width: 8),
-                      Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFE53E3E), fontSize: 13))),
+                      Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFD93025), fontSize: 13))),
                     ],
                   ),
                 ),
@@ -345,7 +367,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: _loading
                     ? const Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5)))
                     : ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE65100)),
+                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF9E3222)),
                         onPressed: _handleLogin,
                         child: Text(l10n.translate('login')),
                       ),
@@ -422,7 +444,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       children: const [
                         TextSpan(
                           text: 'Register here',
-                          style: TextStyle(color: Color(0xFFE65100), fontWeight: FontWeight.bold),
+                          style: TextStyle(color: Color(0xFF9E3222), fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),

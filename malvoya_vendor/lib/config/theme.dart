@@ -2,21 +2,26 @@ import 'package:flutter/material.dart';
 
 class AppTheme {
   // ── Vendor Green Palette (trust, commerce) ────────────────────────────────
-  static const Color primary = Color(0xFF2DC653);
-  static const Color primaryDark = Color(0xFF1DA840);
-  static const Color primaryLight = Color(0xFFE8F8ED);
-  static const Color accent = Color(0xFFFF6B6B);
+  static const Color primary = Color(0xFF2E6B4F);
+  static const Color primaryDark = Color(0xFF245740);
+  static const Color primaryLight = Color(0xFFE4EFE9);
+  static const Color accent = Color(0xFFC2412D);
   static const Color warning = Color(0xFFFFB800);
-  static const Color background = Color(0xFFF7F9F8);
+  static const Color background = Color(0xFFF6F3EE);
   static const Color surface = Colors.white;
-  static const Color textPrimary = Color(0xFF14142B);
-  static const Color textSecondary = Color(0xFF6E7191);
-  static const Color divider = Color(0xFFEEEEF0);
+  static const Color textPrimary = Color(0xFF1C1820);
+  static const Color textSecondary = Color(0xFF6B6472);
+  static const Color divider = Color(0xFFE6E1EA);
   static const Color primaryColor = primary;
 
   static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
+      pageTransitionsTheme: const PageTransitionsTheme(builders: {
+        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+        TargetPlatform.android: PredictiveBackPageTransitionsBuilder(),
+      }),
+
       primaryColor: primary,
       scaffoldBackgroundColor: background,
       colorScheme: ColorScheme.light(
@@ -45,7 +50,7 @@ class AppTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: const Color(0xFFF4F4F8),
+        fillColor: const Color(0xFFEFEBF1),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
         focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: primary, width: 1.5)),

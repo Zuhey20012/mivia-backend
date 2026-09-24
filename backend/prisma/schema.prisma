@@ -3,8 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider = "postgresql" // connection URL: see prisma.config.ts (Prisma 7)
 }
 
 // ─────────────────────────────────────────────
@@ -97,23 +96,30 @@ model User {
   latitude     Float?
   longitude    Float?
 
-  store        Store?
-  orders       Order[]
-  rentals      Rental[]
-  returns      Return[]
+  isActive  Boolean   @default(true) // false = banned or deleted
+  deletedAt DateTime? // set when the account is anonymised (GDPR Art. 17)
+
+  store         Store?
+  courier       Courier?
+  orders        Order[]
+  rentals       Rental[]
+  returns       Return[]
   refreshTokens RefreshToken[]
 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model RefreshToken {
   id        Int      @id @default(autoincrement())
-  token     String   @unique
+  token     String   @unique // SHA-256 hash of the refresh token, never the raw token
   userId    Int
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
   createdAt DateTime @default(now())
+
+  // Query-path indexes (Postgres does not index foreign keys automatically)
+  @@index([userId])
 }
 
 // ─────────────────────────────────────────────
@@ -121,36 +127,39 @@ model RefreshToken {
 // ─────────────────────────────────────────────
 
 model Store {
-  id             Int           @id @default(autoincrement())
-  ownerId        Int           @unique
-  owner          User          @relation(fields: [ownerId], references: [id])
-  name           String
-  description    String?
-  category       StoreCategory
-  logoUrl        String?
-  bannerUrl      String?
-  isHomeBased    Boolean       @default(false)
-  isVerified     Boolean       @default(false)
-  isEcoFriendly  Boolean       @default(false)
+  id            Int           @id @default(autoincrement())
+  ownerId       Int           @unique
+  owner         User          @relation(fields: [ownerId], references: [id])
+  name          String
+  description   String?
+  category      StoreCategory
+  logoUrl       String?
+  bannerUrl     String?
+  isHomeBased   Boolean       @default(false)
+  isVerified    Boolean       @default(false)
+  isEcoFriendly Boolean       @default(false)
 
-  address        String?
-  latitude       Float?
-  longitude      Float?
-  phone          String?
-  email          String?
+  address   String?
+  latitude  Float?
+  longitude Float?
+  phone     String?
+  email     String?
 
   // Business settings
-  commissionRate Float         @default(0.10) // 10% Mivia commission
+  commissionRate Float @default(0.10) // platform commission (fraction of item subtotal)
 
   // Ratings (denormalised for speed)
-  rating         Float         @default(0)
-  totalReviews   Int           @default(0)
+  rating       Float @default(0)
+  totalReviews Int   @default(0)
 
-  products       Product[]
-  orders         Order[]
+  products Product[]
+  orders   Order[]
 
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Query-path indexes (Postgres does not index foreign keys automatically)
+  @@index([isVerified, rating])
 }
 
 // ─────────────────────────────────────────────
@@ -158,57 +167,63 @@ model Store {
 // ─────────────────────────────────────────────
 
 model Product {
-  id               Int              @id @default(autoincrement())
-  storeId          Int
-  store            Store            @relation(fields: [storeId], references: [id])
+  id      Int   @id @default(autoincrement())
+  storeId Int
+  store   Store @relation(fields: [storeId], references: [id])
 
-  name             String
-  description      String?
-  category         String           // "Dress", "Lipstick", "Vintage Bag", etc.
-  condition        ProductCondition @default(NEW)
-  images           String[]         // Cloudinary URLs
-  tags             String[]         // ["eco-friendly", "handmade", "vintage"]
+  name        String
+  description String?
+  category    String // "Dress", "Lipstick", "Vintage Bag", etc.
+  condition   ProductCondition @default(NEW)
+  images      String[] // Cloudinary URLs
+  tags        String[] // ["eco-friendly", "handmade", "vintage"]
 
   // Sale
-  canBeSold        Boolean          @default(true)
-  salePriceCents   Int?             // stored in cents, e.g. 4999 = $49.99
+  canBeSold      Boolean @default(true)
+  salePriceCents Int? // stored in cents, e.g. 4999 = $49.99
 
   // Rental
-  canBeRented      Boolean          @default(false)
-  rentalDayCents   Int?             // price per day in cents
-  depositCents     Int?             // refundable deposit in cents
+  canBeRented    Boolean @default(false)
+  rentalDayCents Int? // price per day in cents
+  depositCents   Int? // refundable deposit in cents
 
   // Inventory
-  stockQuantity    Int              @default(1)
-  isAvailable      Boolean          @default(true)
+  stockQuantity Int     @default(1)
+  isAvailable   Boolean @default(true)
 
   // Flags
-  isEcoFriendly    Boolean          @default(false)
-  isHandmade       Boolean          @default(false)
-  isSecondHand     Boolean          @default(false)
-  isFeatured       Boolean          @default(false)
+  isEcoFriendly Boolean @default(false)
+  isHandmade    Boolean @default(false)
+  isSecondHand  Boolean @default(false)
+  isFeatured    Boolean @default(false)
 
-  variants         ProductVariant[]
-  orderItems       OrderItem[]
-  rentalItems      RentalItem[]
+  variants    ProductVariant[]
+  orderItems  OrderItem[]
+  rentalItems RentalItem[]
 
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Query-path indexes (Postgres does not index foreign keys automatically)
+  @@index([storeId, isAvailable])
 }
 
 model ProductVariant {
-  id               Int      @id @default(autoincrement())
-  productId        Int
-  product          Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  id        Int     @id @default(autoincrement())
+  productId Int
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   size             String?
   color            String?
-  sku              String?  @unique
-  stock            Int      @default(1)
-  priceAdjustCents Int      @default(0) // adds to base price
+  sku              String? @unique
+  stock            Int     @default(1)
+  priceAdjustCents Int     @default(0) // adds to base price
 
-  orderItems       OrderItem[]
-  rentalItems      RentalItem[]
+  orderItems  OrderItem[]
+  rentalItems RentalItem[]
+
+  // Query-path indexes (Postgres does not index foreign keys automatically)
+  @@index([productId])
 }
 
 // ─────────────────────────────────────────────
@@ -216,52 +231,69 @@ model ProductVariant {
 // ─────────────────────────────────────────────
 
 model Order {
-  id               Int           @id @default(autoincrement())
-  userId           Int
-  user             User          @relation(fields: [userId], references: [id])
-  storeId          Int
-  store            Store         @relation(fields: [storeId], references: [id])
-  courierId        Int?
-  courier          Courier?      @relation(fields: [courierId], references: [id])
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  storeId   Int
+  store     Store    @relation(fields: [storeId], references: [id])
+  courierId Int?
+  courier   Courier? @relation(fields: [courierId], references: [id])
 
-  status           OrderStatus   @default(PENDING)
+  status OrderStatus @default(PENDING)
 
   // Pricing (all in cents, server-calculated)
-  subtotalCents      Int         // sum of items
-  deliveryFeeCents   Int         @default(299) // $2.99
-  commissionCents    Int         // 10% of subtotal → Mivia keeps
-  sellerPayoutCents  Int         // subtotal − commission → seller gets
-  totalCents         Int         // subtotalCents + deliveryFeeCents (what customer pays)
+  subtotalCents     Int // sum of items
+  deliveryFeeCents  Int @default(299) // €2.99
+  commissionCents   Int // 10% of subtotal → Mivia keeps
+  sellerPayoutCents Int // subtotal − commission → seller gets
+  totalCents        Int // subtotalCents + deliveryFeeCents (what customer pays)
 
   // Stripe
   stripePaymentIntentId String?
   paymentStatus         PaymentStatus @default(PENDING)
+  paidAt                DateTime?
+  refundedCents         Int           @default(0)
+
+  // Lifecycle timestamps
+  deliveredAt  DateTime? // start of the 14-day withdrawal period (Kuluttajansuojalaki 6:14)
+  cancelledAt  DateTime?
+  cancelReason String?
 
   // Delivery
-  deliveryAddress  String?
-  deliveryLat      Float?
-  deliveryLng      Float?
-  etaMinutes       Int?
+  deliveryAddress String?
+  deliveryLat     Float?
+  deliveryLng     Float?
+  etaMinutes      Int?
 
-  notes            String?
-  items            OrderItem[]
-  returns          Return[]
+  notes   String?
+  items   OrderItem[]
+  returns Return[]
 
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Query-path indexes (Postgres does not index foreign keys automatically)
+  @@index([userId, createdAt])
+  @@index([storeId, paymentStatus, createdAt])
+  @@index([courierId, status])
+  @@index([status, paymentStatus, courierId])
 }
 
 model OrderItem {
-  id         Int             @id @default(autoincrement())
-  orderId    Int
-  order      Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productId  Int
-  product    Product         @relation(fields: [productId], references: [id])
-  variantId  Int?
-  variant    ProductVariant? @relation(fields: [variantId], references: [id])
+  id        Int             @id @default(autoincrement())
+  orderId   Int
+  order     Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId Int
+  product   Product         @relation(fields: [productId], references: [id])
+  variantId Int?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id])
 
-  quantity   Int
-  unitCents  Int             // price snapshot at time of purchase
+  quantity  Int
+  unitCents Int // price snapshot at time of purchase
+
+  // Query-path indexes (Postgres does not index foreign keys automatically)
+  @@index([orderId])
+  @@index([productId])
 }
 
 // ─────────────────────────────────────────────
@@ -269,45 +301,52 @@ model OrderItem {
 // ─────────────────────────────────────────────
 
 model Rental {
-  id              Int          @id @default(autoincrement())
-  userId          Int
-  user            User         @relation(fields: [userId], references: [id])
-  courierId       Int?
-  courier         Courier?     @relation(fields: [courierId], references: [id])
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  courierId Int?
+  courier   Courier? @relation(fields: [courierId], references: [id])
 
-  status          RentalStatus @default(PENDING)
-  startDate       DateTime
-  endDate         DateTime
-  rentalDays      Int          // computed: endDate - startDate
+  status     RentalStatus @default(PENDING)
+  startDate  DateTime
+  endDate    DateTime
+  rentalDays Int // computed: endDate - startDate
 
   // Pricing (cents)
-  subtotalCents   Int          // rentalDays × dailyCents
-  depositCents    Int          // refundable on return
-  deliveryFeeCents Int         @default(299)
-  commissionCents Int
-  totalCents      Int          // what customer pays upfront
+  subtotalCents    Int // rentalDays × dailyCents
+  depositCents     Int // refundable on return
+  deliveryFeeCents Int @default(299)
+  commissionCents  Int
+  totalCents       Int // what customer pays upfront
 
   stripePaymentIntentId String?
-  paymentStatus   PaymentStatus @default(PENDING)
+  paymentStatus         PaymentStatus @default(PENDING)
 
-  items           RentalItem[]
-  return          Return?
+  items  RentalItem[]
+  return Return?
 
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Query-path indexes (Postgres does not index foreign keys automatically)
+  @@index([userId, createdAt])
 }
 
 model RentalItem {
-  id         Int             @id @default(autoincrement())
-  rentalId   Int
-  rental     Rental          @relation(fields: [rentalId], references: [id], onDelete: Cascade)
-  productId  Int
-  product    Product         @relation(fields: [productId], references: [id])
-  variantId  Int?
-  variant    ProductVariant? @relation(fields: [variantId], references: [id])
+  id        Int             @id @default(autoincrement())
+  rentalId  Int
+  rental    Rental          @relation(fields: [rentalId], references: [id], onDelete: Cascade)
+  productId Int
+  product   Product         @relation(fields: [productId], references: [id])
+  variantId Int?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id])
 
   quantity   Int
-  dailyCents Int             // rate snapshot at time of booking
+  dailyCents Int // rate snapshot at time of booking
+
+  // Query-path indexes (Postgres does not index foreign keys automatically)
+  @@index([rentalId])
+  @@index([productId])
 }
 
 // ─────────────────────────────────────────────
@@ -315,28 +354,32 @@ model RentalItem {
 // ─────────────────────────────────────────────
 
 model Return {
-  id              Int          @id @default(autoincrement())
+  id Int @id @default(autoincrement())
 
   // Linked to either an Order or a Rental (not both)
-  orderId         Int?
-  order           Order?       @relation(fields: [orderId], references: [id])
-  rentalId        Int?         @unique
-  rental          Rental?      @relation(fields: [rentalId], references: [id])
+  orderId  Int?
+  order    Order?  @relation(fields: [orderId], references: [id])
+  rentalId Int?    @unique
+  rental   Rental? @relation(fields: [rentalId], references: [id])
 
-  userId          Int
-  user            User         @relation(fields: [userId], references: [id])
-  courierId       Int?
-  courier         Courier?     @relation(fields: [courierId], references: [id])
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  courierId Int?
+  courier   Courier? @relation(fields: [courierId], references: [id])
 
-  reason          ReturnReason
-  conditionNote   String?      // vendor fills this on receipt
-  refundCents     Int?         // calculated after inspection
-  damageDedCents  Int?         @default(0) // deducted if damaged
+  reason         ReturnReason
+  conditionNote  String? // vendor fills this on receipt
+  refundCents    Int? // calculated after inspection
+  damageDedCents Int?         @default(0) // deducted if damaged
 
-  status          ReturnStatus @default(REQUESTED)
+  status ReturnStatus @default(REQUESTED)
 
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Query-path indexes (Postgres does not index foreign keys automatically)
+  @@index([userId, createdAt])
+  @@index([orderId])
 }
 
 // ─────────────────────────────────────────────
@@ -344,25 +387,55 @@ model Return {
 // ─────────────────────────────────────────────
 
 model Courier {
-  id            Int      @id @default(autoincrement())
-  name          String
-  phone         String?
-  email         String?  @unique
-  passwordHash  String?
-  isActive      Boolean  @default(true)
+  id           Int     @id @default(autoincrement())
+  userId       Int?    @unique
+  user         User?   @relation(fields: [userId], references: [id])
+  isApproved   Boolean @default(false) // set by an admin after identity/right-to-work checks
+  name         String
+  phone        String?
+  email        String? @unique
+  passwordHash String?
+  isActive     Boolean @default(true)
 
-  latitude      Float?
-  longitude     Float?
+  latitude  Float?
+  longitude Float?
 
   // Current assignment tracking
   currentOrderId  Int?
   currentRentalId Int?
   currentReturnId Int?
 
-  orders        Order[]
-  rentals       Rental[]
-  returns       Return[]
+  orders  Order[]
+  rentals Rental[]
+  returns Return[]
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Query-path indexes (Postgres does not index foreign keys automatically)
+  @@index([isApproved, isActive])
+}
+
+// ─────────────────────────────────────────────
+// STRIPE WEBHOOK IDEMPOTENCY
+// ─────────────────────────────────────────────
+
+model StripeEvent {
+  id          String   @id // Stripe event id (evt_...)
+  type        String
+  processedAt DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// ONE-TIME SIGN-IN CODES (shared by every API instance)
+// ─────────────────────────────────────────────
+
+model OtpCode {
+  target    String   @id // normalised email or E.164 phone
+  codeHash  String // SHA-256(target:code); the code itself is never stored
+  attempts  Int      @default(0)
+  sentAt    DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([expiresAt])
 }

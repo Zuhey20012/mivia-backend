@@ -10,3 +10,10 @@ backend/.env
 **/*.hprof
 release_builds/
 node_modules/
+
+# secrets & local helpers
+.env
+*.env
+!.env.example
+backend/create-admin.js
+**/node_modules_corrupt/

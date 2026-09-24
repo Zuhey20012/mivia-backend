@@ -375,7 +375,7 @@ class _VideoFeedScreenState extends State<VideoFeedScreen>
                             child: Text(
                               '-${drop['discountPct']}% OFF',
                               style: const TextStyle(
-                                color: Color(0xFF16A34A),
+                                color: Color(0xFF248A52),
                                 fontSize: 10,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -752,7 +752,7 @@ class _VideoFeedScreenState extends State<VideoFeedScreen>
                       height: 44,
                       decoration: BoxDecoration(
                         gradient: const LinearGradient(
-                          colors: [Color(0xFFEC4899), Color(0xFF8B5CF6)],
+                          colors: [Color(0xFF9B5DB8), Color(0xFF6D2E8C)],
                         ),
                         borderRadius: BorderRadius.circular(14),
                       ),
@@ -785,14 +785,14 @@ class _VideoFeedScreenState extends State<VideoFeedScreen>
                   height: 84,
                   decoration: BoxDecoration(
                     gradient: const LinearGradient(
-                      colors: [Color(0xFF8B5CF6), Color(0xFF7C3AED)],
+                      colors: [Color(0xFF6D2E8C), Color(0xFF55226E)],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     ),
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFF8B5CF6).withValues(alpha: 0.5),
+                        color: const Color(0xFF6D2E8C).withValues(alpha: 0.5),
                         blurRadius: 32,
                         spreadRadius: 6,
                       ),
@@ -834,7 +834,7 @@ class _VideoFeedScreenState extends State<VideoFeedScreen>
                   decoration: BoxDecoration(
                     color: const Color(0xFF1E1B4B).withValues(alpha: 0.7),
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: const Color(0xFF8B5CF6).withValues(alpha: 0.4), width: 1.2),
+                    border: Border.all(color: const Color(0xFF6D2E8C).withValues(alpha: 0.4), width: 1.2),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -843,7 +843,7 @@ class _VideoFeedScreenState extends State<VideoFeedScreen>
                         width: 8,
                         height: 8,
                         decoration: const BoxDecoration(
-                          color: Color(0xFF8B5CF6),
+                          color: Color(0xFF6D2E8C),
                           shape: BoxShape.circle,
                         ),
                       ),
@@ -890,7 +890,7 @@ class _VideoFeedScreenState extends State<VideoFeedScreen>
           errorBuilder: (_, __, ___) => Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
-                colors: [Color(0xFF2E1065), Color(0xFF0F172A)],
+                colors: [Color(0xFF2E1065), Color(0xFF17131C)],
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
               ),
@@ -995,7 +995,7 @@ class _VideoFeedScreenState extends State<VideoFeedScreen>
                       gradient: isFollowed
                           ? null
                           : const LinearGradient(
-                              colors: [Color(0xFFEC4899), Color(0xFF8B5CF6)]),
+                              colors: [Color(0xFF9B5DB8), Color(0xFF6D2E8C)]),
                       color: isFollowed
                           ? Colors.white.withValues(alpha: 0.15)
                           : null,
@@ -1047,7 +1047,7 @@ class _VideoFeedScreenState extends State<VideoFeedScreen>
                       horizontal: 12, vertical: 5),
                   decoration: BoxDecoration(
                     gradient: const LinearGradient(
-                      colors: [Color(0xFFEC4899), Color(0xFF8B5CF6)],
+                      colors: [Color(0xFF9B5DB8), Color(0xFF6D2E8C)],
                     ),
                     borderRadius: BorderRadius.circular(20),
                   ),
@@ -1075,7 +1075,7 @@ class _VideoFeedScreenState extends State<VideoFeedScreen>
                   padding: const EdgeInsets.symmetric(
                       horizontal: 7, vertical: 3),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF16A34A),
+                    color: const Color(0xFF248A52),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
@@ -1132,7 +1132,7 @@ class _VideoFeedScreenState extends State<VideoFeedScreen>
                     ? Icons.favorite_rounded
                     : Icons.favorite_border_rounded,
                 iconColor:
-                    isLiked ? const Color(0xFFEF4444) : Colors.white,
+                    isLiked ? const Color(0xFFD93025) : Colors.white,
                 label: isLiked ? '1' : '',
                 onTap: () {
                   HapticFeedback.lightImpact();
@@ -1170,12 +1170,12 @@ class _VideoFeedScreenState extends State<VideoFeedScreen>
                   height: 52,
                   decoration: BoxDecoration(
                     gradient: const LinearGradient(
-                      colors: [Color(0xFFEC4899), Color(0xFF8B5CF6)],
+                      colors: [Color(0xFF9B5DB8), Color(0xFF6D2E8C)],
                     ),
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFFEC4899).withValues(alpha: 0.4),
+                        color: const Color(0xFF9B5DB8).withValues(alpha: 0.4),
                         blurRadius: 12,
                         offset: const Offset(0, 4),
                       ),
@@ -1248,11 +1248,11 @@ class _VideoFeedScreenState extends State<VideoFeedScreen>
                     horizontal: 14, vertical: 6),
                 decoration: BoxDecoration(
                   color: isSelected
-                      ? const Color(0xFF8B5CF6)
+                      ? const Color(0xFF6D2E8C)
                       : Colors.white.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: isSelected ? const Color(0xFF8B5CF6) : Colors.white24,
+                    color: isSelected ? const Color(0xFF6D2E8C) : Colors.white24,
                   ),
                 ),
                 child: Text(
@@ -1284,7 +1284,7 @@ class _VideoFeedScreenState extends State<VideoFeedScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const CircularProgressIndicator(color: Color(0xFFEC4899)),
+              const CircularProgressIndicator(color: Color(0xFF9B5DB8)),
               const SizedBox(height: 20),
               Text(
                 Localizations.localeOf(context).languageCode == 'fi'
@@ -1315,7 +1315,7 @@ class _VideoFeedScreenState extends State<VideoFeedScreen>
                         horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
-                        colors: [Color(0xFFEC4899), Color(0xFF8B5CF6)],
+                        colors: [Color(0xFF9B5DB8), Color(0xFF6D2E8C)],
                       ),
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -1371,7 +1371,7 @@ class _VideoFeedScreenState extends State<VideoFeedScreen>
                         horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
-                        colors: [Color(0xFFEC4899), Color(0xFF8B5CF6)],
+                        colors: [Color(0xFF9B5DB8), Color(0xFF6D2E8C)],
                       ),
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -1418,7 +1418,7 @@ class _VideoFeedScreenState extends State<VideoFeedScreen>
             top: _heartAnimPos.dy - 40,
             child: const Icon(
               Icons.favorite_rounded,
-              color: Color(0xFFEF4444),
+              color: Color(0xFFD93025),
               size: 80,
             ),
           ),

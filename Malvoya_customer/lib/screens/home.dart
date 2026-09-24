@@ -35,18 +35,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   late Animation<double> _radarPulseAnim;
 
   final List<Map<String, dynamic>> categories = [
-    {'name': 'Clothing', 'icon': Icons.checkroom_rounded, 'color': Color(0xFF8B5CF6)},
-    {'name': 'Shoes', 'icon': Icons.snowshoeing_rounded, 'color': Color(0xFF06B6D4)},
-    {'name': 'Bags', 'icon': Icons.shopping_bag_rounded, 'color': Color(0xFFEC4899)},
-    {'name': 'Accessories', 'icon': Icons.watch_rounded, 'color': Color(0xFFF59E0B)},
-    {'name': 'Jewelry', 'icon': Icons.diamond_rounded, 'color': Color(0xFF10B981)},
-    {'name': 'Vintage', 'icon': Icons.auto_awesome_rounded, 'color': Color(0xFF8B5CF6)},
-    {'name': 'Beauty', 'icon': Icons.spa_rounded, 'color': Color(0xFFF43F5E)},
+    {'name': 'Clothing', 'icon': Icons.checkroom_rounded, 'color': Color(0xFF6D2E8C)},
+    {'name': 'Shoes', 'icon': Icons.snowshoeing_rounded, 'color': Color(0xFF8E4FAE)},
+    {'name': 'Bags', 'icon': Icons.shopping_bag_rounded, 'color': Color(0xFF9B5DB8)},
+    {'name': 'Accessories', 'icon': Icons.watch_rounded, 'color': Color(0xFFE08A00)},
+    {'name': 'Jewelry', 'icon': Icons.diamond_rounded, 'color': Color(0xFF248A52)},
+    {'name': 'Vintage', 'icon': Icons.auto_awesome_rounded, 'color': Color(0xFF6D2E8C)},
+    {'name': 'Beauty', 'icon': Icons.spa_rounded, 'color': Color(0xFFC2412D)},
     {'name': 'Home', 'icon': Icons.chair_rounded, 'color': Color(0xFF6366F1)},
-    {'name': 'Returns', 'icon': Icons.assignment_return_rounded, 'color': Color(0xFF8B5CF6)},
-    {'name': 'Eco-Friendly', 'icon': Icons.eco_rounded, 'color': Color(0xFF10B981)},
-    {'name': 'Swipe to Swap', 'icon': Icons.swap_horiz_rounded, 'color': Color(0xFFEC4899)},
-    {'name': 'Second Hand', 'icon': Icons.recycling_rounded, 'color': Color(0xFF06B6D4)},
+    {'name': 'Returns', 'icon': Icons.assignment_return_rounded, 'color': Color(0xFF6D2E8C)},
+    {'name': 'Eco-Friendly', 'icon': Icons.eco_rounded, 'color': Color(0xFF248A52)},
+    {'name': 'Swipe to Swap', 'icon': Icons.swap_horiz_rounded, 'color': Color(0xFF9B5DB8)},
+    {'name': 'Second Hand', 'icon': Icons.recycling_rounded, 'color': Color(0xFF8E4FAE)},
   ];
 
   @override
@@ -233,16 +233,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: isDark
-              ? [const Color(0xFF1E133C), const Color(0xFF140D28)]
-              : [const Color(0xFFEDE9FE), const Color(0xFFF5F3FF)],
+              ? [const Color(0xFF2A2331), const Color(0xFF221C29)]
+              : [const Color(0xFFF1E7F6), const Color(0xFFF6F0F9)],
         ),
         border: Border.all(
-          color: const Color(0xFF8B5CF6).withValues(alpha: isDark ? 0.35 : 0.25),
+          color: const Color(0xFF6D2E8C).withValues(alpha: isDark ? 0.35 : 0.25),
           width: 1.2,
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF8B5CF6).withValues(alpha: isDark ? 0.22 : 0.12),
+            color: const Color(0xFF6D2E8C).withValues(alpha: isDark ? 0.22 : 0.12),
             blurRadius: 20,
             offset: const Offset(0, 8),
           ),
@@ -267,11 +267,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                           height: 32,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: const Color(0xFF10B981).withValues(alpha: 0.18),
-                            border: Border.all(color: const Color(0xFF10B981), width: 1.5),
+                            color: const Color(0xFF248A52).withValues(alpha: 0.18),
+                            border: Border.all(color: const Color(0xFF248A52), width: 1.5),
                           ),
                           child: const Center(
-                            child: Icon(Icons.radar_rounded, size: 18, color: Color(0xFF10B981)),
+                            child: Icon(Icons.radar_rounded, size: 18, color: Color(0xFF248A52)),
                           ),
                         ),
                       ),
@@ -284,7 +284,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w800,
-                              color: isDark ? Colors.white : const Color(0xFF0F0B1E),
+                              color: isDark ? Colors.white : const Color(0xFF1C1820),
                             ),
                           ),
                           Text(
@@ -293,7 +293,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                                 : l10n.translate('radarTelemetry'),
                             style: TextStyle(
                               fontSize: 11.5,
-                              color: const Color(0xFF10B981),
+                              color: const Color(0xFF248A52),
                               fontWeight: FontWeight.w700,
                             ),
                           ),
@@ -304,9 +304,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                      color: const Color(0xFF248A52).withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+                      border: Border.all(color: const Color(0xFF248A52).withValues(alpha: 0.3)),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -315,7 +315,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                           width: 6,
                           height: 6,
                           decoration: const BoxDecoration(
-                            color: Color(0xFF10B981),
+                            color: Color(0xFF248A52),
                             shape: BoxShape.circle,
                           ),
                         ),
@@ -325,7 +325,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                               ? (realStatus == 'SHIPPED' ? 'ETA ~15m' : realStatus)
                               : 'Live 60Hz',
                           style: const TextStyle(
-                            color: Color(0xFF10B981),
+                            color: Color(0xFF248A52),
                             fontWeight: FontWeight.w800,
                             fontSize: 11.5,
                           ),
@@ -340,7 +340,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 children: [
                   Icon(
                     hasRealOrder ? Icons.delivery_dining_rounded : Icons.location_city_rounded,
-                    color: const Color(0xFF8B5CF6),
+                    color: const Color(0xFF6D2E8C),
                     size: 20,
                   ),
                   const SizedBox(width: 8),
@@ -365,7 +365,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 width: double.infinity,
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF8B5CF6),
+                    backgroundColor: const Color(0xFF6D2E8C),
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     padding: const EdgeInsets.symmetric(vertical: 12),
@@ -436,8 +436,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [
-                    const Color(0xFF8B5CF6).withValues(alpha: 0.85),
-                    const Color(0xFF6D28D9),
+                    const Color(0xFF6D2E8C).withValues(alpha: 0.85),
+                    const Color(0xFF55226E),
                   ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
@@ -470,23 +470,23 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF8B5CF6).withValues(alpha: 0.14),
+                          color: const Color(0xFF6D2E8C).withValues(alpha: 0.14),
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
-                            color: const Color(0xFF8B5CF6).withValues(alpha: 0.3),
+                            color: const Color(0xFF6D2E8C).withValues(alpha: 0.3),
                             width: 1,
                           ),
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.star_rounded, size: 16, color: Color(0xFFF59E0B)),
+                            const Icon(Icons.star_rounded, size: 16, color: Color(0xFFE08A00)),
                             const SizedBox(width: 4),
                             Text(
                               '${store['rating'] ?? '4.9'}',
                               style: const TextStyle(
                                 fontWeight: FontWeight.w800,
                                 fontSize: 12.5,
-                                color: Color(0xFF8B5CF6),
+                                color: Color(0xFF6D2E8C),
                               ),
                             ),
                           ],
@@ -545,14 +545,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             height: 58,
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [Color(0xFF8B5CF6), Color(0xFF7C3AED)],
+                colors: [Color(0xFF6D2E8C), Color(0xFF55226E)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF8B5CF6).withValues(alpha: 0.35),
+                  color: const Color(0xFF6D2E8C).withValues(alpha: 0.35),
                   blurRadius: 20,
                   spreadRadius: 2,
                 ),
@@ -634,7 +634,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         return Scaffold(
           backgroundColor: Theme.of(context).scaffoldBackgroundColor,
           appBar: AppBar(
-            backgroundColor: isDark ? const Color(0xFF140D28) : Colors.white,
+            backgroundColor: isDark ? const Color(0xFF221C29) : Colors.white,
             elevation: 0,
             scrolledUnderElevation: 0,
             title: GestureDetector(
@@ -660,7 +660,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   Text(
                     l10n.translate('deliveringTo'),
                     style: const TextStyle(
-                      color: Color(0xFF8B5CF6),
+                      color: Color(0xFF6D2E8C),
                       fontSize: 11.5,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.3,
@@ -689,10 +689,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 icon: Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF8B5CF6).withValues(alpha: 0.12),
+                    color: const Color(0xFF6D2E8C).withValues(alpha: 0.12),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.notifications_none_rounded, size: 20, color: Color(0xFF8B5CF6)),
+                  child: const Icon(Icons.notifications_none_rounded, size: 20, color: Color(0xFF6D2E8C)),
                 ),
                 onPressed: () {
                   HapticFeedback.lightImpact();
@@ -703,7 +703,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             ],
           ),
           body: RefreshIndicator(
-            color: const Color(0xFF8B5CF6),
+            color: const Color(0xFF6D2E8C),
             onRefresh: fetchStores,
             child: SingleChildScrollView(
               physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
@@ -783,7 +783,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                                   fetchStores();
                                 },
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF8B5CF6),
+                                  backgroundColor: const Color(0xFF6D2E8C),
                                   foregroundColor: Colors.white,
                                 ),
                                 icon: const Icon(Icons.refresh_rounded),

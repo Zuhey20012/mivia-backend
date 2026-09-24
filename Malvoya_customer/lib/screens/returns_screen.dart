@@ -1,14 +1,14 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../auth_service.dart';
+import '../config/constants.dart';
 import '../config/theme.dart';
-import '../l10n.dart';
-import '../locale_provider.dart';
-import '../local_notification_service.dart';
-import '../ui/returns/return_condition_scanner.dart';
 
+/// Returns under the 14-day right of withdrawal (Kuluttajansuojalaki 6 luku).
+/// Everything shown here comes from the server; nothing is stored only on the phone.
 class ReturnsScreen extends StatefulWidget {
   const ReturnsScreen({super.key});
 
@@ -16,604 +16,297 @@ class ReturnsScreen extends StatefulWidget {
   State<ReturnsScreen> createState() => _ReturnsScreenState();
 }
 
-class _ReturnsScreenState extends State<ReturnsScreen> with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-  List<Map<String, dynamic>> _returns = [];
+const _reasons = <String, String>{
+  'CHANGED_MIND': 'Muutin mieleni / Changed my mind',
+  'WRONG_ITEM': 'Väärä tuote / Wrong item',
+  'DAMAGED_ON_ARRIVAL': 'Saapui vaurioituneena / Arrived damaged',
+  'NOT_AS_DESCRIBED': 'Ei vastaa kuvausta / Not as described',
+  'OTHER': 'Muu syy / Other',
+};
+
+const _statusLabels = <String, String>{
+  'REQUESTED': 'Pyydetty / Requested',
+  'APPROVED': 'Hyväksytty / Approved',
+  'IN_TRANSIT': 'Matkalla / On its way back',
+  'RECEIVED': 'Vastaanotettu / Received by store',
+  'REFUNDED': 'Hyvitetty / Refunded',
+  'REJECTED': 'Hylätty / Rejected',
+};
+
+class _ReturnsScreenState extends State<ReturnsScreen> {
+  List<dynamic> _returns = [];
   bool _loading = true;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-    _loadReturns();
+    _load();
   }
 
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
+  Map<String, String> _headers(AuthService auth) => {
+        'Authorization': 'Bearer ${auth.accessToken}',
+        'Content-Type': 'application/json',
+      };
 
-  Future<void> _loadReturns() async {
-    setState(() => _loading = true);
+  Future<void> _load() async {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    if (!auth.isAuthenticated) {
+      setState(() { _loading = false; _error = 'Kirjaudu sisään nähdäksesi palautukset. Sign in to see your returns.'; });
+      return;
+    }
+    setState(() { _loading = true; _error = null; });
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString('malvoya_returns');
-      if (raw != null) {
-        final List decoded = jsonDecode(raw);
-        _returns = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
+      final res = await http
+          .get(Uri.parse('${AppConstants.apiBase}/returns'), headers: _headers(auth))
+          .timeout(const Duration(seconds: 15));
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        setState(() => _returns = jsonDecode(res.body)['returns'] ?? []);
       } else {
-        _returns = [];
+        setState(() => _error = 'Palautuksia ei voitu ladata. Could not load returns.');
       }
     } catch (_) {
-      _returns = [];
+      if (mounted) setState(() => _error = 'Ei yhteyttä. No connection.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
-    if (mounted) setState(() => _loading = false);
   }
 
-  Future<void> _persistReturns() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('malvoya_returns', jsonEncode(_returns));
+  /// Delivered orders still inside the 14-day window, newest first.
+  Future<List<dynamic>> _eligibleOrders(AuthService auth) async {
+    final res = await http
+        .get(Uri.parse('${AppConstants.apiBase}/orders'), headers: _headers(auth))
+        .timeout(const Duration(seconds: 15));
+    if (res.statusCode != 200) return [];
+    final orders = (jsonDecode(res.body)['orders'] as List?) ?? [];
+    final alreadyReturned = _returns.map((r) => r['orderId']).toSet();
+    return orders.where((o) {
+      if (o['status'] != 'DELIVERED' || o['deliveredAt'] == null) return false;
+      if (alreadyReturned.contains(o['id'])) return false;
+      final delivered = DateTime.tryParse(o['deliveredAt'].toString());
+      return delivered != null && DateTime.now().difference(delivered).inDays < 14;
+    }).toList();
   }
 
-  String _formatDispatchMethod(String method, AppLocalizations l10n) {
-    if (method.trim().isEmpty) return l10n.locale.languageCode == 'fi' ? 'Putiikin palautusohje' : 'Standard return';
-    return method;
-  }
+  Future<void> _startReturn() async {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    if (!auth.isAuthenticated) return;
+    HapticFeedback.selectionClick();
 
-  String _formatRefundDestination(String dest, AppLocalizations l10n) {
-    if (dest.contains('IBAN') || dest.contains('Bank') || dest.contains('SEPA') || dest.contains('tilisiirto')) {
-      return l10n.translate('directSepaIban');
+    List<dynamic> orders;
+    try {
+      orders = await _eligibleOrders(auth);
+    } catch (_) {
+      orders = [];
     }
-    return l10n.translate('origPaymentCard');
-  }
+    if (!mounted) return;
 
-  String _formatReason(String reason, AppLocalizations l10n) {
-    final r = reason.toLowerCase();
-    if (r.contains('mind') || r.contains('mieli') || r.contains('muuttun')) {
-      return l10n.translate('reasonChangedMind');
-    }
-    if (r.contains('size') || r.contains('koko') || r.contains('fit')) {
-      return l10n.translate('reasonSizeMismatch');
-    }
-    if (r.contains('defective') || r.contains('viallinen') || r.contains('damag')) {
-      return l10n.translate('reasonDefective');
-    }
-    if (r.contains('different') || r.contains('eroaa') || r.contains('kuvaukse')) {
-      return l10n.translate('reasonNotAsDescribed');
-    }
-    return reason;
-  }
+    int? selectedOrder = orders.isNotEmpty ? orders.first['id'] as int : null;
+    String reason = 'CHANGED_MIND';
+    final noteCtrl = TextEditingController();
+    bool submitting = false;
+    String? sheetError;
 
-  void _openStartReturnWizard() {
-    final l10n = AppLocalizations.of(context);
-    final orderIdCtrl = TextEditingController();
-    final itemCtrl = TextEditingController();
-    final ibanCtrl = TextEditingController();
-    String reasonKey = 'reasonChangedMind';
-    final dispatchMethodCtrl = TextEditingController();
-    String refundDestination = 'Original Payment Card';
-
-    final cardBg = AppTheme.cardBackground(context);
-    final textPrimary = AppTheme.primaryText(context);
-    final textSecondary = AppTheme.secondaryText(context);
-    final inputBg = AppTheme.inputBackground(context);
-    final cardBorder = AppTheme.cardBorder(context);
-
-    showModalBottomSheet(
+    await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.transparent,
+      showDragHandle: true,
       builder: (ctx) => StatefulBuilder(
-        builder: (context, setModalState) => Container(
-          decoration: BoxDecoration(
-            color: cardBg,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-            border: Border.all(color: cardBorder),
-          ),
-          padding: EdgeInsets.fromLTRB(24, 16, 24, MediaQuery.of(context).viewInsets.bottom + 24),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 44,
-                    height: 5,
-                    decoration: BoxDecoration(color: Colors.grey.shade400, borderRadius: BorderRadius.circular(3)),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primary.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: const Icon(Icons.assignment_return_rounded, color: AppTheme.primary, size: 24),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(l10n.translate('euStatutoryReturn'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textPrimary)),
-                          Text(l10n.translate('statutoryProtection14d'), style: TextStyle(fontSize: 12, color: textSecondary)),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                Text(l10n.translate('itemNameDesc'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textPrimary)),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: itemCtrl,
-                  style: TextStyle(color: textPrimary, fontSize: 14),
-                  decoration: InputDecoration(
-                    hintText: l10n.translate('itemHintLinen'),
-                    hintStyle: TextStyle(color: textSecondary),
-                    filled: true,
-                    fillColor: inputBg,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Text(l10n.translate('orderRefOptional'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textPrimary)),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: orderIdCtrl,
-                  style: TextStyle(color: textPrimary, fontSize: 14),
-                  decoration: InputDecoration(
-                    hintText: l10n.translate('orderRefHint'),
-                    hintStyle: TextStyle(color: textSecondary),
-                    filled: true,
-                    fillColor: inputBg,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Text(l10n.translate('reasonForReturn'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textPrimary)),
-                const SizedBox(height: 6),
-                DropdownButtonFormField<String>(
-                  value: reasonKey,
-                  dropdownColor: cardBg,
-                  style: TextStyle(color: textPrimary, fontSize: 13),
-                  decoration: InputDecoration(
-                    filled: true,
-                    fillColor: inputBg,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                  ),
-                  items: [
-                    DropdownMenuItem(value: 'reasonChangedMind', child: Text(l10n.translate('reasonChangedMind'), style: TextStyle(fontSize: 13, color: textPrimary))),
-                    DropdownMenuItem(value: 'reasonSizeMismatch', child: Text(l10n.translate('reasonSizeMismatch'), style: TextStyle(fontSize: 13, color: textPrimary))),
-                    DropdownMenuItem(value: 'reasonDefective', child: Text(l10n.translate('reasonDefective'), style: TextStyle(fontSize: 13, color: textPrimary))),
-                    DropdownMenuItem(value: 'reasonNotAsDescribed', child: Text(l10n.translate('reasonNotAsDescribed'), style: TextStyle(fontSize: 13, color: textPrimary))),
-                  ],
-                  onChanged: (val) {
-                    if (val != null) setModalState(() => reasonKey = val);
-                  },
-                ),
-                const SizedBox(height: 14),
-                Text(l10n.translate('returnDispatchMethod'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textPrimary)),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: dispatchMethodCtrl,
-                  style: TextStyle(color: textPrimary, fontSize: 14),
-                  decoration: InputDecoration(
-                    hintText: l10n.locale.languageCode == 'fi' ? 'Toimitustapa / noutotoive (valinnainen)' : 'Dispatch method or return instructions (optional)',
-                    hintStyle: TextStyle(color: textSecondary),
-                    filled: true,
-                    fillColor: inputBg,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Text(l10n.translate('refundDestination'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textPrimary)),
-                const SizedBox(height: 6),
-                DropdownButtonFormField<String>(
-                  value: refundDestination,
-                  dropdownColor: cardBg,
-                  style: TextStyle(color: textPrimary, fontSize: 13),
-                  decoration: InputDecoration(
-                    filled: true,
-                    fillColor: inputBg,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                  ),
-                  items: [
-                    DropdownMenuItem(value: 'Original Payment Card', child: Text(l10n.translate('origPaymentCard'), style: TextStyle(fontSize: 13, color: textPrimary))),
-                    DropdownMenuItem(value: 'European SEPA Bank Account (IBAN)', child: Text(l10n.translate('directSepaIban'), style: TextStyle(fontSize: 13, color: textPrimary))),
-                  ],
-                  onChanged: (val) {
-                    if (val != null) setModalState(() => refundDestination = val);
-                  },
-                ),
-                if (refundDestination.contains('IBAN')) ...[
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: ibanCtrl,
-                    style: TextStyle(color: textPrimary, fontSize: 14),
-                    decoration: InputDecoration(
-                      hintText: 'FI21 1234 5678 9012 34',
-                      labelText: l10n.translate('directSepaIban'),
-                      labelStyle: TextStyle(color: textSecondary),
-                      filled: true,
-                      fillColor: inputBg,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 20),
-
-                // AI Defect Scan Option
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.primary,
-                      side: const BorderSide(color: AppTheme.primary, width: 1.5),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    ),
-                    icon: const Icon(Icons.auto_awesome, size: 18),
-                    label: Text(
-                      l10n.locale.languageCode == 'fi'
-                          ? '📸 Käynnistä tekoälyskannaus ja palautus'
-                          : '📸 Launch AI Garment Scanner & Return',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                    ),
-                    onPressed: () async {
-                      Navigator.pop(ctx);
-                      final result = await Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => ReturnConditionScanner(
-                            orderId: orderIdCtrl.text.trim().isEmpty ? 'ORD-LIVE' : orderIdCtrl.text.trim(),
-                            itemName: itemCtrl.text.trim().isEmpty ? (l10n.locale.languageCode == 'fi' ? 'Putiikkituote' : 'Boutique Apparel') : itemCtrl.text.trim(),
-                          ),
-                        ),
-                      );
-                      if (result != null) {
-                        final retId = 'RET-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
-                        final now = DateTime.now();
-                        final dateStr = '${now.day}.${now.month}.${now.year}';
-                        final newReturn = {
-                          'id': retId,
-                          'item': itemCtrl.text.trim().isEmpty ? (l10n.locale.languageCode == 'fi' ? 'Putiikkituote (AI-varmistettu)' : 'Boutique Piece (AI-Verified)') : itemCtrl.text.trim(),
-                          'orderId': orderIdCtrl.text.trim().isEmpty ? '#MLV-${now.millisecondsSinceEpoch.toString().substring(8)}' : orderIdCtrl.text.trim(),
-                          'reason': 'reasonChangedMind',
-                          'dispatchMethod': 'Noutokuriiri (Riidaton)',
-                          'refundDestination': refundDestination,
-                          'iban': ibanCtrl.text.trim(),
-                          'date': dateStr,
-                          'statusStage': 1,
-                          'statusLabel': l10n.translate('stageRequested'),
-                          'aiInspected': true,
-                          'tamperRibbonIntact': true,
-                          'courierDirective': 'ACCEPT_PACKAGE_DO_NOT_ARGUE',
-                        };
-                        setState(() {
-                          _returns.insert(0, newReturn);
-                        });
-                        await _persistReturns();
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              backgroundColor: const Color(0xFF10B981),
-                              content: Text(
-                                l10n.locale.languageCode == 'fi'
-                                    ? '✅ AI-tarkastus hyväksytty: Kuriirin nouto tilattu riidattomasti!'
-                                    : '✅ AI Verified: Zero-conflict courier pickup requested!',
-                              ),
-                            ),
-                          );
-                        }
-                      }
-                    },
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primary,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      elevation: 0,
-                    ),
-                    onPressed: () async {
-                      if (itemCtrl.text.trim().isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(l10n.translate('itemNameDesc'))),
-                        );
-                        return;
-                      }
-                      HapticFeedback.mediumImpact();
-                      final retId = 'RET-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
-                      final now = DateTime.now();
-                      final dateStr = '${now.day}.${now.month}.${now.year}';
-                      final orderRef = orderIdCtrl.text.trim().isEmpty ? '#MLV-${now.millisecondsSinceEpoch.toString().substring(8)}' : orderIdCtrl.text.trim();
-
-                      final newReturn = {
-                        'id': retId,
-                        'item': itemCtrl.text.trim(),
-                        'orderId': orderRef,
-                        'reason': reasonKey,
-                        'dispatchMethod': dispatchMethodCtrl.text.trim(),
-                        'refundDestination': refundDestination,
-                        'iban': ibanCtrl.text.trim(),
-                        'date': dateStr,
-                        'statusStage': 1,
-                        'statusLabel': l10n.translate('stageRequested'),
-                      };
-                      setState(() {
-                        _returns.insert(0, newReturn);
-                      });
-                      await _persistReturns();
-
-                      await LocalNotificationService.showNotification(
-                        id: 201,
-                        title: l10n.translate('returnSubmittedTitle').replaceAll('{id}', retId),
-                        body: l10n.translate('returnSubmittedBody').replaceAll('{item}', itemCtrl.text.trim()).replaceAll('{method}', _formatDispatchMethod(dispatchMethodCtrl.text.trim(), l10n)),
-                        payload: 'return_$retId',
-                      );
-
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Row(
-                              children: [
-                                const Icon(Icons.check_circle_rounded, color: Colors.white),
-                                const SizedBox(width: 8),
-                                Expanded(child: Text(l10n.translate('returnSubmittedToast').replaceAll('{id}', retId))),
-                              ],
-                            ),
-                            backgroundColor: const Color(0xFF10B981),
-                            behavior: SnackBarBehavior.floating,
-                          ),
-                        );
-                      }
-                    },
-                    child: Text(l10n.translate('submitReturnBtn'), style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildEmptyState(AppLocalizations l10n, Color textPrimary, Color textSecondary) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 90,
-              height: 90,
-              decoration: BoxDecoration(
-                color: AppTheme.primary.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.assignment_return_outlined, color: AppTheme.primary, size: 44),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              l10n.translate('noReturnsRequested'),
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: textPrimary),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              l10n.translate('noReturnsRequestedSub'),
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14, color: textSecondary, height: 1.4),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                elevation: 0,
-              ),
-              onPressed: _openStartReturnWizard,
-              icon: const Icon(Icons.add_rounded, color: Colors.white),
-              label: Text(l10n.translate('startReturnBtn'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStageStep(int stepIndex, int currentStage, String label, IconData icon, Color textPrimary, Color textSecondary) {
-    final isDone = currentStage >= stepIndex;
-    final isCurrent = currentStage == stepIndex;
-    return Expanded(
-      child: Column(
-        children: [
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: isDone ? AppTheme.primary : (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF2E204A) : Colors.grey.shade200),
-              shape: BoxShape.circle,
-              border: isCurrent ? Border.all(color: AppTheme.accent, width: 2.5) : null,
-            ),
-            child: Icon(isDone ? Icons.check : icon, color: isDone ? Colors.white : Colors.grey, size: 16),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: isDone ? FontWeight.bold : FontWeight.w500,
-              color: isDone ? textPrimary : textSecondary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildReturnCard(AppLocalizations l10n, Map<String, dynamic> ret, Color cardBg, Color textPrimary, Color textSecondary, Color borderColor, Color inputBg) {
-    final int stage = (ret['statusStage'] ?? 1) as int;
-    final id = ret['id'] ?? 'RET-000';
-    final date = ret['date'] ?? '';
-    final item = ret['item'] ?? 'Artisan Item';
-    final orderId = ret['orderId'] ?? '#MLV-000';
-    final reason = ret['reason'] ?? 'reasonChangedMind';
-    final dispatchMethod = ret['dispatchMethod'] ?? 'Courier Doorstep Pickup';
-    final refundDestination = ret['refundDestination'] ?? 'Original Payment Card';
-
-    final localizedMethod = _formatDispatchMethod(dispatchMethod, l10n);
-    final localizedDest = _formatRefundDestination(refundDestination, l10n);
-    final localizedReason = _formatReason(reason, l10n);
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: borderColor),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: Theme.of(context).brightness == Brightness.dark ? 0.2 : 0.03), blurRadius: 10, offset: const Offset(0, 3)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppTheme.primary.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  id,
-                  style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold, fontSize: 12),
-                ),
-              ),
-              Text(
-                date,
-                style: TextStyle(color: textSecondary, fontSize: 12),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            item,
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: textPrimary),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '${l10n.translate("orderNum")}: $orderId • $localizedReason',
-            style: TextStyle(fontSize: 12, color: textSecondary),
-          ),
-          const SizedBox(height: 16),
-          // 4-Stage Stepper
-          Row(
-            children: [
-              _buildStageStep(1, stage, l10n.translate('stageRequested'), Icons.edit_document, textPrimary, textSecondary),
-              Container(width: 14, height: 2, color: stage >= 2 ? AppTheme.primary : borderColor),
-              _buildStageStep(2, stage, l10n.translate('stageApproved'), Icons.verified_outlined, textPrimary, textSecondary),
-              Container(width: 14, height: 2, color: stage >= 3 ? AppTheme.primary : borderColor),
-              _buildStageStep(3, stage, l10n.translate('stagePickup'), Icons.local_shipping_outlined, textPrimary, textSecondary),
-              Container(width: 14, height: 2, color: stage >= 4 ? AppTheme.primary : borderColor),
-              _buildStageStep(4, stage, l10n.translate('stageRefunded'), Icons.account_balance_wallet_outlined, textPrimary, textSecondary),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: inputBg,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: borderColor),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  dispatchMethod.contains('Posti') ? Icons.local_post_office_outlined : Icons.delivery_dining_rounded,
-                  size: 18,
-                  color: AppTheme.primary,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
+        builder: (ctx, setSheet) => Padding(
+          padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.of(ctx).viewInsets.bottom + 24),
+          child: orders.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
                   child: Text(
-                    '$localizedMethod → $localizedDest',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: textPrimary),
+                    'Sinulla ei ole palautettavia tilauksia. Tuotteen voi palauttaa 14 päivän kuluessa toimituksesta.\n\n'
+                    'You have no orders that can be returned. Items can be returned within 14 days of delivery.',
+                    style: TextStyle(fontSize: 15, height: 1.4),
                   ),
+                )
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text('Aloita palautus / Start a return',
+                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: -0.3)),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<int>(
+                      initialValue: selectedOrder,
+                      decoration: const InputDecoration(labelText: 'Tilaus / Order'),
+                      items: orders
+                          .map((o) => DropdownMenuItem<int>(
+                                value: o['id'] as int,
+                                child: Text('#${o['id']} • ${o['store']?['name'] ?? ''} • €${((o['totalCents'] ?? 0) / 100).toStringAsFixed(2)}'),
+                              ))
+                          .toList(),
+                      onChanged: (v) => setSheet(() => selectedOrder = v),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: reason,
+                      decoration: const InputDecoration(labelText: 'Syy / Reason'),
+                      items: _reasons.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
+                      onChanged: (v) => setSheet(() => reason = v ?? reason),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: noteCtrl,
+                      maxLength: 500,
+                      maxLines: 3,
+                      decoration: const InputDecoration(labelText: 'Lisätiedot (valinnainen) / Details (optional)'),
+                    ),
+                    const Text(
+                      'Peruuttamisoikeus: sinun ei tarvitse kertoa syytä. Hyvitys tehdään alkuperäiselle maksutavalle 14 päivän kuluessa.\n'
+                      'Right of withdrawal: no reason is required. The refund goes to your original payment method within 14 days.',
+                      style: TextStyle(fontSize: 12, height: 1.4, color: Colors.grey),
+                    ),
+                    if (sheetError != null) ...[
+                      const SizedBox(height: 10),
+                      Text(sheetError!, style: const TextStyle(color: Colors.redAccent)),
+                    ],
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      height: 52,
+                      child: FilledButton(
+                        onPressed: submitting || selectedOrder == null
+                            ? null
+                            : () async {
+                                setSheet(() { submitting = true; sheetError = null; });
+                                try {
+                                  final res = await http
+                                      .post(
+                                        Uri.parse('${AppConstants.apiBase}/returns'),
+                                        headers: _headers(auth),
+                                        body: jsonEncode({
+                                          'orderId': selectedOrder,
+                                          'reason': reason,
+                                          if (noteCtrl.text.trim().isNotEmpty) 'conditionNote': noteCtrl.text.trim(),
+                                        }),
+                                      )
+                                      .timeout(const Duration(seconds: 15));
+                                  if (res.statusCode == 201) {
+                                    if (ctx.mounted) Navigator.pop(ctx);
+                                    _load();
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                                        content: Text('Palautuspyyntö lähetetty. Return request sent.'),
+                                      ));
+                                    }
+                                  } else {
+                                    String msg = 'Palautusta ei voitu luoda. Could not create the return.';
+                                    try { msg = jsonDecode(res.body)['error'] ?? msg; } catch (_) {}
+                                    setSheet(() { submitting = false; sheetError = msg; });
+                                  }
+                                } catch (_) {
+                                  setSheet(() { submitting = false; sheetError = 'Ei yhteyttä. No connection.'; });
+                                }
+                              },
+                        child: submitting
+                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Text('Lähetä palautuspyyntö / Send return request'),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ),
-        ],
+        ),
       ),
     );
+    noteCtrl.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<LocaleProvider>(
-      builder: (context, _, __) {
-        final l10n = AppLocalizations.of(context);
-        final cardBg = AppTheme.cardBackground(context);
-        final textPrimary = AppTheme.primaryText(context);
-        final textSecondary = AppTheme.secondaryText(context);
-        final borderColor = AppTheme.cardBorder(context);
-        final inputBg = AppTheme.inputBackground(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+    final secondary = isDark ? const Color(0xFF98989D) : const Color(0xFF6E6E73);
 
-        return Scaffold(
-          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-          appBar: AppBar(
-            title: Text(l10n.translate('returnsAndExchanges'), style: TextStyle(fontWeight: FontWeight.w700, color: textPrimary)),
-            backgroundColor: cardBg,
-            elevation: 0,
-            leading: IconButton(
-              icon: Icon(Icons.arrow_back_rounded, color: textPrimary),
-              onPressed: () => Navigator.pop(context),
-            ),
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.add_circle_outline_rounded, color: AppTheme.primary),
-                tooltip: l10n.translate('startReturnBtn'),
-                onPressed: _openStartReturnWizard,
+    return Scaffold(
+      appBar: AppBar(title: const Text('Palautukset / Returns')),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _startReturn,
+        backgroundColor: AppTheme.primary,
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.undo_rounded),
+        label: const Text('Aloita palautus'),
+      ),
+      body: RefreshIndicator.adaptive(
+        onRefresh: _load,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: cardColor, borderRadius: BorderRadius.circular(16)),
+              child: Text(
+                'Voit palauttaa tuotteen 14 päivän kuluessa siitä, kun olet vastaanottanut sen.\n'
+                'You can return an item within 14 days of receiving it.',
+                style: TextStyle(fontSize: 14, height: 1.4, color: secondary),
               ),
-            ],
-          ),
-          body: _loading
-              ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
-              : _returns.isEmpty
-                  ? _buildEmptyState(l10n, textPrimary, textSecondary)
-                  : RefreshIndicator(
-                      onRefresh: _loadReturns,
-                      color: AppTheme.primary,
-                      child: ListView.builder(
-                        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        itemCount: _returns.length,
-                        itemBuilder: (_, i) => _buildReturnCard(l10n, _returns[i], cardBg, textPrimary, textSecondary, borderColor, inputBg),
+            ),
+            const SizedBox(height: 16),
+            if (_loading)
+              const Padding(padding: EdgeInsets.only(top: 48), child: Center(child: CircularProgressIndicator.adaptive()))
+            else if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 48),
+                child: Text(_error!, textAlign: TextAlign.center, style: TextStyle(color: secondary)),
+              )
+            else if (_returns.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 48),
+                child: Column(
+                  children: [
+                    Icon(Icons.inventory_2_outlined, size: 48, color: secondary),
+                    const SizedBox(height: 12),
+                    Text('Ei palautuksia / No returns yet', style: TextStyle(color: secondary, fontSize: 15)),
+                  ],
+                ),
+              )
+            else
+              ..._returns.map((r) {
+                final status = r['status']?.toString() ?? 'REQUESTED';
+                final refunded = r['refundCents'] as int?;
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(color: cardColor, borderRadius: BorderRadius.circular(16)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Tilaus / Order #${r['orderId'] ?? '-'} • ${r['order']?['store']?['name'] ?? ''}',
+                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: (status == 'REFUNDED' ? const Color(0xFF34C759) : status == 'REJECTED' ? Colors.redAccent : AppTheme.primary)
+                                  .withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(_statusLabels[status]?.split(' / ').last ?? status, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                          ),
+                        ],
                       ),
-                    ),
-        );
-      },
+                      const SizedBox(height: 6),
+                      Text(_reasons[r['reason']] ?? r['reason'].toString(), style: TextStyle(color: secondary, fontSize: 13)),
+                      if (refunded != null && status == 'REFUNDED') ...[
+                        const SizedBox(height: 6),
+                        Text('Hyvitetty / Refunded €${(refunded / 100).toStringAsFixed(2)}',
+                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                      ],
+                    ],
+                  ),
+                );
+              }),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -1,136 +1,162 @@
 import { Server as HttpServer } from "http";
-import { Server as SocketServer } from "socket.io";
+import { Server as SocketServer, Socket } from "socket.io";
+import { verifyAccessToken } from "../utils/jwt";
+import { prisma } from "./prisma";
+import { env } from "../config/env";
+import { getOrderRelation, getRentalRelation, getCourierForUser } from "../modules/orders/access";
 
-let io: SocketServer;
+let io: SocketServer | null = null;
+
+type SocketUser = { id: number; role: string; email: string };
+
+const LOCATION_DB_WRITE_INTERVAL_MS = 15_000;
+
+function toId(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+function toCoord(value: unknown, limit: number): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) && Math.abs(n) <= limit ? n : null;
+}
 
 export function initSocket(httpServer: HttpServer): SocketServer {
   io = new SocketServer(httpServer, {
-    cors: { origin: "*" },
+    cors: { origin: env.allowedOrigins.length ? env.allowedOrigins : false, credentials: true },
+    maxHttpBufferSize: 16 * 1024,
   });
 
   io.use((socket, next) => {
     try {
-      const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.split(" ")[1];
+      const token = socket.handshake.auth?.token || socket.handshake.headers.authorization?.split(" ")[1];
       if (!token) return next(new Error("Authentication error"));
-      
-      const { verifyAccessToken } = require("../../utils/jwt");
-      const user = verifyAccessToken(token);
-      socket.data.user = user;
+      socket.data.user = verifyAccessToken(token) as SocketUser;
       next();
-    } catch (err) {
+    } catch {
       next(new Error("Authentication error"));
     }
   });
 
-  io.on("connection", (socket) => {
-    const user = socket.data.user;
-    
-    // Client joins a room to track a specific order
-    socket.on("track:order", async (orderId: number) => {
-      // Basic check: Ensure order exists and user has permission (customer or courier)
-      try {
-        const { prisma } = require("../../lib/prisma");
-        const order = await prisma.order.findUnique({ where: { id: orderId } });
-        if (order && (order.userId === user.id || order.courierId === user.id || user.role === "ADMIN")) {
-          socket.join(`order:${orderId}`);
+  io.on("connection", async (socket: Socket) => {
+    const user = socket.data.user as SocketUser;
+    socket.join(`user:${user.id}`);
+
+    // Role-specific rooms are joined server-side, never on the client's say-so.
+    try {
+      if (user.role === "VENDOR") {
+        const store = await prisma.store.findUnique({ where: { ownerId: user.id }, select: { id: true } });
+        if (store) socket.join(`store:${store.id}`);
+      }
+      if (user.role === "COURIER") {
+        const courier = await getCourierForUser(user.id);
+        if (courier?.isApproved) {
+          socket.data.courierId = courier.id;
+          socket.join(`courier:${courier.id}`);
+          socket.join("couriers");
         }
-      } catch (err) {}
-    });
-
-    socket.on('track:store', (storeId) => {
-      socket.join(`store:${storeId}`);
-      console.log(`[Socket] Client joined store room: store:${storeId}`);
-    });
-
-    socket.on("track:rental", (rentalId: number) => {
-      socket.join(`rental:${rentalId}`);
-    });
-
-    // Courier updates location during delivery transit (high-precision telemetry stream)
-    socket.on("courier:telemetry", (data: any) => {
-      const lat = data?.lat ?? data?.latitude;
-      const lng = data?.lng ?? data?.longitude;
-      const orderId = data?.orderId;
-      const courierId = data?.courierId ?? (socket.data?.user?.id ?? 0);
-
-      if (lat !== undefined && lng !== undefined && orderId) {
-        io.to(`order:${orderId}`).emit("courier:location", {
-          courierId: Number(courierId),
-          orderId: Number(orderId),
-          lat: Number(lat),
-          lng: Number(lng),
-          bearing: Number(data?.bearing ?? 0),
-          speed: Number(data?.speed ?? 0),
-          accuracy: Number(data?.accuracy ?? 5.0),
-          etaMinutes: Number(data?.etaMinutes ?? 15),
-          timestamp: Date.now(),
-        });
       }
+    } catch {
+      // DB hiccup: the client can still join per-order rooms below
+    }
+
+    // Kept for app compatibility: only lets a vendor into their own store room.
+    socket.on("track:store", async (storeId: unknown) => {
+      const id = toId(storeId);
+      if (!id || user.role !== "VENDOR") return;
+      const store = await prisma.store.findFirst({ where: { id, ownerId: user.id }, select: { id: true } }).catch(() => null);
+      if (store) socket.join(`store:${id}`);
     });
 
-    socket.on("courier:update_location", (data: { orderId: number; lat: number; lng: number; etaMinutes?: number; bearing?: number }) => {
-      if (data && data.orderId && data.lat && data.lng) {
-        emitCourierLocation(data.orderId, {
-          lat: data.lat,
-          lng: data.lng,
-          bearing: data.bearing ?? 0,
-          etaMinutes: data.etaMinutes ?? 15,
-        });
+    socket.on("track:order", async (orderId: unknown) => {
+      const id = toId(orderId);
+      if (id && (await getOrderRelation(id, user).catch(() => null))) socket.join(`order:${id}`);
+    });
+
+    socket.on("track:rental", async (rentalId: unknown) => {
+      const id = toId(rentalId);
+      if (id && (await getRentalRelation(id, user).catch(() => null))) socket.join(`rental:${id}`);
+    });
+
+    // ── Courier live location ──────────────────────────────────────────────
+    const verifiedCourierOrders = new Set<number>();
+    let lastDbWrite = 0;
+
+    const handleLocation = async (data: any) => {
+      const courierId = socket.data.courierId as number | undefined;
+      const orderId = toId(data?.orderId);
+      const lat = toCoord(data?.lat ?? data?.latitude, 90);
+      const lng = toCoord(data?.lng ?? data?.longitude, 180);
+      if (!courierId || !orderId || lat === null || lng === null) return;
+
+      if (!verifiedCourierOrders.has(orderId)) {
+        const order = await prisma.order.findFirst({
+          where: { id: orderId, courierId, status: { in: ["CONFIRMED", "PROCESSING", "SHIPPED"] } },
+          select: { id: true },
+        }).catch(() => null);
+        if (!order) return;
+        verifiedCourierOrders.add(orderId);
       }
-    });
 
-    // In-transit chat message relay
-    socket.on("chat:join", (orderId: number) => {
-      socket.join(`chat:${orderId}`);
-    });
+      io!.to(`order:${orderId}`).emit("courier:location", {
+        orderId,
+        lat,
+        lng,
+        bearing: Number(data?.bearing) || 0,
+        speed: Number(data?.speed) || 0,
+        accuracy: Number(data?.accuracy) || 0,
+        etaMinutes: toId(data?.etaMinutes) ?? undefined,
+        timestamp: Date.now(),
+      });
 
-    socket.on("chat:send", (data: { orderId: number; sender: string; text: string; role: string }) => {
-      if (data && data.orderId && data.text) {
-        io.to(`chat:${data.orderId}`).emit("chat:message", {
-          ...data,
-          timestamp: new Date().toISOString(),
-        });
+      if (Date.now() - lastDbWrite > LOCATION_DB_WRITE_INTERVAL_MS) {
+        lastDbWrite = Date.now();
+        prisma.courier.update({ where: { id: courierId }, data: { latitude: lat, longitude: lng } }).catch(() => {});
       }
+    };
+    socket.on("courier:telemetry", handleLocation);
+    socket.on("courier:update_location", handleLocation);
+
+    // ── In-delivery chat (relayed, not stored) ─────────────────────────────
+    socket.on("chat:join", async (orderId: unknown) => {
+      const id = toId(orderId);
+      if (id && (await getOrderRelation(id, user).catch(() => null))) socket.join(`chat:${id}`);
     });
 
-    socket.on("disconnect", () => {});
+    socket.on("chat:send", (data: any) => {
+      const orderId = toId(data?.orderId);
+      const text = typeof data?.text === "string" ? data.text.trim().slice(0, 1000) : "";
+      if (!orderId || !text || !socket.rooms.has(`chat:${orderId}`)) return;
+      io!.to(`chat:${orderId}`).emit("chat:message", {
+        orderId,
+        text,
+        senderId: user.id,
+        role: user.role,
+        sender: typeof data?.sender === "string" ? data.sender.slice(0, 60) : user.role,
+        timestamp: new Date().toISOString(),
+      });
+    });
   });
 
   return io;
 }
 
-export function getIo(): SocketServer {
-  if (!io) throw new Error("Socket.io not initialized");
+export function getIo(): SocketServer | null {
   return io;
 }
 
-/**
- * Emit a courier location update to all clients tracking an order.
- */
-export function emitCourierLocation(
-  orderId: number,
-  data: { lat: number; lng: number; bearing?: number; etaMinutes: number }
-) {
-  if (!io) return;
-  io.to(`order:${orderId}`).emit("courier:location", data);
+export function emitOrderStatus(orderId: number, payload: Record<string, unknown>) {
+  io?.to(`order:${orderId}`).emit("order:status", { orderId, ...payload, timestamp: new Date().toISOString() });
 }
 
-export function emitOrderStatus(orderId: number, status: string) {
-  if (!io) return;
-  io.to(`order:${orderId}`).emit("order:status", { status });
+export function emitToStore(storeId: number, event: string, payload: unknown) {
+  io?.to(`store:${storeId}`).emit(event, payload);
 }
 
-export function emitNewOrderToStore(storeId: number | string, orderData: any) {
-  const io = getIo();
-  if (io) {
-    io.to(`store:${storeId}`).emit('order:new', orderData);
-    console.log(`[Socket] Emitted order:new to store:${storeId}`);
-  }
+export function emitToCourier(courierId: number, event: string, payload: unknown) {
+  io?.to(`courier:${courierId}`).emit(event, payload);
 }
 
-export function emitOrderStatusToStore(storeId: number | string, statusData: any) {
-  const io = getIo();
-  if (io) {
-    io.to(`store:${storeId}`).emit('order:status', statusData);
-  }
+export function emitToAllCouriers(event: string, payload: unknown) {
+  io?.to("couriers").emit(event, payload);
 }

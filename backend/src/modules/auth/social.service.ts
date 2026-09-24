@@ -1,107 +1,90 @@
-import { OAuth2Client } from 'google-auth-library';
-import * as admin from 'firebase-admin';
+import { OAuth2Client } from "google-auth-library";
+import * as admin from "firebase-admin";
+import crypto from "crypto";
 import { prisma } from "../../lib/prisma";
-import { signAccessToken, signRefreshToken } from "../../utils/jwt";
 import { env } from "../../config/env";
+import { issueSession } from "./session";
+import { AuthError, phoneToSyntheticEmail } from "./auth.service";
 
 const googleClient = new OAuth2Client(env.googleClientId);
 
-// Initialize Firebase Admin (requires GOOGLE_APPLICATION_CREDENTIALS env var or serviceAccount.json)
+// Verifying Firebase ID tokens only needs the project id (public keys are fetched from Google).
 if (!admin.apps.length) {
   try {
-    admin.initializeApp();
+    admin.initializeApp(process.env.FIREBASE_PROJECT_ID ? { projectId: process.env.FIREBASE_PROJECT_ID } : undefined);
   } catch (e) {
-    console.error("Firebase Admin Initialization Error", e);
+    console.error("Firebase Admin initialization error", e);
   }
 }
 
-export async function loginWithGoogle(idToken: string) {
-  const ticket = await googleClient.verifyIdToken({
-    idToken,
-    audience: env.googleClientId,
+type SocialUser = { id: number; name: string; email: string; role: string; isActive: boolean };
+export type SignupRole = "CUSTOMER" | "VENDOR" | "COURIER";
+
+/** The role only applies when a new account is created; existing accounts keep theirs. */
+async function createSocialUser(data: { email: string; name: string; phone?: string }, role: SignupRole) {
+  const user = await prisma.user.create({
+    data: { email: data.email, name: data.name, phone: data.phone ?? null, passwordHash: unusablePasswordHash(), role },
   });
-  const payload = ticket.getPayload();
-  if (!payload || !payload.email) throw new Error("Invalid Google Token");
-
-  let user = await prisma.user.findUnique({ where: { email: payload.email } });
-
-  if (!user) {
-    user = await prisma.user.create({
-      data: {
-        email: payload.email,
-        name: payload.name || "Google User",
-        passwordHash: "SOCIAL_AUTH",
-        role: "CUSTOMER",
-      }
-    });
+  if (role === "COURIER") {
+    await prisma.courier.create({ data: { userId: user.id, name: user.name, phone: data.phone ?? null, isActive: false } });
   }
-
-  return generateSession(user);
+  return user;
 }
 
-import jwt from 'jsonwebtoken';
+function unusablePasswordHash() {
+  return `SOCIAL:${crypto.randomBytes(24).toString("hex")}`;
+}
 
-export async function loginWithPhone(firebaseToken: string) {
-  let phoneNumber: string | undefined;
+function assertActive(user: SocialUser) {
+  if (!user.isActive) throw new AuthError("This account is disabled", 403);
+}
 
-  try {
-    const decodedToken = await admin.auth().verifyIdToken(firebaseToken);
-    phoneNumber = decodedToken.phone_number;
-  } catch (err) {
-    throw new Error("Invalid Phone Token");
+export async function loginWithGoogle(idToken: string, role: SignupRole = "CUSTOMER") {
+  if (!env.googleClientId) throw new AuthError("Google sign-in is not configured", 503);
+  const ticket = await googleClient.verifyIdToken({ idToken, audience: env.googleClientId });
+  const payload = ticket.getPayload();
+  // Only trust emails Google has verified, otherwise an attacker could claim someone else's address.
+  if (!payload?.email || payload.email_verified !== true) throw new AuthError("Invalid Google token", 401);
+
+  const email = payload.email.toLowerCase();
+  let user = await prisma.user.findFirst({ where: { email: { equals: email, mode: "insensitive" } } });
+  if (!user) {
+    user = await createSocialUser({ email, name: payload.name || email.split("@")[0] }, role);
   }
+  assertActive(user);
+  return issueSession(user);
+}
 
-  if (!phoneNumber) throw new Error("Invalid Phone Token");
+async function verifyFirebaseToken(token: string) {
+  try {
+    return await admin.auth().verifyIdToken(token);
+  } catch {
+    throw new AuthError("Invalid sign-in token", 401);
+  }
+}
+
+export async function loginWithPhone(firebaseToken: string, role: SignupRole = "CUSTOMER") {
+  const decoded = await verifyFirebaseToken(firebaseToken);
+  const phoneNumber = decoded.phone_number;
+  if (!phoneNumber) throw new AuthError("Invalid phone token", 401);
 
   let user = await prisma.user.findFirst({ where: { phone: phoneNumber } });
-
   if (!user) {
-    user = await prisma.user.create({
-      data: {
-        phone: phoneNumber,
-        email: `${phoneNumber.replace(/[^0-9]/g, '')}@phone.malvoya.app`,
-        name: `Customer (${phoneNumber})`,
-        passwordHash: "SOCIAL_AUTH",
-        role: "CUSTOMER",
-      }
-    });
+    user = await createSocialUser({ phone: phoneNumber, email: phoneToSyntheticEmail(phoneNumber), name: role === "CUSTOMER" ? "Customer" : "Partner" }, role);
   }
-
-  return generateSession(user);
+  assertActive(user);
+  return issueSession(user);
 }
 
-export async function loginWithApple(identityToken: string) {
-  // Verify Apple identity token using Firebase Admin
-  const decodedToken = await admin.auth().verifyIdToken(identityToken);
-  const email = decodedToken.email;
-  const name = decodedToken.name || "Apple User";
+export async function loginWithApple(identityToken: string, role: SignupRole = "CUSTOMER") {
+  const decoded = await verifyFirebaseToken(identityToken);
+  const email = decoded.email?.toLowerCase();
+  if (!email || decoded.email_verified === false) throw new AuthError("Apple sign-in did not provide a verified email", 401);
 
-  if (!email) throw new Error("Invalid Apple Token — no email provided");
-
-  let user = await prisma.user.findUnique({ where: { email } });
-
+  let user = await prisma.user.findFirst({ where: { email: { equals: email, mode: "insensitive" } } });
   if (!user) {
-    user = await prisma.user.create({
-      data: {
-        email,
-        name,
-        passwordHash: "SOCIAL_AUTH",
-        role: "CUSTOMER",
-      }
-    });
+    user = await createSocialUser({ email, name: decoded.name || "Customer" }, role);
   }
-
-  return generateSession(user);
-}
-
-async function generateSession(user: any) {
-  const safeUser = { id: user.id, name: user.name, email: user.email, role: user.role };
-  const accessToken = signAccessToken(safeUser);
-  const refreshToken = signRefreshToken({ id: user.id });
-
-  // Save refresh token to database for proper session management
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
-  await prisma.refreshToken.create({ data: { token: refreshToken, userId: user.id, expiresAt } });
-
-  return { user: safeUser, accessToken, refreshToken };
+  assertActive(user);
+  return issueSession(user);
 }

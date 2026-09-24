@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -18,6 +19,11 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
   final _nameCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
   final _bannerCtrl = TextEditingController();
+  final _addressCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
+  double? _lat;
+  double? _lng;
+  bool _locating = false;
   int _step = 0; // 0=Store Info, 1=Category, 2=Photos & Description
   String _category = 'Apparel';
   bool _loading = false;
@@ -53,6 +59,8 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
     _nameCtrl.dispose();
     _descCtrl.dispose();
     _bannerCtrl.dispose();
+    _addressCtrl.dispose();
+    _phoneCtrl.dispose();
     super.dispose();
   }
 
@@ -63,11 +71,11 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
     }
     setState(() { _loading = true; _error = null; });
 
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('vendor_store_name', _nameCtrl.text.trim());
-    await prefs.setString('vendor_store_category', _category);
-    await prefs.setString('vendor_store_desc', _descCtrl.text.trim());
-    await prefs.setBool('vendor_has_store', true);
+    if (_addressCtrl.text.trim().length < 5 || _lat == null || _lng == null) {
+      setState(() { _loading = false; _error = 'Add your store address and tap "Use my current location" while at the store.'; });
+      return;
+    }
+    final banner = _bannerCtrl.text.trim();
 
     final auth = Provider.of<AuthService>(context, listen: false);
     final normalizedCategory = _categoryMap[_category] ?? _category.toUpperCase().replaceAll(' ', '_');
@@ -83,30 +91,47 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
           'name': _nameCtrl.text.trim(),
           'description': _descCtrl.text.trim(),
           'category': normalizedCategory,
+          'address': _addressCtrl.text.trim(),
+          'latitude': _lat,
+          'longitude': _lng,
+          if (_phoneCtrl.text.trim().isNotEmpty) 'phone': _phoneCtrl.text.trim(),
+          if (banner.startsWith('https://')) 'bannerUrl': banner,
         }),
-      );
-      if (res.statusCode == 201 || res.statusCode == 200 || res.statusCode == 409) {
+      ).timeout(const Duration(seconds: 15));
+      if (res.statusCode == 201 || res.statusCode == 200) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('vendor_store_name', _nameCtrl.text.trim());
         if (mounted) {
           Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const VendorDashboard()));
         }
       } else {
-        final body = jsonDecode(res.body);
-        final msg = (body['message'] ?? body['error'] ?? '').toString();
-        if (msg.toLowerCase().contains('already have a store')) {
-          if (mounted) {
-            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const VendorDashboard()));
-          }
-          return;
-        }
-        // Still navigate on any other error
-        if (mounted) {
-          Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const VendorDashboard()));
-        }
+        String msg = 'Could not create the store. Please check the details.';
+        try {
+          final body = jsonDecode(res.body);
+          msg = (body['error'] ?? msg).toString();
+        } catch (_) {}
+        if (mounted) setState(() { _loading = false; _error = msg; });
       }
     } catch (_) {
-      if (mounted) {
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const VendorDashboard()));
+      if (mounted) setState(() { _loading = false; _error = 'No connection. Your store was not saved — please try again.'; });
+    }
+  }
+
+  Future<void> _useCurrentLocation() async {
+    setState(() { _locating = true; _error = null; });
+    try {
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        setState(() => _error = 'Location permission is needed to place your store on the map.');
+        return;
       }
+      final pos = await Geolocator.getCurrentPosition(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
+      setState(() { _lat = pos.latitude; _lng = pos.longitude; });
+    } catch (_) {
+      setState(() => _error = 'Could not get your location. Check that location services are on.');
+    } finally {
+      if (mounted) setState(() => _locating = false);
     }
   }
 
@@ -134,7 +159,7 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
+      backgroundColor: const Color(0xFF17131C),
       body: Column(
         children: [
           // ── Premium dark header ────────────────────────────────────────────
@@ -142,7 +167,7 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
             width: double.infinity,
             decoration: const BoxDecoration(
               gradient: LinearGradient(
-                colors: [Color(0xFF1E1B2E), Color(0xFF0F172A)],
+                colors: [Color(0xFF1E1B2E), Color(0xFF17131C)],
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
               ),
@@ -162,7 +187,7 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                           decoration: BoxDecoration(
                             gradient: const LinearGradient(
-                              colors: [Color(0xFF7C3AED), Color(0xFF4F46E5)],
+                              colors: [Color(0xFF6D2E8C), Color(0xFF4F46E5)],
                             ),
                             borderRadius: BorderRadius.circular(30),
                           ),
@@ -248,7 +273,7 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                   duration: const Duration(milliseconds: 300),
                   height: 4,
                   decoration: BoxDecoration(
-                    color: isDone || isActive ? const Color(0xFF7C3AED) : Colors.white24,
+                    color: isDone || isActive ? const Color(0xFF6D2E8C) : Colors.white24,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -290,9 +315,9 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Kauppasi nimi', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF14142B))),
+          const Text('Kauppasi nimi', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF1C1820))),
           const SizedBox(height: 4),
-          const Text('Step 1 of 3', style: TextStyle(color: Color(0xFF6E7191), fontSize: 13)),
+          const Text('Step 1 of 3', style: TextStyle(color: Color(0xFF6B6472), fontSize: 13)),
           const SizedBox(height: 24),
           TextField(
             controller: _nameCtrl,
@@ -300,19 +325,19 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
             style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
             decoration: const InputDecoration(
               hintText: 'e.g. Kallio Vintage Boutique',
-              hintStyle: TextStyle(fontSize: 16, color: Color(0xFF6E7191), fontWeight: FontWeight.w400),
-              prefixIcon: Icon(Icons.store_outlined, color: Color(0xFF7C3AED)),
+              hintStyle: TextStyle(fontSize: 16, color: Color(0xFF6B6472), fontWeight: FontWeight.w400),
+              prefixIcon: Icon(Icons.store_outlined, color: Color(0xFF6D2E8C)),
             ),
           ),
           const SizedBox(height: 12),
           const Row(
             children: [
-              Icon(Icons.info_outline, size: 14, color: Color(0xFF6E7191)),
+              Icon(Icons.info_outline, size: 14, color: Color(0xFF6B6472)),
               SizedBox(width: 6),
               Expanded(
                 child: Text(
                   'Kauppasi nimi näkyy asiakkaille / Visible to customers',
-                  style: TextStyle(color: Color(0xFF6E7191), fontSize: 12),
+                  style: TextStyle(color: Color(0xFF6B6472), fontSize: 12),
                 ),
               ),
             ],
@@ -334,9 +359,9 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Kaupan kategoria', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF14142B))),
+          const Text('Kaupan kategoria', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF1C1820))),
           const SizedBox(height: 4),
-          const Text('Step 2 of 3', style: TextStyle(color: Color(0xFF6E7191), fontSize: 13)),
+          const Text('Step 2 of 3', style: TextStyle(color: Color(0xFF6B6472), fontSize: 13)),
           const SizedBox(height: 20),
           GridView.count(
             crossAxisCount: 3,
@@ -354,19 +379,19 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                   decoration: BoxDecoration(
                     gradient: isSelected
                         ? const LinearGradient(
-                            colors: [Color(0xFF7C3AED), Color(0xFF4F46E5)],
+                            colors: [Color(0xFF6D2E8C), Color(0xFF4F46E5)],
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
                           )
                         : null,
-                    color: isSelected ? null : const Color(0xFFF4F4F8),
+                    color: isSelected ? null : const Color(0xFFEFEBF1),
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
-                      color: isSelected ? const Color(0xFF7C3AED) : Colors.transparent,
+                      color: isSelected ? const Color(0xFF6D2E8C) : Colors.transparent,
                       width: 2,
                     ),
                     boxShadow: isSelected
-                        ? [const BoxShadow(color: Color(0x337C3AED), blurRadius: 8, offset: Offset(0, 3))]
+                        ? [const BoxShadow(color: Color(0x336D2E8C), blurRadius: 8, offset: Offset(0, 3))]
                         : [],
                   ),
                   child: Column(
@@ -374,14 +399,14 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                     children: [
                       Icon(
                         item['icon'] as IconData,
-                        color: isSelected ? Colors.white : const Color(0xFF6E7191),
+                        color: isSelected ? Colors.white : const Color(0xFF6B6472),
                         size: 28,
                       ),
                       const SizedBox(height: 6),
                       Text(
                         (item['label'] as String).split('/').first.trim(),
                         style: TextStyle(
-                          color: isSelected ? Colors.white : const Color(0xFF14142B),
+                          color: isSelected ? Colors.white : const Color(0xFF1C1820),
                           fontWeight: FontWeight.w700,
                           fontSize: 11,
                         ),
@@ -393,7 +418,7 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                         Text(
                           '/ ${(item['label'] as String).split('/').last.trim()}',
                           style: TextStyle(
-                            color: isSelected ? Colors.white70 : const Color(0xFF6E7191),
+                            color: isSelected ? Colors.white70 : const Color(0xFF6B6472),
                             fontSize: 9,
                           ),
                           textAlign: TextAlign.center,
@@ -419,9 +444,9 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Kuvaus ja kansikuva', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF14142B))),
+          const Text('Kuvaus ja kansikuva', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF1C1820))),
           const SizedBox(height: 4),
-          const Text('Step 3 of 3', style: TextStyle(color: Color(0xFF6E7191), fontSize: 13)),
+          const Text('Step 3 of 3', style: TextStyle(color: Color(0xFF6B6472), fontSize: 13)),
           const SizedBox(height: 20),
           TextField(
             controller: _descCtrl,
@@ -445,24 +470,54 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
               prefixIcon: Icon(Icons.image_outlined),
             ),
           ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _addressCtrl,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(
+              labelText: 'Osoite / Store address',
+              hintText: 'Katu 1, 00100 Helsinki',
+              prefixIcon: Icon(Icons.place_outlined),
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _phoneCtrl,
+            keyboardType: TextInputType.phone,
+            decoration: const InputDecoration(
+              labelText: 'Puhelin / Phone (valinnainen)',
+              hintText: '+358 40 1234567',
+              prefixIcon: Icon(Icons.phone_outlined),
+            ),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: _locating ? null : _useCurrentLocation,
+            icon: _locating
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                : Icon(_lat != null ? Icons.check_circle_rounded : Icons.my_location_rounded),
+            label: Text(_lat != null
+                ? 'Location saved (${_lat!.toStringAsFixed(4)}, ${_lng!.toStringAsFixed(4)})'
+                : 'Use my current location (at the store)'),
+          ),
           const SizedBox(height: 16),
           // Green info box
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: const Color(0xFFE8F8ED),
+              color: const Color(0xFFE4EFE9),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFF2DC653).withOpacity(0.3)),
+              border: Border.all(color: const Color(0xFF2E6B4F).withOpacity(0.3)),
             ),
             child: const Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.auto_awesome_rounded, color: Color(0xFF2DC653), size: 20),
+                Icon(Icons.auto_awesome_rounded, color: Color(0xFF2E6B4F), size: 20),
                 SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     'Kauppasi tuotteet ilmestyvät automaattisesti Malvoya Reels -syötteeseen heti kun lisäät niitä!',
-                    style: TextStyle(color: Color(0xFF1DA840), fontSize: 13, height: 1.4, fontWeight: FontWeight.w500),
+                    style: TextStyle(color: Color(0xFF245740), fontSize: 13, height: 1.4, fontWeight: FontWeight.w500),
                   ),
                 ),
               ],
@@ -482,7 +537,7 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
       padding: EdgeInsets.fromLTRB(24, 12, 24, MediaQuery.of(context).padding.bottom + 12),
       decoration: const BoxDecoration(
         color: Colors.white,
-        border: Border(top: BorderSide(color: Color(0xFFEEEEF0))),
+        border: Border(top: BorderSide(color: Color(0xFFE6E1EA))),
       ),
       child: Row(
         children: [
@@ -492,9 +547,9 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
               style: OutlinedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                side: const BorderSide(color: Color(0xFFEEEEF0)),
+                side: const BorderSide(color: Color(0xFFE6E1EA)),
               ),
-              child: const Icon(Icons.arrow_back_rounded, color: Color(0xFF14142B)),
+              child: const Icon(Icons.arrow_back_rounded, color: Color(0xFF1C1820)),
             ),
             const SizedBox(width: 12),
           ],
@@ -504,7 +559,7 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
               child: _loading
                   ? Container(
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(colors: [Color(0xFF7C3AED), Color(0xFF4F46E5)]),
+                        gradient: const LinearGradient(colors: [Color(0xFF6D2E8C), Color(0xFF4F46E5)]),
                         borderRadius: BorderRadius.circular(14),
                       ),
                       child: const Center(
@@ -513,9 +568,9 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                     )
                   : DecoratedBox(
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(colors: [Color(0xFF7C3AED), Color(0xFF4F46E5)]),
+                        gradient: const LinearGradient(colors: [Color(0xFF6D2E8C), Color(0xFF4F46E5)]),
                         borderRadius: BorderRadius.circular(14),
-                        boxShadow: const [BoxShadow(color: Color(0x447C3AED), blurRadius: 12, offset: Offset(0, 4))],
+                        boxShadow: const [BoxShadow(color: Color(0x446D2E8C), blurRadius: 12, offset: Offset(0, 4))],
                       ),
                       child: ElevatedButton(
                         onPressed: _step < 2 ? _next : _createStore,
@@ -543,9 +598,9 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(color: const Color(0xFFFFF0F0), borderRadius: BorderRadius.circular(10)),
       child: Row(children: [
-        const Icon(Icons.error_outline, color: Color(0xFFE53E3E), size: 18),
+        const Icon(Icons.error_outline, color: Color(0xFFD93025), size: 18),
         const SizedBox(width: 8),
-        Expanded(child: Text(msg, style: const TextStyle(color: Color(0xFFE53E3E), fontSize: 13))),
+        Expanded(child: Text(msg, style: const TextStyle(color: Color(0xFFD93025), fontSize: 13))),
       ]),
     );
   }

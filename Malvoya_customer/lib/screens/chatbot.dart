@@ -307,7 +307,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text(l10n.translate('ticketSentToEmail').replaceAll('{id}', ticketId)),
-                          backgroundColor: const Color(0xFF16A34A),
+                          backgroundColor: const Color(0xFF248A52),
                           behavior: SnackBarBehavior.floating,
                         ),
                       );
@@ -342,7 +342,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(l10n.translate('malvoyaConciergeAi'), style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: textPrimary)),
-                Text(l10n.translate('onlineOfficialSupport'), style: const TextStyle(fontSize: 12, color: Color(0xFF16A34A), fontWeight: FontWeight.w600)),
+                Text(l10n.translate('onlineOfficialSupport'), style: const TextStyle(fontSize: 12, color: Color(0xFF248A52), fontWeight: FontWeight.w600)),
               ],
             ),
             backgroundColor: cardBg,
