@@ -16,7 +16,7 @@ const nav = [
 export default function Sidebar() {
   const handleLogout = () => {
     localStorage.removeItem('token');
-    window.location.href = '/login';
+    window.location.hash = '#/login';
   };
 
   return (

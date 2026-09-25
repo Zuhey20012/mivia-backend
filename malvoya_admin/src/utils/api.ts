@@ -17,10 +17,10 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (error) => {
-    const onLogin = window.location.pathname === '/login';
+    const onLogin = window.location.hash.startsWith('#/login');
     if (error.response?.status === 401 && !onLogin) {
       localStorage.removeItem('token');
-      window.location.assign('/login');
+      window.location.hash = '#/login';
     }
     return Promise.reject(error);
   },
