@@ -1,4 +1,5 @@
-import * as admin from "firebase-admin";
+import { initializeApp, cert } from "firebase-admin/app";
+import { getMessaging as firebaseMessaging, Messaging } from "firebase-admin/messaging";
 import pino from "pino";
 import { env } from "../config/env";
 import { prisma } from "./prisma";
@@ -10,9 +11,9 @@ const logger = pino({ name: "push" });
  * without it pushes are skipped and the apps still get live updates over the socket.
  * Only service messages are sent (order, delivery, payout) — never marketing.
  */
-let messaging: admin.messaging.Messaging | null | undefined;
+let messaging: Messaging | null | undefined;
 
-function getMessaging() {
+function pushClient(): Messaging | null {
   if (messaging !== undefined) return messaging;
   messaging = null;
   if (!env.firebaseServiceAccount) return messaging;
@@ -20,8 +21,8 @@ function getMessaging() {
     const raw = env.firebaseServiceAccount.trim().startsWith("{")
       ? env.firebaseServiceAccount
       : Buffer.from(env.firebaseServiceAccount, "base64").toString("utf8");
-    const app = admin.initializeApp({ credential: admin.credential.cert(JSON.parse(raw)) }, "push");
-    messaging = app.messaging();
+    const app = initializeApp({ credential: cert(JSON.parse(raw)) }, "push");
+    messaging = firebaseMessaging(app);
   } catch (err: any) {
     logger.error({ err: err?.message }, "FIREBASE_SERVICE_ACCOUNT is invalid; push disabled");
   }
@@ -29,7 +30,7 @@ function getMessaging() {
 }
 
 export function pushConfigured() {
-  return !!getMessaging();
+  return !!pushClient();
 }
 
 export type PushMessage = {
@@ -44,7 +45,7 @@ export async function pushToUser(userId: number, msg: PushMessage) {
 }
 
 export async function pushToUsers(userIds: number[], msg: PushMessage) {
-  const m = getMessaging();
+  const m = pushClient();
   if (!m || !userIds.length) return;
   const devices = await prisma.deviceToken.findMany({ where: { userId: { in: userIds } }, select: { token: true } });
   if (!devices.length) return;

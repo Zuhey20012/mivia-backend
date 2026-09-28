@@ -1,5 +1,6 @@
 import { OAuth2Client } from "google-auth-library";
-import * as admin from "firebase-admin";
+import { initializeApp, getApps, getApp } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
 import crypto from "crypto";
 import { prisma } from "../../lib/prisma";
 import { env } from "../../config/env";
@@ -9,9 +10,9 @@ import { AuthError, phoneToSyntheticEmail } from "./auth.service";
 const googleClient = new OAuth2Client(env.googleClientId);
 
 // Verifying Firebase ID tokens only needs the project id (public keys are fetched from Google).
-if (!admin.apps.length) {
+if (!getApps().some((a) => a.name === "[DEFAULT]")) {
   try {
-    admin.initializeApp(process.env.FIREBASE_PROJECT_ID ? { projectId: process.env.FIREBASE_PROJECT_ID } : undefined);
+    initializeApp(process.env.FIREBASE_PROJECT_ID ? { projectId: process.env.FIREBASE_PROJECT_ID } : undefined);
   } catch (e) {
     console.error("Firebase Admin initialization error", e);
   }
@@ -57,7 +58,7 @@ export async function loginWithGoogle(idToken: string, role: SignupRole = "CUSTO
 
 async function verifyFirebaseToken(token: string) {
   try {
-    return await admin.auth().verifyIdToken(token);
+    return await getAuth(getApp()).verifyIdToken(token);
   } catch {
     throw new AuthError("Invalid sign-in token", 401);
   }
