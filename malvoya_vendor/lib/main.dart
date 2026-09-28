@@ -10,6 +10,7 @@ import 'screens/pending_approval.dart';
 import 'auth_service.dart';
 import 'l10n.dart';
 import 'locale_provider.dart';
+import 'core/push_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,7 +25,12 @@ class MalvoyaVendorApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => AuthService()),
+        ChangeNotifierProvider(create: (_) {
+          final auth = AuthService();
+          // New orders and payouts arrive as notifications even when the app is closed
+          PushService.instance.attach(auth);
+          return auth;
+        }),
         ChangeNotifierProvider(create: (_) => LocaleProvider()),
       ],
       child: Consumer<LocaleProvider>(

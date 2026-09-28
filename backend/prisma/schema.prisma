@@ -690,3 +690,30 @@ model JobLease {
   lockedUntil DateTime
   lastRunAt   DateTime?
 }
+
+// ─────────────────────────────────────────────
+// SUPPORT
+// ─────────────────────────────────────────────
+
+enum SupportStatus {
+  OPEN
+  ANSWERED
+  CLOSED
+}
+
+// Requests to the Malvoya team from any app; answered by email.
+model SupportRequest {
+  id        Int           @id @default(autoincrement())
+  userId    Int?
+  email     String
+  app       String // "customer" | "store" | "courier"
+  topic     String
+  message   String
+  orderId   Int?
+  status    SupportStatus @default(OPEN)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@index([status, createdAt])
+  @@index([userId])
+}

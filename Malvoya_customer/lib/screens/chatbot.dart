@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../core/api_client.dart';
 import '../core/strings.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
@@ -288,30 +289,32 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                     ),
                     icon: const Icon(Icons.send_rounded, color: Colors.white, size: 20),
                     label: Text(l10n.translate('sendTicket'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-                    onPressed: () {
+                    onPressed: () async {
                       if (subjectCtrl.text.trim().isEmpty || messageCtrl.text.trim().isEmpty) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(content: Text(l10n.translate('pleaseEnterSubjectMsg'))),
                         );
                         return;
                       }
-                      Navigator.pop(ctx);
-                      final ticketId = 'MLV-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
-                      setState(() {
-                        _messages.add({
-                          'sender': 'bot',
-                          'text': '✅ ${l10n.translate("ticketCreatedGuaranteed").replaceAll("{id}", ticketId)}\n\n${l10n.translate("category")}: $selectedCategory\n${l10n.translate("subject")}: ${subjectCtrl.text.trim()}',
-                          'time': l10n.translate('justNow'),
-                        });
+                      final auth = Provider.of<AuthService>(context, listen: false);
+                      final res = await ApiClient(auth).post('/support', {
+                        'app': 'customer',
+                        'topic': '$selectedCategory: ${subjectCtrl.text.trim()}',
+                        'message': messageCtrl.text.trim(),
                       });
-                      _scrollToBottom();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(l10n.translate('ticketSentToEmail').replaceAll('{id}', ticketId)),
-                          backgroundColor: const Color(0xFF248A52),
-                          behavior: SnackBarBehavior.floating,
-                        ),
-                      );
+                      if (!mounted) return;
+                      if (res.ok) Navigator.pop(ctx);
+                      if (res.ok) {
+                        setState(() => _messages.add({
+                              'sender': 'bot',
+                              'text': tr(context, 'Sent to our team (#${res.data['id']}). We reply by email to ${res.data['replyTo']}.',
+                                  'Lähetetty tiimillemme (#${res.data['id']}). Vastaamme sähköpostitse osoitteeseen ${res.data['replyTo']}.'),
+                              'time': l10n.translate('justNow'),
+                            }));
+                        _scrollToBottom();
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.error!)));
+                      }
                     },
                   ),
                 ),

@@ -7,6 +7,7 @@ import 'config/theme.dart';
 import 'screens/courier_welcome.dart';
 import 'screens/courier_dashboard.dart';
 import 'screens/pending_approval.dart';
+import 'core/push_service.dart';
 import 'auth_service.dart';
 import 'l10n.dart';
 import 'locale_provider.dart';
@@ -24,7 +25,12 @@ class MalvoyaCourierApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => AuthService()),
+        ChangeNotifierProvider(create: (_) {
+          final auth = AuthService();
+          // Job offers and payouts arrive as notifications when the app is in the background
+          PushService.instance.attach(auth);
+          return auth;
+        }),
         ChangeNotifierProvider(create: (_) => LocaleProvider()),
       ],
       child: Consumer<LocaleProvider>(

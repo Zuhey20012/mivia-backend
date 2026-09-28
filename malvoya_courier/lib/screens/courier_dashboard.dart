@@ -1,1082 +1,592 @@
-import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
-import 'package:shimmer/shimmer.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../auth_service.dart';
-import '../config/constants.dart';
 import '../config/theme.dart';
-import '../l10n.dart';
+import '../core/api_client.dart';
+import '../core/media_upload.dart';
+import '../core/legal_links.dart';
+import '../core/strings.dart';
 import '../services/courier_telemetry_service.dart';
 import '../services/socket_service.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:geolocator/geolocator.dart';
+import 'payouts_screen.dart';
 
+/// Go online, pick the jobs you want, deliver with navigation and chat, and see what you earn.
 class CourierDashboard extends StatefulWidget {
   const CourierDashboard({super.key});
+
   @override
   State<CourierDashboard> createState() => _CourierDashboardState();
 }
 
 class _CourierDashboardState extends State<CourierDashboard> with SingleTickerProviderStateMixin {
-  late TabController _tabs;
-  bool _isOnline = false;
-  List _availableOrders = [];
-  List _myDeliveries = [];
-  bool _loadingOrders = false;
-  bool _loadingDeliveries = false;
-  bool _connectionError = false;
-  Map<String, dynamic>? _activeDelivery;
+  late final TabController _tabs = TabController(length: 3, vsync: this);
+  bool _online = false;
+  bool _switching = false;
+  List<Map<String, dynamic>> _jobs = [];
+  List<Map<String, dynamic>> _mine = [];
+  Map<String, dynamic>? _earnings;
+  final List<Map<String, dynamic>> _chat = [];
+  bool _loading = true;
+
+  AuthService get _auth => Provider.of<AuthService>(context, listen: false);
+  ApiClient get _api => ApiClient(_auth);
+  Map<String, dynamic>? get _active {
+    for (final o in _mine) {
+      if (['CONFIRMED', 'PROCESSING', 'SHIPPED'].contains(o['status'])) return o;
+    }
+    return null;
+  }
 
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 3, vsync: this);
-    _loadOnlineStatus();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _fetchAll());
+    final socket = CourierSocketService();
+    socket.onDispatchOffer = (_) {
+      HapticFeedback.heavyImpact();
+      _loadJobs();
+    };
+    socket.onOrderStatus = (_) => _loadMine();
+    socket.onChatMessage = (m) {
+      if (mounted && asInt(m['orderId']) == asInt(_active?['id'])) setState(() => _chat.add(m));
+    };
+    WidgetsBinding.instance.addPostFrameCallback((_) => _init());
   }
 
   @override
   void dispose() {
     _tabs.dispose();
-    CourierTelemetryService().stopBroadcast();
     super.dispose();
   }
 
-  Future<void> _loadOnlineStatus() async {
-    final prefs = await SharedPreferences.getInstance();
-    final online = prefs.getBool('courier_online') ?? false;
-    setState(() => _isOnline = online);
+  Future<void> _init() async {
+    final me = await _api.get('/courier/me');
+    if (!mounted) return;
+    final online = me.ok && me.data['courier']?['isOnline'] == true;
+    setState(() => _online = online);
+    if (online) await _startSharing();
+    await Future.wait([_loadJobs(), _loadMine(), _loadEarnings()]);
+    if (mounted) setState(() => _loading = false);
+  }
 
-    final auth = Provider.of<AuthService>(context, listen: false);
-    if (online && auth.accessToken != null) {
-      CourierSocketService().connect(auth.accessToken!);
-      final telemetry = CourierTelemetryService();
-      telemetry.startLiveBroadcast(orderId: _activeDelivery?['id'], accessToken: auth.accessToken);
-    }
+  Future<bool> _startSharing() async {
+    final token = _auth.accessToken ?? '';
+    CourierSocketService().connect(token);
+    final ok = await CourierTelemetryService().start(accessToken: token, orderId: asInt(_active?['id']));
+    return ok;
   }
 
   Future<void> _toggleOnline() async {
-    final nextState = !_isOnline;
-    double lat = 60.1841;
-    double lng = 24.9493;
-
-    if (nextState) {
-      try {
-        LocationPermission permission = await Geolocator.checkPermission();
-        if (permission == LocationPermission.denied) {
-          permission = await Geolocator.requestPermission();
-          if (permission == LocationPermission.denied) {
-            throw Exception('Location permissions are denied');
-          }
-        }
-        if (permission == LocationPermission.deniedForever) {
-          throw Exception('Location permissions are permanently denied');
-        }
-        
-        Position position = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.high);
-        lat = position.latitude;
-        lng = position.longitude;
-      } catch (e) {
+    HapticFeedback.mediumImpact();
+    setState(() => _switching = true);
+    final next = !_online;
+    double? lat;
+    double? lng;
+    if (next) {
+      if (!await _startSharing()) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content: Text('Location unavailable. Cannot go online.'),
-                backgroundColor: Colors.red),
-          );
+          setState(() => _switching = false);
+          _snack(tr(context, 'Turn on location and allow it for Malvoya Courier to go online.', 'Laita sijainti päälle ja salli se Malvoya Courierille mennäksesi linjoille.'));
         }
         return;
       }
-    }
-
-    final prefs = await SharedPreferences.getInstance();
-    setState(() => _isOnline = nextState);
-    await prefs.setBool('courier_online', nextState);
-
-    final auth = Provider.of<AuthService>(context, listen: false);
-    final telemetry = CourierTelemetryService();
-
-    if (auth.accessToken != null) {
-      if (nextState) {
-        CourierSocketService().connect(auth.accessToken!);
-        telemetry.startLiveBroadcast(orderId: _activeDelivery?['id'], accessToken: auth.accessToken);
-      } else {
-        CourierSocketService().disconnect();
-        telemetry.stopBroadcast();
-      }
-
       try {
-        http.post(
-          Uri.parse('${AppConstants.apiBase}/courier/status'),
-          headers: {'Authorization': _authHeader(), 'Content-Type': 'application/json'},
-          body: jsonEncode({'isOnline': nextState, 'latitude': lat, 'longitude': lng}),
-        ).timeout(const Duration(seconds: 4));
+        final p = await Geolocator.getCurrentPosition(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
+        lat = p.latitude;
+        lng = p.longitude;
       } catch (_) {}
+    } else {
+      CourierTelemetryService().stop();
     }
+    final res = await _api.post('/courier/status', {'isOnline': next, 'latitude': lat, 'longitude': lng});
+    if (!mounted) return;
+    setState(() {
+      _switching = false;
+      if (res.ok) _online = next;
+    });
+    if (!res.ok) _snack(res.error!);
+    if (next) _loadJobs();
+  }
 
-    if (nextState) _fetchAll();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(nextState
-            ? '🟢 You are online — High-frequency GPS telemetry active'
-            : '🔴 You are offline — Telemetry paused'),
+  Future<void> _loadJobs() async {
+    final res = await _api.get('/orders/available');
+    if (!mounted || !res.ok) return;
+    setState(() => _jobs = ((res.data['orders'] as List?) ?? []).map((o) => Map<String, dynamic>.from(o)).toList());
+  }
+
+  Future<void> _loadMine() async {
+    final res = await _api.get('/orders/courier/mine');
+    if (!mounted || !res.ok) return;
+    setState(() => _mine = ((res.data['orders'] as List?) ?? []).map((o) => Map<String, dynamic>.from(o)).toList());
+    final active = _active;
+    CourierTelemetryService().setActiveOrder(asInt(active?['id']));
+    if (active != null) CourierSocketService().trackOrder(asInt(active['id'])!);
+  }
+
+  Future<void> _loadEarnings() async {
+    final res = await _api.get('/payouts');
+    if (!mounted || !res.ok) return;
+    setState(() => _earnings = res.data);
+  }
+
+  void _snack(String t) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t), behavior: SnackBarBehavior.floating));
+
+  Future<void> _accept(Map<String, dynamic> job) async {
+    HapticFeedback.mediumImpact();
+    final res = await _api.patch('/orders/${job['id']}/assign-courier');
+    if (!mounted) return;
+    if (!res.ok) {
+      _snack(res.error!);
+      _loadJobs();
+      return;
+    }
+    _chat.clear();
+    await _loadMine();
+    _loadJobs();
+    _tabs.animateTo(1);
+  }
+
+  Future<void> _pickedUp(Map<String, dynamic> o) async {
+    HapticFeedback.mediumImpact();
+    final res = await _api.patch('/orders/${o['id']}/status', {'status': 'SHIPPED'});
+    if (!mounted) return;
+    if (!res.ok) _snack(res.error!);
+    _loadMine();
+  }
+
+  Future<Position?> _here() async {
+    try {
+      return await Geolocator.getCurrentPosition(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high))
+          .timeout(const Duration(seconds: 8));
+    } catch (_) {
+      return CourierTelemetryService().lastPosition;
+    }
+  }
+
+  Future<void> _complete(Map<String, dynamic> o) async {
+    final method = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            title: Text(tr(context, 'How did you hand it over?', 'Miten luovutit tilauksen?'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
+          ),
+          ListTile(
+            leading: const Icon(Icons.handshake_outlined),
+            title: Text(tr(context, 'To the customer in person', 'Asiakkaalle henkilökohtaisesti')),
+            onTap: () => Navigator.pop(ctx, 'IN_PERSON'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.photo_camera_outlined),
+            title: Text(tr(context, 'Left at the door — take a photo', 'Jätetty ovelle — ota kuva')),
+            subtitle: Text(tr(context, 'Only the customer sees the photo. It is deleted after 30 days.', 'Vain asiakas näkee kuvan. Se poistetaan 30 päivän kuluttua.')),
+            onTap: () => Navigator.pop(ctx, 'PHOTO'),
+          ),
+        ]),
+      ),
+    );
+    if (method == null || !mounted) return;
+    final orderId = asInt(o['id'])!;
+    Map<String, dynamic>? proof;
+    if (method == 'PHOTO') {
+      final shot = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 80);
+      if (shot == null || !mounted) return;
+      _snack(tr(context, 'Uploading photo…', 'Ladataan kuvaa…'));
+      try {
+        proof = (await MediaUpload.upload(api: _api, kind: 'delivery_proof', file: File(shot.path), orderId: orderId)).toProof();
+      } catch (e) {
+        if (mounted) _snack('$e');
+        return;
+      }
+    }
+    final pos = await _here();
+    final res = await _api.post('/orders/$orderId/deliver', {
+      'method': method,
+      if (proof != null) 'upload': proof,
+      if (pos != null) 'latitude': pos.latitude,
+      if (pos != null) 'longitude': pos.longitude,
+    });
+    if (!mounted) return;
+    if (!res.ok) return _snack(res.error!);
+    HapticFeedback.heavyImpact();
+    _snack(tr(context, 'Delivered — nice work!', 'Toimitettu — hyvää työtä!'));
+    _chat.clear();
+    await Future.wait([_loadMine(), _loadEarnings(), _loadJobs()]);
+  }
+
+  Future<void> _navigate(double? lat, double? lng, String? address) async {
+    final destination = lat != null && lng != null ? '$lat,$lng' : Uri.encodeComponent(address ?? '');
+    final uri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$destination&travelmode=bicycling');
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  void _openChat(Map<String, dynamic> o) {
+    final input = TextEditingController();
+    final orderId = asInt(o['id'])!;
+    final myName = (_auth.currentUser?.name ?? 'Courier').split(' ').first;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
+        void send(String t) {
+          if (t.trim().isEmpty) return;
+          CourierSocketService().sendChat(orderId, t.trim(), myName);
+          input.clear();
+          Future.delayed(const Duration(milliseconds: 400), () => ctx.mounted ? set(() {}) : null);
+        }
+
+        final quick = [
+          tr(context, 'I\'m at the door', 'Olen ovella'),
+          tr(context, 'I\'m outside', 'Olen ulkona'),
+          tr(context, 'Running 5 min late', 'Myöhästyn 5 min'),
+        ];
+        return SizedBox(
+          height: MediaQuery.of(ctx).size.height * 0.7,
+          child: Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+            child: Column(children: [
+              ListTile(
+                title: Text(tr(context, 'Chat with the customer', 'Chat asiakkaan kanssa'), style: const TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text(tr(context, 'Phone numbers are never shared.', 'Puhelinnumeroita ei jaeta.')),
+              ),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: _chat.map((m) {
+                    final mine = m['role'] == 'COURIER';
+                    return Align(
+                      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        constraints: const BoxConstraints(maxWidth: 280),
+                        decoration: BoxDecoration(color: mine ? AppTheme.primary : AppTheme.divider, borderRadius: BorderRadius.circular(16)),
+                        child: Text(m['text'] ?? '', style: TextStyle(color: mine ? Colors.white : AppTheme.textPrimary)),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Row(children: quick.map((q) => Padding(padding: const EdgeInsets.only(right: 8), child: ActionChip(label: Text(q), onPressed: () => send(q)))).toList()),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                child: Row(children: [
+                  Expanded(child: TextField(controller: input, maxLength: 1000, onSubmitted: send, decoration: InputDecoration(counterText: '', hintText: tr(context, 'Message', 'Viesti')))),
+                  IconButton(icon: const Icon(Icons.send_rounded, color: AppTheme.primary), onPressed: () => send(input.text)),
+                ]),
+              ),
+            ]),
+          ),
+        );
+      }),
+    );
+  }
+
+  void _howJobsWork() {
+    showModalBottomSheet(
+      context: context,
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(tr(context, 'How jobs are offered', 'Miten keikat tarjotaan'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 12),
+          Text(
+            tr(context,
+                'When a store accepts an order, it is offered to online couriers within 7.5 km of the store, nearest first. If nobody is that close, every online courier sees it. You choose which jobs to take — declining or ignoring a job never affects you. The pay shown is what you earn for the job. No automated system rates or deactivates you; account decisions are made by a person and explained to you.',
+                'Kun kauppa hyväksyy tilauksen, se tarjotaan linjoilla oleville kuriireille 7,5 km:n säteellä kaupasta, lähin ensin. Jos kukaan ei ole niin lähellä, kaikki linjoilla olevat näkevät sen. Valitset itse keikkasi — kieltäytyminen tai ohittaminen ei vaikuta sinuun. Näytetty palkkio on se, mitä ansaitset. Mikään automaatti ei arvioi tai sulje tiliäsi; päätökset tekee ihminen ja perustelee ne sinulle.'),
+            style: const TextStyle(height: 1.45, color: AppTheme.textSecondary),
+          ),
+          const SizedBox(height: 12),
+          TextButton.icon(
+            onPressed: () => openLegal('couriers'),
+            icon: const Icon(Icons.gavel_rounded),
+            label: Text(tr(context, 'Read the courier agreement', 'Lue lähettisopimus')),
+          ),
+        ]),
       ),
     );
   }
 
-  String _authHeader() {
-    final auth = Provider.of<AuthService>(context, listen: false);
-    return 'Bearer ${auth.accessToken}';
-  }
-
-  Future<void> _fetchAll() async {
-    setState(() => _connectionError = false);
-    await Future.wait([_fetchAvailableOrders(), _fetchMyDeliveries()]);
-  }
-
-  Future<void> _fetchAvailableOrders() async {
-    if (!_isOnline) return;
-    setState(() => _loadingOrders = true);
-    try {
-      final res = await http.get(
-        Uri.parse('${AppConstants.apiBase}/orders/available'),
-        headers: {'Authorization': _authHeader()},
-      ).timeout(const Duration(seconds: 4));
-      if (res.statusCode == 200 && mounted) {
-        final data = jsonDecode(res.body);
-        setState(() { _availableOrders = data is List ? data : (data['orders'] ?? []); });
-      } else {
-        if (mounted) setState(() => _connectionError = true);
-      }
-    } catch (_) {
-      if (mounted) setState(() => _connectionError = true);
-    } finally {
-      if (mounted) setState(() => _loadingOrders = false);
-    }
-  }
-
-  Future<void> _fetchMyDeliveries() async {
-    setState(() => _loadingDeliveries = true);
-    try {
-      final res = await http.get(
-        Uri.parse('${AppConstants.apiBase}/orders/courier/mine'),
-        headers: {'Authorization': _authHeader()},
-      ).timeout(const Duration(seconds: 4));
-      if (res.statusCode == 200 && mounted) {
-        final data = jsonDecode(res.body);
-        final deliveries = data is List ? data : (data['orders'] ?? []);
-        final activeList = (deliveries as List).cast<Map<String, dynamic>>()
-            .where((d) => ['CONFIRMED', 'PROCESSING', 'SHIPPED'].contains(d['status'])).toList();
-        setState(() {
-          _myDeliveries = deliveries;
-          _activeDelivery = activeList.isNotEmpty ? activeList.first : null;
-        });
-
-        if (_activeDelivery != null && _isOnline) {
-          CourierSocketService().trackOrder(_activeDelivery!['id']);
-          CourierTelemetryService().startLiveBroadcast(orderId: _activeDelivery!['id']);
-        }
-      } else {
-        if (mounted) setState(() => _connectionError = true);
-      }
-    } catch (_) {
-      if (mounted) setState(() => _connectionError = true);
-    } finally {
-      if (mounted) setState(() => _loadingDeliveries = false);
-    }
-  }
-
-  Future<void> _acceptDelivery(Map<String, dynamic> order) async {
-    try {
-      final res = await http.patch(
-        Uri.parse('${AppConstants.apiBase}/orders/${order['id']}/assign-courier'),
-        headers: {'Authorization': _authHeader(), 'Content-Type': 'application/json'},
-      ).timeout(const Duration(seconds: 4));
-      if (res.statusCode == 200) {
-        CourierSocketService().trackOrder(order['id']);
-        CourierTelemetryService().startLiveBroadcast(orderId: order['id']);
-        _fetchAll();
-        _tabs.animateTo(1);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(AppLocalizations.of(context).translate('deliveryAcceptedToast'))),
-          );
-        }
-      }
-    } catch (_) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to accept delivery.')));
-    }
-  }
-
-  Future<void> _openGoogleMapsNavigation(String address) async {
-    final clean = address.trim();
-    if (clean.isEmpty) return;
-    final encoded = Uri.encodeComponent(clean);
-    final geoUri = Uri.parse('geo:0,0?q=$encoded');
-    final webUri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$encoded');
-    try {
-      if (await canLaunchUrl(geoUri)) {
-        await launchUrl(geoUri, mode: LaunchMode.externalApplication);
-        return;
-      }
-    } catch (_) {}
-    try {
-      if (await canLaunchUrl(webUri)) {
-        await launchUrl(webUri, mode: LaunchMode.externalApplication);
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _markPickedUp(int orderId) async {
-    try {
-      await http.patch(
-        Uri.parse('${AppConstants.apiBase}/orders/$orderId/status'),
-        headers: {'Authorization': _authHeader(), 'Content-Type': 'application/json'},
-        body: jsonEncode({'status': 'SHIPPED'}),
-      ).timeout(const Duration(seconds: 4));
-      _fetchAll();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('📦 Items picked up! Out for delivery.')));
-    } catch (_) {}
-  }
-
-  Future<void> _markDelivered(int orderId) async {
-    try {
-      final res = await http.patch(
-        Uri.parse('${AppConstants.apiBase}/orders/$orderId/status'),
-        headers: {'Authorization': _authHeader(), 'Content-Type': 'application/json'},
-        body: jsonEncode({'status': 'DELIVERED'}),
-      ).timeout(const Duration(seconds: 4));
-      CourierTelemetryService().stopBroadcast();
-      _fetchAll();
-      if (mounted) {
-        final ok = res.statusCode == 200;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: ok ? const Color(0xFF248A52) : AppTheme.accent,
-            content: Text(ok ? 'Delivery completed. Thank you!' : 'Could not mark as delivered. Please try again.'),
-          ),
-        );
-      }
-    } catch (_) {}
-  }
+  // ── UI ──────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final auth = Provider.of<AuthService>(context);
-    final l10n = AppLocalizations.of(context);
-    final name = auth.currentUser?.name?.split(' ').first ?? 'Courier';
-    final completedCount = _myDeliveries.where((d) => d['status'] == 'DELIVERED').length;
-    // Sum of the delivery fees on completed trips. Actual courier pay follows the signed courier agreement.
-    final estimatedEarnings = _myDeliveries
-        .where((d) => d['status'] == 'DELIVERED')
-        .fold<double>(0, (sum, d) => sum + ((d['deliveryFeeCents'] as int? ?? 0) / 100));
-
+    final active = _active;
+    final name = (_auth.currentUser?.name ?? '').split(' ').first;
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         backgroundColor: Colors.white,
-        titleSpacing: 16,
-        title: Row(
-          children: [
-            Container(
-              width: 36, height: 36,
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: [AppTheme.primary, AppTheme.primaryDark]),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(Icons.delivery_dining_rounded, color: Colors.white, size: 20),
-            ),
-            const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('${AppLocalizations.of(context).translate('hiName')}$name!', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                Text(AppLocalizations.of(context).translate('malvoyaCourier'), style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary, fontWeight: FontWeight.w400)),
-              ],
-            ),
-          ],
-        ),
+        title: Text(name.isEmpty ? 'Malvoya Courier' : '${tr(context, 'Hi', 'Hei')} $name'),
         actions: [
-          // Online/Offline toggle
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: GestureDetector(
-              onTap: _toggleOnline,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                margin: const EdgeInsets.symmetric(vertical: 14),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                decoration: BoxDecoration(
-                  color: _isOnline ? AppTheme.success.withOpacity(0.15) : const Color(0xFFEFEBF1),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: _isOnline ? AppTheme.success : AppTheme.divider),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 8, height: 8,
-                      decoration: BoxDecoration(
-                        color: _isOnline ? AppTheme.success : Colors.grey.shade400,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      _isOnline ? l10n.translate('goOnline') : l10n.translate('goOffline'),
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                        color: _isOnline ? AppTheme.success : AppTheme.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout_rounded),
-            onPressed: () => auth.logout(),
-          ),
+          IconButton(tooltip: tr(context, 'How jobs are offered', 'Miten keikat tarjotaan'), icon: const Icon(Icons.info_outline_rounded), onPressed: _howJobsWork),
+          IconButton(tooltip: tr(context, 'Sign out', 'Kirjaudu ulos'), icon: const Icon(Icons.logout_rounded), onPressed: () async {
+            if (_online) await _toggleOnline();
+            CourierSocketService().disconnect();
+            await _auth.logout();
+          }),
         ],
         bottom: TabBar(
           controller: _tabs,
-          indicatorColor: AppTheme.primary,
-          indicatorWeight: 3,
           labelColor: AppTheme.primary,
           unselectedLabelColor: AppTheme.textSecondary,
-          labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+          indicatorColor: AppTheme.primary,
           tabs: [
-            Tab(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(l10n.translate('availableOrders')),
-                  if (_availableOrders.isNotEmpty) ...[
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(10)),
-                      child: Text('${_availableOrders.length}', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            Tab(text: l10n.translate('myDeliveries')),
-            Tab(text: l10n.translate('earnings')),
+            Tab(text: '${tr(context, 'Jobs', 'Keikat')}${_jobs.isNotEmpty && active == null ? ' (${_jobs.length})' : ''}'),
+            Tab(text: tr(context, 'Delivery', 'Toimitus')),
+            Tab(text: tr(context, 'Earnings', 'Ansiot')),
           ],
         ),
       ),
-      body: Column(
-        children: [
-          if (_isOnline)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(colors: [Color(0xFF17131C), Color(0xFF1E293B)]),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: const BoxDecoration(color: Color(0xFF248A52), shape: BoxShape.circle),
-                  ),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      '⚡ FusedLocation 60Hz: Streaming live telemetry to customer radar (3s / 4m)',
-                      style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Text('SUB-100MS', style: TextStyle(color: Color(0xFF86EFAC), fontSize: 9, fontWeight: FontWeight.bold)),
-                  ),
-                ],
-              ),
-            ),
-          if (_connectionError)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(8),
-              color: const Color(0xFF6D2E8C),
-              child: const Text(
-                'No connection. Please check your network and try again.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-              ),
-            ),
+      body: Column(children: [
+        _onlineBar(),
+        Expanded(
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : TabBarView(controller: _tabs, children: [_jobsTab(active), _deliveryTab(active), _earningsTab()]),
+        ),
+      ]),
+    );
+  }
+
+  Widget _onlineBar() => Container(
+        color: _online ? AppTheme.success : AppTheme.textPrimary,
+        padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
+        child: Row(children: [
+          Icon(_online ? Icons.circle : Icons.circle_outlined, size: 12, color: Colors.white),
+          const SizedBox(width: 10),
           Expanded(
-            child: TabBarView(
-              controller: _tabs,
-              children: [
-                _buildAvailableTab(),
-                _buildMyDeliveriesTab(),
-                _buildEarningsTab(completedCount, estimatedEarnings),
-              ],
+            child: Text(
+              _online
+                  ? tr(context, 'Online — sharing your location while online', 'Linjoilla — sijaintisi jaetaan, kun olet linjoilla')
+                  : tr(context, 'Offline — you get no jobs and your location is not shared', 'Poissa — et saa keikkoja eikä sijaintiasi jaeta'),
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
             ),
           ),
-        ],
-      ),
-    );
-  }
+          _switching
+              ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : Switch(value: _online, onChanged: (_) => _toggleOnline(), activeColor: Colors.white, activeTrackColor: Colors.white38),
+        ]),
+      );
 
-  // ── AVAILABLE ORDERS ──────────────────────────────────────────────────────
-
-  Widget _buildAvailableTab() {
-    final l10n = AppLocalizations.of(context);
-    if (!_isOnline) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 100, height: 100,
-                decoration: BoxDecoration(color: AppTheme.primaryLight, shape: BoxShape.circle),
-                child: const Icon(Icons.power_settings_new_rounded, size: 50, color: AppTheme.primary),
-              ),
-              const SizedBox(height: 24),
-              Text(l10n.translate('youAreOffline'), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: AppTheme.textPrimary)),
-              const SizedBox(height: 8),
-              Text(l10n.translate('goOnlineDesc'), style: const TextStyle(color: AppTheme.textSecondary, height: 1.5), textAlign: TextAlign.center),
-              const SizedBox(height: 28),
-              ElevatedButton.icon(
-                onPressed: _toggleOnline,
-                icon: const Icon(Icons.circle, size: 10),
-                label: Text(l10n.translate('goOnline')),
-              ),
-            ],
-          ),
-        ),
-      );
+  Widget _jobsTab(Map<String, dynamic>? active) {
+    if (active != null) {
+      return _empty(Icons.pedal_bike_rounded, tr(context, 'Finish your current delivery to take the next job.', 'Tee nykyinen toimitus loppuun ottaaksesi seuraavan keikan.'));
     }
-    if (_loadingOrders) return _shimmerList();
-    if (_connectionError) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.wifi_off_rounded, size: 64, color: Colors.grey.shade400),
-              const SizedBox(height: 16),
-              const Text('Could not fetch orders', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: _fetchAvailableOrders,
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF6D2E8C), foregroundColor: Colors.white),
-                icon: const Icon(Icons.refresh_rounded),
-                label: const Text('Retry'),
-              ),
-            ],
-          ),
-        ),
-      );
+    if (!_online) {
+      return _empty(Icons.power_settings_new_rounded, tr(context, 'Go online to see jobs near you.', 'Mene linjoille nähdäksesi keikat lähelläsi.'));
     }
-    if (_availableOrders.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 100, height: 100,
-                decoration: BoxDecoration(color: AppTheme.primaryLight, shape: BoxShape.circle),
-                child: const Icon(Icons.moped_outlined, size: 50, color: AppTheme.primary),
-              ),
-              const SizedBox(height: 24),
-              Text(l10n.translate('noDeliveriesRightNow'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppTheme.textPrimary)),
-              const SizedBox(height: 8),
-              Text(l10n.translate('stayOnlineDesc'), style: const TextStyle(color: AppTheme.textSecondary, height: 1.5), textAlign: TextAlign.center),
-              const SizedBox(height: 20),
-              TextButton.icon(
-                onPressed: _fetchAvailableOrders,
-                icon: const Icon(Icons.refresh_rounded),
-                label: Text(l10n.translate('refresh')),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
+    final here = CourierTelemetryService().lastPosition;
     return RefreshIndicator(
-      onRefresh: _fetchAvailableOrders,
-      color: AppTheme.primary,
-      child: ListView.separated(
-        padding: const EdgeInsets.all(16),
-        itemCount: _availableOrders.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 12),
-        itemBuilder: (ctx, i) => _buildAvailableOrderCard(_availableOrders[i]),
-      ),
-    );
-  }
-
-  Widget _buildAvailableOrderCard(Map<String, dynamic> order) {
-    // The exact customer address is only revealed after accepting (data minimisation).
-    final feeCents = order['deliveryFeeCents'] as int? ?? 0;
-    final deliveryFee = '€${(feeCents / 100).toStringAsFixed(2)}';
-    final itemCount = order['itemCount'] as int? ?? 0;
-    final address = '$itemCount item${itemCount == 1 ? '' : 's'} • delivery address shown after you accept';
-    final storeName = order['store']?['name'] ?? 'Store';
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppTheme.primary.withOpacity(0.2)),
-        boxShadow: [BoxShadow(color: AppTheme.primary.withOpacity(0.08), blurRadius: 10, offset: const Offset(0, 3))],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 44, height: 44,
-                  decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(12)),
-                  child: const Icon(Icons.storefront_outlined, color: AppTheme.primary, size: 24),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Pickup: $storeName', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppTheme.textPrimary)),
-                      const Text('Ready for pickup • 20–45 min delivery', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(10)),
-                  child: Text(deliveryFee, style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w800, fontSize: 15)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                const Icon(Icons.location_on_outlined, size: 16, color: AppTheme.textSecondary),
-                const SizedBox(width: 6),
-                Expanded(child: Text(address, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13), maxLines: 2)),
-              ],
-            ),
-            const SizedBox(height: 14),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () => _acceptDelivery(order),
-                style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
-                child: Text(AppLocalizations.of(context).translate('acceptDelivery')),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ── MY DELIVERIES ─────────────────────────────────────────────────────────
-
-  Widget _buildMyDeliveriesTab() {
-    if (_loadingDeliveries) return _shimmerList();
-
-    return RefreshIndicator(
-      onRefresh: _fetchMyDeliveries,
-      color: AppTheme.primary,
-      child: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          if (_activeDelivery != null) ...[
-            _buildActiveDeliveryCard(_activeDelivery!),
-            const SizedBox(height: 20),
-            const Text('Past Deliveries', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
-            const SizedBox(height: 12),
-          ],
-          ..._myDeliveries
-            .where((d) => d['status'] == 'DELIVERED' || d['status'] == 'CANCELLED')
-            .map((d) => Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _buildPastDeliveryTile(d),
-            )),
-          if (_myDeliveries.isEmpty)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.all(40),
-                child: Column(
-                  children: [
-                    Icon(Icons.history_rounded, size: 64, color: Colors.grey.shade300),
-                    const SizedBox(height: 16),
-                    const Text('No deliveries yet', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: AppTheme.textPrimary)),
+      onRefresh: _loadJobs,
+      child: _jobs.isEmpty
+          ? ListView(children: [_empty(Icons.hourglass_empty_rounded, tr(context, 'No jobs right now. You get a notification when one comes in.', 'Ei keikkoja juuri nyt. Saat ilmoituksen, kun uusi tulee.'))])
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: _jobs.map((j) {
+                final s = (j['store'] as Map?) ?? {};
+                String? toStore;
+                String? drop;
+                if (here != null && s['latitude'] != null) {
+                  toStore = '${(Geolocator.distanceBetween(here.latitude, here.longitude, (s['latitude'] as num).toDouble(), (s['longitude'] as num).toDouble()) / 1000).toStringAsFixed(1)} km';
+                }
+                if (s['latitude'] != null && j['deliveryAreaLat'] != null) {
+                  drop = '${(Geolocator.distanceBetween((s['latitude'] as num).toDouble(), (s['longitude'] as num).toDouble(), (j['deliveryAreaLat'] as num).toDouble(), (j['deliveryAreaLng'] as num).toDouble()) / 1000).toStringAsFixed(1)} km';
+                }
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppTheme.divider)),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Text(euro(context, j['courierFeeCents'] ?? j['deliveryFeeCents']), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
+                      const Spacer(),
+                      Text('${j['itemCount']} ${tr(context, 'item(s)', 'tuote(tta)')}', style: const TextStyle(color: AppTheme.textSecondary)),
+                    ]),
                     const SizedBox(height: 8),
-                    const Text('Your completed deliveries will appear here', style: TextStyle(color: AppTheme.textSecondary)),
-                  ],
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  void _showDeliveryProofModal(Map<String, dynamic> delivery) {
-    final orderId = delivery['id'] as int;
-    final address = delivery['deliveryAddress'] ?? 'Customer Entrance';
-    final now = DateTime.now();
-    final timeStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')} EET';
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        padding: const EdgeInsets.all(24),
-        child: SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
-                ),
-              ),
-              const SizedBox(height: 18),
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(12)),
-                    child: const Icon(Icons.verified_outlined, color: AppTheme.primary),
-                  ),
-                  const SizedBox(width: 12),
-                  const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Doorstep Handover Proof', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                      Text('Malvoya Contactless Delivery Standard', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 18),
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF8F7FF),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppTheme.divider),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.location_on, size: 16, color: AppTheme.primary),
-                        const SizedBox(width: 6),
-                        Expanded(child: Text(address, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        const Icon(Icons.access_time_rounded, size: 16, color: Colors.grey),
-                        const SizedBox(width: 6),
-                        Text('Timestamp: $timeStr', style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                height: 110,
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF17131C),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Stack(
-                  children: [
-                    const Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.camera_alt, color: Colors.white, size: 32),
-                          SizedBox(height: 6),
-                          Text('Doorstep Proof Attached ✅', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-                          Text('Parcel placed safely at customer entrance', style: TextStyle(color: Colors.white70, fontSize: 11)),
-                        ],
-                      ),
-                    ),
-                    Positioned(
-                      bottom: 8,
-                      right: 12,
-                      child: Text('GPS Verified', style: TextStyle(color: Colors.greenAccent.shade200, fontSize: 10, fontWeight: FontWeight.bold)),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    _markDelivered(orderId);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                  child: const Text('Confirm Handover & Settle Earnings', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildActiveDeliveryCard(Map<String, dynamic> delivery) {
-    final status = delivery['status'] as String? ?? 'CONFIRMED';
-    final isPickedUp = status == 'SHIPPED';
-    final storeName = delivery['store']?['name'] ?? 'Boutique Store';
-    final storeAddress = delivery['store']?['address'] ?? 'Helsinki Boutique Studio';
-    final customerAddress = delivery['deliveryAddress'] ?? 'Helsinki Customer Entrance';
-    final orderId = delivery['id'] as int;
-
-    return Container(
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [AppTheme.primary, AppTheme.primaryDark],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: AppTheme.primary.withValues(alpha: 0.3), blurRadius: 12, offset: const Offset(0, 4))],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.local_shipping_rounded, color: Colors.white, size: 22),
-                    const SizedBox(width: 8),
+                    Text('${tr(context, 'Pick up', 'Nouto')}: ${s['name'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                    if (s['address'] != null) Text(s['address'], style: const TextStyle(color: AppTheme.textSecondary)),
+                    const SizedBox(height: 6),
                     Text(
-                      isPickedUp ? 'In Transit to Customer' : 'Heading to Boutique',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16),
+                      [
+                        if (toStore != null) '${tr(context, 'To store', 'Kauppaan')} $toStore',
+                        if (drop != null) '${tr(context, 'then', 'sitten')} ~$drop ${tr(context, 'to the customer', 'asiakkaalle')}',
+                      ].join(' · '),
+                      style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary),
                     ),
-                  ],
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text('Order #$orderId', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                ),
-              ],
+                    Text(tr(context, 'The exact address is shown after you accept.', 'Tarkka osoite näytetään hyväksynnän jälkeen.'), style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                    const SizedBox(height: 12),
+                    SizedBox(width: double.infinity, height: 50, child: FilledButton(onPressed: () => _accept(j), child: Text(tr(context, 'Accept job', 'Ota keikka')))),
+                  ]),
+                );
+              }).toList(),
             ),
-            const SizedBox(height: 16),
-            // Pickup Box
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: isPickedUp ? Colors.white.withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: isPickedUp ? Colors.white24 : Colors.white60),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.storefront_outlined, color: Colors.white, size: 22),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Text('1. PICKUP AT STORE', style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
-                            if (isPickedUp) ...[
-                              const SizedBox(width: 6),
-                              const Icon(Icons.check_circle, color: Color(0xFF86EFAC), size: 14),
-                            ],
-                          ],
-                        ),
-                        const SizedBox(height: 2),
-                        Text(storeName, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
-                        Text(storeAddress, style: const TextStyle(color: Colors.white70, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.navigation_rounded, color: Colors.white),
-                    tooltip: 'Google Maps Navigation',
-                    onPressed: () => _openGoogleMapsNavigation('$storeName, $storeAddress'),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 10),
-            // Delivery Box
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: isPickedUp ? Colors.white.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: isPickedUp ? Colors.white60 : Colors.white24),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.location_on_outlined, color: Colors.white, size: 22),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('2. DELIVER TO CUSTOMER', style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
-                        const SizedBox(height: 2),
-                        Text(customerAddress, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold), maxLines: 2, overflow: TextOverflow.ellipsis),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.navigation_rounded, color: Colors.white),
-                    tooltip: 'Google Maps Navigation',
-                    onPressed: () => _openGoogleMapsNavigation(customerAddress),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 18),
-            // Action Buttons
-            if (!isPickedUp)
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () => _markPickedUp(orderId),
-                  icon: const Icon(Icons.check_box_outlined, color: AppTheme.primary),
-                  label: const Text('Confirm Pickup from Boutique'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: AppTheme.primary,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                ),
-              )
-            else
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () => _showDeliveryProofModal(delivery),
-                  icon: const Icon(Icons.camera_alt_outlined, color: AppTheme.primary),
-                  label: const Text('Doorstep Photo & Complete Delivery'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: AppTheme.primary,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
     );
   }
 
+  Widget _deliveryTab(Map<String, dynamic>? o) {
+    if (o == null) return _empty(Icons.inventory_2_outlined, tr(context, 'No delivery in progress.', 'Ei toimitusta käynnissä.'));
+    final s = (o['store'] as Map?) ?? {};
+    final pickedUp = o['status'] == 'SHIPPED';
+    final storeReady = o['status'] == 'PROCESSING';
+    final items = (o['items'] as List?) ?? [];
+    final customer = (o['user']?['name'] ?? '').toString().split(' ').first;
 
-  Widget _buildPastDeliveryTile(Map<String, dynamic> delivery) {
-    final isDelivered = delivery['status'] == 'DELIVERED';
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 44, height: 44,
-            decoration: BoxDecoration(
-              color: isDelivered ? AppTheme.success.withOpacity(0.1) : Colors.red.shade50,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              isDelivered ? Icons.check_circle_outline_rounded : Icons.cancel_outlined,
-              color: isDelivered ? AppTheme.success : Colors.red,
-              size: 22,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Order #${delivery['id']}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                Text(delivery['deliveryAddress'] ?? '', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
-              ],
-            ),
-          ),
-          if (isDelivered)
-            Text('€${((delivery['deliveryFeeCents'] as int? ?? 0) / 100).toStringAsFixed(2)}',
-                style: const TextStyle(color: AppTheme.success, fontWeight: FontWeight.w800, fontSize: 14)),
-        ],
-      ),
-    );
-  }
-
-  // ── EARNINGS ──────────────────────────────────────────────────────────────
-
-  Widget _buildEarningsTab(int completedCount, double estimatedEarnings) {
-    final l10n = AppLocalizations.of(context);
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [AppTheme.primary, AppTheme.primaryDark],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Column(
-            children: [
-              Text('Completed trips — delivery fees', style: const TextStyle(color: Colors.white70, fontSize: 14)),
-              const SizedBox(height: 8),
-              Text('€${estimatedEarnings.toStringAsFixed(2)}',
-                style: const TextStyle(color: Colors.white, fontSize: 48, fontWeight: FontWeight.w900, letterSpacing: -2)),
-              const SizedBox(height: 4),
-              Text('$completedCount ${l10n.translate('deliveriesCompleted')}',
-                style: const TextStyle(color: Colors.white70, fontSize: 14)),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-
-        _earningRow('Delivery fees on completed trips', '€${estimatedEarnings.toStringAsFixed(2)}', Icons.euro_rounded, highlight: true),
-
-        const SizedBox(height: 24),
-        Container(
-          padding: const EdgeInsets.all(20),
+    Widget step(int n, String title, bool done, bool current, List<Widget> children) => Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppTheme.divider),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: current ? AppTheme.primary : AppTheme.divider, width: current ? 1.6 : 1),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(l10n.translate('howEarningsWork'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: AppTheme.textPrimary)),
-              const SizedBox(height: 14),
-              _infoRow('Every job shows its delivery fee before you accept it.'),
-              _infoRow('You choose which jobs to take — nothing is assigned automatically.'),
-              _infoRow('Offers go first to online couriers nearest the store (within 7.5 km).'),
-              _infoRow('Your pay and payout schedule are set out in your courier agreement.'),
-            ],
-          ),
-        ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              CircleAvatar(radius: 13, backgroundColor: done ? AppTheme.success : (current ? AppTheme.primary : AppTheme.divider),
+                  child: done ? const Icon(Icons.check, size: 16, color: Colors.white) : Text('$n', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700))),
+              const SizedBox(width: 10),
+              Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+            ]),
+            if (current) ...[const SizedBox(height: 10), ...children],
+          ]),
+        );
 
+    return RefreshIndicator(
+      onRefresh: _loadMine,
+      child: ListView(padding: const EdgeInsets.all(16), children: [
+        Text('${tr(context, 'Order', 'Tilaus')} #${o['id']} · ${euro(context, o['courierFeeCents'] ?? o['deliveryFeeCents'])}', style: const TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 10),
+        step(1, '${tr(context, 'Pick up at', 'Nouda')} ${s['name'] ?? ''}', pickedUp, !pickedUp, [
+          if (s['address'] != null) Text(s['address']),
+          const SizedBox(height: 6),
+          Text(storeReady ? tr(context, 'The store says the order is packed and ready.', 'Kauppa ilmoittaa tilauksen olevan valmis.') : tr(context, 'The store is still packing.', 'Kauppa pakkaa vielä.'),
+              style: TextStyle(color: storeReady ? AppTheme.success : AppTheme.textSecondary, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          for (final i in items) Text('${i['quantity']}× ${i['product']?['name'] ?? ''}'),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(child: OutlinedButton.icon(
+              onPressed: () => _navigate((s['latitude'] as num?)?.toDouble(), (s['longitude'] as num?)?.toDouble(), s['address']),
+              icon: const Icon(Icons.navigation_outlined),
+              label: Text(tr(context, 'Navigate', 'Navigoi')),
+            )),
+            if (s['phone'] != null) ...[
+              const SizedBox(width: 8),
+              Expanded(child: OutlinedButton.icon(
+                onPressed: () => launchUrl(Uri.parse('tel:${s['phone']}')),
+                icon: const Icon(Icons.call_outlined),
+                label: Text(tr(context, 'Call store', 'Soita kauppaan')),
+              )),
+            ],
+          ]),
+          const SizedBox(height: 10),
+          SizedBox(width: double.infinity, height: 50, child: FilledButton(onPressed: () => _pickedUp(o), child: Text(tr(context, 'I have the order', 'Tilaus on mukanani')))),
+        ]),
+        step(2, '${tr(context, 'Deliver to', 'Toimita')} ${customer.isEmpty ? tr(context, 'the customer', 'asiakkaalle') : customer}', false, pickedUp, [
+          if (o['deliveryAddress'] != null) Text(o['deliveryAddress'], style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+          if ((o['notes'] ?? '').toString().isNotEmpty) Padding(padding: const EdgeInsets.only(top: 4), child: Text('“${o['notes']}”', style: const TextStyle(fontStyle: FontStyle.italic))),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(child: OutlinedButton.icon(
+              onPressed: () => _navigate((o['deliveryLat'] as num?)?.toDouble(), (o['deliveryLng'] as num?)?.toDouble(), o['deliveryAddress']),
+              icon: const Icon(Icons.navigation_outlined),
+              label: Text(tr(context, 'Navigate', 'Navigoi')),
+            )),
+            const SizedBox(width: 8),
+            Expanded(child: OutlinedButton.icon(onPressed: () => _openChat(o), icon: const Icon(Icons.chat_bubble_outline_rounded), label: Text(tr(context, 'Chat', 'Chat')))),
+          ]),
+          const SizedBox(height: 10),
+          SizedBox(width: double.infinity, height: 50, child: FilledButton(onPressed: () => _complete(o), child: Text(tr(context, 'Complete delivery', 'Merkitse toimitetuksi')))),
+        ]),
+        Text(tr(context, 'Keep the app open or in the background while delivering so the customer can follow you.', 'Pidä sovellus auki tai taustalla toimituksen aikana, jotta asiakas voi seurata sinua.'),
+            style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+      ]),
+    );
+  }
+
+  Widget _earningsTab() {
+    final summary = (_earnings?['summary'] as Map?) ?? {};
+    final delivered = _mine.where((o) => o['status'] == 'DELIVERED').toList();
+    final today = DateTime.now();
+    final todayCents = delivered
+        .where((o) {
+          final d = DateTime.tryParse('${o['deliveredAt']}')?.toLocal();
+          return d != null && d.year == today.year && d.month == today.month && d.day == today.day;
+        })
+        .fold<int>(0, (s, o) => s + (asInt(o['courierFeeCents']) ?? 0));
+    Widget stat(String label, dynamic cents) => Expanded(
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.divider)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(label, style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+              Text(euro(context, cents), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+            ]),
+          ),
+        );
+    return RefreshIndicator(
+      onRefresh: () async => Future.wait([_loadEarnings(), _loadMine()]),
+      child: ListView(padding: const EdgeInsets.all(16), children: [
+        Row(children: [
+          stat(tr(context, 'Today', 'Tänään'), todayCents),
+          const SizedBox(width: 10),
+          stat(tr(context, 'This week (paid)', 'Tällä viikolla'), summary['paidThisWeekCents']),
+        ]),
+        const SizedBox(height: 10),
+        Row(children: [
+          stat(tr(context, 'Paid out', 'Maksettu'), summary['paidCents']),
+          const SizedBox(width: 10),
+          stat(tr(context, 'Waiting', 'Odottaa'), (asInt(summary['scheduledCents']) ?? 0) + (asInt(summary['waitingForAccountCents']) ?? 0)),
+        ]),
+        if ((asInt(summary['waitingForAccountCents']) ?? 0) > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Text(tr(context, 'Set up payouts to receive the money you have earned.', 'Ota tilitykset käyttöön saadaksesi ansaitsemasi rahat.'),
+                style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w600)),
+          ),
+        const SizedBox(height: 12),
+        FilledButton.icon(
+          onPressed: () async {
+            await Navigator.push(context, MaterialPageRoute(builder: (_) => const PayoutsScreen()));
+            _loadEarnings();
+          },
+          icon: const Icon(Icons.account_balance_outlined),
+          label: Text(tr(context, 'Payouts and bank details', 'Tilitykset ja pankkitiedot')),
+        ),
         const SizedBox(height: 16),
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: AppTheme.primaryLight,
-            borderRadius: BorderRadius.circular(16),
+        Text(tr(context, 'Recent deliveries', 'Viimeisimmät toimitukset'), style: const TextStyle(fontWeight: FontWeight.w700)),
+        for (final o in delivered.take(30))
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text('${o['store']?['name'] ?? ''} · #${o['id']}'),
+            subtitle: Text(_when(o['deliveredAt'])),
+            trailing: Text(euro(context, o['courierFeeCents']), style: const TextStyle(fontWeight: FontWeight.w700)),
           ),
-          child: Row(
-            children: [
-              const Icon(Icons.info_outline_rounded, color: AppTheme.primary, size: 24),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Text(
-                  'Earnings are updated after each completed delivery. Contact support if you notice any discrepancies.',
-                  style: TextStyle(fontSize: 13, color: AppTheme.primary, height: 1.5),
-                ),
-              ),
-            ],
-          ),
+      ]),
+    );
+  }
+
+  String _when(dynamic iso) {
+    final d = DateTime.tryParse('$iso')?.toLocal();
+    return d == null ? '' : '${d.day}.${d.month}. ${d.hour.toString().padLeft(2, '0')}.${d.minute.toString().padLeft(2, '0')}';
+  }
+
+  Widget _empty(IconData icon, String text) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(40),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 56, color: AppTheme.textSecondary),
+            const SizedBox(height: 12),
+            Text(text, textAlign: TextAlign.center, style: const TextStyle(color: AppTheme.textSecondary, height: 1.4)),
+          ]),
         ),
-      ],
-    );
-  }
-
-  Widget _earningRow(String label, String value, IconData icon, {bool highlight = false}) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: highlight ? AppTheme.primaryLight : Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: highlight ? AppTheme.primary.withOpacity(0.3) : AppTheme.divider),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: highlight ? AppTheme.primary : AppTheme.textSecondary, size: 20),
-          const SizedBox(width: 12),
-          Expanded(child: Text(label, style: TextStyle(fontSize: 14, fontWeight: highlight ? FontWeight.w700 : FontWeight.w500, color: AppTheme.textPrimary))),
-          Text(value, style: TextStyle(fontWeight: FontWeight.w800, fontSize: highlight ? 18 : 14, color: highlight ? AppTheme.primary : AppTheme.textPrimary)),
-        ],
-      ),
-    );
-  }
-
-  Widget _infoRow(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.check_rounded, size: 16, color: AppTheme.textSecondary),
-          const SizedBox(width: 8),
-          Expanded(child: Text(text, style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary, height: 1.4))),
-        ],
-      ),
-    );
-  }
-
-  Widget _shimmerList() {
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: 3,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
-      itemBuilder: (_, __) => Shimmer.fromColors(
-        baseColor: Colors.grey.shade200,
-        highlightColor: Colors.grey.shade100,
-        child: Container(height: 140, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18))),
-      ),
-    );
-  }
+      );
 }

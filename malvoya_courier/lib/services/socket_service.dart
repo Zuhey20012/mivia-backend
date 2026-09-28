@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import '../config/constants.dart';
 
+/// Live connection for job offers, order updates and chat with the customer.
 class CourierSocketService extends ChangeNotifier {
   static final CourierSocketService _instance = CourierSocketService._internal();
   factory CourierSocketService() => _instance;
@@ -11,80 +12,69 @@ class CourierSocketService extends ChangeNotifier {
   bool _connected = false;
   bool get isConnected => _connected;
 
-  final List<Map<String, dynamic>> _dispatchOffers = [];
-  List<Map<String, dynamic>> get dispatchOffers => List.unmodifiable(_dispatchOffers);
+  // Rooms are per connection, so they are joined again after every reconnect
+  final Set<int> _orders = {};
 
-  Function(Map<String, dynamic>)? onNewDispatchOffer;
+  void Function(Map<String, dynamic>)? onDispatchOffer;
+  void Function(Map<String, dynamic>)? onOrderStatus;
+  void Function(Map<String, dynamic>)? onChatMessage;
 
   void connect(String accessToken) {
-    if (_socket != null && _connected) return;
-
+    if (_socket != null) return;
     final baseUrl = AppConstants.apiBase.replaceAll('/api/v1', '');
-    _socket = io.io(baseUrl, io.OptionBuilder()
-        .setTransports(['websocket'])
-        .setAuth({'token': accessToken})
-        .enableAutoConnect()
-        .enableReconnection()
-        .setReconnectionAttempts(10)
-        .setReconnectionDelay(2000)
-        .build());
-
+    _socket = io.io(
+      baseUrl,
+      io.OptionBuilder()
+          .setTransports(['websocket'])
+          .setAuth({'token': accessToken})
+          .enableAutoConnect()
+          .enableReconnection()
+          .setReconnectionDelay(2000)
+          .build(),
+    );
     _socket!.onConnect((_) {
       _connected = true;
-      debugPrint('[CourierSocket] Connected');
-      notifyListeners();
-    });
-
-    _socket!.onDisconnect((_) {
-      _connected = false;
-      debugPrint('[CourierSocket] Disconnected');
-      notifyListeners();
-    });
-
-    _socket!.onConnectError((err) {
-      debugPrint('[CourierSocket] Connection error: $err');
-      _connected = false;
-    });
-
-    // Listen for dispatch offers
-    _socket!.on('courier:dispatch_offer', (data) {
-      debugPrint('[CourierSocket] Dispatch offer: $data');
-      if (data is Map<String, dynamic>) {
-        _dispatchOffers.insert(0, data);
-        onNewDispatchOffer?.call(data);
+      for (final id in _orders) {
+        _socket?.emit('track:order', id);
+        _socket?.emit('chat:join', id);
       }
       notifyListeners();
     });
-
-    // Listen for order status changes on active deliveries
-    _socket!.on('order:status', (data) {
-      debugPrint('[CourierSocket] Order status update: $data');
+    _socket!.onDisconnect((_) {
+      _connected = false;
       notifyListeners();
+    });
+    _socket!.on('courier:dispatch_offer', (data) {
+      if (data is Map) onDispatchOffer?.call(Map<String, dynamic>.from(data));
+      notifyListeners();
+    });
+    _socket!.on('order:status', (data) {
+      if (data is Map) onOrderStatus?.call(Map<String, dynamic>.from(data));
+      notifyListeners();
+    });
+    _socket!.on('chat:message', (data) {
+      if (data is Map) onChatMessage?.call(Map<String, dynamic>.from(data));
     });
   }
 
-  void emitTelemetry(Map<String, dynamic> telemetryData) {
-    _socket?.emit('courier:telemetry', telemetryData);
-  }
+  void emitTelemetry(Map<String, dynamic> data) => _socket?.emit('courier:telemetry', data);
 
-  void trackOrder(dynamic orderId) {
+  /// Follow an order the courier is carrying (status updates and chat).
+  void trackOrder(int orderId) {
+    _orders.add(orderId);
     _socket?.emit('track:order', orderId);
-    debugPrint('[CourierSocket] Tracking order: $orderId');
+    _socket?.emit('chat:join', orderId);
   }
 
-  void clearOffer(int index) {
-    if (index >= 0 && index < _dispatchOffers.length) {
-      _dispatchOffers.removeAt(index);
-      notifyListeners();
-    }
-  }
+  void sendChat(int orderId, String text, String senderName) =>
+      _socket?.emit('chat:send', {'orderId': orderId, 'text': text, 'sender': senderName});
 
   void disconnect() {
     _socket?.disconnect();
     _socket?.dispose();
     _socket = null;
     _connected = false;
-    _dispatchOffers.clear();
+    _orders.clear();
     notifyListeners();
   }
 }

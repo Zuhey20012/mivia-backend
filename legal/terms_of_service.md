@@ -28,9 +28,15 @@ Malvoya arranges payment and local delivery by independent couriers.
 - Payment is processed by Stripe. The order is confirmed only after the payment has been confirmed.
 - Malvoya never sees your card or bank details.
 
-## 5. Delivery
+## 5. Drops, reviews and reports
 
-The estimated delivery time is shown in the app. If a delivery cannot be completed, we will contact you. If the delay is substantial, you may cancel and get a full refund.
+- **Drops** are short videos and photos posted by stores. How the feed is ranked is explained in the app ("Why am I seeing this?") and in the Privacy Policy. You can switch to the chronological "Latest" view.
+- **Reviews** can only be written by customers whose order was delivered, once per order, within 30 days. We do not edit reviews or pay for them. Reviews that break the law are hidden, which also removes them from the store's rating.
+- **Reporting:** you can report any drop that you think is illegal or breaks these terms, also without an account. A person reviews every report. Three reports from different users hide the drop until it has been reviewed.
+
+## 5a. Delivery
+
+The estimated delivery time is shown in the app. If the courier leaves the order at your door, they take a photo that only you, the courier and Malvoya can see; it is deleted after 30 days. If a delivery cannot be completed, we will contact you. If the delay is substantial, you may cancel and get a full refund.
 
 ## 6. Cancelling before the store accepts
 

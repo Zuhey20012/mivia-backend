@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
+import '../core/strings.dart';
+import '../core/legal_links.dart';
 import '../config/constants.dart';
 import '../config/theme.dart';
 import '../l10n.dart';
@@ -27,10 +29,6 @@ class PrivacyGdprScreen extends StatefulWidget {
 }
 
 class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
-  bool _consentAnalytics = true;
-  bool _consentPersonalization = true;
-  bool _consentRadar = true;
-  bool _consentMarketing = false;
   bool _loading = true;
 
   @override
@@ -40,27 +38,10 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
   }
 
   Future<void> _loadConsentPreferences() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      setState(() {
-        _consentAnalytics = prefs.getBool('consent_analytics') ?? true;
-        _consentPersonalization = prefs.getBool('consent_personalization') ?? true;
-        _consentRadar = prefs.getBool('consent_courier_radar') ?? true;
-        _consentMarketing = prefs.getBool('consent_marketing_sms') ?? false;
-        _loading = false;
-      });
-    } catch (_) {
-      setState(() => _loading = false);
-    }
+    setState(() => _loading = false);
   }
 
-  Future<void> _updateConsent(String key, bool val) async {
-    HapticFeedback.lightImpact();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(key, val);
-    } catch (_) {}
-  }
+
 
   Future<void> _exportUserData(AuthService auth, AppLocalizations l10n) async {
     HapticFeedback.mediumImpact();
@@ -401,55 +382,33 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                     ),
                     const SizedBox(height: 16),
 
-                    // 2. CONSENT & COOKIE MANAGEMENT
+                    // 2. No tracking to consent to
                     _buildCard(
-                      title: l10n.translate('dataProcessingConsents'),
+                      title: tr(context, 'Tracking and consent', 'Seuranta ja suostumus'),
                       cardBg: cardBg,
                       borderColor: borderColor,
                       textSecondary: textSecondary,
                       children: [
-                        SwitchListTile(
-                          title: Text(l10n.translate('analyticalTelemetry'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: textPrimary)),
-                          subtitle: Text(l10n.translate('analyticalTelemetrySub'), style: TextStyle(fontSize: 12, color: textSecondary)),
-                          value: _consentAnalytics,
-                          activeTrackColor: AppTheme.primary,
-                          onChanged: (val) {
-                            setState(() => _consentAnalytics = val);
-                            _updateConsent('consent_analytics', val);
-                          },
+                        ListTile(
+                          leading: const Icon(Icons.verified_user_outlined, color: AppTheme.primary),
+                          title: Text(
+                            tr(context, 'No ads, no analytics trackers', 'Ei mainoksia, ei analytiikkaseurantaa'),
+                            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary),
+                          ),
+                          subtitle: Text(
+                            tr(context,
+                                'Malvoya uses your data only to run your orders and account, so there is nothing extra to consent to. The Drops feed is ranked without a personal profile.',
+                                'Malvoya käyttää tietojasi vain tilaustesi ja tilisi hoitamiseen, joten erillistä suostumusta ei tarvita. Drops-syöte järjestetään ilman henkilökohtaista profiilia.'),
+                            style: TextStyle(fontSize: 12, color: textSecondary, height: 1.4),
+                          ),
                         ),
                         Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
-                        SwitchListTile(
-                          title: Text(l10n.translate('boutiquePersonalization'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: textPrimary)),
-                          subtitle: Text(l10n.translate('boutiquePersonalizationSub'), style: TextStyle(fontSize: 12, color: textSecondary)),
-                          value: _consentPersonalization,
-                          activeTrackColor: AppTheme.primary,
-                          onChanged: (val) {
-                            setState(() => _consentPersonalization = val);
-                            _updateConsent('consent_personalization', val);
-                          },
-                        ),
-                        Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
-                        SwitchListTile(
-                          title: Text(l10n.translate('courierProximityRadar'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: textPrimary)),
-                          subtitle: Text(l10n.translate('courierRadarSub'), style: TextStyle(fontSize: 12, color: textSecondary)),
-                          value: _consentRadar,
-                          activeTrackColor: AppTheme.primary,
-                          onChanged: (val) {
-                            setState(() => _consentRadar = val);
-                            _updateConsent('consent_courier_radar', val);
-                          },
-                        ),
-                        Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
-                        SwitchListTile(
-                          title: Text(l10n.translate('promotionalMarketing'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: textPrimary)),
-                          subtitle: Text(l10n.translate('promotionalMarketingSub'), style: TextStyle(fontSize: 12, color: textSecondary)),
-                          value: _consentMarketing,
-                          activeTrackColor: AppTheme.primary,
-                          onChanged: (val) {
-                            setState(() => _consentMarketing = val);
-                            _updateConsent('consent_marketing_sms', val);
-                          },
+                        ListTile(
+                          leading: const Icon(Icons.description_outlined, color: AppTheme.primary),
+                          title: Text(tr(context, 'Read the full privacy policy', 'Lue koko tietosuojaseloste'),
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
+                          trailing: const Icon(Icons.open_in_new_rounded, size: 18),
+                          onTap: () => openLegal('privacy'),
                         ),
                       ],
                     ),

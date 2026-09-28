@@ -26,6 +26,8 @@ import mediaRoutes    from "./modules/media/media.routes";
 import dropsRoutes, { shareRouter } from "./modules/drops/drops.routes";
 import meRoutes       from "./modules/me/me.routes";
 import payoutsRoutes  from "./modules/payouts/payouts.routes";
+import legalRoutes    from "./modules/legal/legal.routes";
+import supportRoutes  from "./modules/support/support.routes";
 import { startScheduler, stopScheduler } from "./services/scheduler";
 
 const logger = pino({ level: env.logLevel });
@@ -85,8 +87,10 @@ app.use("/api/v1",        ordersRoutes);
 app.use("/api/v1",        dropsRoutes);
 app.use("/api/v1",        meRoutes);
 app.use("/api/v1",        payoutsRoutes);
+app.use("/api/v1",        supportRoutes);
 app.use("/api/v1/admin",  adminRoutes);
 app.use(shareRouter); // public share pages: /d/:id
+app.use(legalRoutes); // public legal pages: /legal/privacy, /legal/terms, …
 
 app.use(notFound);
 app.use(errorHandler);

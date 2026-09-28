@@ -1,5 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../auth_service.dart';
+import '../config/theme.dart';
+import '../core/api_client.dart';
+import '../core/legal_links.dart';
+import '../core/strings.dart';
 
+/// Help for sellers: straight answers, the seller terms, and a way to reach the Malvoya team.
 class ChatbotScreen extends StatefulWidget {
   const ChatbotScreen({super.key});
 
@@ -8,130 +15,84 @@ class ChatbotScreen extends StatefulWidget {
 }
 
 class _ChatbotScreenState extends State<ChatbotScreen> {
-  final TextEditingController _ctrl = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
-  final List<Map<String, dynamic>> _messages = [
-    {'sender': 'bot', 'text': 'Hei! I am Malvoya AI. I am here to help you with orders, returns, and navigating the marketplace. What can I assist you with today?'},
-  ];
+  final _topic = TextEditingController();
+  final _message = TextEditingController();
+  bool _sending = false;
 
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent + 100,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
-    });
+  @override
+  void dispose() {
+    _topic.dispose();
+    _message.dispose();
+    super.dispose();
   }
 
-  void _sendMessage() {
-    if (_ctrl.text.isEmpty) return;
-    setState(() {
-      _messages.add({'sender': 'user', 'text': _ctrl.text});
+  Future<void> _send() async {
+    if (_message.text.trim().length < 5) return;
+    setState(() => _sending = true);
+    final res = await ApiClient(Provider.of<AuthService>(context, listen: false)).post('/support', {
+      'app': 'store',
+      'topic': _topic.text.trim().isEmpty ? 'Seller question' : _topic.text.trim(),
+      'message': _message.text.trim(),
     });
-    final text = _ctrl.text.toLowerCase();
-    _ctrl.clear();
-    _scrollToBottom();
-    
-    Future.delayed(const Duration(seconds: 1), () {
-      setState(() {
-        if (text.contains('return') || text.contains('refund') || text.contains('broken')) {
-          _messages.add({'sender': 'bot', 'text': 'I am sorry to hear that. Under Finnish consumer law, you have 14 days to return an item. Please navigate to the "Orders" tab, select your order, and tap "Request Return". I can also connect you to a human agent if needed.'});
-        } else if (text.contains('where') || text.contains('track') || text.contains('delivery') || text.contains('courier')) {
-          _messages.add({'sender': 'bot', 'text': 'Your active order is currently on the way! Courier Mikael K. is approximately 2.5km away (10 mins). You can view the live map tracking on your Home tab under "Active Delivery".'});
-        } else if (text.contains('gift') || text.contains('recommend') || text.contains('skincare') || text.contains('clothes')) {
-          _messages.add({'sender': 'bot', 'text': 'Malvoya has an excellent selection! For skincare, I highly recommend "Lumi Cosmetics". If you are looking for apparel, check out the "Nordic Vintage" boutique. Would you like me to filter the marketplace for these categories?'});
-        } else if (text.contains('payment') || text.contains('card') || text.contains('stripe')) {
-          _messages.add({'sender': 'bot', 'text': 'You can manage your saved cards securely via Stripe in your Profile -> Payment Methods. Malvoya supports all major credit cards and Apple/Google Pay.'});
-        } else if (text.contains('hello') || text.contains('hi') || text.contains('hei')) {
-          _messages.add({'sender': 'bot', 'text': 'Hello! How can I make your Malvoya experience better today?'});
-        } else {
-          _messages.add({'sender': 'bot', 'text': 'I understand. Let me check the system for you... An agent has been notified and will join this chat shortly to assist you further.'});
-        }
-      });
-      _scrollToBottom();
-    });
+    if (!mounted) return;
+    setState(() => _sending = false);
+    if (res.ok) {
+      _topic.clear();
+      _message.clear();
+    }
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(res.ok
+          ? tr(context, 'Sent (#${res.data['id']}). We reply by email to ${res.data['replyTo']}.', 'Lähetetty (#${res.data['id']}). Vastaamme sähköpostitse osoitteeseen ${res.data['replyTo']}.')
+          : res.error!),
+    ));
   }
 
   @override
   Widget build(BuildContext context) {
+    final faq = [
+      (tr(context, 'When does my store go live?', 'Milloin kauppani julkaistaan?'),
+          tr(context, 'After our team has checked your details (Y-tunnus for businesses). You can add products and drops meanwhile.', 'Kun tiimimme on tarkistanut tietosi (yrityksiltä Y-tunnus). Voit lisätä tuotteita ja julkaisuja sillä välin.')),
+      (tr(context, 'When am I paid?', 'Milloin saan rahat?'),
+          tr(context, '15 days after delivery, when the 14-day return window has passed, to your Stripe account (Store → Payouts). Malvoya keeps the commission agreed in the seller terms.', '15 päivää toimituksen jälkeen, kun 14 päivän palautusaika on päättynyt, Stripe-tilillesi (Kauppa → Tilitykset). Malvoya pidättää myyjän ehdoissa sovitun provision.')),
+      (tr(context, 'How do orders work?', 'Miten tilaukset toimivat?'),
+          tr(context, 'You only see paid orders. Accept or decline, pack it, tap "Packed". A courier picks it up. Declined orders are refunded automatically.', 'Näet vain maksetut tilaukset. Hyväksy tai hylkää, pakkaa ja paina "Pakattu". Kuriiri noutaa tilauksen. Hylätyt tilaukset hyvitetään automaattisesti.')),
+      (tr(context, 'How are drops shown?', 'Miten julkaisut näytetään?'),
+          tr(context, 'In the Drops feed by how new they are, how people respond, how close your store is to the customer and your rating. Nobody can buy a better position.', 'Drops-syötteessä uutuuden, reaktioiden, etäisyyden ja arvosanasi perusteella. Parempaa sijoitusta ei voi ostaa.')),
+      (tr(context, 'How do returns work?', 'Miten palautukset toimivat?'),
+          tr(context, 'Customers of business sellers can return within 14 days of delivery. Approve the return, confirm when you get the items, then refund in the app.', 'Yritysmyyjien asiakkaat voivat palauttaa 14 päivän kuluessa. Hyväksy palautus, vahvista kun saat tuotteet ja hyvitä sovelluksessa.')),
+    ];
     return Scaffold(
-      appBar: AppBar(title: const Text('Malvoya Support AI')),
-      resizeToAvoidBottomInset: true,
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: ListView.builder(
-                controller: _scrollController,
-                padding: const EdgeInsets.all(16),
-                itemCount: _messages.length,
-                itemBuilder: (context, i) {
-                  final msg = _messages[i];
-                  final isUser = msg['sender'] == 'user';
-                  return Align(
-                    alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-                    child: Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
-                      decoration: BoxDecoration(
-                        color: isUser ? Theme.of(context).primaryColor : Colors.grey.shade200,
-                        borderRadius: BorderRadius.only(
-                          topLeft: const Radius.circular(16),
-                          topRight: const Radius.circular(16),
-                          bottomLeft: Radius.circular(isUser ? 16 : 4),
-                          bottomRight: Radius.circular(isUser ? 4 : 16),
-                        ),
-                      ),
-                      child: Text(
-                        msg['text'],
-                        style: TextStyle(color: isUser ? Colors.white : Colors.black87, fontSize: 15, height: 1.3),
-                      ),
-                    ),
-                  );
-                },
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(title: Text(tr(context, 'Help for sellers', 'Apua myyjille'))),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          for (final q in faq)
+            Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ExpansionTile(
+                title: Text(q.$1, style: const TextStyle(fontWeight: FontWeight.w600)),
+                childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                children: [Text(q.$2, style: const TextStyle(height: 1.45, color: AppTheme.textSecondary))],
               ),
             ),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white, 
-                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -2))]
-              ),
-              child: SafeArea(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _ctrl,
-                        onSubmitted: (_) => _sendMessage(),
-                        decoration: InputDecoration(
-                          hintText: 'Type your message...',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
-                          filled: true,
-                          fillColor: Colors.grey.shade100,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    GestureDetector(
-                      onTap: _sendMessage,
-                      child: CircleAvatar(
-                        radius: 24,
-                        backgroundColor: Theme.of(context).primaryColor,
-                        child: const Icon(Icons.send, color: Colors.white, size: 20),
-                      ),
-                    )
-                  ],
-                ),
-              ),
-            )
-          ],
-        ),
+          TextButton.icon(onPressed: () => openLegal('sellers'), icon: const Icon(Icons.gavel_rounded), label: Text(tr(context, 'Read the seller terms', 'Lue myyjän ehdot'))),
+          const Divider(height: 32),
+          Text(tr(context, 'Contact the Malvoya team', 'Ota yhteyttä Malvoyan tiimiin'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+          const SizedBox(height: 8),
+          TextField(controller: _topic, maxLength: 80, decoration: InputDecoration(labelText: tr(context, 'Subject', 'Aihe'))),
+          TextField(controller: _message, maxLength: 4000, maxLines: 5, decoration: InputDecoration(labelText: tr(context, 'How can we help?', 'Miten voimme auttaa?'))),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 50,
+            child: FilledButton(
+              onPressed: _sending ? null : _send,
+              child: _sending ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : Text(tr(context, 'Send', 'Lähetä')),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(tr(context, 'We reply by email to your account address.', 'Vastaamme sähköpostitse tilisi osoitteeseen.'), style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+        ],
       ),
     );
   }

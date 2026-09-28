@@ -1,607 +1,321 @@
-import 'dart:convert';
+import 'dart:io';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../auth_service.dart';
-import '../config/constants.dart';
-import '../l10n.dart';
+import '../config/theme.dart';
+import '../core/api_client.dart';
+import '../core/media_upload.dart';
+import '../core/strings.dart';
 import 'vendor_dashboard.dart';
 
+/// Create the store, or edit it later. Who the seller is (business or private person) is shown
+/// to shoppers, as EU marketplace law requires, and is checked during review.
 class StoreSetupScreen extends StatefulWidget {
   const StoreSetupScreen({super.key});
+
   @override
   State<StoreSetupScreen> createState() => _StoreSetupScreenState();
 }
 
 class _StoreSetupScreenState extends State<StoreSetupScreen> {
-  final _nameCtrl = TextEditingController();
-  final _descCtrl = TextEditingController();
-  final _bannerCtrl = TextEditingController();
-  final _addressCtrl = TextEditingController();
-  final _phoneCtrl = TextEditingController();
+  final _form = GlobalKey<FormState>();
+  final _name = TextEditingController();
+  final _description = TextEditingController();
+  final _address = TextEditingController();
+  final _phone = TextEditingController();
+  final _businessId = TextEditingController();
+
+  Map<String, dynamic>? _existing;
+  String _category = 'APPAREL';
+  String _sellerType = 'BUSINESS';
+  double _prepMinutes = 10;
   double? _lat;
   double? _lng;
+  String? _logoUrl;
+  String? _bannerUrl;
+  double? _uploading;
   bool _locating = false;
-  int _step = 0; // 0=Store Info, 1=Category, 2=Photos & Description
-  String _category = 'Apparel';
-  bool _loading = false;
+  bool _loading = true;
+  bool _saving = false;
   String? _error;
 
-  // 9 categories with icons
-  final _categoryItems = <Map<String, dynamic>>[
-    {'label': 'Vaatteet / Apparel',         'value': 'Apparel',      'icon': Icons.checkroom_outlined},
-    {'label': 'Second Hand',                 'value': 'Second Hand',  'icon': Icons.recycling_outlined},
-    {'label': 'Kosmetiikka / Cosmetics',    'value': 'Cosmetics',    'icon': Icons.face_outlined},
-    {'label': 'Ihonhoito / Skincare',       'value': 'Skincare',     'icon': Icons.spa_outlined},
-    {'label': 'Asusteet / Accessories',     'value': 'Accessories',  'icon': Icons.watch_outlined},
-    {'label': 'Lemmikkitarvikkeet / Pets',  'value': 'Pets',         'icon': Icons.pets_outlined},
-    {'label': 'Ekologiset / Eco Friendly',  'value': 'Eco Friendly', 'icon': Icons.eco_outlined},
-    {'label': 'Boutiques',                   'value': 'Boutiques',    'icon': Icons.style_outlined},
-    {'label': 'Muu / Other',                 'value': 'Other',        'icon': Icons.more_horiz_outlined},
-  ];
-
-  final _categoryMap = <String, String>{
-    'Apparel':      'APPAREL',
-    'Second Hand':  'THRIFT',
-    'Cosmetics':    'COSMETICS',
-    'Skincare':     'COSMETICS',
-    'Accessories':  'ACCESSORIES',
-    'Pets':         'OTHER',
-    'Eco Friendly': 'ECO_FRIENDLY',
-    'Boutiques':    'APPAREL',
-    'Other':        'OTHER',
+  static const _categories = {
+    'APPAREL': ['Clothing & fashion', 'Vaatteet ja muoti'],
+    'THRIFT': ['Second hand & vintage', 'Kierrätys ja vintage'],
+    'ACCESSORIES': ['Accessories, bags & jewellery', 'Asusteet, laukut ja korut'],
+    'COSMETICS': ['Beauty & skincare', 'Kauneus ja ihonhoito'],
+    'HANDMADE': ['Handmade', 'Käsintehty'],
+    'ECO_FRIENDLY': ['Eco-friendly', 'Ekologinen'],
+    'HOME_DECOR': ['Home', 'Koti'],
+    'OTHER': ['Other', 'Muu'],
   };
+
+  ApiClient get _api => ApiClient(Provider.of<AuthService>(context, listen: false));
+  bool get _verified => _existing?['isVerified'] == true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
 
   @override
   void dispose() {
-    _nameCtrl.dispose();
-    _descCtrl.dispose();
-    _bannerCtrl.dispose();
-    _addressCtrl.dispose();
-    _phoneCtrl.dispose();
+    for (final c in [_name, _description, _address, _phone, _businessId]) {
+      c.dispose();
+    }
     super.dispose();
   }
 
-  Future<void> _createStore() async {
-    if (_nameCtrl.text.trim().isEmpty) {
-      setState(() => _error = 'Please enter your store name.');
-      return;
-    }
-    setState(() { _loading = true; _error = null; });
-
-    if (_addressCtrl.text.trim().length < 5 || _lat == null || _lng == null) {
-      setState(() { _loading = false; _error = 'Add your store address and tap "Use my current location" while at the store.'; });
-      return;
-    }
-    final banner = _bannerCtrl.text.trim();
-
-    final auth = Provider.of<AuthService>(context, listen: false);
-    final normalizedCategory = _categoryMap[_category] ?? _category.toUpperCase().replaceAll(' ', '_');
-
-    try {
-      final res = await http.post(
-        Uri.parse('${AppConstants.apiBase}/stores'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${auth.accessToken}',
-        },
-        body: jsonEncode({
-          'name': _nameCtrl.text.trim(),
-          'description': _descCtrl.text.trim(),
-          'category': normalizedCategory,
-          'address': _addressCtrl.text.trim(),
-          'latitude': _lat,
-          'longitude': _lng,
-          if (_phoneCtrl.text.trim().isNotEmpty) 'phone': _phoneCtrl.text.trim(),
-          if (banner.startsWith('https://')) 'bannerUrl': banner,
-        }),
-      ).timeout(const Duration(seconds: 15));
-      if (res.statusCode == 201 || res.statusCode == 200) {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('vendor_store_name', _nameCtrl.text.trim());
-        if (mounted) {
-          Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const VendorDashboard()));
-        }
-      } else {
-        String msg = 'Could not create the store. Please check the details.';
-        try {
-          final body = jsonDecode(res.body);
-          msg = (body['error'] ?? msg).toString();
-        } catch (_) {}
-        if (mounted) setState(() { _loading = false; _error = msg; });
-      }
-    } catch (_) {
-      if (mounted) setState(() { _loading = false; _error = 'No connection. Your store was not saved — please try again.'; });
-    }
+  Future<void> _load() async {
+    final res = await _api.get('/stores/my');
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      if (!res.ok) return;
+      final s = Map<String, dynamic>.from(res.data['store']);
+      _existing = s;
+      _name.text = s['name'] ?? '';
+      _description.text = s['description'] ?? '';
+      _address.text = s['address'] ?? '';
+      _phone.text = s['phone'] ?? '';
+      _businessId.text = s['businessId'] ?? '';
+      _category = _categories.containsKey(s['category']) ? s['category'] : 'OTHER';
+      _sellerType = s['sellerType'] ?? 'BUSINESS';
+      _prepMinutes = (asInt(s['prepMinutes']) ?? 10).toDouble();
+      _lat = (s['latitude'] as num?)?.toDouble();
+      _lng = (s['longitude'] as num?)?.toDouble();
+      _logoUrl = s['logoUrl'];
+      _bannerUrl = s['bannerUrl'];
+    });
   }
 
-  Future<void> _useCurrentLocation() async {
-    setState(() { _locating = true; _error = null; });
+  Future<void> _locate() async {
+    setState(() {
+      _locating = true;
+      _error = null;
+    });
     try {
       var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-        setState(() => _error = 'Location permission is needed to place your store on the map.');
+        setState(() => _error = tr(context, 'Location permission is needed to put your store on the map.', 'Sijaintilupa tarvitaan, jotta kauppasi näkyy kartalla.'));
         return;
       }
       final pos = await Geolocator.getCurrentPosition(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
-      setState(() { _lat = pos.latitude; _lng = pos.longitude; });
+      setState(() {
+        _lat = pos.latitude;
+        _lng = pos.longitude;
+      });
     } catch (_) {
-      setState(() => _error = 'Could not get your location. Check that location services are on.');
+      setState(() => _error = tr(context, 'Could not get your location. Check that location is on.', 'Sijaintia ei saatu. Tarkista, että sijainti on päällä.'));
     } finally {
       if (mounted) setState(() => _locating = false);
     }
   }
 
-  void _next() {
-    if (_step == 0 && _nameCtrl.text.trim().isEmpty) {
-      setState(() => _error = 'Please enter your store name.');
+  Future<void> _pickImage(bool logo) async {
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: logo ? 800 : 2000, imageQuality: 85);
+    if (picked == null || !mounted) return;
+    setState(() => _uploading = 0);
+    try {
+      final url = await MediaUpload.uploadImage(
+        api: _api,
+        kind: 'store_image',
+        file: File(picked.path),
+        onProgress: (p) => mounted ? setState(() => _uploading = p) : null,
+      );
+      setState(() => logo ? _logoUrl = url : _bannerUrl = url);
+    } catch (e) {
+      setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _uploading = null);
+    }
+  }
+
+  Future<void> _save() async {
+    if (!_form.currentState!.validate()) return;
+    if (_lat == null || _lng == null) {
+      setState(() => _error = tr(context, 'Tap "Use my current location" while at the store so couriers can find you.', 'Paina "Käytä nykyistä sijaintia" ollessasi kaupalla, jotta kuriirit löytävät sinut.'));
       return;
     }
-    setState(() { _error = null; if (_step < 2) _step++; });
-  }
-
-  void _back() {
-    if (_step > 0) setState(() { _step--; _error = null; });
-  }
-
-  String get _buttonLabel {
-    switch (_step) {
-      case 0: return 'Jatka / Continue';
-      case 1: return 'Jatka / Continue';
-      case 2: return 'Luo kauppa / Create Store';
-      default: return 'Continue';
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final res = await _api.post('/stores', {
+      'name': _name.text.trim(),
+      'description': _description.text.trim(),
+      'category': _category,
+      'address': _address.text.trim(),
+      'latitude': _lat,
+      'longitude': _lng,
+      'prepMinutes': _prepMinutes.round(),
+      if (_phone.text.trim().isNotEmpty) 'phone': _phone.text.trim(),
+      if (!_verified) 'sellerType': _sellerType,
+      if (!_verified && _sellerType == 'BUSINESS') 'businessId': _businessId.text.trim(),
+      if (_logoUrl != null) 'logoUrl': _logoUrl,
+      if (_bannerUrl != null) 'bannerUrl': _bannerUrl,
+    });
+    if (!mounted) return;
+    setState(() => _saving = false);
+    if (!res.ok) {
+      setState(() => _error = res.error);
+      return;
+    }
+    if (_existing == null) {
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const VendorDashboard()));
+    } else {
+      Navigator.pop(context, true);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF17131C),
-      body: Column(
-        children: [
-          // ── Premium dark header ────────────────────────────────────────────
-          Container(
-            width: double.infinity,
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Color(0xFF1E1B2E), Color(0xFF17131C)],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-              ),
-            ),
-            child: SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(24, 16, 24, 28),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        // Malvoya gradient pill badge
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                          decoration: BoxDecoration(
-                            gradient: const LinearGradient(
-                              colors: [Color(0xFF6D2E8C), Color(0xFF4F46E5)],
-                            ),
-                            borderRadius: BorderRadius.circular(30),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.storefront_rounded, color: Colors.white, size: 14),
-                              SizedBox(width: 6),
-                              Text('Malvoya', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
-                            ],
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: () => Provider.of<AuthService>(context, listen: false).logout(),
-                          child: const Text('Sign out', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    Text(
-                      AppLocalizations.of(context).translate('openYourStore'),
-                      style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w900, height: 1.2, letterSpacing: -0.5),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Myy tuotteitasi 20–45 min pikatoimituksella\nMalvoya-verkostosi kautta.',
-                      style: TextStyle(color: Colors.white60, fontSize: 13, height: 1.5),
-                    ),
-                    const SizedBox(height: 20),
-                    // Progress bar
-                    _buildProgressBar(),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-          // ── Step content ───────────────────────────────────────────────────
-          Expanded(
-            child: Container(
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-              ),
-              child: Column(
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(title: Text(_existing == null ? tr(context, 'Set up your store', 'Perusta kauppasi') : tr(context, 'Store details', 'Kaupan tiedot'))),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : Form(
+              key: _form,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
                 children: [
-                  Expanded(
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 300),
-                      transitionBuilder: (child, animation) => FadeTransition(
-                        opacity: animation,
-                        child: SlideTransition(
-                          position: Tween<Offset>(begin: const Offset(0.05, 0), end: Offset.zero).animate(animation),
-                          child: child,
-                        ),
-                      ),
-                      child: _buildStepContent(),
+                  if (_existing != null) ...[
+                    _pictures(),
+                    const SizedBox(height: 20),
+                  ],
+                  TextFormField(
+                    controller: _name,
+                    maxLength: 100,
+                    decoration: InputDecoration(labelText: tr(context, 'Store name', 'Kaupan nimi')),
+                    validator: (v) => (v ?? '').trim().length < 2 ? tr(context, 'Enter the store name', 'Anna kaupan nimi') : null,
+                  ),
+                  TextFormField(
+                    controller: _description,
+                    maxLength: 1000,
+                    maxLines: 3,
+                    decoration: InputDecoration(labelText: tr(context, 'What do you sell?', 'Mitä myyt?')),
+                  ),
+                  DropdownButtonFormField<String>(
+                    value: _category,
+                    decoration: InputDecoration(labelText: tr(context, 'Main category', 'Pääkategoria')),
+                    items: _categories.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(isFinnish(context) ? e.value[1] : e.value[0]))).toList(),
+                    onChanged: (v) => setState(() => _category = v!),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(tr(context, 'Who is selling?', 'Kuka myy?'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                  const SizedBox(height: 6),
+                  SegmentedButton<String>(
+                    segments: [
+                      ButtonSegment(value: 'BUSINESS', label: Text(tr(context, 'A business', 'Yritys')), icon: const Icon(Icons.business_rounded)),
+                      ButtonSegment(value: 'PRIVATE', label: Text(tr(context, 'A private person', 'Yksityishenkilö')), icon: const Icon(Icons.person_outline_rounded)),
+                    ],
+                    selected: {_sellerType},
+                    onSelectionChanged: _verified ? null : (s) => setState(() => _sellerType = s.first),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _sellerType == 'BUSINESS'
+                        ? tr(context, 'Businesses give their Y-tunnus. Customers get the 14-day right of withdrawal and see your company details.',
+                            'Yritykset antavat Y-tunnuksensa. Asiakkailla on 14 päivän peruuttamisoikeus, ja he näkevät yrityksesi tiedot.')
+                        : tr(context, 'Only for people selling their own items occasionally. If you sell regularly for profit, you are a business.',
+                            'Vain omia tavaroitaan satunnaisesti myyville. Jos myyt säännöllisesti voittoa tavoitellen, olet yritys.'),
+                    style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary, height: 1.4),
+                  ),
+                  if (_verified)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(tr(context, 'To change this after approval, contact sellers@malvoya.com.', 'Muuttaaksesi tätä hyväksynnän jälkeen ota yhteyttä: sellers@malvoya.com.'),
+                          style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                    ),
+                  if (_sellerType == 'BUSINESS')
+                    TextFormField(
+                      controller: _businessId,
+                      enabled: !_verified,
+                      decoration: InputDecoration(labelText: 'Y-tunnus', hintText: '1234567-8'),
+                      validator: (v) => RegExp(r'^\d{7}-\d$').hasMatch((v ?? '').trim()) ? null : tr(context, 'Format 1234567-8', 'Muoto 1234567-8'),
+                    ),
+                  const SizedBox(height: 20),
+                  TextFormField(
+                    controller: _address,
+                    decoration: InputDecoration(labelText: tr(context, 'Pickup address', 'Noutoosoite'), hintText: 'Mannerheimintie 1, 00100 Helsinki'),
+                    validator: (v) => (v ?? '').trim().length < 5 ? tr(context, 'Enter the address couriers pick up from', 'Anna osoite, josta kuriirit noutavat') : null,
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: _locating ? null : _locate,
+                    icon: _locating ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : Icon(_lat != null ? Icons.check_circle_rounded : Icons.my_location_rounded),
+                    label: Text(_lat != null ? tr(context, 'Location saved — update', 'Sijainti tallennettu — päivitä') : tr(context, 'Use my current location', 'Käytä nykyistä sijaintia')),
+                  ),
+                  const SizedBox(height: 8),
+                  TextFormField(controller: _phone, keyboardType: TextInputType.phone, decoration: InputDecoration(labelText: tr(context, 'Phone (for couriers, optional)', 'Puhelin (kuriireille, valinnainen)'))),
+                  const SizedBox(height: 20),
+                  Text('${tr(context, 'Time to pack an order', 'Tilauksen pakkausaika')}: ${_prepMinutes.round()} min', style: const TextStyle(fontWeight: FontWeight.w600)),
+                  Slider(value: _prepMinutes, min: 0, max: 60, divisions: 12, label: '${_prepMinutes.round()} min', onChanged: (v) => setState(() => _prepMinutes = v)),
+                  Text(tr(context, 'Used for the delivery times customers see.', 'Käytetään asiakkaille näytettävissä toimitusajoissa.'), style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                  if (_error != null) Padding(padding: const EdgeInsets.only(top: 14), child: Text(_error!, style: const TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w600))),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    height: 54,
+                    child: FilledButton(
+                      onPressed: _saving || _uploading != null ? null : _save,
+                      child: _saving
+                          ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : Text(_existing == null ? tr(context, 'Create store', 'Luo kauppa') : tr(context, 'Save', 'Tallenna')),
                     ),
                   ),
-                  _buildBottomBar(),
+                  if (_existing == null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: Text(tr(context, 'You can add a logo and cover picture once the store is created. Our team reviews every store before it goes live.',
+                              'Voit lisätä logon ja kansikuvan, kun kauppa on luotu. Tiimimme tarkistaa jokaisen kaupan ennen julkaisua.'),
+                          textAlign: TextAlign.center, style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary)),
+                    ),
                 ],
               ),
             ),
-          ),
-        ],
-      ),
     );
   }
 
-  Widget _buildProgressBar() {
-    final steps = ['Store Info', 'Category', 'Photos & Desc'];
-    return Row(
-      children: List.generate(steps.length, (i) {
-        final isActive = i == _step;
-        final isDone = i < _step;
-        return Expanded(
-          child: Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 300),
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: isDone || isActive ? const Color(0xFF6D2E8C) : Colors.white24,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  steps[i],
-                  style: TextStyle(
-                    color: isActive ? Colors.white : Colors.white38,
-                    fontSize: 10,
-                    fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      }),
-    );
-  }
-
-  Widget _buildStepContent() {
-    switch (_step) {
-      case 0:
-        return _buildStep1();
-      case 1:
-        return _buildStep2();
-      case 2:
-        return _buildStep3();
-      default:
-        return _buildStep1();
-    }
-  }
-
-  // ── Step 1: Store Name ─────────────────────────────────────────────────────
-  Widget _buildStep1() {
-    return SingleChildScrollView(
-      key: const ValueKey(0),
-      padding: const EdgeInsets.fromLTRB(24, 28, 24, 16),
-      child: Column(
+  Widget _pictures() => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Kauppasi nimi', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF1C1820))),
-          const SizedBox(height: 4),
-          const Text('Step 1 of 3', style: TextStyle(color: Color(0xFF6B6472), fontSize: 13)),
-          const SizedBox(height: 24),
-          TextField(
-            controller: _nameCtrl,
-            textCapitalization: TextCapitalization.words,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-            decoration: const InputDecoration(
-              hintText: 'e.g. Kallio Vintage Boutique',
-              hintStyle: TextStyle(fontSize: 16, color: Color(0xFF6B6472), fontWeight: FontWeight.w400),
-              prefixIcon: Icon(Icons.store_outlined, color: Color(0xFF6D2E8C)),
-            ),
-          ),
-          const SizedBox(height: 12),
-          const Row(
-            children: [
-              Icon(Icons.info_outline, size: 14, color: Color(0xFF6B6472)),
-              SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  'Kauppasi nimi näkyy asiakkaille / Visible to customers',
-                  style: TextStyle(color: Color(0xFF6B6472), fontSize: 12),
-                ),
-              ),
-            ],
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: 16),
-            _errorBox(_error!),
-          ],
-        ],
-      ),
-    );
-  }
-
-  // ── Step 2: Category Grid ──────────────────────────────────────────────────
-  Widget _buildStep2() {
-    return SingleChildScrollView(
-      key: const ValueKey(1),
-      padding: const EdgeInsets.fromLTRB(24, 28, 24, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Kaupan kategoria', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF1C1820))),
-          const SizedBox(height: 4),
-          const Text('Step 2 of 3', style: TextStyle(color: Color(0xFF6B6472), fontSize: 13)),
-          const SizedBox(height: 20),
-          GridView.count(
-            crossAxisCount: 3,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            childAspectRatio: 0.85,
-            children: _categoryItems.map((item) {
-              final isSelected = _category == item['value'];
-              return GestureDetector(
-                onTap: () => setState(() => _category = item['value'] as String),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  decoration: BoxDecoration(
-                    gradient: isSelected
-                        ? const LinearGradient(
-                            colors: [Color(0xFF6D2E8C), Color(0xFF4F46E5)],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          )
-                        : null,
-                    color: isSelected ? null : const Color(0xFFEFEBF1),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: isSelected ? const Color(0xFF6D2E8C) : Colors.transparent,
-                      width: 2,
-                    ),
-                    boxShadow: isSelected
-                        ? [const BoxShadow(color: Color(0x336D2E8C), blurRadius: 8, offset: Offset(0, 3))]
-                        : [],
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        item['icon'] as IconData,
-                        color: isSelected ? Colors.white : const Color(0xFF6B6472),
-                        size: 28,
+          GestureDetector(
+            onTap: () => _pickImage(false),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: SizedBox(
+                height: 130,
+                width: double.infinity,
+                child: _bannerUrl != null
+                    ? CachedNetworkImage(imageUrl: _bannerUrl!, fit: BoxFit.cover)
+                    : Container(
+                        color: AppTheme.primaryLight,
+                        child: Center(child: Text(tr(context, 'Add a cover picture', 'Lisää kansikuva'), style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w600))),
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        (item['label'] as String).split('/').first.trim(),
-                        style: TextStyle(
-                          color: isSelected ? Colors.white : const Color(0xFF1C1820),
-                          fontWeight: FontWeight.w700,
-                          fontSize: 11,
-                        ),
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      if ((item['label'] as String).contains('/'))
-                        Text(
-                          '/ ${(item['label'] as String).split('/').last.trim()}',
-                          style: TextStyle(
-                            color: isSelected ? Colors.white70 : const Color(0xFF6B6472),
-                            fontSize: 9,
-                          ),
-                          textAlign: TextAlign.center,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                    ],
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── Step 3: Description + Banner ───────────────────────────────────────────
-  Widget _buildStep3() {
-    return SingleChildScrollView(
-      key: const ValueKey(2),
-      padding: const EdgeInsets.fromLTRB(24, 28, 24, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Kuvaus ja kansikuva', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF1C1820))),
-          const SizedBox(height: 4),
-          const Text('Step 3 of 3', style: TextStyle(color: Color(0xFF6B6472), fontSize: 13)),
-          const SizedBox(height: 20),
-          TextField(
-            controller: _descCtrl,
-            maxLines: 4,
-            decoration: const InputDecoration(
-              labelText: 'Kaupan kuvaus (valinnainen)',
-              hintText: 'Kerro asiakkaille mikä tekee kaupastasi erityisen...',
-              prefixIcon: Padding(
-                padding: EdgeInsets.only(bottom: 52),
-                child: Icon(Icons.description_outlined),
               ),
-              alignLabelWithHint: true,
-            ),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _bannerCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Kansikuva URL (valinnainen)',
-              hintText: 'https://...',
-              prefixIcon: Icon(Icons.image_outlined),
-            ),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _addressCtrl,
-            textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(
-              labelText: 'Osoite / Store address',
-              hintText: 'Katu 1, 00100 Helsinki',
-              prefixIcon: Icon(Icons.place_outlined),
-            ),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _phoneCtrl,
-            keyboardType: TextInputType.phone,
-            decoration: const InputDecoration(
-              labelText: 'Puhelin / Phone (valinnainen)',
-              hintText: '+358 40 1234567',
-              prefixIcon: Icon(Icons.phone_outlined),
             ),
           ),
           const SizedBox(height: 10),
-          OutlinedButton.icon(
-            onPressed: _locating ? null : _useCurrentLocation,
-            icon: _locating
-                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                : Icon(_lat != null ? Icons.check_circle_rounded : Icons.my_location_rounded),
-            label: Text(_lat != null
-                ? 'Location saved (${_lat!.toStringAsFixed(4)}, ${_lng!.toStringAsFixed(4)})'
-                : 'Use my current location (at the store)'),
-          ),
-          const SizedBox(height: 16),
-          // Green info box
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: const Color(0xFFE4EFE9),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFF2E6B4F).withOpacity(0.3)),
-            ),
-            child: const Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(Icons.auto_awesome_rounded, color: Color(0xFF2E6B4F), size: 20),
-                SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Kauppasi tuotteet ilmestyvät automaattisesti Malvoya Reels -syötteeseen heti kun lisäät niitä!',
-                    style: TextStyle(color: Color(0xFF245740), fontSize: 13, height: 1.4, fontWeight: FontWeight.w500),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: 16),
-            _errorBox(_error!),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBottomBar() {
-    return Container(
-      padding: EdgeInsets.fromLTRB(24, 12, 24, MediaQuery.of(context).padding.bottom + 12),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: Color(0xFFE6E1EA))),
-      ),
-      child: Row(
-        children: [
-          if (_step > 0) ...[
-            OutlinedButton(
-              onPressed: _back,
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                side: const BorderSide(color: Color(0xFFE6E1EA)),
+          Row(children: [
+            GestureDetector(
+              onTap: () => _pickImage(true),
+              child: CircleAvatar(
+                radius: 34,
+                backgroundColor: AppTheme.primaryLight,
+                backgroundImage: _logoUrl != null ? CachedNetworkImageProvider(_logoUrl!) : null,
+                child: _logoUrl == null ? const Icon(Icons.add_a_photo_outlined, color: AppTheme.primary) : null,
               ),
-              child: const Icon(Icons.arrow_back_rounded, color: Color(0xFF1C1820)),
             ),
             const SizedBox(width: 12),
-          ],
-          Expanded(
-            child: SizedBox(
-              height: 52,
-              child: _loading
-                  ? Container(
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(colors: [Color(0xFF6D2E8C), Color(0xFF4F46E5)]),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: const Center(
-                        child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)),
-                      ),
-                    )
-                  : DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(colors: [Color(0xFF6D2E8C), Color(0xFF4F46E5)]),
-                        borderRadius: BorderRadius.circular(14),
-                        boxShadow: const [BoxShadow(color: Color(0x446D2E8C), blurRadius: 12, offset: Offset(0, 4))],
-                      ),
-                      child: ElevatedButton(
-                        onPressed: _step < 2 ? _next : _createStore,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.transparent,
-                          shadowColor: Colors.transparent,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        ),
-                        child: Text(
-                          _buttonLabel,
-                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: Colors.white),
-                        ),
-                      ),
-                    ),
-            ),
-          ),
+            Expanded(child: Text(tr(context, 'Tap to change the logo or cover picture.', 'Vaihda logo tai kansikuva napauttamalla.'), style: const TextStyle(color: AppTheme.textSecondary))),
+            if (_uploading != null) SizedBox(width: 26, height: 26, child: CircularProgressIndicator(value: _uploading, strokeWidth: 3)),
+          ]),
         ],
-      ),
-    );
-  }
-
-  Widget _errorBox(String msg) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: const Color(0xFFFFF0F0), borderRadius: BorderRadius.circular(10)),
-      child: Row(children: [
-        const Icon(Icons.error_outline, color: Color(0xFFD93025), size: 18),
-        const SizedBox(width: 8),
-        Expanded(child: Text(msg, style: const TextStyle(color: Color(0xFFD93025), fontSize: 13))),
-      ]),
-    );
-  }
+      );
 }

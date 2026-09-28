@@ -33,8 +33,12 @@ Business sellers must honour the customer's 14-day right of withdrawal and defec
 ## 6. Fees and payouts
 
 - Commission: [X] % of the item price (excluding the delivery fee), unless agreed otherwise in writing.
-- Payouts are made [WEEKLY] through [PAYOUT PROVIDER] after refunds and commission are deducted.
+- Payouts are made through Stripe Connect to the Seller's own Stripe account, 15 days after delivery (after the 14-day return window), with refunds and commission deducted. Stripe verifies the Seller's identity and bank account on its own pages.
 - Malvoya provides a statement for each payout.
+
+## 6a. Drops, photos and videos
+
+The Seller may post short videos and photos ("drops") of their own products. The Seller must hold the rights to everything shown (music, logos, people). Malvoya may remove drops that are illegal or break these terms and always tells the Seller why and how to object (Digital Services Act Art. 17).
 
 ## 7. Ranking
 

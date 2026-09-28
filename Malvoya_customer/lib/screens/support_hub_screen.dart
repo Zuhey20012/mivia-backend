@@ -7,6 +7,8 @@ import '../l10n.dart';
 import '../locale_provider.dart';
 import 'chatbot.dart';
 import '../local_notification_service.dart';
+import '../auth_service.dart';
+import '../core/api_client.dart';
 
 class SupportHubScreen extends StatefulWidget {
   const SupportHubScreen({super.key});
@@ -58,7 +60,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
       'subtitle': 'Zero video spam drops, verified local boutiques & 14-day statutory returns',
       'icon': Icons.verified_outlined,
       'color': const Color(0xFFE08A00),
-      'examples': ['Finnish 14-day return rights', 'Express local courier speeds', 'Verified boutique guarantee'],
+      'examples': ['Finnish 14-day return rights', 'Express local courier speeds', 'How stores are verified'],
     },
     {
       'id': 'partner',
@@ -232,32 +234,21 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
                       );
                       return;
                     }
-                    Navigator.pop(ctx);
-                    final ticketId = 'MLV-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
-                    
-                    await LocalNotificationService.showNotification(
-                      id: 401,
-                      title: 'Support Ticket #$ticketId',
-                      body: 'Malvoya Concierge: $topicTitle request received.',
-                    );
-
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Row(
-                            children: [
-                              const Icon(Icons.check_circle_rounded, color: Colors.white),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(l10n.translate('ticketCreatedGuaranteed').replaceAll('{id}', ticketId)),
-                              ),
-                            ],
-                          ),
-                          backgroundColor: const Color(0xFF248A52),
-                          behavior: SnackBarBehavior.floating,
-                        ),
-                      );
-                    }
+                    final auth = Provider.of<AuthService>(context, listen: false);
+                    final res = await ApiClient(auth).post('/support', {
+                      'app': 'customer',
+                      'topic': topicTitle,
+                      'message': messageCtrl.text.trim(),
+                      if (!auth.isAuthenticated && emailCtrl.text.trim().isNotEmpty) 'email': emailCtrl.text.trim(),
+                    });
+                    if (!mounted) return;
+                    if (res.ok) Navigator.pop(ctx);
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      behavior: SnackBarBehavior.floating,
+                      content: Text(res.ok
+                          ? tr(context, 'Sent (#${res.data['id']}). We will reply to ${res.data['replyTo']}.', 'Lähetetty (#${res.data['id']}). Vastaamme osoitteeseen ${res.data['replyTo']}.')
+                          : res.error!),
+                    ));
                   },
                   child: Text(l10n.translate('submitSupportRequest'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                 ),
@@ -282,25 +273,6 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
                       },
                       icon: const Icon(Icons.email_outlined, size: 16, color: Color(0xFF3B82F6)),
                       label: Text(l10n.translate('sendViaEmail'), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF3B82F6))),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        side: BorderSide(color: AppTheme.primary.withValues(alpha: 0.4)),
-                      ),
-                      onPressed: () {
-                        final desc = messageCtrl.text.trim();
-                        LocalNotificationService.openSmsApp(
-                          phone: '',
-                          body: '[Malvoya Support - $topicTitle] ${desc.isNotEmpty ? desc : "Inquiry assistance requested."}',
-                        );
-                      },
-                      icon: const Icon(Icons.sms_rounded, size: 16, color: AppTheme.primary),
-                      label: Text(l10n.translate('sendViaSms'), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.primary)),
                     ),
                   ),
                 ],
@@ -583,34 +555,6 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
               }),
 
               const SizedBox(height: 20),
-
-              // Response Guarantee Card
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF248A52).withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: const Color(0xFF248A52).withValues(alpha: 0.3)),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.shield_outlined, color: Color(0xFF248A52), size: 24),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(l10n.translate('guaranteedResponseTitle'), style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: textPrimary)),
-                            Text(l10n.translate('guaranteedResponseSub'), style: TextStyle(fontSize: 11, color: textSecondary)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
 
               const SizedBox(height: 36),
             ],

@@ -264,7 +264,16 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Work that needs the session one last time before signing out (e.g. forgetting this
+  /// phone's push token). Each hook gets a few seconds; failures never block signing out.
+  static final List<Future<void> Function(AuthService)> beforeLogout = [];
+
   Future<void> logout() async {
+    for (final hook in beforeLogout) {
+      try {
+        await hook(this).timeout(const Duration(seconds: 4));
+      } catch (_) {}
+    }
     final refresh = _refreshToken;
     if (refresh != null) {
       try {

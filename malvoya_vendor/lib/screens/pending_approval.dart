@@ -47,7 +47,7 @@ class PendingApprovalScreen extends StatelessWidget {
               _step(Icons.verified_user_outlined, 'Review',
                   'We check your business details (Y-tunnus or identity for private sellers) and contact you if we need anything.'),
               _step(Icons.account_balance_outlined, 'Payouts',
-                  'Payout details are collected securely by our payment provider during review — never typed into this app.'),
+                  'Set up payouts in Store → Payouts. Stripe collects your bank and identity details on its own secure pages.'),
               const Spacer(),
               SizedBox(
                 height: 52,

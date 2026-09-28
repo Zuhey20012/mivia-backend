@@ -104,6 +104,13 @@ export async function logoutUser(refreshToken: string) {
 // ─── GDPR: access (Art. 15/20) and erasure (Art. 17) ────────────────────────
 
 export async function exportUserData(userId: number) {
+  const [user, supportRequests] = await Promise.all([exportUser(userId), prisma.supportRequest.findMany({
+    where: { userId }, select: { id: true, topic: true, message: true, status: true, createdAt: true },
+  })]);
+  return user && { ...user, supportRequests };
+}
+
+function exportUser(userId: number) {
   return prisma.user.findUnique({
     where: { id: userId },
     select: {
@@ -155,6 +162,7 @@ export async function deleteUserAccount(userId: number) {
 
     // Likes, favourites and push devices go; reviews stay (they carry store ratings) without their text
     await tx.dropLike.deleteMany({ where: { userId } });
+    await tx.supportRequest.deleteMany({ where: { userId } });
     await tx.favorite.deleteMany({ where: { userId } });
     await tx.deviceToken.deleteMany({ where: { userId } });
     await tx.review.updateMany({ where: { userId }, data: { comment: null } });

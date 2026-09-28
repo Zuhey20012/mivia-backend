@@ -35,13 +35,14 @@ Documents are checked through [VERIFICATION METHOD], not collected in the app.
 
 ## 5. Fees and payment
 
-- The fee for each job is shown before acceptance: [FEE MODEL, e.g. "the delivery fee shown on the job"].
-- Payouts are made [WEEKLY] to the Courier's account, through [PAYOUT PROVIDER].
+- The fee for each job is shown before acceptance. By default the Courier earns the full delivery fee the customer pays [CONFIRM OR CHANGE].
+- Each completed delivery is paid to the Courier's own Stripe account right after delivery (Stripe Connect). Stripe verifies the Courier's identity and bank account on its own pages.
+- The Courier is responsible for their own taxes and insurance as an independent contractor.
 - Malvoya provides a monthly statement of completed jobs and fees.
 
 ## 6. Location data
 
-The Courier's location is processed only while they are online, as described in the Privacy Policy. Only the latest location is kept, and it is deleted when the Courier goes offline.
+The Courier's location is processed only while they are online, as described in the Privacy Policy. On Android a permanent notification shows whenever the location is being shared. Only the latest location is kept, and it is deleted when the Courier goes offline. When an order is left at the door, the Courier takes a delivery photo; it is visible only to the customer and Malvoya and deleted after 30 days.
 
 ## 7. Conduct and safety
 
