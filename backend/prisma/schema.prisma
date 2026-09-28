@@ -80,6 +80,44 @@ enum PaymentStatus {
   REFUNDED
 }
 
+// Shown to customers on every product: consumer rights only apply to business sellers
+// (Omnibus Directive 2019/2161, Art. 6a CRD).
+enum SellerType {
+  BUSINESS
+  PRIVATE
+}
+
+enum MediaKind {
+  VIDEO
+  IMAGE
+}
+
+enum DropStatus {
+  PROCESSING // uploaded, waiting for the video to be transcoded
+  READY // visible in the feed
+  FAILED // transcoding failed
+  REMOVED // taken down by the store or by moderation
+}
+
+enum ReportStatus {
+  OPEN
+  ACTIONED
+  DISMISSED
+}
+
+enum PayoutParty {
+  STORE
+  COURIER
+}
+
+enum PayoutStatus {
+  WAITING_FOR_ACCOUNT // the store or courier has not finished Stripe onboarding yet
+  SCHEDULED // store payouts are released after the 14-day return window
+  PAID
+  CANCELLED // fully refunded before release
+  FAILED
+}
+
 // ─────────────────────────────────────────────
 // USER
 // ─────────────────────────────────────────────
@@ -105,6 +143,10 @@ model User {
   rentals       Rental[]
   returns       Return[]
   refreshTokens RefreshToken[]
+  favorites     Favorite[]
+  dropLikes     DropLike[]
+  reviews       Review[]
+  devices       DeviceToken[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -146,7 +188,14 @@ model Store {
   email     String?
 
   // Business settings
-  commissionRate Float @default(0.10) // platform commission (fraction of item subtotal)
+  commissionRate Float      @default(0.10) // platform commission (fraction of item subtotal)
+  sellerType     SellerType @default(BUSINESS)
+  businessId     String? // Y-tunnus for business sellers (checked during review)
+  prepMinutes    Int        @default(10) // time to get an order ready for pickup, used for ETAs
+
+  // Stripe Connect (Express) account that receives the store's payouts
+  stripeAccountId String? @unique
+  payoutsEnabled  Boolean @default(false)
 
   // Ratings (denormalised for speed)
   rating       Float @default(0)
@@ -154,6 +203,9 @@ model Store {
 
   products Product[]
   orders   Order[]
+  drops    Drop[]
+  reviews  Review[]
+  payouts  Payout[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -197,15 +249,30 @@ model Product {
   isSecondHand  Boolean @default(false)
   isFeatured    Boolean @default(false)
 
-  variants    ProductVariant[]
-  orderItems  OrderItem[]
-  rentalItems RentalItem[]
+  variants     ProductVariant[]
+  orderItems   OrderItem[]
+  rentalItems  RentalItem[]
+  priceChanges PriceChange[]
+  favorites    Favorite[]
+  drops        Drop[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Query-path indexes (Postgres does not index foreign keys automatically)
   @@index([storeId, isAvailable])
+}
+
+// Every sale price a product has had. A "was" price may only be shown when it is the lowest
+// price of the 30 days before the reduction (Hintamerkintäasetus / Omnibus Directive, Art. 6a PID).
+model PriceChange {
+  id         Int      @id @default(autoincrement())
+  productId  Int
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  priceCents Int
+  changedAt  DateTime @default(now())
+
+  @@index([productId, changedAt])
 }
 
 model ProductVariant {
@@ -254,7 +321,11 @@ model Order {
   paidAt                DateTime?
   refundedCents         Int           @default(0)
 
+  courierFeeCents Int @default(0) // what the courier earns for this delivery
+
   // Lifecycle timestamps
+  acceptedAt   DateTime? // courier accepted the job
+  pickedUpAt   DateTime?
   deliveredAt  DateTime? // start of the 14-day withdrawal period (Kuluttajansuojalaki 6:14)
   cancelledAt  DateTime?
   cancelReason String?
@@ -263,11 +334,19 @@ model Order {
   deliveryAddress String?
   deliveryLat     Float?
   deliveryLng     Float?
-  etaMinutes      Int?
+  etaMinutes      Int? // estimate given to the customer when the order was paid
+
+  // Proof of delivery. Photos are private and deleted after 30 days (data minimisation).
+  handoverMethod        String? // "IN_PERSON" | "PHOTO"
+  deliveryProofPublicId String?
+  deliveredLat          Float?
+  deliveredLng          Float?
 
   notes   String?
   items   OrderItem[]
   returns Return[]
+  review  Review?
+  payouts Payout[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -405,9 +484,18 @@ model Courier {
   currentRentalId Int?
   currentReturnId Int?
 
+  // Stripe Connect (Express) account that receives delivery earnings
+  stripeAccountId String? @unique
+  payoutsEnabled  Boolean @default(false)
+
+  rating       Float @default(0)
+  totalRatings Int   @default(0)
+
   orders  Order[]
   rentals Rental[]
   returns Return[]
+  payouts Payout[]
+  reviews Review[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -438,4 +526,167 @@ model OtpCode {
   expiresAt DateTime
 
   @@index([expiresAt])
+}
+
+// ─────────────────────────────────────────────
+// DROPS  (short shoppable videos from stores)
+// ─────────────────────────────────────────────
+
+model Drop {
+  id        Int     @id @default(autoincrement())
+  storeId   Int
+  store     Store   @relation(fields: [storeId], references: [id])
+  productId Int
+  product   Product @relation(fields: [productId], references: [id])
+
+  caption       String?
+  mediaKind     MediaKind
+  mediaPublicId String    @unique // Cloudinary public id (verified signed upload)
+  durationSec   Float?
+  width         Int?
+  height        Int?
+
+  status        DropStatus @default(PROCESSING)
+  removedReason String?
+
+  // Engagement counters (denormalised; the source rows live in DropLike / DropView)
+  likeCount     Int   @default(0)
+  viewCount     Int   @default(0)
+  shareCount    Int   @default(0)
+  completeCount Int   @default(0) // views watched to (almost) the end
+  watchSeconds  Float @default(0)
+
+  likes   DropLike[]
+  views   DropView[]
+  reports DropReport[]
+
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status, publishedAt])
+  @@index([storeId, createdAt])
+  @@index([productId])
+}
+
+model DropLike {
+  dropId    Int
+  drop      Drop     @relation(fields: [dropId], references: [id], onDelete: Cascade)
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([dropId, userId])
+  @@index([userId])
+}
+
+// One row per viewer per drop per day, so replays and bots cannot inflate the view count.
+model DropView {
+  dropId    Int
+  drop      Drop     @relation(fields: [dropId], references: [id], onDelete: Cascade)
+  viewerKey String // "u:<userId>" or "d:<sha256 of the install id>"
+  day       DateTime @db.Date
+  completed Boolean  @default(false)
+
+  @@id([dropId, viewerKey, day])
+}
+
+// Notice-and-action for illegal or harmful content (Digital Services Act, Art. 16).
+model DropReport {
+  id           Int          @id @default(autoincrement())
+  dropId       Int
+  drop         Drop         @relation(fields: [dropId], references: [id], onDelete: Cascade)
+  reporterId   Int?
+  reason       String
+  details      String?
+  status       ReportStatus @default(OPEN)
+  resolvedById Int?
+  resolvedAt   DateTime?
+  createdAt    DateTime     @default(now())
+
+  @@index([status, createdAt])
+  @@index([dropId])
+}
+
+// ─────────────────────────────────────────────
+// FAVOURITES, REVIEWS, PUSH DEVICES
+// ─────────────────────────────────────────────
+
+model Favorite {
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId Int
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, productId])
+  @@index([productId])
+}
+
+// Only customers with a delivered order can review, once per order (verified reviews,
+// Omnibus Directive: platforms must say how they check that reviews come from real buyers).
+model Review {
+  id            Int      @id @default(autoincrement())
+  orderId       Int      @unique
+  order         Order    @relation(fields: [orderId], references: [id])
+  userId        Int
+  user          User     @relation(fields: [userId], references: [id])
+  storeId       Int
+  store         Store    @relation(fields: [storeId], references: [id])
+  courierId     Int?
+  courier       Courier? @relation(fields: [courierId], references: [id])
+  storeRating   Int // 1–5
+  courierRating Int? // 1–5, not shown publicly
+  comment       String?
+  isHidden      Boolean  @default(false) // hidden by moderation
+  createdAt     DateTime @default(now())
+
+  @@index([storeId, createdAt])
+  @@index([courierId])
+}
+
+model DeviceToken {
+  token     String   @id // Firebase Cloud Messaging registration token
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform  String // "android" | "ios"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────
+// PAYOUTS  (Stripe Connect transfers to stores and couriers)
+// ─────────────────────────────────────────────
+
+model Payout {
+  id               Int          @id @default(autoincrement())
+  orderId          Int
+  order            Order        @relation(fields: [orderId], references: [id])
+  party            PayoutParty
+  storeId          Int?
+  store            Store?       @relation(fields: [storeId], references: [id])
+  courierId        Int?
+  courier          Courier?     @relation(fields: [courierId], references: [id])
+  amountCents      Int
+  status           PayoutStatus
+  releaseAt        DateTime // earliest moment the transfer may be made
+  stripeTransferId String?      @unique
+  failureReason    String?
+  paidAt           DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@unique([orderId, party])
+  @@index([status, releaseAt])
+  @@index([storeId, createdAt])
+  @@index([courierId, createdAt])
+}
+
+// Lease for background jobs, so only one API instance runs a job at a time.
+model JobLease {
+  name        String    @id
+  lockedUntil DateTime
+  lastRunAt   DateTime?
 }

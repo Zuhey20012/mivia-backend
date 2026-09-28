@@ -1,52 +1,56 @@
 import { Response } from "express";
 import { AuthRequest } from "../../middleware/auth";
-import { createProductSchema, updateProductSchema, productQuerySchema } from "./products.schema";
+import { sendError, positiveId } from "../../lib/errors";
+import { createProductSchema, updateProductSchema, productQuerySchema, searchQuerySchema } from "./products.schema";
 import * as productsService from "./products.service";
 
 export async function listProducts(req: AuthRequest, res: Response) {
+  const query = productQuerySchema.safeParse(req.query);
+  const storeId = positiveId(req.params.storeId);
+  if (!query.success || !storeId) return res.status(400).json({ ok: false, error: "Invalid request" });
   try {
-    const query = productQuerySchema.parse(req.query);
-    const data  = await productsService.getProductsByStore(Number(req.params.storeId), query as any, req.user?.id);
-    res.json({ ok: true, ...data });
-  } catch (e: any) { console.error(e); res.status(400).json({ ok: false, error: "Invalid request" }); }
+    res.json({ ok: true, ...(await productsService.getProductsByStore(storeId, query.data as any, req.user?.id)) });
+  } catch (e) { sendError(res, e); }
+}
+
+export async function searchProducts(req: AuthRequest, res: Response) {
+  const query = searchQuerySchema.safeParse(req.query);
+  if (!query.success) return res.status(400).json({ ok: false, errors: query.error.flatten() });
+  try {
+    res.json({ ok: true, ...(await productsService.searchProducts(query.data)) });
+  } catch (e) { sendError(res, e); }
 }
 
 export async function getProduct(req: AuthRequest, res: Response) {
+  const id = positiveId(req.params.id);
+  if (!id) return res.status(404).json({ ok: false, error: "Product not found" });
   try {
-    const product = await productsService.getProductById(Number(req.params.id));
-    res.json({ ok: true, product });
-  } catch { res.status(404).json({ ok: false, error: "Product not found" }); }
+    res.json({ ok: true, product: await productsService.getProductById(id, req.user?.id) });
+  } catch (e) { sendError(res, e); }
 }
 
 export async function createProduct(req: AuthRequest, res: Response) {
   const result = createProductSchema.safeParse(req.body);
   if (!result.success) return res.status(400).json({ ok: false, errors: result.error.flatten() });
   try {
-    const store = await import("../../lib/prisma").then(m =>
-      m.prisma.store.findUnique({ where: { ownerId: req.user!.id } })
-    );
-    if (!store) return res.status(404).json({ ok: false, error: "Create your store first" });
-    const product = await productsService.createProduct(store.id, result.data);
-    res.status(201).json({ ok: true, product });
-  } catch (e: any) { console.error(e); res.status(400).json({ ok: false, error: "Invalid request" }); }
+    res.status(201).json({ ok: true, product: await productsService.createProduct(req.user!.id, result.data) });
+  } catch (e) { sendError(res, e); }
 }
 
 export async function updateProduct(req: AuthRequest, res: Response) {
+  const id = positiveId(req.params.id);
   const result = updateProductSchema.safeParse(req.body);
-  if (!result.success) return res.status(400).json({ ok: false, errors: result.error.flatten() });
+  if (!id || !result.success) return res.status(400).json({ ok: false, errors: result.success ? undefined : result.error.flatten() });
   try {
-    const product = await productsService.updateProduct(Number(req.params.id), req.user!.id, result.data);
-    res.json({ ok: true, product });
-  } catch (e: any) {
-    res.status(e.message === "Forbidden" ? 403 : 404).json({ ok: false, error: e.message === "Forbidden" ? "Forbidden" : "Product not found" });
-  }
+    res.json({ ok: true, product: await productsService.updateProduct(id, req.user!.id, result.data) });
+  } catch (e) { sendError(res, e); }
 }
 
 export async function deleteProduct(req: AuthRequest, res: Response) {
+  const id = positiveId(req.params.id);
+  if (!id) return res.status(404).json({ ok: false, error: "Product not found" });
   try {
-    await productsService.deleteProduct(Number(req.params.id), req.user!.id);
+    await productsService.deleteProduct(id, req.user!.id);
     res.json({ ok: true });
-  } catch (e: any) {
-    res.status(e.message === "Forbidden" ? 403 : 404).json({ ok: false, error: e.message === "Forbidden" ? "Forbidden" : "Product not found" });
-  }
+  } catch (e) { sendError(res, e); }
 }

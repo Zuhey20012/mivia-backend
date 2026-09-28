@@ -6,6 +6,7 @@ import {
   getCouriers, approveCourier, suspendCourier,
   getOrders,
 } from "./admin.controller";
+import moderationRoutes from "./moderation.routes";
 
 const router = Router();
 
@@ -22,5 +23,6 @@ router.get("/couriers",               getCouriers);
 router.patch("/couriers/:id/approve", approveCourier);
 router.patch("/couriers/:id/suspend", suspendCourier);
 router.get("/orders",                 getOrders);
+router.use(moderationRoutes);
 
 export default router;

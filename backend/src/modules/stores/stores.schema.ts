@@ -19,9 +19,31 @@ export const createStoreSchema = z.object({
   longitude:     z.number().optional(),
   phone:         z.string().optional(),
   email:         z.string().email().optional(),
+  logoUrl:       z.string().url().startsWith("https://").optional(),
+  bannerUrl:     z.string().url().startsWith("https://").optional(),
+  // Business sellers give their Y-tunnus (format 1234567-8); private people selling their own items do not
+  sellerType:    z.enum(["BUSINESS", "PRIVATE"]).optional(), // older app builds do not send it
+  businessId:    z.string().trim().regex(/^\d{7}-\d$/, "Y-tunnus format is 1234567-8").optional(),
+  prepMinutes:   z.number().int().min(0).max(120).optional(),
+}).refine((d) => d.sellerType !== "BUSINESS" || !!d.businessId, {
+  message: "Business sellers must give their Y-tunnus",
+  path: ["businessId"],
 });
 
-export const updateStoreSchema = createStoreSchema.partial();
+export const updateStoreSchema = z.object({
+  name:        z.string().min(2).max(100).optional(),
+  description: z.string().max(1000).optional(),
+  isHomeBased: z.boolean().optional(),
+  isEcoFriendly: z.boolean().optional(),
+  address:     z.string().optional(),
+  latitude:    z.number().optional(),
+  longitude:   z.number().optional(),
+  phone:       z.string().optional(),
+  email:       z.string().email().optional(),
+  logoUrl:     z.string().url().startsWith("https://").optional(),
+  bannerUrl:   z.string().url().startsWith("https://").optional(),
+  prepMinutes: z.number().int().min(0).max(120).optional(),
+});
 
 export const storeQuerySchema = z.object({
   category:    z.string().optional(),

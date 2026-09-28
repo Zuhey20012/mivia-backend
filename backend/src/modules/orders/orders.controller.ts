@@ -1,4 +1,5 @@
 import { Response } from "express";
+import { z } from "zod";
 import { AuthRequest } from "../../middleware/auth";
 import {
   createOrderSchema, createRentalSchema, createReturnSchema, updateReturnStatusSchema, updateOrderStatusSchema,
@@ -98,7 +99,7 @@ export async function createReturn(req: AuthRequest, res: Response) {
 
 export async function listReturns(req: AuthRequest, res: Response) {
   try {
-    res.json({ ok: true, returns: await ordersService.listReturns(req.user!.id) });
+    res.json({ ok: true, returns: await ordersService.listReturns(req.user!) });
   } catch (e) { sendOrderError(res, e); }
 }
 
@@ -117,5 +118,35 @@ export async function updateReturnStatus(req: AuthRequest, res: Response) {
   if (!result.success) return res.status(400).json({ ok: false, errors: result.error.flatten() });
   try {
     res.json({ ok: true, return: await ordersService.updateReturnStatus(id, req.user!, result.data) });
+  } catch (e) { sendOrderError(res, e); }
+}
+
+// ─── DELIVERY HANDOVER ───────────────────────────────────────────────────────
+const deliverSchema = z.object({
+  method: z.enum(["IN_PERSON", "PHOTO"]),
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
+  upload: z.object({
+    publicId: z.string().min(5).max(200),
+    version: z.union([z.string().max(20), z.number().int()]),
+    signature: z.string().length(40),
+  }).optional(),
+});
+
+export async function deliverOrder(req: AuthRequest, res: Response) {
+  const id = idParam(req);
+  const result = deliverSchema.safeParse(req.body);
+  if (!id) return res.status(404).json({ ok: false, error: "Order not found" });
+  if (!result.success) return res.status(400).json({ ok: false, errors: result.error.flatten() });
+  try {
+    res.json({ ok: true, order: await ordersService.deliverOrder(id, req.user!.id, result.data) });
+  } catch (e) { sendOrderError(res, e); }
+}
+
+export async function getDeliveryProof(req: AuthRequest, res: Response) {
+  const id = idParam(req);
+  if (!id) return res.status(404).json({ ok: false, error: "Order not found" });
+  try {
+    res.json({ ok: true, proof: await ordersService.getDeliveryProof(id, req.user!) });
   } catch (e) { sendOrderError(res, e); }
 }

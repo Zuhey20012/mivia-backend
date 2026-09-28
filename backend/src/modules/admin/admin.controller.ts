@@ -9,7 +9,7 @@ function idParam(req: Request) {
 
 // ─── Overview Stats ────────────────────────────────────────────────────────────
 export async function getStats(_req: Request, res: Response) {
-  const [customers, stores, couriers, orders, revenue, pendingVendors, pendingCouriers, activeOrders] = await Promise.all([
+  const [customers, stores, couriers, orders, revenue, pendingVendors, pendingCouriers, activeOrders, liveDrops, openReports, failedPayouts] = await Promise.all([
     prisma.user.count({ where: { role: "CUSTOMER", isActive: true } }),
     prisma.store.count(),
     prisma.courier.count({ where: { userId: { not: null } } }),
@@ -18,6 +18,9 @@ export async function getStats(_req: Request, res: Response) {
     prisma.store.count({ where: { isVerified: false } }),
     prisma.courier.count({ where: { isApproved: false, userId: { not: null } } }),
     prisma.order.count({ where: { status: { in: ["PENDING", "CONFIRMED", "PROCESSING", "SHIPPED"] }, paymentStatus: "SUCCEEDED" } }),
+    prisma.drop.count({ where: { status: "READY" } }),
+    prisma.dropReport.count({ where: { status: "OPEN" } }),
+    prisma.payout.count({ where: { status: "FAILED" } }),
   ]);
 
   res.json({
@@ -33,6 +36,9 @@ export async function getStats(_req: Request, res: Response) {
       pendingCouriers,
       revenueCents: revenue._sum.totalCents ?? 0,
       commissionCents: revenue._sum.commissionCents ?? 0,
+      liveDrops,
+      openReports,
+      failedPayouts,
     },
   });
 }

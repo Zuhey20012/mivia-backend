@@ -112,8 +112,12 @@ export async function exportUserData(userId: number) {
       orders: { include: { items: true } },
       rentals: { include: { items: true } },
       returns: true,
-      store: { include: { products: true } },
-      courier: { select: { id: true, name: true, phone: true, email: true, isApproved: true, createdAt: true } },
+      store: { include: { products: true, drops: { select: { id: true, caption: true, status: true, createdAt: true, likeCount: true, viewCount: true } } } },
+      courier: { select: { id: true, name: true, phone: true, email: true, isApproved: true, createdAt: true, rating: true } },
+      favorites: { select: { productId: true, createdAt: true } },
+      dropLikes: { select: { dropId: true, createdAt: true } },
+      reviews: { select: { orderId: true, storeRating: true, courierRating: true, comment: true, createdAt: true } },
+      devices: { select: { platform: true, createdAt: true, updatedAt: true } },
     },
   });
 }
@@ -147,6 +151,15 @@ export async function deleteUserAccount(userId: number) {
       // The store's legal identity stays on past orders; it just stops trading.
       await tx.product.updateMany({ where: { storeId: store.id }, data: { isAvailable: false } });
       await tx.store.update({ where: { id: store.id }, data: { isVerified: false, phone: null, email: null } });
+    }
+
+    // Likes, favourites and push devices go; reviews stay (they carry store ratings) without their text
+    await tx.dropLike.deleteMany({ where: { userId } });
+    await tx.favorite.deleteMany({ where: { userId } });
+    await tx.deviceToken.deleteMany({ where: { userId } });
+    await tx.review.updateMany({ where: { userId }, data: { comment: null } });
+    if (store) {
+      await tx.drop.updateMany({ where: { storeId: store.id, status: { in: ["READY", "PROCESSING"] } }, data: { status: "REMOVED", removedReason: "Store account deleted" } });
     }
 
     await tx.courier.updateMany({

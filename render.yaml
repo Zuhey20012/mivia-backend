@@ -41,8 +41,18 @@ services:
         sync: false
       - key: TWILIO_PHONE_NUMBER
         sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false
+      - key: PUBLIC_API_URL
+        sync: false
       # Browser origins only (admin panel). Mobile apps are not affected by CORS.
       - key: ALLOWED_ORIGINS
-        value: "https://admin.malvoya.com"
+        value: "https://malvoya-admin.onrender.com,https://admin.malvoya.com"
       - key: NODE_ENV
         value: production

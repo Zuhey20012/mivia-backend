@@ -20,12 +20,19 @@ export function haversineKm(
 function toRad(deg: number) { return (deg * Math.PI) / 180; }
 
 /**
- * ETA in minutes: distance / avg speed + packaging buffer.
- * Clamped between 20 and 120 minutes.
+ * Delivery estimate shown before ordering and stored on the order: the store's preparation time,
+ * a courier reaching the store, cycling at city speed, and the handover. Given as a 10-minute window.
  */
+export function estimateDelivery(distanceKm: number, prepMinutes = 10) {
+  const cyclingKmh = 15;
+  const toStoreMinutes = 6;
+  const handoverMinutes = 3;
+  const travel = (distanceKm / cyclingKmh) * 60;
+  const eta = Math.min(120, Math.max(15, Math.round(prepMinutes + toStoreMinutes + travel + handoverMinutes)));
+  return { etaMinutes: eta, etaMaxMinutes: eta + 10 };
+}
+
+/** Kept for older callers: lower bound of the estimate with the default preparation time. */
 export function calcEtaMinutes(distanceKm: number): number {
-  const avgSpeedKmh = 25; // city courier speed
-  const packagingMins = 10;
-  const travelMins = (distanceKm / avgSpeedKmh) * 60;
-  return Math.min(120, Math.max(20, Math.round(travelMins + packagingMins)));
+  return estimateDelivery(distanceKm).etaMinutes;
 }

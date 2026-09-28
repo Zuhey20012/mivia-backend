@@ -2,6 +2,7 @@ import pino from "pino";
 import { prisma } from "../lib/prisma";
 import { haversineKm } from "../utils/distance";
 import { emitToAllCouriers, emitToCourier } from "../lib/socket";
+import { pushToUsers } from "../lib/push";
 
 const logger = pino({ name: "dispatch" });
 
@@ -38,19 +39,20 @@ export async function offerOrderToCouriers(orderId: number) {
     deliveryAreaLat: approximate(order.deliveryLat),
     deliveryAreaLng: approximate(order.deliveryLng),
     deliveryFeeCents: order.deliveryFeeCents,
+    courierFeeCents: order.courierFeeCents,
     createdAt: order.createdAt,
   };
 
   const couriers = await prisma.courier.findMany({
     where: { isApproved: true, isActive: true, currentOrderId: null },
-    select: { id: true, latitude: true, longitude: true, updatedAt: true },
+    select: { id: true, userId: true, latitude: true, longitude: true, updatedAt: true },
   });
 
   const nearby =
     order.store.latitude !== null && order.store.longitude !== null
       ? couriers
           .filter((c) => c.latitude !== null && c.longitude !== null && Date.now() - c.updatedAt.getTime() < LOCATION_FRESH_MS)
-          .map((c) => ({ id: c.id, km: haversineKm(order.store.latitude!, order.store.longitude!, c.latitude!, c.longitude!) }))
+          .map((c) => ({ id: c.id, userId: c.userId, km: haversineKm(order.store.latitude!, order.store.longitude!, c.latitude!, c.longitude!) }))
           .filter((c) => c.km <= OFFER_RADIUS_KM)
           .sort((a, b) => a.km - b.km)
       : [];
@@ -60,6 +62,13 @@ export async function offerOrderToCouriers(orderId: number) {
   } else {
     emitToAllCouriers("courier:dispatch_offer", offer);
   }
+  // Same offer as a push, for couriers who are online but have the app in the background
+  const recipients = (nearby.length ? nearby : couriers).map((c) => c.userId).filter((id): id is number => id !== null);
+  pushToUsers(recipients, {
+    title: `New delivery · ${(order.courierFeeCents / 100).toFixed(2).replace(".", ",")} €`,
+    body: `Pick up at ${order.store.name}. Open Malvoya Courier to accept.`,
+    data: { type: "offer", orderId: String(order.id) },
+  }).catch(() => {});
 
   logger.info(
     {

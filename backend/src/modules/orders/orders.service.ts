@@ -8,6 +8,11 @@ import { env } from "../../config/env";
 import { emitOrderStatus, emitToStore } from "../../lib/socket";
 import { offerOrderToCouriers } from "../../services/dispatchService";
 import { sendOrderConfirmation, sendOrderStatusEmail } from "../../services/notificationDeliveryService";
+import { pushToUser } from "../../lib/push";
+import { authenticatedImageUrl, destroyResource } from "../../lib/cloudinary";
+import { estimateDelivery } from "../../utils/distance";
+import { verifyOwnedUpload, UploadProof } from "../media/media.service";
+import { adjustStorePayoutForRefund, createPayoutsForOrder } from "../payouts/payouts.service";
 import { Actor, getCourierForUser, getOrderRelation } from "./access";
 
 const logger = pino({ name: "orders" });
@@ -69,6 +74,8 @@ export async function createOrder(userId: number, input: {
         ? haversineKm(store.latitude, store.longitude, input.deliveryLat, input.deliveryLng)
         : null;
     const pricing = calcOrderPricing(subtotalCents, store.commissionRate, deliveryFeeForDistance(distanceKm));
+    const courierFeeCents = Math.round(pricing.deliveryFeeCents * env.courierFeeShare);
+    const etaMinutes = distanceKm === null ? null : estimateDelivery(distanceKm, store.prepMinutes).etaMinutes;
 
     return tx.order.create({
       data: {
@@ -79,6 +86,8 @@ export async function createOrder(userId: number, input: {
         deliveryLng: input.deliveryLng,
         notes: input.notes,
         ...pricing,
+        courierFeeCents,
+        etaMinutes,
         items: { createMany: { data: itemsData } },
       },
       include: { items: true },
@@ -139,6 +148,11 @@ export async function markOrderPaid(orderId: number, paymentIntentId: string, am
     createdAt: order.createdAt,
   });
   emitOrderStatus(orderId, { status: order.status, paymentStatus: "SUCCEEDED" });
+  pushToUser(order.store.ownerId, {
+    title: `New order #${order.id}`,
+    body: `${order.items.reduce((n, i) => n + i.quantity, 0)} item(s) · ${(order.subtotalCents / 100).toFixed(2).replace(".", ",")} € — accept it in Malvoya Store.`,
+    data: { type: "order", orderId: String(order.id) },
+  }).catch(() => {});
 
   sendOrderConfirmation({
     orderId: order.id,
@@ -215,6 +229,11 @@ async function cancelOrderInternal(orderId: number, reason: string) {
 
   emitOrderStatus(orderId, { status: "CANCELLED" });
   emitToStore(order.storeId, "order:status", { orderId, status: "CANCELLED" });
+  pushToUser(order.userId, {
+    title: `Order #${orderId} was cancelled`,
+    body: order.paymentStatus === "SUCCEEDED" ? "Your money is on its way back to you." : "You have not been charged.",
+    data: { type: "order", orderId: String(orderId) },
+  }).catch(() => {});
   return updated;
 }
 
@@ -254,6 +273,9 @@ export async function updateOrderStatus(orderId: number, actor: Actor, next: Ord
   if (next === "CONFIRMED" && order.paymentStatus !== "SUCCEEDED") {
     throw new OrderError("This order has not been paid yet", 409);
   }
+  if (next === "DELIVERED" && relation === "courier") {
+    throw new OrderError("Confirm the handover in the app to complete this delivery", 409);
+  }
 
   if (next === "CANCELLED") {
     const cancelled = await cancelOrderInternal(orderId, relation === "vendor" ? "Declined by store" : "Cancelled by Malvoya");
@@ -264,7 +286,11 @@ export async function updateOrderStatus(orderId: number, actor: Actor, next: Ord
   const updated = await prisma.$transaction(async (tx) => {
     const res = await tx.order.updateMany({
       where: { id: orderId, status: order.status },
-      data: { status: next, ...(next === "DELIVERED" ? { deliveredAt: new Date() } : {}) },
+      data: {
+        status: next,
+        ...(next === "DELIVERED" ? { deliveredAt: new Date(), handoverMethod: "ADMIN" } : {}),
+        ...(next === "SHIPPED" ? { pickedUpAt: new Date() } : {}),
+      },
     });
     if (res.count === 0) throw new OrderError("The order changed in the meantime, please refresh", 409);
     if (next === "DELIVERED" && order.courierId) {
@@ -273,12 +299,97 @@ export async function updateOrderStatus(orderId: number, actor: Actor, next: Ord
     return tx.order.findUniqueOrThrow({ where: { id: orderId } });
   });
 
-  emitOrderStatus(orderId, { status: next });
-  emitToStore(order.storeId, "order:status", { orderId, status: next });
-  sendOrderStatusEmail(orderId, order.user.email, next).catch(() => {});
-
-  if (next === "CONFIRMED") offerOrderToCouriers(orderId).catch((e) => logger.error({ orderId, e }, "Dispatch failed"));
+  afterStatusChange(updated, order.user.email, next);
   return updated;
+}
+
+const STATUS_PUSH: Partial<Record<OrderStatus, (o: { id: number; etaMinutes: number | null }) => { title: string; body: string }>> = {
+  CONFIRMED: (o) => ({ title: `Order #${o.id} accepted`, body: "The store is getting your order ready." }),
+  PROCESSING: (o) => ({ title: `Order #${o.id} is being packed`, body: "A courier will pick it up soon." }),
+  SHIPPED: (o) => ({ title: `Order #${o.id} is on its way`, body: "Follow your courier live in the app." }),
+  DELIVERED: (o) => ({ title: `Order #${o.id} delivered`, body: "Enjoy! You can rate the store and return items within 14 days." }),
+};
+
+function afterStatusChange(order: { id: number; storeId: number; userId: number; etaMinutes: number | null }, email: string, next: OrderStatus) {
+  emitOrderStatus(order.id, { status: next });
+  emitToStore(order.storeId, "order:status", { orderId: order.id, status: next });
+  sendOrderStatusEmail(order.id, email, next).catch(() => {});
+  const push = STATUS_PUSH[next]?.(order);
+  if (push) pushToUser(order.userId, { ...push, data: { type: "order", orderId: String(order.id) } }).catch(() => {});
+
+  if (next === "CONFIRMED") offerOrderToCouriers(order.id).catch((e) => logger.error({ orderId: order.id, e }, "Dispatch failed"));
+  if (next === "DELIVERED") createPayoutsForOrder(order.id).catch((e) => logger.error({ orderId: order.id, err: e?.message }, "Payout creation failed"));
+}
+
+/**
+ * The courier completes a delivery: handed over in person, or left at the door with a photo.
+ * The courier's position at handover is stored with the order as proof of delivery.
+ */
+export async function deliverOrder(orderId: number, userId: number, input: {
+  method: "IN_PERSON" | "PHOTO"; upload?: UploadProof; latitude?: number; longitude?: number;
+}) {
+  const courier = await requireApprovedCourier(userId);
+  const order = await prisma.order.findUnique({ where: { id: orderId }, include: { user: { select: { email: true } } } });
+  if (!order || order.courierId !== courier.id) throw new OrderError("Order not found", 404);
+  if (order.status !== "SHIPPED") throw new OrderError("Pick the order up before completing the delivery", 409);
+
+  let proofId: string | null = null;
+  if (input.method === "PHOTO") {
+    if (!input.upload) throw new OrderError("Take a photo of where you left the order");
+    await verifyOwnedUpload("delivery_proof", { id: userId, role: "COURIER" }, input.upload, orderId);
+    proofId = input.upload.publicId;
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const res = await tx.order.updateMany({
+      where: { id: orderId, status: "SHIPPED", courierId: courier.id },
+      data: {
+        status: "DELIVERED",
+        deliveredAt: new Date(),
+        handoverMethod: input.method,
+        deliveryProofPublicId: proofId,
+        deliveredLat: input.latitude ?? null,
+        deliveredLng: input.longitude ?? null,
+      },
+    });
+    if (res.count === 0) throw new OrderError("The order changed in the meantime, please refresh", 409);
+    await tx.courier.updateMany({ where: { id: courier.id, currentOrderId: orderId }, data: { currentOrderId: null } });
+    return tx.order.findUniqueOrThrow({ where: { id: orderId } });
+  });
+
+  afterStatusChange(updated, order.user.email, "DELIVERED");
+  return updated;
+}
+
+/** Delivery photo, for the customer, the courier who took it and Malvoya only. */
+export async function getDeliveryProof(orderId: number, actor: Actor) {
+  const relation = await getOrderRelation(orderId, actor);
+  if (!relation || relation === "vendor") throw new OrderError("Order not found", 404);
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { handoverMethod: true, deliveryProofPublicId: true, deliveredAt: true, deliveredLat: true, deliveredLng: true },
+  });
+  if (!order?.deliveredAt) throw new OrderError("This order has not been delivered yet", 409);
+  return {
+    method: order.handoverMethod,
+    deliveredAt: order.deliveredAt,
+    photoUrl: order.deliveryProofPublicId ? authenticatedImageUrl(order.deliveryProofPublicId) : null,
+    location: order.deliveredLat !== null && order.deliveredLng !== null ? { lat: order.deliveredLat, lng: order.deliveredLng } : null,
+  };
+}
+
+/** Delivery photos are kept 30 days, long enough to settle "where is my parcel" questions. */
+export async function purgeOldDeliveryProofs() {
+  const old = await prisma.order.findMany({
+    where: { deliveryProofPublicId: { not: null }, deliveredAt: { lt: new Date(Date.now() - 30 * 86_400_000) } },
+    select: { id: true, deliveryProofPublicId: true },
+    take: 100,
+  });
+  for (const o of old) {
+    await destroyResource(o.deliveryProofPublicId!, "image", "authenticated").catch(() => {});
+    await prisma.order.update({ where: { id: o.id }, data: { deliveryProofPublicId: null, deliveredLat: null, deliveredLng: null } });
+  }
+  return old.length;
 }
 
 // ─── Reading orders ─────────────────────────────────────────────────────────
@@ -291,7 +402,7 @@ export async function getOrder(id: number, actor: Actor) {
   return prisma.order.findUniqueOrThrow({
     where: { id },
     include: {
-      items: { include: { product: { select: { id: true, name: true, images: true } } } },
+      items: { include: { product: { select: { id: true, name: true, images: true } }, variant: { select: { size: true, color: true } } } },
       courier: courierPublic,
       store: { select: { id: true, name: true, address: true, latitude: true, longitude: true, logoUrl: true, phone: true } },
     },
@@ -301,8 +412,9 @@ export async function getOrder(id: number, actor: Actor) {
 /** The same endpoint serves every app; what you get depends on your role. */
 export async function listOrdersFor(actor: Actor) {
   const include = {
-    items: { include: { product: { select: { name: true, images: true } } } },
+    items: { include: { product: { select: { name: true, images: true } }, variant: { select: { size: true, color: true } } } },
     store: { select: { id: true, name: true, logoUrl: true, address: true, latitude: true, longitude: true } },
+    review: { select: { storeRating: true } },
   };
 
   if (actor.role === "VENDOR") {
@@ -348,6 +460,7 @@ export async function listAvailableOrders(userId: number) {
     store: o.store,
     itemCount: o.items.reduce((sum, i) => sum + i.quantity, 0),
     deliveryFeeCents: o.deliveryFeeCents,
+    courierFeeCents: o.courierFeeCents,
     deliveryAreaLat: o.deliveryLat === null ? null : Math.round(o.deliveryLat * 100) / 100,
     deliveryAreaLng: o.deliveryLng === null ? null : Math.round(o.deliveryLng * 100) / 100,
     createdAt: o.createdAt,
@@ -378,7 +491,7 @@ export async function acceptOrder(orderId: number, userId: number) {
   const updated = await prisma.$transaction(async (tx) => {
     const res = await tx.order.updateMany({
       where: { id: orderId, courierId: null, paymentStatus: "SUCCEEDED", status: { in: ["CONFIRMED", "PROCESSING"] } },
-      data: { courierId: courier.id },
+      data: { courierId: courier.id, acceptedAt: new Date() },
     });
     if (res.count === 0) throw new OrderError("This delivery is no longer available", 409);
     await tx.courier.update({ where: { id: courier.id }, data: { currentOrderId: orderId } });
@@ -387,6 +500,11 @@ export async function acceptOrder(orderId: number, userId: number) {
 
   emitOrderStatus(orderId, { status: updated.status, courierId: courier.id, courierName: courier.name });
   emitToStore(updated.storeId, "order:status", { orderId, status: updated.status, courierName: courier.name });
+  pushToUser(updated.userId, {
+    title: `${courier.name.split(" ")[0]} is delivering your order`,
+    body: "Your courier is heading to the store.",
+    data: { type: "order", orderId: String(orderId) },
+  }).catch(() => {});
   return updated;
 }
 
@@ -558,14 +676,38 @@ export async function updateReturnStatus(id: number, actor: Actor, data: {
     }),
     // Returned goods go back into stock
     ...order.items.map((i) => prisma.product.update({ where: { id: i.productId }, data: { stockQuantity: { increment: i.quantity } } })),
+    ...order.items.filter((i) => i.variantId).map((i) => prisma.productVariant.update({ where: { id: i.variantId! }, data: { stock: { increment: i.quantity } } })),
   ]);
+  await adjustStorePayoutForRefund(order.id, refundCents);
+  pushToUser(ret.userId, {
+    title: "Refund sent",
+    body: `${(refundCents / 100).toFixed(2).replace(".", ",")} € for order #${order.id} is on its way back to you.`,
+    data: { type: "order", orderId: String(order.id) },
+  }).catch(() => {});
   return updated;
 }
 
-export async function listReturns(userId: number) {
+/** Customers see their own returns; stores see returns of their orders so they can process them. */
+export async function listReturns(actor: Actor) {
+  let where: Prisma.ReturnWhereInput = { userId: actor.id };
+  if (actor.role === "VENDOR") {
+    const store = await prisma.store.findUnique({ where: { ownerId: actor.id }, select: { id: true } });
+    if (!store) return [];
+    where = { order: { storeId: store.id } };
+  } else if (actor.role === "ADMIN") {
+    where = {};
+  }
   return prisma.return.findMany({
-    where: { userId },
-    include: { order: { select: { id: true, totalCents: true, deliveredAt: true, store: { select: { name: true } } } } },
+    where,
+    include: {
+      order: {
+        select: {
+          id: true, totalCents: true, subtotalCents: true, deliveryFeeCents: true, refundedCents: true, deliveredAt: true,
+          store: { select: { name: true } },
+          items: { select: { quantity: true, unitCents: true, product: { select: { name: true, images: true } }, variant: { select: { size: true, color: true } } } },
+        },
+      },
+    },
     orderBy: { createdAt: "desc" },
     take: 100,
   });
