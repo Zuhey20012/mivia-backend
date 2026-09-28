@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import '../core/strings.dart';
 import '../config/theme.dart';
 import '../l10n.dart';
 import '../locale_provider.dart';
@@ -392,7 +393,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
 
               const SizedBox(height: 12),
 
-              // Instant AI Concierge Card
+              // Help assistant (automatic answers, not AI)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: GestureDetector(
@@ -426,12 +427,12 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                l10n.translate('instantAiConcierge'),
+                                tr(context, 'Help assistant', 'Apuri'),
                                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16),
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                l10n.translate('instantAiConciergeSub'),
+                                tr(context, 'Automatic answers about orders, returns and sizes', 'Automaattiset vastaukset tilauksista, palautuksista ja koosta'),
                                 style: const TextStyle(color: Colors.white70, fontSize: 12),
                               ),
                             ],

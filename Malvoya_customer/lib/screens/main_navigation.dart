@@ -5,7 +5,7 @@ import 'package:provider/provider.dart';
 import '../cart.dart';
 import '../config/theme.dart';
 import 'home.dart';
-import 'video_feed.dart';
+import 'drops_feed.dart';
 import 'search.dart';
 import 'orders.dart';
 import 'profile.dart';
@@ -13,11 +13,8 @@ import '../checkout.dart';
 import '../l10n.dart';
 import '../locale_provider.dart';
 
-/**
- * Malvoya Master Navigation Hub
- * Dynamically localized across 25 languages with high-performance IndexedStack,
- * Shoppable High-Fashion Live Drops (TikTok-style 120Hz Reel), and decoupled Floating Bag Island.
- */
+/// Five tabs: Home, Search, Drops (shoppable videos), Orders and Profile, with a floating bag
+/// bar whenever the bag has items (hidden on Drops, which has its own buy buttons).
 
 class MainNavigation extends StatefulWidget {
   const MainNavigation({super.key});
@@ -44,7 +41,7 @@ class _MainNavigationState extends State<MainNavigation> {
   List<Widget> _buildScreens(String langCode) => [
     HomeScreen(key: ValueKey('home_$langCode')),
     SearchScreen(key: ValueKey('search_$langCode'), isTab: true),
-    VideoFeedScreen(key: ValueKey('drop_$langCode')),
+    DropsFeedScreen(key: ValueKey('drop_$langCode'), isActive: _index == 2),
     OrdersScreen(key: ValueKey('orders_$langCode')),
     ProfileScreen(key: ValueKey('profile_$langCode')),
   ];
@@ -62,18 +59,19 @@ class _MainNavigationState extends State<MainNavigation> {
             children: [
               PageView(
                 controller: _pageController,
-                physics: const BouncingScrollPhysics(),
+                // Swiping sideways would fight the vertical Drops feed, so tabs change by tapping
+                physics: const NeverScrollableScrollPhysics(),
                 onPageChanged: (i) => setState(() => _index = i),
                 children: _buildScreens(localeProvider.locale.languageCode),
               ),
 
-              // Decoupled Floating Bag Island Widget
-              Positioned(
-                bottom: 84,
-                left: 16,
-                right: 16,
-                child: _buildFloatingBagIsland(l10n),
-              ),
+              if (_index != 2)
+                Positioned(
+                  bottom: 84,
+                  left: 16,
+                  right: 16,
+                  child: _buildFloatingBagIsland(l10n),
+                ),
             ],
           ),
           bottomNavigationBar: Container(

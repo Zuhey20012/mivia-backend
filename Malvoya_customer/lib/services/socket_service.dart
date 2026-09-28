@@ -11,6 +11,10 @@ class CustomerSocketService extends ChangeNotifier {
   bool _connected = false;
   bool get isConnected => _connected;
 
+  // Rooms are per connection, so they are joined again after every reconnect
+  final Set<int> _trackedOrders = {};
+  final Set<int> _chats = {};
+
   // Callbacks for real-time events
   Function(Map<String, dynamic>)? onCourierLocationUpdate;
   Function(Map<String, dynamic>)? onOrderStatusUpdate;
@@ -31,7 +35,12 @@ class CustomerSocketService extends ChangeNotifier {
 
     _socket!.onConnect((_) {
       _connected = true;
-      debugPrint('[CustomerSocket] Connected');
+      for (final id in _trackedOrders) {
+        _socket?.emit('track:order', id);
+      }
+      for (final id in _chats) {
+        _socket?.emit('chat:join', id);
+      }
       notifyListeners();
     });
 
@@ -48,53 +57,37 @@ class CustomerSocketService extends ChangeNotifier {
 
     // Listen for live courier GPS
     _socket!.on('courier:location', (data) {
-      debugPrint('[CustomerSocket] Courier location: $data');
-      if (data is Map<String, dynamic>) {
-        onCourierLocationUpdate?.call(data);
-      }
-      notifyListeners();
+      if (data is Map) onCourierLocationUpdate?.call(Map<String, dynamic>.from(data));
     });
 
-    // Listen for order status changes
     _socket!.on('order:status', (data) {
-      debugPrint('[CustomerSocket] Order status: $data');
-      if (data is Map<String, dynamic>) {
-        onOrderStatusUpdate?.call(data);
-      }
+      if (data is Map) onOrderStatusUpdate?.call(Map<String, dynamic>.from(data));
       notifyListeners();
     });
 
-    // Listen for chat messages
     _socket!.on('chat:message', (data) {
-      debugPrint('[CustomerSocket] Chat message: $data');
-      if (data is Map<String, dynamic>) {
-        onChatMessage?.call(data);
-      }
-      notifyListeners();
+      if (data is Map) onChatMessage?.call(Map<String, dynamic>.from(data));
     });
   }
 
-  void trackOrder(dynamic orderId) {
+  /// Order ids must be the numeric id (the server ignores anything else).
+  void trackOrder(int orderId) {
+    _trackedOrders.add(orderId);
     _socket?.emit('track:order', orderId);
-    debugPrint('[CustomerSocket] Tracking order: $orderId');
   }
 
-  void joinChat(dynamic orderId) {
+  void joinChat(int orderId) {
+    _chats.add(orderId);
     _socket?.emit('chat:join', orderId);
-    debugPrint('[CustomerSocket] Joined chat for order: $orderId');
   }
 
-  void sendChatMessage(dynamic orderId, String message, String senderRole) {
-    _socket?.emit('chat:send', {
-      'orderId': orderId,
-      'message': message,
-      'sender': senderRole,
-    });
+  void sendChatMessage(int orderId, String message, String senderName) {
+    _socket?.emit('chat:send', {'orderId': orderId, 'text': message, 'sender': senderName});
   }
 
-  void stopTracking() {
-    // Socket.io rooms are automatically left on disconnect
-    debugPrint('[CustomerSocket] Stopped tracking');
+  void stopTracking(int orderId) {
+    _trackedOrders.remove(orderId);
+    _chats.remove(orderId);
   }
 
   void disconnect() {
@@ -102,6 +95,8 @@ class CustomerSocketService extends ChangeNotifier {
     _socket?.dispose();
     _socket = null;
     _connected = false;
+    _trackedOrders.clear();
+    _chats.clear();
     onCourierLocationUpdate = null;
     onOrderStatusUpdate = null;
     onChatMessage = null;

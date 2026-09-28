@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
-import 'admin_dashboard.dart';
 import 'chatbot.dart';
 import 'settings_screen.dart';
 import 'returns_screen.dart';
@@ -12,6 +11,8 @@ import 'support_hub_screen.dart';
 import 'terms_legal_screen.dart';
 import 'privacy_gdpr_screen.dart';
 import 'orders.dart';
+import 'favorites_screen.dart';
+import '../core/strings.dart';
 import '../locale_provider.dart';
 import '../l10n.dart';
 import '../config/theme.dart';
@@ -575,11 +576,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     const SizedBox(width: 10),
                     _buildQuickCard(
                       context: context,
-                      icon: Icons.swap_horiz_rounded,
-                      iconColor: const Color(0xFF55226E),
-                      title: l10n.translate('swipeToSwap'),
-                      subtitle: l10n.translate('refundsReturns'),
-                      onTap: () => _nav(context, const ReturnsScreen()),
+                      icon: Icons.favorite_rounded,
+                      iconColor: const Color(0xFFC2412D),
+                      title: tr(context, 'Favourites', 'Suosikit'),
+                      subtitle: tr(context, 'Saved items', 'Tallennetut tuotteet'),
+                      onTap: () => _nav(context, const FavoritesScreen()),
                     ),
                   ],
                 ),
@@ -699,14 +700,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
               // Menu Group 4: Concierge & Support
               _buildMenuGroup(
                 context: context,
-                title: l10n.translate('conciergeAssistance'),
+                title: tr(context, 'Help', 'Apua'),
                 children: [
                   _buildTile(
                     context: context,
-                    icon: Icons.auto_awesome_rounded,
+                    icon: Icons.help_outline_rounded,
                     iconColor: AppTheme.primary,
-                    title: l10n.translate('aiConcierge'),
-                    subtitle: l10n.translate('aiConciergeSubtitle'),
+                    title: tr(context, 'Help assistant', 'Apuri'),
+                    subtitle: tr(context, 'Automatic answers about orders, returns and sizes', 'Automaattiset vastaukset tilauksista, palautuksista ja koosta'),
                     onTap: () => _nav(context, const ChatbotScreen()),
                   ),
                   Divider(height: 1, indent: 56, color: dividerColor),
@@ -719,29 +720,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     onTap: () => _nav(context, const SupportHubScreen()),
                   ),
                 ],
-              ),
-
-              // Admin Control Room (if Admin)
-              Consumer<AuthService>(
-                builder: (context, a, _) {
-                  if (a.isAdmin) {
-                    return _buildMenuGroup(
-                      context: context,
-                      title: l10n.translate('adminControlRoom'),
-                      children: [
-                        _buildTile(
-                          context: context,
-                          icon: Icons.admin_panel_settings_rounded,
-                          iconColor: Colors.purple,
-                          title: 'Owner & Fleet Dashboard',
-                          subtitle: 'Algorithmic transparency audit & metrics',
-                          onTap: () => _nav(context, const AdminDashboard()),
-                        ),
-                      ],
-                    );
-                  }
-                  return const SizedBox.shrink();
-                },
               ),
 
               const SizedBox(height: 16),

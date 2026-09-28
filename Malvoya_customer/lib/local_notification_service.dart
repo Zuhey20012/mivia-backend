@@ -32,7 +32,7 @@ class LocalNotificationService {
           AndroidFlutterLocalNotificationsPlugin>();
       if (androidPlugin != null) {
         await androidPlugin.createNotificationChannel(channel);
-        await androidPlugin.requestNotificationsPermission();
+        // Permission is asked after sign-in (see PushService), not on first launch
       }
       _initialized = true;
     } catch (_) {}

@@ -8,12 +8,6 @@ import 'package:http/http.dart' as http;
 import '../config/theme.dart';
 import '../local_notification_service.dart';
 
-enum GoogleMapLayer {
-  hybrid,
-  satellite,
-  roadmap,
-  terrain,
-}
 
 class AddressResult {
   final String street;
@@ -59,21 +53,10 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
   bool _isGeocoding = false;
   Timer? _debounceTimer;
 
-  GoogleMapLayer _selectedLayer = GoogleMapLayer.hybrid;
 
-  String get _currentTileUrl {
-    switch (_selectedLayer) {
-      case GoogleMapLayer.satellite:
-        return 'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}';
-      case GoogleMapLayer.hybrid:
-        return 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}';
-      case GoogleMapLayer.terrain:
-        return 'https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}';
-      case GoogleMapLayer.roadmap:
-      default:
-        return 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}';
-    }
-  }
+  // OpenStreetMap tiles (licensed for use with attribution). Google's tile servers may not be
+  // used directly outside the official Maps SDK, so there is no satellite layer.
+  String get _currentTileUrl => 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 
   String _street = 'Scanning map...';
   String _houseNumber = '';
@@ -108,16 +91,14 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
     super.dispose();
   }
 
-  void _onPositionChanged(MapPosition position, bool hasGesture) {
-    if (position.center != null) {
-      _currentCenter = position.center!;
-      _debounceTimer?.cancel();
-      _debounceTimer = Timer(const Duration(milliseconds: 550), () {
-        if (mounted) {
-          _reverseGeocode(_currentCenter);
-        }
-      });
-    }
+  void _onPositionChanged(MapCamera camera, bool hasGesture) {
+    _currentCenter = camera.center;
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 550), () {
+      if (mounted) {
+        _reverseGeocode(_currentCenter);
+      }
+    });
   }
 
   Future<void> _reverseGeocode(LatLng point) async {
@@ -229,42 +210,6 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
     Navigator.pop(context, result);
   }
 
-  Widget _buildLayerChip(String label, GoogleMapLayer layer, Color cardBg, Color textPrimary, Color borderColor) {
-    final isSelected = _selectedLayer == layer;
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.lightImpact();
-        setState(() => _selectedLayer = layer);
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(
-          color: isSelected ? AppTheme.primary : cardBg.withValues(alpha: 0.94),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isSelected ? AppTheme.primary : borderColor,
-            width: 1.2,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.1),
-              blurRadius: 6,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
-            color: isSelected ? Colors.white : textPrimary,
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -276,13 +221,11 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          // 1. Google Maps Multi-Layer Engine (Satellite / Hybrid / Roads / 3D Terrain)
           FlutterMap(
-            key: ValueKey(_selectedLayer),
             mapController: _mapController,
             options: MapOptions(
-              center: _currentCenter,
-              zoom: 16.0,
+              initialCenter: _currentCenter,
+              initialZoom: 16.0,
               maxZoom: 20.0,
               minZoom: 4.0,
               onPositionChanged: _onPositionChanged,
@@ -444,22 +387,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                   ),
                   const SizedBox(height: 10),
 
-                  // Google Maps Layer Switcher Pill Row
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    physics: const BouncingScrollPhysics(),
-                    child: Row(
-                      children: [
-                        _buildLayerChip('🗺️ Hybrid', GoogleMapLayer.hybrid, cardBg, textPrimary, borderColor),
-                        const SizedBox(width: 8),
-                        _buildLayerChip('🛰️ Satellite', GoogleMapLayer.satellite, cardBg, textPrimary, borderColor),
-                        const SizedBox(width: 8),
-                        _buildLayerChip('🛣️ Roads', GoogleMapLayer.roadmap, cardBg, textPrimary, borderColor),
-                        const SizedBox(width: 8),
-                        _buildLayerChip('⛰️ 3D Terrain', GoogleMapLayer.terrain, cardBg, textPrimary, borderColor),
-                      ],
-                    ),
-                  ),
+                  const Text('© OpenStreetMap contributors', style: TextStyle(fontSize: 10.5, color: Colors.grey)),
                 ],
               ),
             ),
@@ -508,7 +436,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                 GestureDetector(
                   onTap: () {
                     HapticFeedback.lightImpact();
-                    final newZoom = (_mapController.zoom + 1.0).clamp(4.0, 20.0);
+                    final newZoom = (_mapController.camera.zoom + 1.0).clamp(4.0, 20.0);
                     _mapController.move(_currentCenter, newZoom);
                   },
                   child: Container(
@@ -529,7 +457,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                 GestureDetector(
                   onTap: () {
                     HapticFeedback.lightImpact();
-                    final newZoom = (_mapController.zoom - 1.0).clamp(4.0, 20.0);
+                    final newZoom = (_mapController.camera.zoom - 1.0).clamp(4.0, 20.0);
                     _mapController.move(_currentCenter, newZoom);
                   },
                   child: Container(

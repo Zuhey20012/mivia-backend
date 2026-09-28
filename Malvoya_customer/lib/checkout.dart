@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'core/delivery_location.dart';
 import 'config/constants.dart';
 import 'config/theme.dart';
 import 'auth_service.dart';
@@ -36,6 +37,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
   Future<void> _loadSavedAddress() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      await DeliveryLocation.instance.load();
       final savedAddr = prefs.getString('malvoya_active_address') ??
                         prefs.getString('saved_default_address') ?? 
                         prefs.getString('user_delivery_address');
@@ -77,6 +79,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
       return;
     }
 
+    final loc = DeliveryLocation.instance;
     try {
       final response = await http.post(
         Uri.parse('${AppConstants.apiBase}/orders'),
@@ -87,10 +90,12 @@ class _CheckoutPageState extends State<CheckoutPage> {
         body: jsonEncode({
           'storeId': cart.storeId,
           'deliveryAddress': _addressCtrl.text.trim(),
-          'items': cart.items.map((i) => {
-            'productId': i.productId,
-            'quantity': i.quantity,
-          }).toList(),
+          // Coordinates only when this is the address that was pinned on the map
+          if (loc.hasCoordinates && loc.address?.trim() == _addressCtrl.text.trim()) ...{
+            'deliveryLat': loc.lat,
+            'deliveryLng': loc.lng,
+          },
+          'items': cart.items.map((i) => i.toOrderItem()..removeWhere((_, v) => v == null)).toList(),
         }),
       );
 

@@ -10,11 +10,13 @@ import '../l10n.dart';
 import '../locale_provider.dart';
 import 'store_detail.dart';
 import 'category_detail.dart';
-import 'map_tracker.dart';
+import 'order_detail.dart';
 import 'location_selector_modal.dart';
 import 'notification_center_drawer.dart';
 import 'returns_screen.dart';
-import '../features/returns/presentation/widgets/swipe_to_swap_sheet.dart';
+import '../core/delivery_location.dart';
+import '../core/strings.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shimmer/shimmer.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -45,7 +47,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     {'name': 'Home', 'icon': Icons.chair_rounded, 'color': Color(0xFF6366F1)},
     {'name': 'Returns', 'icon': Icons.assignment_return_rounded, 'color': Color(0xFF6D2E8C)},
     {'name': 'Eco-Friendly', 'icon': Icons.eco_rounded, 'color': Color(0xFF248A52)},
-    {'name': 'Swipe to Swap', 'icon': Icons.swap_horiz_rounded, 'color': Color(0xFF9B5DB8)},
     {'name': 'Second Hand', 'icon': Icons.recycling_rounded, 'color': Color(0xFF8E4FAE)},
   ];
 
@@ -59,8 +60,19 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _radarPulseAnim = Tween<double>(begin: 0.85, end: 1.18).animate(
       CurvedAnimation(parent: _radarPulseCtrl, curve: Curves.easeInOut),
     );
-    fetchStores();
+    DeliveryLocation.instance.addListener(_onLocationChanged);
+    DeliveryLocation.instance.load().then((_) {
+      final addr = DeliveryLocation.instance.address;
+      if (addr != null && mounted) setState(() => _currentDeliveryCity = addr);
+      fetchStores();
+    });
     checkActiveOrders();
+  }
+
+  void _onLocationChanged() {
+    if (!mounted) return;
+    setState(() => loading = true);
+    fetchStores();
   }
 
   Future<void> checkActiveOrders() async {
@@ -97,13 +109,17 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   @override
   void dispose() {
+    DeliveryLocation.instance.removeListener(_onLocationChanged);
     _radarPulseCtrl.dispose();
     super.dispose();
   }
 
   Future<void> fetchStores() async {
     try {
-      final res = await http.get(Uri.parse('${AppConstants.apiBase}/stores'));
+      final q = DeliveryLocation.instance.query;
+      final res = await http
+          .get(Uri.parse('${AppConstants.apiBase}/stores').replace(queryParameters: q.isEmpty ? null : q))
+          .timeout(const Duration(seconds: 12));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (mounted) {
@@ -143,16 +159,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => const ReturnsScreen()),
-          );
-        } else if (catName == 'Swipe to Swap') {
-          SwipeToSwapSheet.show(
-            context,
-            orderId: 'SWAP-DEMO',
-            itemName: 'Malvoya Designer Apparel',
-            currentSize: 'M',
-            currentColor: 'Noir',
-            price: 189.0,
-            storeName: 'Helsinki Flagship',
           );
         } else {
           Navigator.push(
@@ -217,235 +223,86 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
+  /// Shown only while you have a real order on its way.
   Widget _buildRadarBanner(BuildContext context, AppLocalizations l10n, bool isDark) {
-    final hasRealOrder = hasActiveOrder && activeOrder != null;
-    final realStoreName = activeOrder?['store']?['name'] ?? activeOrder?['storeName'] ?? 'Putiikki';
-    final rawOrderId = activeOrder?['id']?.toString() ?? '';
-    final realOrderId = rawOrderId.length > 8 ? rawOrderId.substring(0, 8).toUpperCase() : rawOrderId.toUpperCase();
-    final realCourierName = activeOrder?['courier']?['name'] ?? 'Kuriiri noutamassa';
-    final realStatus = activeOrder?['status'] ?? 'PENDING';
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 24),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: isDark
-              ? [const Color(0xFF2A2331), const Color(0xFF221C29)]
-              : [const Color(0xFFF1E7F6), const Color(0xFFF6F0F9)],
-        ),
-        border: Border.all(
-          color: const Color(0xFF6D2E8C).withValues(alpha: isDark ? 0.35 : 0.25),
-          width: 1.2,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF6D2E8C).withValues(alpha: isDark ? 0.22 : 0.12),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(24),
-        child: Padding(
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    final order = activeOrder;
+    if (!hasActiveOrder || order == null) return const SizedBox.shrink();
+    final status = order['status'];
+    final label = switch (status) {
+      'PENDING' => tr(context, 'Waiting for the store', 'Odottaa kauppaa'),
+      'CONFIRMED' => tr(context, 'Accepted by the store', 'Kauppa hyväksyi'),
+      'PROCESSING' => tr(context, 'Being packed', 'Pakataan'),
+      _ => tr(context, 'On its way to you', 'Matkalla sinulle'),
+    };
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.mediumImpact();
+        Navigator.push(context, MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: asInt(order['id'])!)));
+      },
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(20)),
+        child: Row(
+          children: [
+            ScaleTransition(
+              scale: _radarPulseAnim,
+              child: const Icon(Icons.delivery_dining_rounded, color: Colors.white, size: 30),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      ScaleTransition(
-                        scale: _radarPulseAnim,
-                        child: Container(
-                          width: 32,
-                          height: 32,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: const Color(0xFF248A52).withValues(alpha: 0.18),
-                            border: Border.all(color: const Color(0xFF248A52), width: 1.5),
-                          ),
-                          child: const Center(
-                            child: Icon(Icons.radar_rounded, size: 18, color: Color(0xFF248A52)),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            hasRealOrder ? 'Aktiivinen tilaus' : l10n.translate('liveCourierRadar'),
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w800,
-                              color: isDark ? Colors.white : const Color(0xFF1C1820),
-                            ),
-                          ),
-                          Text(
-                            hasRealOrder
-                                ? 'Tilaus #$realOrderId'
-                                : l10n.translate('radarTelemetry'),
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              color: const Color(0xFF248A52),
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF248A52).withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFF248A52).withValues(alpha: 0.3)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 6,
-                          height: 6,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF248A52),
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          hasRealOrder
-                              ? (realStatus == 'SHIPPED' ? 'ETA ~15m' : realStatus)
-                              : 'Live 60Hz',
-                          style: const TextStyle(
-                            color: Color(0xFF248A52),
-                            fontWeight: FontWeight.w800,
-                            fontSize: 11.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                  Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
+                  Text('${order['store']?['name'] ?? ''} · #${order['id']}', style: const TextStyle(color: Colors.white70, fontSize: 13)),
                 ],
               ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Icon(
-                    hasRealOrder ? Icons.delivery_dining_rounded : Icons.location_city_rounded,
-                    color: const Color(0xFF6D2E8C),
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      hasRealOrder
-                          ? '$realCourierName • $realStoreName'
-                          : 'Helsinki • Espoo • Vantaa • Kauniainen',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white70 : Colors.black87,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF6D2E8C),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    elevation: 0,
-                  ),
-                  icon: const Icon(Icons.location_searching_rounded, size: 18),
-                  label: Text(
-                    hasRealOrder ? 'Seuraa tilausta tutkalla' : l10n.translate('openRadarMap'),
-                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5),
-                  ),
-                  onPressed: () {
-                    HapticFeedback.mediumImpact();
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => MapTrackerScreen(
-                          orderId: hasRealOrder ? '#$realOrderId' : 'MALVOYA-RADAR',
-                          merchantName: hasRealOrder ? realStoreName : 'Pääkaupunkiseudun Putiikit',
-                          courierName: hasRealOrder ? realCourierName : 'Kuriiriverkosto',
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
+            ),
+            Text(tr(context, 'Track', 'Seuraa'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+            const Icon(Icons.chevron_right_rounded, color: Colors.white),
+          ],
         ),
       ),
     );
   }
 
   Widget _buildStoreCard(BuildContext context, Map<String, dynamic> store, bool isDark) {
-    final cardBg = AppTheme.cardBackground(context);
-    final cardBorder = AppTheme.cardBorder(context);
     final textPrimary = AppTheme.primaryText(context);
     final textSecondary = AppTheme.secondaryText(context);
+    final reviews = asInt(store['totalReviews']) ?? 0;
+    final eta = etaWindow(store);
+    final km = store['distanceKm'];
 
     return GestureDetector(
       onTap: () {
         HapticFeedback.lightImpact();
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => StoreDetailScreen(store: store)),
-        );
+        Navigator.push(context, MaterialPageRoute(builder: (_) => StoreDetailScreen(store: store)));
       },
       child: Container(
         margin: const EdgeInsets.only(bottom: 20),
         decoration: BoxDecoration(
-          color: cardBg,
+          color: AppTheme.cardBackground(context),
           borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: cardBorder, width: 1.2),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.28 : 0.04),
-              blurRadius: 16,
-              offset: const Offset(0, 6),
-            ),
-          ],
+          border: Border.all(color: AppTheme.cardBorder(context), width: 1.2),
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
+            SizedBox(
               height: 140,
               width: double.infinity,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    const Color(0xFF6D2E8C).withValues(alpha: 0.85),
-                    const Color(0xFF55226E),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
-              child: const Center(
-                child: Icon(Icons.storefront_rounded, size: 56, color: Colors.white),
-              ),
+              child: store['bannerUrl'] != null
+                  ? CachedNetworkImage(imageUrl: store['bannerUrl'], fit: BoxFit.cover)
+                  : Container(
+                      decoration: const BoxDecoration(gradient: LinearGradient(colors: [Color(0xFF6D2E8C), Color(0xFF55226E)])),
+                      child: Center(
+                        child: store['logoUrl'] != null
+                            ? CircleAvatar(radius: 34, backgroundImage: CachedNetworkImageProvider(store['logoUrl']))
+                            : const Icon(Icons.storefront_rounded, size: 56, color: Colors.white),
+                      ),
+                    ),
             ),
             Padding(
               padding: const EdgeInsets.all(16),
@@ -453,72 +310,44 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Expanded(
-                        child: Text(
-                          store['name'] ?? 'Helsinki Boutique',
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                            color: textPrimary,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                        child: Text(store['name'] ?? '', maxLines: 1, overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: textPrimary)),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF6D2E8C).withValues(alpha: 0.14),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: const Color(0xFF6D2E8C).withValues(alpha: 0.3),
-                            width: 1,
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.star_rounded, size: 16, color: Color(0xFFE08A00)),
-                            const SizedBox(width: 4),
-                            Text(
-                              '${store['rating'] ?? '4.9'}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 12.5,
-                                color: Color(0xFF6D2E8C),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      if (reviews > 0) ...[
+                        const Icon(Icons.star_rounded, size: 17, color: Color(0xFFE08A00)),
+                        const SizedBox(width: 3),
+                        Text('${store['rating']} ($reviews)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textPrimary)),
+                      ] else
+                        Text(tr(context, 'New', 'Uusi'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppTheme.primary)),
                     ],
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    store['description'] ?? store['category'] ?? 'Pohjoismainen luksus & muoti',
-                    style: TextStyle(color: textSecondary, fontSize: 13, height: 1.3),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  if ((store['description'] ?? '').toString().isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(store['description'], maxLines: 2, overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: textSecondary, fontSize: 13, height: 1.3)),
+                  ],
                   const SizedBox(height: 12),
-                  Row(
+                  Wrap(
+                    spacing: 14,
+                    runSpacing: 6,
                     children: [
-                      Icon(Icons.delivery_dining_rounded, size: 16, color: textSecondary),
-                      const SizedBox(width: 5),
-                      Text(
-                        '15-25 min',
-                        style: TextStyle(color: textSecondary, fontWeight: FontWeight.w600, fontSize: 12.5),
-                      ),
-                      const SizedBox(width: 16),
-                      Icon(Icons.euro_rounded, size: 15, color: textSecondary),
-                      const SizedBox(width: 3),
-                      Text(
-                        '2,90 € toimitus',
-                        style: TextStyle(color: textSecondary, fontWeight: FontWeight.w600, fontSize: 12.5),
-                      ),
+                      if (eta != null) _meta(Icons.schedule_rounded, eta, textSecondary),
+                      _meta(Icons.delivery_dining_rounded, '${euro(context, store['deliveryFeeCents'])} ${tr(context, 'delivery', 'toimitus')}', textSecondary),
+                      if (km != null) _meta(Icons.near_me_outlined, '$km km', textSecondary),
+                      if (store['sellerType'] == 'PRIVATE') _meta(Icons.person_outline_rounded, tr(context, 'Private seller', 'Yksityinen myyjä'), textSecondary),
                     ],
                   ),
+                  if (!DeliveryLocation.instance.hasCoordinates)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        tr(context, 'Pin your address on the map to see the exact delivery fee and time.',
+                            'Merkitse osoitteesi kartalle nähdäksesi tarkan toimitusmaksun ja -ajan.'),
+                        style: TextStyle(fontSize: 11.5, color: textSecondary),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -527,6 +356,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       ),
     );
   }
+
+  Widget _meta(IconData icon, String text, Color color) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 4),
+          Text(text, style: TextStyle(color: color, fontWeight: FontWeight.w600, fontSize: 12.5)),
+        ],
+      );
 
   Widget _buildStoresEmptyState(BuildContext context, AppLocalizations l10n, bool isDark) {
     return Container(

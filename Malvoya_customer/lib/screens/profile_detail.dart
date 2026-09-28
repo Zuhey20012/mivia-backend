@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../core/strings.dart';
 import '../config/theme.dart';
 import 'payment_methods_screen.dart';
 import '../theme_provider.dart';
@@ -819,7 +820,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
       children: [
         Text('How can we help you?', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: textPrimary)),
         const SizedBox(height: 6),
-        Text('Our customer team and AI concierge are available 24/7.', style: TextStyle(color: textSecondary, fontSize: 14)),
+        Text(tr(context, 'Automatic answers any time; our team replies by email.', 'Automaattiset vastaukset milloin vain; tiimimme vastaa sähköpostitse.'), style: TextStyle(color: textSecondary, fontSize: 14)),
         const SizedBox(height: 24),
 
         ListTile(
@@ -830,8 +831,8 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
             decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(12)),
             child: const Icon(Icons.support_agent_rounded, color: Color(0xFF2563EB), size: 24),
           ),
-          title: Text('Malvoya AI Concierge', style: TextStyle(fontWeight: FontWeight.w700, color: textPrimary)),
-          subtitle: Text('Instant answers to express local delivery, sizing & returns', style: TextStyle(color: textSecondary)),
+          title: Text(tr(context, 'Help assistant', 'Apuri'), style: TextStyle(fontWeight: FontWeight.w700, color: textPrimary)),
+          subtitle: Text(tr(context, 'Automatic answers about delivery, sizes and returns', 'Automaattiset vastaukset toimituksesta, koosta ja palautuksista'), style: TextStyle(color: textSecondary)),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChatbotScreen())),
         ),

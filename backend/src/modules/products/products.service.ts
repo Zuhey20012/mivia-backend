@@ -74,6 +74,7 @@ export async function getProductById(id: number, viewerId?: number) {
 /** Catalogue search across all verified stores, with size/colour/price filters. */
 export async function searchProducts(q: {
   q?: string; category?: string; size?: string; color?: string; condition?: string; secondHand?: string;
+  eco?: string; handmade?: string; storeId?: number;
   minPrice?: number; maxPrice?: number; sort: string; page: number; limit: number;
 }) {
   const and: Prisma.ProductWhereInput[] = [{ isAvailable: true, canBeSold: true, store: { isVerified: true } }];
@@ -92,6 +93,9 @@ export async function searchProducts(q: {
   if (q.category) and.push({ category: { equals: q.category, mode: "insensitive" } });
   if (q.condition) and.push({ condition: q.condition as any });
   if (q.secondHand) and.push({ isSecondHand: q.secondHand === "true" });
+  if (q.eco) and.push({ isEcoFriendly: true });
+  if (q.handmade) and.push({ isHandmade: true });
+  if (q.storeId) and.push({ storeId: q.storeId });
   if (q.size || q.color) {
     and.push({
       variants: {

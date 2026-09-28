@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../core/strings.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../l10n.dart';
@@ -341,7 +342,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
             title: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(l10n.translate('malvoyaConciergeAi'), style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: textPrimary)),
+                Text(tr(context, 'Help assistant · automatic answers', 'Apuri · automaattiset vastaukset'), style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: textPrimary)),
                 Text(l10n.translate('onlineOfficialSupport'), style: const TextStyle(fontSize: 12, color: Color(0xFF248A52), fontWeight: FontWeight.w600)),
               ],
             ),

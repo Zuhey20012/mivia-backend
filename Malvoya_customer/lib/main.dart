@@ -9,12 +9,18 @@ import 'screens/main_navigation.dart';
 import 'screens/login.dart';
 import 'cart.dart';
 import 'auth_service.dart';
-import 'admin_service.dart';
 import 'screens/cookie_consent_banner.dart';
 import 'l10n.dart';
 import 'locale_provider.dart';
 import 'theme_provider.dart';
 import 'local_notification_service.dart';
+import 'core/delivery_location.dart';
+import 'core/push_service.dart';
+import 'core/strings.dart';
+import 'screens/order_detail.dart';
+
+/// Lets a tapped push notification open the right screen from anywhere.
+final navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -49,6 +55,15 @@ void main() async {
     debugPrint('Firebase init error: $e');
   }
 
+  await DeliveryLocation.instance.load();
+
+  PushService.instance.onOpen = (data) {
+    final orderId = asInt(data['orderId']);
+    if (data['type'] == 'order' && orderId != null) {
+      navigatorKey.currentState?.push(MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: orderId)));
+    }
+  };
+
   runApp(const MalvoyaApp());
 }
 
@@ -59,11 +74,11 @@ class MalvoyaApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => AuthService()),
-        ChangeNotifierProxyProvider<AuthService, AdminService>(
-          create: (ctx) => AdminService(Provider.of<AuthService>(ctx, listen: false)),
-          update: (ctx, auth, _) => AdminService(auth),
-        ),
+        ChangeNotifierProvider(create: (_) {
+          final auth = AuthService();
+          PushService.instance.attach(auth);
+          return auth;
+        }),
         ChangeNotifierProvider(create: (_) => CartService()),
         ChangeNotifierProvider(create: (_) => LocaleProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
@@ -72,6 +87,7 @@ class MalvoyaApp extends StatelessWidget {
         builder: (context, localeProvider, themeProvider, child) {
           return MaterialApp(
             key: ValueKey('malvoya_app_${localeProvider.locale.languageCode}_${themeProvider.mode}'),
+            navigatorKey: navigatorKey,
             title: 'Malvoya',
             debugShowCheckedModeBanner: false,
             theme: themeProvider.currentTheme,

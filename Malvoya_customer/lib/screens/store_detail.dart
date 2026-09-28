@@ -1,18 +1,22 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
-import 'dart:convert';
-import '../config/constants.dart';
+import '../auth_service.dart';
 import '../cart.dart';
-import '../models.dart';
 import '../checkout.dart';
 import '../config/theme.dart';
-import '../l10n.dart';
+import '../core/api_client.dart';
+import '../core/delivery_location.dart';
+import '../core/strings.dart';
+import '../widgets/product_tile.dart';
+import 'drops_feed.dart';
 
+/// A store: delivery time and fee to your address, who the seller is, their drops, what
+/// verified customers say, and everything they sell.
 class StoreDetailScreen extends StatefulWidget {
+  /// Needs at least `id`; anything else is shown while the full store loads.
   final Map<String, dynamic> store;
-
   const StoreDetailScreen({super.key, required this.store});
 
   @override
@@ -20,591 +24,252 @@ class StoreDetailScreen extends StatefulWidget {
 }
 
 class _StoreDetailScreenState extends State<StoreDetailScreen> {
-  List products = [];
-  bool loading = true;
+  late Map<String, dynamic> _store = Map<String, dynamic>.from(widget.store);
+  List<Map<String, dynamic>> _products = [];
+  List<Map<String, dynamic>> _drops = [];
+  List<Map<String, dynamic>> _reviews = [];
+  int _reviewTotal = 0;
+  bool _loading = true;
+  String? _error;
+
+  int get _id => asInt(widget.store['id'])!;
 
   @override
   void initState() {
     super.initState();
-    fetchProducts();
+    _load();
   }
 
-  Future<void> fetchProducts() async {
-    try {
-      final res = await http.get(
-        Uri.parse('${AppConstants.apiBase}/stores/${widget.store['id']}/products'),
-      ).timeout(const Duration(seconds: 10));
-      if (res.statusCode == 200 && mounted) {
-        final data = jsonDecode(res.body);
-        setState(() {
-          products = data['products'] ?? [];
-          loading = false;
-        });
-      } else {
-        if (mounted) setState(() => loading = false);
+  Future<void> _load() async {
+    await DeliveryLocation.instance.load();
+    if (!mounted) return;
+    final api = ApiClient(Provider.of<AuthService>(context, listen: false));
+    final results = await Future.wait([
+      api.get('/stores/$_id', query: DeliveryLocation.instance.query),
+      api.get('/stores/$_id/drops', query: {'limit': '12'}),
+      api.get('/stores/$_id/reviews'),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      final store = results[0];
+      if (!store.ok) {
+        _error = store.error;
+        return;
       }
-    } catch (e) {
-      if (mounted) setState(() => loading = false);
-    }
-  }
-
-  void _onProductTapped(Map<String, dynamic> product) {
-    HapticFeedback.lightImpact();
-    final variants = (product['variants'] as List?) ?? [];
-    if (variants.isNotEmpty) {
-      _showProductVariantSheet(product, variants);
-    } else {
-      _confirmAndAddToCart(
-        product: product,
-        variantId: null,
-        variantLabel: null,
-        priceCents: product['salePriceCents'] ?? product['rentalDayCents'] ?? 0,
-      );
-    }
-  }
-
-  void _showProductVariantSheet(Map<String, dynamic> product, List variants) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        int selectedIndex = 0;
-        return StatefulBuilder(
-          builder: (modalCtx, setModalState) {
-            final cardBg = AppTheme.cardBackground(context);
-            final textPrimary = AppTheme.primaryText(context);
-            final borderColor = AppTheme.cardBorder(context);
-            final l10n = AppLocalizations.of(context);
-
-            final activeVariant = variants[selectedIndex];
-            final priceAdjust = (activeVariant['priceAdjustCents'] ?? 0) as int;
-            final basePrice = (product['salePriceCents'] ?? product['rentalDayCents'] ?? 0) as int;
-            final currentTotalCents = basePrice + priceAdjust;
-            final stock = (activeVariant['stock'] ?? product['stockQuantity'] ?? 1) as int;
-            final isOutOfStock = stock <= 0;
-
-            return Container(
-              decoration: BoxDecoration(
-                color: cardBg,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-                border: Border(top: BorderSide(color: borderColor, width: 1.5)),
-              ),
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-              child: SafeArea(
-                top: false,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 40,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade400,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: AppTheme.primary.withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Text(
-                                  widget.store['name'] ?? 'Boutique',
-                                  style: const TextStyle(
-                                    color: AppTheme.primary,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                product['name'] ?? 'Artisan Piece',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w800,
-                                  color: textPrimary,
-                                  letterSpacing: -0.3,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Text(
-                          '€${(currentTotalCents / 100.0).toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w900,
-                            color: AppTheme.primary,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      l10n.translate('selectSizeAndFit'),
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: textPrimary,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: List.generate(variants.length, (i) {
-                        final v = variants[i];
-                        final isSelected = selectedIndex == i;
-                        final vStock = (v['stock'] ?? 1) as int;
-                        final vOutOfStock = vStock <= 0;
-                        final label = v['size'] ?? v['color'] ?? 'Standard';
-
-                        return GestureDetector(
-                          onTap: vOutOfStock
-                              ? null
-                              : () {
-                                  HapticFeedback.selectionClick();
-                                  setModalState(() => selectedIndex = i);
-                                },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: isSelected
-                                  ? AppTheme.primary
-                                  : (vOutOfStock
-                                      ? Colors.grey.withValues(alpha: 0.1)
-                                      : cardBg),
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: isSelected
-                                    ? AppTheme.primary
-                                    : (vOutOfStock
-                                        ? Colors.grey.shade300
-                                        : borderColor),
-                                width: 1.5,
-                              ),
-                            ),
-                            child: Text(
-                              label,
-                              style: TextStyle(
-                                color: isSelected
-                                    ? Colors.white
-                                    : (vOutOfStock
-                                        ? Colors.grey.shade400
-                                        : textPrimary),
-                                fontWeight: FontWeight.w800,
-                                fontSize: 13,
-                                decoration: vOutOfStock ? TextDecoration.lineThrough : null,
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
-                    ),
-                    const SizedBox(height: 16),
-                    // Live Stock Indicator
-                    Row(
-                      children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: isOutOfStock
-                                ? Colors.red
-                                : (stock <= 3 ? const Color(0xFFE08A00) : const Color(0xFF248A52)),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          isOutOfStock
-                              ? l10n.translate('outOfStockSize')
-                              : (stock <= 3
-                                  ? '${l10n.translate('onlyLeft')} $stock ${l10n.translate('leftInStock')}'
-                                  : l10n.translate('inStockReady')),
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: isOutOfStock
-                                ? Colors.red
-                                : (stock <= 3 ? const Color(0xFFE08A00) : const Color(0xFF248A52)),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          backgroundColor: isOutOfStock ? Colors.grey.shade400 : AppTheme.primary,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        ),
-                        onPressed: isOutOfStock
-                            ? null
-                            : () {
-                                Navigator.pop(ctx);
-                                final chosenVariant = variants[selectedIndex];
-                                final sizeStr = chosenVariant['size'] ?? chosenVariant['color'] ?? 'Standard';
-                                _confirmAndAddToCart(
-                                  product: product,
-                                  variantId: chosenVariant['id'],
-                                  variantLabel: 'Size $sizeStr',
-                                  priceCents: currentTotalCents,
-                                );
-                              },
-                        child: Text(
-                          isOutOfStock ? l10n.translate('soldOut') : '${l10n.translate('addToBag')} • €${(currentTotalCents / 100.0).toStringAsFixed(2)}',
-                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  void _confirmAndAddToCart({
-    required Map<String, dynamic> product,
-    required int? variantId,
-    required String? variantLabel,
-    required int priceCents,
-  }) {
-    final cart = Provider.of<CartService>(context, listen: false);
-    final storeId = widget.store['id'] as int?;
-    final storeName = widget.store['name'] ?? 'Boutique';
-
-    // Malvoya Single-Merchant Basket Protection Check
-    if (!cart.canAddDirectly(storeId)) {
-      HapticFeedback.heavyImpact();
-      showDialog(
-        context: context,
-        builder: (dialogCtx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-          title: Text(AppLocalizations.of(context).translate('startNewBasket'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-          content: Text(
-            AppLocalizations.of(context).translate('differentBoutiqueWarning'),
-            style: const TextStyle(fontSize: 13, height: 1.4),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogCtx),
-              child: Text(AppLocalizations.of(context).translate('cancel'), style: const TextStyle(fontWeight: FontWeight.w700)),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-              onPressed: () {
-                Navigator.pop(dialogCtx);
-                _executeAddToCart(
-                  cart: cart,
-                  product: product,
-                  variantId: variantId,
-                  variantLabel: variantLabel,
-                  priceCents: priceCents,
-                  storeId: storeId,
-                  storeName: storeName,
-                  forceClear: true,
-                );
-              },
-              child: Text(AppLocalizations.of(context).translate('startNewBag'), style: const TextStyle(fontWeight: FontWeight.w800)),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
-
-    _executeAddToCart(
-      cart: cart,
-      product: product,
-      variantId: variantId,
-      variantLabel: variantLabel,
-      priceCents: priceCents,
-      storeId: storeId,
-      storeName: storeName,
-      forceClear: false,
-    );
-  }
-
-  void _executeAddToCart({
-    required CartService cart,
-    required Map<String, dynamic> product,
-    required int? variantId,
-    required String? variantLabel,
-    required int priceCents,
-    required int? storeId,
-    required String storeName,
-    required bool forceClear,
-  }) {
-    HapticFeedback.mediumImpact();
-    cart.add(
-      CartItem(
-        productId: product['id'],
-        variantId: variantId,
-        storeId: storeId,
-        storeName: storeName,
-        name: product['name'],
-        variantLabel: variantLabel,
-        price: priceCents / 100.0,
-      ),
-      forceClear: forceClear,
-    );
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('${product['name']}${variantLabel != null ? ' ($variantLabel)' : ''} added to bag'),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-        action: SnackBarAction(
-          label: 'VIEW BAG',
-          textColor: Colors.white,
-          onPressed: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => const CheckoutPage()));
-          },
-        ),
-      ),
-    );
-  }
-
-  Widget _buildProductItem(Map<String, dynamic> product) {
-    final priceCents = product['salePriceCents'] ?? product['rentalDayCents'] ?? 0;
-    final price = priceCents / 100.0;
-    final cardBg = AppTheme.cardBackground(context);
-    final borderColor = AppTheme.cardBorder(context);
-    final textPrimary = AppTheme.primaryText(context);
-    final textSecondary = AppTheme.secondaryText(context);
-    
-    return GestureDetector(
-      onTap: () => _onProductTapped(product),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 14),
-        decoration: BoxDecoration(
-          color: cardBg,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: borderColor, width: 1.2),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 110,
-              height: 110,
-              decoration: BoxDecoration(
-                color: AppTheme.primary.withValues(alpha: 0.08),
-                borderRadius: const BorderRadius.horizontal(left: Radius.circular(19)),
-              ),
-              child: const Icon(Icons.checkroom_rounded, size: 44, color: AppTheme.primary),
-            ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      product['name'] ?? 'Product',
-                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: textPrimary),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      product['description'] ?? product['category'] ?? '',
-                      style: TextStyle(color: textSecondary, fontSize: 12, height: 1.3),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          '€${price.toStringAsFixed(2)}',
-                          style: const TextStyle(fontWeight: FontWeight.w900, color: AppTheme.primary, fontSize: 16),
-                        ),
-                        ElevatedButton(
-                          onPressed: () => _onProductTapped(product),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.primary,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                            minimumSize: Size.zero,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                          ),
-                          child: const Text('Add', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+      _error = null;
+      _store = Map<String, dynamic>.from(store.data['store']);
+      _products = ((_store['products'] as List?) ?? []).map((p) => Map<String, dynamic>.from(p)).toList();
+      if (results[1].ok) _drops = ((results[1].data['drops'] as List?) ?? []).map((d) => Map<String, dynamic>.from(d)).toList();
+      if (results[2].ok) {
+        _reviews = ((results[2].data['reviews'] as List?) ?? []).map((r) => Map<String, dynamic>.from(r)).toList();
+        _reviewTotal = asInt(results[2].data['total']) ?? _reviews.length;
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final textPrimary = AppTheme.primaryText(context);
-
     return Scaffold(
       body: Stack(
         children: [
-          CustomScrollView(
-            physics: const BouncingScrollPhysics(),
-            slivers: [
-              SliverAppBar(
-                expandedHeight: 220.0,
-                pinned: true,
-                flexibleSpace: FlexibleSpaceBar(
-                  title: Text(
-                    widget.store['name'] ?? 'Store',
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, shadows: [Shadow(blurRadius: 8, color: Colors.black54)]),
-                  ),
-                  background: Container(
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Color(0xFF6366F1), AppTheme.primary],
-                      ),
-                    ),
-                    child: const Center(child: Icon(Icons.storefront_rounded, size: 72, color: Colors.white24)),
+          RefreshIndicator(
+            onRefresh: _load,
+            child: CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+              slivers: [
+                SliverAppBar(
+                  expandedHeight: 200,
+                  pinned: true,
+                  flexibleSpace: FlexibleSpaceBar(
+                    title: Text(_store['name'] ?? '',
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, shadows: [Shadow(blurRadius: 8, color: Colors.black54)])),
+                    background: _store['bannerUrl'] != null
+                        ? CachedNetworkImage(imageUrl: _store['bannerUrl'], fit: BoxFit.cover)
+                        : Container(
+                            decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF8E4FAE), AppTheme.primary])),
+                            child: const Center(child: Icon(Icons.storefront_rounded, size: 72, color: Colors.white24)),
+                          ),
                   ),
                 ),
-              ),
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Collections & Drops',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textPrimary),
-                      ),
-                      Text(
-                        '${products.length} Items',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.secondaryText(context)),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              if (loading)
-                const SliverFillRemaining(child: Center(child: CircularProgressIndicator(color: AppTheme.primary)))
-              else if (products.isEmpty)
-                SliverFillRemaining(
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.inventory_2_outlined, size: 54, color: Colors.grey.shade300),
-                        const SizedBox(height: 12),
-                        const Text('No drops listed yet', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                        const SizedBox(height: 4),
-                        Text('Check back soon for new studio collections.', style: TextStyle(color: AppTheme.secondaryText(context), fontSize: 13)),
-                      ],
+                if (_error != null)
+                  SliverFillRemaining(child: Center(child: Text(_error!)))
+                else ...[
+                  SliverToBoxAdapter(child: _header()),
+                  if (_drops.isNotEmpty) SliverToBoxAdapter(child: _dropsStrip()),
+                  if (_reviews.isNotEmpty) SliverToBoxAdapter(child: _reviewsBlock()),
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
+                      child: Text(tr(context, 'All items', 'Kaikki tuotteet'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textPrimary)),
                     ),
                   ),
-                )
-              else
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
-                  sliver: SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (context, index) => _buildProductItem(products[index]),
-                      childCount: products.length,
+                  if (_loading)
+                    const SliverToBoxAdapter(child: Padding(padding: EdgeInsets.all(40), child: Center(child: CircularProgressIndicator())))
+                  else if (_products.isEmpty)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.all(40),
+                        child: Text(tr(context, 'This store has not listed anything yet.', 'Kauppa ei ole vielä lisännyt tuotteita.'),
+                            textAlign: TextAlign.center, style: TextStyle(color: AppTheme.secondaryText(context))),
+                      ),
+                    )
+                  else
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
+                      sliver: SliverGrid(
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 18,
+                          crossAxisSpacing: 14,
+                          childAspectRatio: 0.58,
+                        ),
+                        delegate: SliverChildBuilderDelegate(
+                          (_, i) => ProductTile(product: {..._products[i], 'store': _store}, storeName: ''),
+                          childCount: _products.length,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
+                ],
+              ],
+            ),
+          ),
+          Positioned(bottom: 20, left: 16, right: 16, child: _bagBar()),
+        ],
+      ),
+    );
+  }
+
+  Widget _header() {
+    final muted = AppTheme.secondaryText(context);
+    final reviews = asInt(_store['totalReviews']) ?? 0;
+    final eta = etaWindow(_store);
+    final isPrivate = _store['sellerType'] == 'PRIVATE';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if ((_store['description'] ?? '').toString().isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(_store['description'], style: TextStyle(fontSize: 14.5, height: 1.45, color: AppTheme.primaryText(context))),
+            ),
+          Wrap(
+            spacing: 16,
+            runSpacing: 8,
+            children: [
+              _meta(Icons.star_rounded, reviews > 0 ? '${_store['rating']} ($reviews)' : tr(context, 'No reviews yet', 'Ei vielä arvioita'),
+                  color: reviews > 0 ? const Color(0xFFE08A00) : muted),
+              if (eta != null) _meta(Icons.schedule_rounded, eta),
+              if (_store['deliveryFeeCents'] != null) _meta(Icons.delivery_dining_rounded, '${euro(context, _store['deliveryFeeCents'])} ${tr(context, 'delivery', 'toimitus')}'),
+              if (_store['distanceKm'] != null) _meta(Icons.near_me_outlined, '${_store['distanceKm']} km'),
             ],
           ),
+          const SizedBox(height: 12),
+          InkWell(
+            onTap: _traderInfo,
+            child: Row(
+              children: [
+                Icon(isPrivate ? Icons.person_outline_rounded : Icons.verified_outlined, size: 18, color: muted),
+                const SizedBox(width: 6),
+                Text(isPrivate ? tr(context, 'Private seller', 'Yksityinen myyjä') : tr(context, 'Business seller', 'Yritysmyyjä'),
+                    style: TextStyle(color: muted, fontWeight: FontWeight.w600)),
+                const SizedBox(width: 4),
+                Text('· ${tr(context, 'Seller information', 'Myyjän tiedot')}', style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-          // Malvoya Reactive Floating Bag Bar
-          Positioned(
-            bottom: 20,
-            left: 16,
-            right: 16,
-            child: Consumer<CartService>(
-              builder: (ctx, cart, _) {
-                if (cart.items.isEmpty) return const SizedBox.shrink();
+  Widget _meta(IconData icon, String text, {Color? color}) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 17, color: color ?? AppTheme.secondaryText(context)),
+          const SizedBox(width: 4),
+          Text(text, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppTheme.primaryText(context))),
+        ],
+      );
+
+  void _traderInfo() {
+    final isPrivate = _store['sellerType'] == 'PRIVATE';
+    showModalBottomSheet(
+      context: context,
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(tr(context, 'Seller information', 'Myyjän tiedot'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 12),
+            Text(_store['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
+            if (!isPrivate && _store['businessId'] != null) Text('Y-tunnus ${_store['businessId']}'),
+            if (!isPrivate && _store['address'] != null) Text(_store['address']),
+            const SizedBox(height: 12),
+            Text(
+              isPrivate
+                  ? tr(context, 'A private person selling their own items. Consumer rights such as the 14-day right of withdrawal do not apply.',
+                      'Yksityishenkilö, joka myy omia tavaroitaan. Kuluttajan oikeudet, kuten 14 päivän peruuttamisoikeus, eivät koske ostoa.')
+                  : tr(context, 'A business. Consumer protection law applies to your purchase, including the 14-day right of withdrawal.',
+                      'Yritys. Ostoon sovelletaan kuluttajansuojalakia, mukaan lukien 14 päivän peruuttamisoikeus.'),
+              style: TextStyle(color: AppTheme.secondaryText(context), height: 1.4),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _dropsStrip() => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 10),
+            child: Text(tr(context, 'Drops', 'Julkaisut'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppTheme.primaryText(context))),
+          ),
+          SizedBox(
+            height: 190,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: _drops.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (_, i) {
+                final d = _drops[i];
+                final poster = d['media']?['poster'];
                 return GestureDetector(
                   onTap: () {
-                    HapticFeedback.mediumImpact();
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => const CheckoutPage()));
+                    HapticFeedback.selectionClick();
+                    Navigator.push(context, MaterialPageRoute(
+                      builder: (_) => DropsFeedScreen(storeId: _id, storeName: _store['name'], startDropId: asInt(d['id'])),
+                    ));
                   },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                    decoration: BoxDecoration(
-                      gradient: AppTheme.irisFuchsiaGradient,
-                      borderRadius: BorderRadius.circular(22),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppTheme.primary.withValues(alpha: 0.4),
-                          blurRadius: 20,
-                          offset: const Offset(0, 8),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.25),
-                            borderRadius: BorderRadius.circular(12),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: SizedBox(
+                      width: 110,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          Container(color: Colors.black12),
+                          if (poster != null) CachedNetworkImage(imageUrl: poster, fit: BoxFit.cover),
+                          if (d['kind'] == 'VIDEO') const Center(child: Icon(Icons.play_arrow_rounded, color: Colors.white, size: 36)),
+                          Positioned(
+                            left: 6,
+                            bottom: 6,
+                            child: Row(children: [
+                              const Icon(Icons.favorite_rounded, color: Colors.white, size: 14),
+                              const SizedBox(width: 3),
+                              Text('${d['likeCount'] ?? 0}', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
+                            ]),
                           ),
-                          child: Text(
-                            '${cart.itemCount}',
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 13),
-                          ),
-                        ),
-                        const SizedBox(width: 14),
-                        Text(
-                          '€${cart.total.toStringAsFixed(2)}',
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 17),
-                        ),
-                        const Spacer(),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              AppLocalizations.of(context).translate('viewBag'),
-                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14),
-                            ),
-                            const SizedBox(width: 6),
-                            const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 18),
-                          ],
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 );
@@ -612,7 +277,77 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
             ),
           ),
         ],
+      );
+
+  Widget _reviewsBlock() {
+    final muted = AppTheme.secondaryText(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Text(tr(context, 'Reviews', 'Arviot'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppTheme.primaryText(context))),
+            const Spacer(),
+            Text('$_reviewTotal', style: TextStyle(color: muted)),
+          ]),
+          const SizedBox(height: 4),
+          Text(tr(context, 'Only customers whose order was delivered can review.', 'Vain asiakkaat, joiden tilaus on toimitettu, voivat arvioida.'),
+              style: TextStyle(fontSize: 12, color: muted)),
+          const SizedBox(height: 10),
+          for (final r in _reviews.take(3))
+            Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(color: AppTheme.cardBackground(context), borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.cardBorder(context))),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Text('★' * (asInt(r['rating']) ?? 0), style: const TextStyle(color: Color(0xFFE08A00))),
+                    const SizedBox(width: 8),
+                    Text(r['author'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(width: 6),
+                    Text(tr(context, '· Verified purchase', '· Vahvistettu ostos'), style: TextStyle(fontSize: 12, color: muted)),
+                  ]),
+                  if ((r['comment'] ?? '').toString().isNotEmpty)
+                    Padding(padding: const EdgeInsets.only(top: 6), child: Text(r['comment'], style: const TextStyle(height: 1.4))),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }
+
+  Widget _bagBar() => Consumer<CartService>(
+        builder: (ctx, cart, _) {
+          if (cart.items.isEmpty) return const SizedBox.shrink();
+          return GestureDetector(
+            onTap: () {
+              HapticFeedback.mediumImpact();
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const CheckoutPage()));
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+              decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(22)),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.25), borderRadius: BorderRadius.circular(12)),
+                    child: Text('${cart.itemCount}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 13)),
+                  ),
+                  const SizedBox(width: 14),
+                  Text(euro(context, (cart.total * 100).round()), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 17)),
+                  const Spacer(),
+                  Text(tr(context, 'View bag', 'Näytä kassi'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14)),
+                  const SizedBox(width: 6),
+                  const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 18),
+                ],
+              ),
+            ),
+          );
+        },
+      );
 }

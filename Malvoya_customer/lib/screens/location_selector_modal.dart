@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/theme.dart';
+import '../core/delivery_location.dart';
 import 'map_address_picker.dart';
 
 class LocationSelectorModal extends StatefulWidget {
@@ -34,10 +35,10 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
 
   final List<Map<String, dynamic>> _cities = [
     // Finland - Capital Region
-    {'name': 'Helsinki', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Live Radar', 'active': true},
-    {'name': 'Espoo', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Live Radar', 'active': true},
-    {'name': 'Vantaa', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Live Radar', 'active': true},
-    {'name': 'Kauniainen', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Live Radar', 'active': true},
+    {'name': 'Helsinki', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Service area', 'active': true},
+    {'name': 'Espoo', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Service area', 'active': true},
+    {'name': 'Vantaa', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Service area', 'active': true},
+    {'name': 'Kauniainen', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Service area', 'active': true},
     // Finland - Key Metros
     {'name': 'Tampere', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
     {'name': 'Turku', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
@@ -104,6 +105,18 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
     if (mounted) setState(() => _loadingAddresses = false);
   }
 
+  void _useSaved(Map<String, dynamic> addr) {
+    final text = (addr['subtitle'] ?? addr['title'] ?? '').toString();
+    widget.onLocationSelected?.call(text);
+    final lat = addr['lat'];
+    final lng = addr['lng'];
+    DeliveryLocation.instance.set(
+      text,
+      latitude: lat is num ? lat.toDouble() : null,
+      longitude: lng is num ? lng.toDouble() : null,
+    );
+  }
+
   Future<void> _saveNewManualAddress() async {
     if (_streetCtrl.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter street name.')));
@@ -126,6 +139,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('malvoya_addresses', jsonEncode(_savedAddresses));
     widget.onLocationSelected?.call(addressText);
+    DeliveryLocation.instance.set(addressText);
     if (mounted) {
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -213,10 +227,13 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                     );
                     if (result != null && mounted) {
                       widget.onLocationSelected?.call(result.fullAddress);
+                      DeliveryLocation.instance.set(result.fullAddress, latitude: result.latitude, longitude: result.longitude);
                       final newAddress = {
                         'id': 'addr_${DateTime.now().millisecondsSinceEpoch}',
                         'title': result.street.isNotEmpty ? result.street : 'Pin Location',
                         'subtitle': result.fullAddress,
+                        'lat': result.latitude,
+                        'lng': result.longitude,
                         'buzzer': '',
                         'isDefault': _savedAddresses.isEmpty,
                       };
@@ -294,10 +311,13 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                           );
                           if (res != null && mounted) {
                             widget.onLocationSelected?.call(res.fullAddress);
+                            DeliveryLocation.instance.set(res.fullAddress, latitude: res.latitude, longitude: res.longitude);
                             final newAddress = {
                               'id': 'addr_${DateTime.now().millisecondsSinceEpoch}',
-                              'title': res.street.isNotEmpty ? res.street : 'Live GPS Pin',
+                              'title': res.street.isNotEmpty ? res.street : 'Pinned location',
                               'subtitle': res.fullAddress,
+                              'lat': res.latitude,
+                              'lng': res.longitude,
                               'buzzer': '',
                               'isDefault': _savedAddresses.isEmpty,
                             };
@@ -530,12 +550,12 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                         trailing: IconButton(
                           icon: const Icon(Icons.check_circle_outline, color: AppTheme.primary),
                           onPressed: () {
-                            widget.onLocationSelected?.call(addr['subtitle'] ?? addr['title']);
+                            _useSaved(addr);
                             Navigator.pop(context);
                           },
                         ),
                         onTap: () {
-                          widget.onLocationSelected?.call(addr['subtitle'] ?? addr['title']);
+                          _useSaved(addr);
                           Navigator.pop(context);
                         },
                       ),
@@ -632,6 +652,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                           HapticFeedback.lightImpact();
                           final locName = '${city['name']}, ${city['country']}';
                           widget.onLocationSelected?.call(locName);
+                          DeliveryLocation.instance.set(locName);
                           Navigator.pop(context);
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
