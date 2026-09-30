@@ -291,7 +291,7 @@ async function ownedStore(ownerId: number) {
 }
 
 export async function createDrop(actor: { id: number; role: string }, input: {
-  productId: number; caption?: string; kind: "VIDEO" | "IMAGE"; upload: UploadProof;
+  productId: number; caption?: string; kind: "VIDEO" | "IMAGE"; upload: UploadProof; rightsConfirmed: true;
 }) {
   const store = await ownedStore(actor.id);
   const product = await prisma.product.findUnique({ where: { id: input.productId }, select: { storeId: true, isAvailable: true, canBeSold: true } });
@@ -324,6 +324,7 @@ export async function createDrop(actor: { id: number; role: string }, input: {
         height: resource.height ?? null,
         status: ready ? "READY" : "PROCESSING",
         publishedAt: ready ? new Date() : null,
+        rightsConfirmedAt: new Date(),
       },
       include: dropInclude,
     });

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -52,7 +51,6 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   bool _muted = false;
   bool _paused = false;
   bool _routeCovered = false;
-  String? _installId;
   DateTime? _watchStart;
 
   bool get _shouldPlay => widget.isActive && !_paused && !_routeCovered && mounted;
@@ -68,12 +66,8 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     try {
       final prefs = await SharedPreferences.getInstance();
       _muted = prefs.getBool('drops_muted') ?? false;
-      _installId = prefs.getString('install_id');
-      if (_installId == null) {
-        final r = Random.secure();
-        _installId = List.generate(24, (_) => r.nextInt(16).toRadixString(16)).join();
-        await prefs.setString('install_id', _installId!);
-      }
+      // An old build stored a device ID for view counting; it is no longer used, so remove it
+      await prefs.remove('install_id');
     } catch (_) {}
     await DeliveryLocation.instance.load();
     await _load(reset: true);
@@ -270,7 +264,6 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     ApiClient(auth).post('/drops/$id/view', {
       'watchedSec': double.parse(watched.toStringAsFixed(1)),
       'completed': _completed.contains(id) || _drops[_index]['kind'] == 'IMAGE' && watched >= 3,
-      if (!auth.isAuthenticated && _installId != null) 'installId': _installId,
     });
   }
 

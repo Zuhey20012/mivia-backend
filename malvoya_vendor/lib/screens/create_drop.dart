@@ -27,6 +27,7 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
   final _caption = TextEditingController();
   double? _progress;
   String? _error;
+  bool _rightsConfirmed = false;
 
   ApiClient get _api => ApiClient(Provider.of<AuthService>(context, listen: false));
 
@@ -106,6 +107,7 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
       final res = await _api.post('/drops', {
         'productId': _productId,
         'kind': _isVideo ? 'VIDEO' : 'IMAGE',
+        'rightsConfirmed': true,
         if (_caption.text.trim().isNotEmpty) 'caption': _caption.text.trim(),
         'upload': media.toProof(),
       });
@@ -204,6 +206,18 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
               style: const TextStyle(fontSize: 12.5, height: 1.4, color: AppTheme.primaryDark),
             ),
           ),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            value: _rightsConfirmed,
+            onChanged: uploading ? null : (v) => setState(() => _rightsConfirmed = v ?? false),
+            title: Text(
+              tr(context,
+                  'I made this video or photo, or I have permission to use everything in it — including the music, any logos, and everyone who appears in it.',
+                  'Tein tämän videon tai kuvan itse tai minulla on lupa käyttää kaikkea siinä olevaa — myös musiikkia, logoja ja kaikkia siinä näkyviä ihmisiä.'),
+              style: const TextStyle(fontSize: 13, height: 1.35),
+            ),
+          ),
           if (_error != null)
             Padding(padding: const EdgeInsets.only(top: 12), child: Text(_error!, style: const TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w600))),
           const SizedBox(height: 20),
@@ -215,7 +229,7 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
             SizedBox(
               height: 54,
               child: FilledButton.icon(
-                onPressed: _file != null && _productId != null ? _post : null,
+                onPressed: _file != null && _productId != null && _rightsConfirmed ? _post : null,
                 icon: const Icon(Icons.send_rounded),
                 label: Text(tr(context, 'Post drop', 'Julkaise')),
               ),

@@ -73,7 +73,7 @@ class ActiveOrderError extends ActiveOrderState {
   List<Object?> get props => [message];
 }
 
-// Wolt/Uber Active-Order State Machine BLoC Implementation
+// Active-order state machine (BLoC) implementation
 class ActiveOrderBloc extends Bloc<ActiveOrderEvent, ActiveOrderState> {
   final WatchActiveOrderUseCase _watchOrder;
   final CancelOrderUseCase _cancelOrder;

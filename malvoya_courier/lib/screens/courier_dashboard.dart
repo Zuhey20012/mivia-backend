@@ -183,7 +183,8 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
           ListTile(
             leading: const Icon(Icons.photo_camera_outlined),
             title: Text(tr(context, 'Left at the door — take a photo', 'Jätetty ovelle — ota kuva')),
-            subtitle: Text(tr(context, 'Only the customer sees the photo. It is deleted after 30 days.', 'Vain asiakas näkee kuvan. Se poistetaan 30 päivän kuluttua.')),
+            subtitle: Text(tr(context, 'Photograph only the parcel at the door — no people, faces or house numbers. Only the customer sees it; it is deleted after 30 days.',
+                'Kuvaa vain paketti ovella — ei ihmisiä, kasvoja tai ovinumeroita. Vain asiakas näkee kuvan; se poistetaan 30 päivän kuluttua.')),
             onTap: () => Navigator.pop(ctx, 'PHOTO'),
           ),
         ]),
@@ -309,6 +310,11 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
             onPressed: () => openLegal('couriers'),
             icon: const Icon(Icons.gavel_rounded),
             label: Text(tr(context, 'Read the courier agreement', 'Lue lähettisopimus')),
+          ),
+          TextButton.icon(
+            onPressed: () => showLicensePage(context: context, applicationName: 'Malvoya Courier', applicationLegalese: '© Malvoya'),
+            icon: const Icon(Icons.code_rounded),
+            label: Text(tr(context, 'Open-source licences', 'Avoimen lähdekoodin lisenssit')),
           ),
         ]),
       ),

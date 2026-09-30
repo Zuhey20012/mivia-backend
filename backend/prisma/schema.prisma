@@ -549,6 +549,9 @@ model Drop {
   status        DropStatus @default(PROCESSING)
   removedReason String?
 
+  // The store confirmed it owns or has permission for everything in the drop (music, logos, people)
+  rightsConfirmedAt DateTime?
+
   // Engagement counters (denormalised; the source rows live in DropLike / DropView)
   likeCount     Int   @default(0)
   viewCount     Int   @default(0)

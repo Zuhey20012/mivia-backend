@@ -56,6 +56,8 @@ const createSchema = z.object({
   productId: z.number().int().positive(),
   caption: z.string().max(300).optional(),
   kind: z.enum(["VIDEO", "IMAGE"]),
+  // Required: the store confirms it holds the rights to the music, logos and people shown
+  rightsConfirmed: z.literal(true, { errorMap: () => ({ message: "Confirm that you have the rights to everything in the drop" }) }),
   upload: z.object({
     publicId: z.string().min(5).max(200),
     version: z.union([z.string().max(20), z.number().int()]),

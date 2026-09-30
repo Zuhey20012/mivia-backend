@@ -32,6 +32,15 @@ class TermsLegalScreen extends StatelessWidget {
                 onTap: () => openLegal(d.$1),
               ),
             ),
+          Card(
+            margin: const EdgeInsets.only(bottom: 10),
+            child: ListTile(
+              leading: const Icon(Icons.code_rounded, color: AppTheme.primary),
+              title: Text(tr(context, 'Open-source licences', 'Avoimen lähdekoodin lisenssit'), style: const TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text(tr(context, 'Software Malvoya is built with', 'Ohjelmistot, joilla Malvoya on tehty')),
+              onTap: () => showLicensePage(context: context, applicationName: 'Malvoya', applicationLegalese: '© Malvoya'),
+            ),
+          ),
           const SizedBox(height: 12),
           Text(
             tr(context,

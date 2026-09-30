@@ -267,7 +267,9 @@ async function register(name, role, extra = {}) {
 
   console.log("\n— Drops (shoppable videos)");
   await seedResource(vslot.publicId, { duration: 21.5, width: 720, height: 1280, derived: [] });
-  const d1res = await call("POST", "/drops", { productId: p3.id, caption: "New linen <script>x</script>", kind: "VIDEO", upload: { publicId: vslot.publicId, version: 5, signature: uploadSig(vslot.publicId, 5) } }, vendor.accessToken);
+  const noRights = await call("POST", "/drops", { productId: p3.id, kind: "VIDEO", upload: { publicId: vslot.publicId, version: 5, signature: uploadSig(vslot.publicId, 5) } }, vendor.accessToken);
+  check("a drop is refused unless the store confirms it holds the rights (music, logos, people)", noRights.status === 400, noRights.body);
+  const d1res = await call("POST", "/drops", { productId: p3.id, caption: "New linen <script>x</script>", kind: "VIDEO", rightsConfirmed: true, upload: { publicId: vslot.publicId, version: 5, signature: uploadSig(vslot.publicId, 5) } }, vendor.accessToken);
   check("store posts a video drop; it waits for processing", d1res.status === 201 && d1res.body.drop.status === "PROCESSING", d1res.body);
   const d1 = d1res.body.drop?.id;
   check("processing drop is not in the feed", !(await call("GET", "/drops/feed?mode=latest")).body.drops.some((d) => d.id === d1));
@@ -287,8 +289,8 @@ async function register(name, role, extra = {}) {
 
   const long = (await call("POST", "/media/sign", { kind: "drop_video" }, vendor.accessToken)).body;
   await seedResource(long.publicId, { duration: 140, width: 720, height: 1280, derived: [] });
-  check("videos over 90 s are refused", (await call("POST", "/drops", { productId: p3.id, kind: "VIDEO", upload: { publicId: long.publicId, version: 1, signature: uploadSig(long.publicId, 1) } }, vendor.accessToken)).status === 400);
-  const notMine = await call("POST", "/drops", { productId: p3.id, kind: "VIDEO", upload: { publicId: vslot.publicId, version: 5, signature: uploadSig(vslot.publicId, 5) } }, otherVendor.accessToken);
+  check("videos over 90 s are refused", (await call("POST", "/drops", { productId: p3.id, kind: "VIDEO", rightsConfirmed: true, upload: { publicId: long.publicId, version: 1, signature: uploadSig(long.publicId, 1) } }, vendor.accessToken)).status === 400);
+  const notMine = await call("POST", "/drops", { productId: p3.id, kind: "VIDEO", rightsConfirmed: true, upload: { publicId: vslot.publicId, version: 5, signature: uploadSig(vslot.publicId, 5) } }, otherVendor.accessToken);
   check("store cannot post another store's product", notMine.status === 400 || notMine.status === 403, notMine.status);
 
   check("like a drop", (await call("POST", `/drops/${d1}/like`, null, otherCust.accessToken)).body.likeCount === 1);
@@ -311,12 +313,12 @@ async function register(name, role, extra = {}) {
 
   const imgSlot = (await call("POST", "/media/sign", { kind: "drop_image" }, vendor.accessToken)).body;
   await seedResource(imgSlot.publicId, { width: 1080, height: 1350 });
-  const imgDrop = await call("POST", "/drops", { productId: p3.id, kind: "IMAGE", upload: { publicId: imgSlot.publicId, version: 2, signature: uploadSig(imgSlot.publicId, 2) } }, vendor.accessToken);
+  const imgDrop = await call("POST", "/drops", { productId: p3.id, kind: "IMAGE", rightsConfirmed: true, upload: { publicId: imgSlot.publicId, version: 2, signature: uploadSig(imgSlot.publicId, 2) } }, vendor.accessToken);
   check("photo drops go live immediately", imgDrop.status === 201 && imgDrop.body.drop.status === "READY", imgDrop.body);
   for (let i = 0; i < 3; i++) {
     const sl = (await call("POST", "/media/sign", { kind: "drop_image" }, vendor.accessToken)).body;
     await seedResource(sl.publicId, { width: 1080, height: 1350 });
-    await call("POST", "/drops", { productId: p3.id, kind: "IMAGE", upload: { publicId: sl.publicId, version: 3, signature: uploadSig(sl.publicId, 3) } }, vendor.accessToken);
+    await call("POST", "/drops", { productId: p3.id, kind: "IMAGE", rightsConfirmed: true, upload: { publicId: sl.publicId, version: 3, signature: uploadSig(sl.publicId, 3) } }, vendor.accessToken);
   }
   const pg1 = await call("GET", "/drops/feed?limit=3");
   const pg2 = await call("GET", `/drops/feed?limit=3&cursor=${pg1.body.nextCursor}`);
@@ -329,7 +331,7 @@ async function register(name, role, extra = {}) {
   const oSlot = (await call("POST", "/media/sign", { kind: "drop_image" }, otherVendor.accessToken)).body;
   await seedResource(oSlot.publicId, { width: 1080, height: 1350 });
   const oProd = (await call("POST", "/products", { name: "Denim", category: "Jeans", salePriceCents: 7000 }, otherVendor.accessToken)).body.product;
-  const oDrop = (await call("POST", "/drops", { productId: oProd.id, kind: "IMAGE", upload: { publicId: oSlot.publicId, version: 1, signature: uploadSig(oSlot.publicId, 1) } }, otherVendor.accessToken)).body.drop;
+  const oDrop = (await call("POST", "/drops", { productId: oProd.id, kind: "IMAGE", rightsConfirmed: true, upload: { publicId: oSlot.publicId, version: 1, signature: uploadSig(oSlot.publicId, 1) } }, otherVendor.accessToken)).body.drop;
   check("unverified store's drops stay out of the feed", !!oDrop && !(await call("GET", "/drops/feed?limit=20&mode=latest")).body.drops.some((d) => d.id === oDrop.id));
   check("another store cannot delete my drop", (await call("DELETE", `/drops/${d1}`, null, otherVendor.accessToken)).status === 404);
   const mine = await call("GET", "/drops/mine", null, vendor.accessToken);

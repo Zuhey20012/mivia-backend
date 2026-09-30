@@ -21,7 +21,7 @@ Malvoya is a marketplace. Stores that sell through Malvoya are independent selle
 | Payment status and Stripe payment reference | Confirm payment and issue refunds. **We never receive or store card or bank account numbers**; Stripe processes them. | Contract; legal obligation |
 | Courier location, only while the courier is online | Show the courier's position to the customer and store of an active order; offer jobs to nearby couriers | Contract with the courier (6(1)(b)) |
 | Store business details (for sellers) | Verify sellers; tax reporting on marketplace sellers (DAC7) | Contract; legal obligation |
-| Drops you like, views of drops (counted once per day; signed-out viewers are identified only by a random install ID), favourites and reviews | Show likes and favourites, rank the Drops feed, show verified reviews | Contract (6(1)(b)); legitimate interest (6(1)(f)) |
+| Drops you like, views of drops (counted once per day; for signed-out viewers we keep only a one-way scrambled form of the IP address, which changes every day — nothing is stored on your phone for this), favourites and reviews | Show likes and favourites, rank the Drops feed, show verified reviews | Contract (6(1)(b)); legitimate interest (6(1)(f)) |
 | Delivery photo and the courier's position at handover, when the order is left at the door | Proof of delivery | Contract; legitimate interest |
 | Push notification token of your phone | Send order, delivery and payout updates. No marketing. | Contract (6(1)(b)) |
 | Photos and videos stores upload (products, drops) | Show them in the app | Contract with the store |
