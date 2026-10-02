@@ -113,7 +113,7 @@ The simulated escrow, dispatch engine, telemetry service, "AI garment inspection
 - Logo: the "Thread M". `lib/widgets/brand_mark.dart` in each app has `BrandMark` and `BrandTile`, drawn with `CustomPaint`. Icon PNG sources are in `assets/brand/`; regenerate launcher icons and splash with `dart run flutter_launcher_icons` and `dart run flutter_native_splash:create`.
 - Colours: Malva `#6D2E8C` (customer), Moss `#2E6B4F` (store), Lingon `#C2412D` (courier), Birch `#F6F3EE` (light background) and Night `#17131C` (dark background). Status colours: green `#248A52`, red `#D93025`, amber `#E08A00`.
 - Style: system fonts (no custom fonts), iOS-style page transitions on iOS, flat surfaces with hairline borders, 14 px radius on controls, 52 px buttons. The customer app follows the phone's light/dark setting until the user picks a theme. Don't reintroduce neon gradients, glows or emoji in UI copy.
-- Play Store: bump `version:` in each `pubspec.yaml` (the `+N` build number must increase with every upload; `1.2.0+3` is the current build).
+- Play Store: bump `version:` in each `pubspec.yaml` (the `+N` build number must increase with every upload; `1.2.0+4` is the current build).
 
 ## Compliance context (Finland / EU)
 

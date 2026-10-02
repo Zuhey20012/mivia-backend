@@ -5,7 +5,7 @@ Three apps, one developer account:
 - `com.malvoya.vendor` — "Malvoya Store"
 - `com.malvoya.courier` — "Malvoya Courier"
 
-Build number rule: every upload needs a higher `+N` in `pubspec.yaml` (`1.2.0+3` is the current build).
+Build number rule: every upload needs a higher `+N` in `pubspec.yaml` (`1.2.0+4` is the current build).
 
 ## 1. Before the first upload
 
