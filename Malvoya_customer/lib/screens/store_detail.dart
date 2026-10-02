@@ -33,6 +33,29 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
   String? _error;
 
   int get _id => asInt(widget.store['id'])!;
+  bool _followBusy = false;
+
+  Future<void> _toggleFollow() async {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    if (!auth.isAuthenticated) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr(context, 'Sign in to follow stores', 'Kirjaudu sisään seurataksesi kauppoja'))));
+      return;
+    }
+    HapticFeedback.lightImpact();
+    final next = _store['followedByMe'] != true;
+    setState(() => _followBusy = true);
+    final api = ApiClient(auth);
+    final res = next ? await api.put('/stores/$_id/follow') : await api.delete('/stores/$_id/follow');
+    if (!mounted) return;
+    setState(() {
+      _followBusy = false;
+      if (res.ok) {
+        _store['followedByMe'] = res.data['following'] == true;
+        _store['followerCount'] = res.data['followerCount'];
+      }
+    });
+    if (!res.ok) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.error!)));
+  }
 
   @override
   void initState() {
@@ -151,6 +174,30 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(children: [
+              Expanded(
+                child: Text(
+                  (asInt(_store['followerCount']) ?? 0) == 1
+                      ? tr(context, '1 follower', '1 seuraaja')
+                      : tr(context, '${asInt(_store['followerCount']) ?? 0} followers', '${asInt(_store['followerCount']) ?? 0} seuraajaa'),
+                  style: TextStyle(color: muted, fontWeight: FontWeight.w600),
+                ),
+              ),
+              _store['followedByMe'] == true
+                  ? OutlinedButton.icon(
+                      onPressed: _followBusy ? null : _toggleFollow,
+                      icon: const Icon(Icons.check_rounded, size: 18),
+                      label: Text(tr(context, 'Following', 'Seuraat')),
+                    )
+                  : FilledButton.icon(
+                      onPressed: _followBusy ? null : _toggleFollow,
+                      icon: const Icon(Icons.add_rounded, size: 18),
+                      label: Text(tr(context, 'Follow', 'Seuraa')),
+                    ),
+            ]),
+          ),
           if ((_store['description'] ?? '').toString().isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(bottom: 12),

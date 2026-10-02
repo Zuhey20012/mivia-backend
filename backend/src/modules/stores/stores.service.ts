@@ -5,6 +5,7 @@ import { isOwnImageUrl, mediaConfigured } from "../../lib/cloudinary";
 import { haversineKm, estimateDelivery } from "../../utils/distance";
 import { deliveryFeeForDistance } from "../../utils/pricing";
 import { priceInfoFor, presentProduct, productInclude } from "../products/pricing";
+import { followInfo } from "../drops/social";
 
 /** Trader information shoppers are entitled to see (DSA Art. 30, Omnibus Art. 6a CRD). */
 const publicStoreFields = {
@@ -75,9 +76,10 @@ export async function getStoreById(id: number, viewerId?: number, lat: number | 
   // Unverified stores are only visible to their owner
   if (!store || (!store.isVerified && store.ownerId !== viewerId)) throw new ApiError("Store not found", 404);
   const { ownerId, products, ...publicStore } = store;
-  const info = await priceInfoFor(products);
+  const [info, follow] = await Promise.all([priceInfoFor(products), followInfo(id, viewerId)]);
   return {
     ...publicStore,
+    ...follow,
     ...deliveryInfo(publicStore, lat, lng),
     products: products.map((p) => presentProduct(p, info.get(p.id))),
   };

@@ -50,7 +50,13 @@ export async function pushToUsers(userIds: number[], msg: PushMessage) {
   const devices = await prisma.deviceToken.findMany({ where: { userId: { in: userIds } }, select: { token: true } });
   if (!devices.length) return;
 
-  const tokens = devices.map((d) => d.token);
+  // FCM takes at most 500 tokens per multicast
+  for (let i = 0; i < devices.length; i += 500) {
+    await sendBatch(m, devices.slice(i, i + 500).map((d) => d.token), msg);
+  }
+}
+
+async function sendBatch(m: Messaging, tokens: string[], msg: PushMessage) {
   try {
     const res = await m.sendEachForMulticast({
       tokens,

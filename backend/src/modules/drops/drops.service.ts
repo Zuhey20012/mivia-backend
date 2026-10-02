@@ -5,7 +5,7 @@ import { prisma } from "../../lib/prisma";
 import { ApiError } from "../../lib/errors";
 import { env } from "../../config/env";
 import { destroyResource, getResource, hlsReady, imageUrl, videoHlsUrl, videoMp4Url, videoPosterUrl } from "../../lib/cloudinary";
-import { pushToUser } from "../../lib/push";
+import { pushToUser, pushToUsers } from "../../lib/push";
 import { sendEmail, escapeHtml } from "../../services/notificationDeliveryService";
 import { priceInfoFor, presentProduct, productInclude } from "../products/pricing";
 import { deliveryInfo } from "../stores/stores.service";
@@ -42,13 +42,17 @@ function media(drop: { mediaKind: string; mediaPublicId: string }) {
 }
 
 async function presentDrops(rows: DropRow[], viewer: Viewer, loc: { lat: number | null; lng: number | null }, reasons?: Map<number, string>) {
-  const [liked, info] = await Promise.all([
+  const [liked, info, follows] = await Promise.all([
     viewer && rows.length
       ? prisma.dropLike.findMany({ where: { userId: viewer.id, dropId: { in: rows.map((r) => r.id) } }, select: { dropId: true } })
       : Promise.resolve([]),
     priceInfoFor(rows.map((r) => r.product)),
+    viewer && rows.length
+      ? prisma.storeFollow.findMany({ where: { userId: viewer.id, storeId: { in: [...new Set(rows.map((r) => r.storeId))] } }, select: { storeId: true } })
+      : Promise.resolve([]),
   ]);
   const likedSet = new Set(liked.map((l) => l.dropId));
+  const followedSet = new Set(follows.map((f) => f.storeId));
   return rows.map((d) => {
     const { ownerId, latitude, longitude, prepMinutes, ...store } = d.store;
     return {
@@ -63,11 +67,12 @@ async function presentDrops(rows: DropRow[], viewer: Viewer, loc: { lat: number 
       likeCount: d.likeCount,
       viewCount: d.viewCount,
       shareCount: d.shareCount,
+      commentCount: d.commentCount,
       likedByMe: likedSet.has(d.id),
       publishedAt: d.publishedAt,
       shareUrl: `${env.publicApiUrl}/d/${d.id}`,
       reason: reasons?.get(d.id) ?? null,
-      store: { ...store, ...deliveryInfo({ latitude, longitude, prepMinutes }, loc.lat, loc.lng) },
+      store: { ...store, followedByMe: followedSet.has(d.storeId), ...deliveryInfo({ latitude, longitude, prepMinutes }, loc.lat, loc.lng) },
       product: presentProduct(d.product, info.get(d.product.id)),
     };
   });
@@ -88,6 +93,7 @@ export const RANKING_EXPLANATION = {
     "The store's customer rating",
   ],
   latest: ["Newest drops first, nothing else"],
+  following: ["Newest drops from the stores you follow, nothing else"],
   personalProfiling: false,
 };
 
@@ -134,14 +140,21 @@ function decodeCursor(raw?: string): Cursor | null {
  * The ranking is computed against a snapshot time kept in the cursor, so paging through the
  * feed is stable: nothing jumps or repeats while you scroll.
  */
-export async function getFeed(opts: { mode: "foryou" | "latest"; cursor?: string; limit: number; lat: number | null; lng: number | null; storeId?: number }, viewer: Viewer) {
+export async function getFeed(opts: { mode: "foryou" | "latest" | "following"; cursor?: string; limit: number; lat: number | null; lng: number | null; storeId?: number }, viewer: Viewer) {
   const snap = decodeCursor(opts.cursor) ?? { t: Date.now(), o: 0 };
+  let followed: number[] | undefined;
+  if (opts.mode === "following") {
+    if (!viewer) throw new ApiError("Sign in to see drops from stores you follow", 401);
+    followed = (await prisma.storeFollow.findMany({ where: { userId: viewer.id }, select: { storeId: true }, take: 2000 })).map((f) => f.storeId);
+    if (!followed.length) return { drops: [], nextCursor: null };
+  }
   const where: Prisma.DropWhereInput = {
     status: "READY",
     publishedAt: { lte: new Date(snap.t), gte: new Date(snap.t - FEED_WINDOW_DAYS * 86_400_000) },
     store: { isVerified: true },
     product: { isAvailable: true },
     ...(opts.storeId ? { storeId: opts.storeId } : {}),
+    ...(followed ? { storeId: { in: followed } } : {}),
   };
   const candidates = await prisma.drop.findMany({
     where,
@@ -155,7 +168,7 @@ export async function getFeed(opts: { mode: "foryou" | "latest"; cursor?: string
 
   const reasons = new Map<number, string>();
   let ordered: number[];
-  if (opts.mode === "latest" || opts.storeId) {
+  if (opts.mode !== "foryou" || opts.storeId) {
     ordered = candidates.map((c) => c.id);
   } else {
     const scored = candidates.map((c) => {
@@ -328,6 +341,7 @@ export async function createDrop(actor: { id: number; role: string }, input: {
       },
       include: dropInclude,
     });
+    if (ready) notifyFollowers(drop.id).catch(() => {});
     const [presented] = await presentDrops([drop], actor, { lat: null, lng: null });
     return presented;
   } catch (e: any) {
@@ -368,6 +382,23 @@ async function publish(dropId: number) {
   if (!updated.count) return;
   const drop = await prisma.drop.findUnique({ where: { id: dropId }, select: { store: { select: { ownerId: true } } } });
   if (drop) pushToUser(drop.store.ownerId, { title: "Your drop is live", body: "Shoppers can now see it in the Drops feed.", data: { type: "drop", dropId: String(dropId) } }).catch(() => {});
+  notifyFollowers(dropId).catch(() => {});
+}
+
+const MAX_FOLLOWER_PUSHES = 2000;
+
+/** A store's new drop reaches the people following the store (content they asked for). */
+async function notifyFollowers(dropId: number) {
+  const drop = await prisma.drop.findUnique({
+    where: { id: dropId },
+    select: { storeId: true, store: { select: { name: true, ownerId: true } }, product: { select: { name: true } } },
+  });
+  if (!drop) return;
+  const followers = await prisma.storeFollow.findMany({ where: { storeId: drop.storeId }, select: { userId: true }, take: MAX_FOLLOWER_PUSHES });
+  const ids = followers.map((f) => f.userId).filter((id) => id !== drop.store.ownerId);
+  if (ids.length) {
+    await pushToUsers(ids, { title: `New drop from ${drop.store.name}`, body: drop.product.name, data: { type: "drop", dropId: String(dropId) } });
+  }
 }
 
 /** Called by the Cloudinary webhook when the streaming versions are ready (or failed). */

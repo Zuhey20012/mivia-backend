@@ -5,8 +5,10 @@ import { sendError, positiveId } from "../../lib/errors";
 import { escapeHtml } from "../../services/notificationDeliveryService";
 import { env } from "../../config/env";
 import * as drops from "./drops.service";
+import { socialRoutes } from "./social";
 
 const router = Router();
+router.use(socialRoutes);
 
 function location(req: AuthRequest) {
   const lat = req.query.lat !== undefined ? Number(req.query.lat) : null;
@@ -16,7 +18,7 @@ function location(req: AuthRequest) {
 }
 
 const feedQuery = z.object({
-  mode: z.enum(["foryou", "latest"]).default("foryou"),
+  mode: z.enum(["foryou", "latest", "following"]).default("foryou"),
   cursor: z.string().max(200).optional(),
   limit: z.coerce.number().int().min(1).max(20).default(8),
 });

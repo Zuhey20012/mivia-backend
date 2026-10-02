@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// One sound switch for every video in the app (product galleries and Drops), remembered between
-/// launches: turn the sound on once and the next video plays with sound too.
+/// launches: mute once and every video stays muted until sound is turned back on.
 class MediaSound extends ChangeNotifier {
   MediaSound._() {
     _load();
@@ -10,7 +10,7 @@ class MediaSound extends ChangeNotifier {
   static final MediaSound instance = MediaSound._();
 
   static const _key = 'media_sound_on';
-  bool _on = false; // videos start muted until the user asks for sound
+  bool _on = true; // videos play with sound (as Drops always did) until the user mutes them
 
   bool get on => _on;
   double get volume => _on ? 1 : 0;
@@ -18,7 +18,8 @@ class MediaSound extends ChangeNotifier {
   Future<void> _load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final saved = prefs.getBool(_key) ?? false;
+      // Earlier builds kept a Drops-only mute switch; carry that choice over
+      final saved = prefs.getBool(_key) ?? !(prefs.getBool('drops_muted') ?? false);
       if (saved != _on) {
         _on = saved;
         notifyListeners();

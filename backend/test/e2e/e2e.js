@@ -400,6 +400,43 @@ async function register(name, role, extra = {}) {
   const m1 = mine.body.drops.find((d) => d.id === d1);
   check("store sees its drops with real stats", m1?.viewCount === 1 && m1?.avgWatchSec > 0, m1);
 
+  console.log("\n— Comments and follows");
+  check("anonymous users cannot comment", (await call("POST", `/drops/${d1}/comments`, { body: "hi" })).status === 401);
+  check("an empty comment is refused", (await call("POST", `/drops/${d1}/comments`, { body: "   " }, otherCust.accessToken)).status === 400);
+  check("comments over 300 characters are refused", (await call("POST", `/drops/${d1}/comments`, { body: "x".repeat(301) }, otherCust.accessToken)).status === 400);
+  const cm1 = await call("POST", `/drops/${d1}/comments`, { body: "  Love   this colour! <b>x</b> " }, otherCust.accessToken);
+  check("customer comments on a drop; shown by first name, stored as plain text", cm1.status === 201 && cm1.body.comment?.body === "Love this colour! <b>x</b>" && cm1.body.comment.author === "Olli" && cm1.body.comment.mine === true, cm1.body);
+  const cm2 = await call("POST", `/drops/${d1}/comments`, { body: "Thank you! Sizes S-L in stock." }, vendor.accessToken);
+  check("the store's reply is labelled as the store", cm2.status === 201 && cm2.body.comment?.byStore === true && cm2.body.comment.author === `Vera Vintage ${uniq}`, cm2.body);
+  const listedComments = await call("GET", `/drops/${d1}/comments`);
+  check("anyone can read comments, newest first, without edit rights", listedComments.body.comments?.length === 2 && listedComments.body.comments[0].id === cm2.body.comment.id && listedComments.body.comments.every((c) => !c.mine && !c.canDelete), listedComments.body);
+  check("the drop shows its comment count", (await call("GET", `/drops/${d1}`)).body.drop?.commentCount === 2);
+  const commentStranger = await register("Saara");
+  check("others cannot delete someone's comment", (await call("DELETE", `/drops/${d1}/comments/${cm1.body.comment.id}`, null, commentStranger.accessToken)).status === 403);
+  check("the store can delete a comment on its own drop", (await call("DELETE", `/drops/${d1}/comments/${cm1.body.comment.id}`, null, vendor.accessToken)).status === 200 && (await call("GET", `/drops/${d1}`)).body.drop?.commentCount === 1);
+  check("you cannot report your own comment", (await call("POST", `/drops/${d1}/comments/${cm2.body.comment.id}/report`, { reason: "SCAM" }, vendor.accessToken)).status === 400);
+  for (const reporter of [otherCust, commentStranger, await register("Riku")]) {
+    await call("POST", `/drops/${d1}/comments/${cm2.body.comment.id}/report`, { reason: "HARASSMENT" }, reporter.accessToken);
+  }
+  check("three distinct reports hide a comment", (await call("GET", `/drops/${d1}/comments`)).body.comments?.length === 0 && (await call("GET", `/drops/${d1}`)).body.drop?.commentCount === 0);
+  const reportedComments = await call("GET", "/admin/comments/reported", null, adminToken);
+  check("admins see reportedComments comments with reasons", reportedComments.body.comments?.some((c) => c.id === cm2.body.comment.id && c.status === "HIDDEN" && c.reports.length === 3), reportedComments.body);
+  check("only admins see reportedComments comments", (await call("GET", "/admin/comments/reported", null, otherCust.accessToken)).status === 403);
+  const restoredComment = await call("POST", `/admin/comments/${cm2.body.comment.id}`, { action: "restore" }, adminToken);
+  check("an admin can restore a wrongly hidden comment", restoredComment.body.comment?.status === "VISIBLE" && (await call("GET", `/drops/${d1}`)).body.drop?.commentCount === 1, restoredComment.body);
+
+  check("following needs a signed-in user", (await call("PUT", `/stores/${storeId}/follow`)).status === 401);
+  const followRes = await call("PUT", `/stores/${storeId}/follow`, null, otherCust.accessToken);
+  check("customer follows a store", followRes.body.following === true && followRes.body.followerCount === 1, followRes.body);
+  check("following twice counts once", (await call("PUT", `/stores/${storeId}/follow`, null, otherCust.accessToken)).body.followerCount === 1);
+  const sPage = (await call("GET", `/stores/${storeId}`, null, otherCust.accessToken)).body.store;
+  check("store page shows followers and that you follow it", sPage?.followerCount === 1 && sPage?.followedByMe === true, sPage && { followerCount: sPage.followerCount, followedByMe: sPage.followedByMe });
+  const followFeed = await call("GET", "/drops/feed?mode=following", null, otherCust.accessToken);
+  check("the Following feed has drops from followed stores, marked as followed", followFeed.body.drops?.some((d) => d.id === d1 && d.store.followedByMe === true && typeof d.commentCount === "number"), followFeed.body);
+  check("the Following feed is empty when you follow nobody", (await call("GET", "/drops/feed?mode=following", null, commentStranger.accessToken)).body.drops?.length === 0);
+  check("the Following feed needs a signed-in user", (await call("GET", "/drops/feed?mode=following")).status === 401);
+  check("unfollow", (await call("DELETE", `/stores/${storeId}/follow`, null, otherCust.accessToken)).body.following === false);
+
   console.log("\n— Reporting and moderation (DSA)");
   const reporters = [otherCust, await register("Pia"), await register("Rami")];
   check("anonymous report accepted", (await call("POST", `/drops/${d1}/report`, { reason: "SCAM" })).body.received === true);

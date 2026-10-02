@@ -154,6 +154,8 @@ model User {
   dropLikes     DropLike[]
   reviews       Review[]
   devices       DeviceToken[]
+  dropComments  DropComment[]
+  follows       StoreFollow[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -208,11 +210,12 @@ model Store {
   rating       Float @default(0)
   totalReviews Int   @default(0)
 
-  products Product[]
-  orders   Order[]
-  drops    Drop[]
-  reviews  Review[]
-  payouts  Payout[]
+  products  Product[]
+  orders    Order[]
+  drops     Drop[]
+  reviews   Review[]
+  payouts   Payout[]
+  followers StoreFollow[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -582,10 +585,12 @@ model Drop {
   shareCount    Int   @default(0)
   completeCount Int   @default(0) // views watched to (almost) the end
   watchSeconds  Float @default(0)
+  commentCount  Int   @default(0) // visible comments
 
-  likes   DropLike[]
-  views   DropView[]
-  reports DropReport[]
+  likes    DropLike[]
+  views    DropView[]
+  reports  DropReport[]
+  comments DropComment[]
 
   publishedAt DateTime?
   createdAt   DateTime  @default(now())
@@ -633,6 +638,53 @@ model DropReport {
 
   @@index([status, createdAt])
   @@index([dropId])
+}
+
+enum CommentStatus {
+  VISIBLE
+  HIDDEN // three distinct reports: hidden until an admin looks at it
+  REMOVED // deleted by its author, the store or an admin
+}
+
+/// Comments on drops. Shown with the commenter's first name only.
+model DropComment {
+  id          Int           @id @default(autoincrement())
+  dropId      Int
+  drop        Drop          @relation(fields: [dropId], references: [id], onDelete: Cascade)
+  userId      Int
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  body        String
+  status      CommentStatus @default(VISIBLE)
+  reportCount Int           @default(0)
+  createdAt   DateTime      @default(now())
+
+  reports DropCommentReport[]
+
+  @@index([dropId, status, id])
+  @@index([userId, createdAt])
+  @@index([status, reportCount])
+}
+
+model DropCommentReport {
+  commentId  Int
+  comment    DropComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  reporterId Int
+  reason     String
+  createdAt  DateTime    @default(now())
+
+  @@id([commentId, reporterId])
+}
+
+/// A shopper following a store: its new drops reach them in the Following feed and by push.
+model StoreFollow {
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storeId   Int
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, storeId])
+  @@index([storeId])
 }
 
 // ─────────────────────────────────────────────

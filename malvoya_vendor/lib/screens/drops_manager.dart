@@ -6,8 +6,9 @@ import '../config/theme.dart';
 import '../core/api_client.dart';
 import '../core/strings.dart';
 import 'create_drop.dart';
+import 'drop_comments.dart';
 
-/// Your drops with their real numbers: views, likes, shares and how many watched to the end.
+/// Your drops with their real numbers: views, likes, comments, shares and how many watched to the end.
 class DropsManager extends StatefulWidget {
   const DropsManager({super.key});
 
@@ -108,6 +109,7 @@ class DropsManagerState extends State<DropsManager> {
         stat(tr(context, 'Live', 'Julkaistu'), _drops.where((d) => d['status'] == 'READY').length),
         stat(tr(context, 'Views', 'Katselut'), sum('viewCount')),
         stat(tr(context, 'Likes', 'Tykkäykset'), sum('likeCount')),
+        stat(tr(context, 'Comments', 'Kommentit'), sum('commentCount')),
         stat(tr(context, 'Shares', 'Jaot'), sum('shareCount')),
       ]),
     );
@@ -159,6 +161,15 @@ class DropsManagerState extends State<DropsManager> {
                   '${d['kind'] == 'VIDEO' && views > 0 ? ' · $completion % ${tr(context, 'watched to the end', 'katsoi loppuun')}' : ''}',
                   style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
                 ),
+                if (status == 'READY')
+                  TextButton.icon(
+                    style: TextButton.styleFrom(padding: EdgeInsets.zero, visualDensity: VisualDensity.compact),
+                    onPressed: () => showStoreDropComments(context, d, onCountChanged: (n) {
+                      if (mounted) setState(() => d['commentCount'] = n);
+                    }),
+                    icon: const Icon(Icons.chat_bubble_outline_rounded, size: 18),
+                    label: Text('${asInt(d['commentCount']) ?? 0} ${tr(context, 'comments', 'kommenttia')}'),
+                  ),
               ],
             ),
           ),

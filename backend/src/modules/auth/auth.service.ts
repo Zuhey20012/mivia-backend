@@ -137,6 +137,8 @@ function exportUser(userId: number) {
       dropLikes: { select: { dropId: true, createdAt: true } },
       reviews: { select: { orderId: true, storeRating: true, courierRating: true, comment: true, createdAt: true } },
       devices: { select: { platform: true, createdAt: true, updatedAt: true } },
+      dropComments: { where: { status: { not: "REMOVED" } }, select: { dropId: true, body: true, status: true, createdAt: true } },
+      follows: { select: { storeId: true, createdAt: true } },
     },
   });
 }
@@ -177,6 +179,13 @@ export async function deleteUserAccount(userId: number) {
     await tx.supportRequest.deleteMany({ where: { userId } });
     await tx.favorite.deleteMany({ where: { userId } });
     await tx.deviceToken.deleteMany({ where: { userId } });
+    await tx.storeFollow.deleteMany({ where: { userId } });
+    // Comments are personal data: remove them and keep each drop's visible-comment count right
+    const visible = await tx.dropComment.groupBy({ by: ["dropId"], where: { userId, status: "VISIBLE" }, _count: { _all: true } });
+    for (const v of visible) {
+      await tx.drop.update({ where: { id: v.dropId }, data: { commentCount: { decrement: v._count._all } } });
+    }
+    await tx.dropComment.deleteMany({ where: { userId } });
     await tx.review.updateMany({ where: { userId }, data: { comment: null } });
     if (store) {
       await tx.drop.updateMany({ where: { storeId: store.id, status: { in: ["READY", "PROCESSING"] } }, data: { status: "REMOVED", removedReason: "Store account deleted" } });

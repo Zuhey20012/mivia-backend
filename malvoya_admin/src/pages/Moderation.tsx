@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Flag, Play, EyeOff, RotateCcw } from 'lucide-react';
+import { Flag, Play, EyeOff, RotateCcw, MessageSquare } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../utils/api';
 
@@ -26,6 +26,17 @@ type Report = {
   drop: { id: number; status: string; caption: string | null; store: { name: string } };
 };
 
+type ReportedComment = {
+  id: number;
+  dropId: number;
+  body: string;
+  status: 'VISIBLE' | 'HIDDEN';
+  reportCount: number;
+  createdAt: string;
+  user: { id: number; name: string };
+  reports: { reason: string; createdAt: string }[];
+};
+
 const STATUSES = ['READY', 'REMOVED', 'PROCESSING', 'FAILED'] as const;
 
 /**
@@ -35,15 +46,17 @@ const STATUSES = ['READY', 'REMOVED', 'PROCESSING', 'FAILED'] as const;
 export default function Moderation() {
   const [reports, setReports] = useState<Report[]>([]);
   const [drops, setDrops] = useState<Drop[]>([]);
+  const [comments, setComments] = useState<ReportedComment[]>([]);
   const [status, setStatus] = useState<(typeof STATUSES)[number]>('READY');
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
     setError(null);
     try {
-      const [r, d] = await Promise.all([api.get('/admin/reports'), api.get(`/admin/drops?status=${status}`)]);
+      const [r, d, c] = await Promise.all([api.get('/admin/reports'), api.get(`/admin/drops?status=${status}`), api.get('/admin/comments/reported')]);
       setReports(r.data.reports);
       setDrops(d.data.drops);
+      setComments(c.data.comments);
     } catch {
       setError('Could not load moderation data.');
     }
@@ -62,6 +75,11 @@ export default function Moderation() {
     if (!confirm('Restore this drop and dismiss its open reports?')) return;
     try { await api.patch(`/admin/drops/${dropId}`, { action: 'restore' }); await load(); }
     catch { alert('Restore failed'); }
+  }
+
+  async function moderateComment(commentId: number, action: 'remove' | 'restore') {
+    try { await api.post(`/admin/comments/${commentId}`, { action }); await load(); }
+    catch { alert(action === 'remove' ? 'Could not remove the comment' : 'Could not restore the comment'); }
   }
 
   async function dismiss(reportId: number) {
@@ -93,6 +111,33 @@ export default function Moderation() {
                   <td className="py-3 text-right whitespace-nowrap">
                     <button className="apple-btn-danger text-xs px-3 py-1.5 mr-2" onClick={() => remove(r.drop.id)}>Remove drop</button>
                     <button className="apple-btn-secondary text-xs px-3 py-1.5" onClick={() => dismiss(r.id)}>Dismiss</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="apple-card mb-6">
+        <h2 className="font-semibold mb-1 flex items-center gap-2"><MessageSquare className="w-4 h-4" /> Reported comments ({comments.length})</h2>
+        <p className="text-gray-400 text-xs mb-4">Three reports from different users hide a comment until you decide. Restoring makes it visible again and clears its reports.</p>
+        {comments.length === 0 ? <p className="text-gray-400 text-sm">Nothing to review.</p> : (
+          <table className="w-full text-sm">
+            <tbody>
+              {comments.map(c => (
+                <tr key={c.id} className="table-row">
+                  <td className="py-3 pr-4 whitespace-nowrap">
+                    {[...new Set(c.reports.map(r => r.reason))].map(reason => <span key={reason} className="badge-red mr-1">{reason}</span>)}
+                  </td>
+                  <td className="py-3 pr-4">
+                    <p className="font-medium">{c.body}</p>
+                    <p className="text-gray-400 text-xs">Drop #{c.dropId} · by user #{c.user.id} · {c.reportCount} reports · {c.status === 'HIDDEN' ? 'hidden' : 'visible'}</p>
+                  </td>
+                  <td className="py-3 pr-4 text-gray-400 text-xs">{new Date(c.createdAt).toLocaleString('fi-FI')}</td>
+                  <td className="py-3 text-right whitespace-nowrap">
+                    <button className="apple-btn-danger text-xs px-3 py-1.5 mr-2" onClick={() => moderateComment(c.id, 'remove')}>Remove</button>
+                    {c.status === 'HIDDEN' && <button className="apple-btn-secondary text-xs px-3 py-1.5" onClick={() => moderateComment(c.id, 'restore')}>Restore</button>}
                   </td>
                 </tr>
               ))}

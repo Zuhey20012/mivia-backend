@@ -10,8 +10,11 @@ import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
 import '../core/delivery_location.dart';
+import '../core/media_sound.dart';
+import '../core/report_reasons.dart';
 import '../core/strings.dart';
 import '../widgets/add_to_bag_sheet.dart';
+import '../widgets/drop_comments_sheet.dart';
 import '../widgets/price_tag.dart';
 import 'product_detail.dart';
 import 'store_detail.dart';
@@ -48,7 +51,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   bool _hasMore = true;
   String? _error;
   int _index = 0;
-  bool _muted = false;
+  bool get _muted => !MediaSound.instance.on;
   bool _paused = false;
   bool _routeCovered = false;
   DateTime? _watchStart;
@@ -59,13 +62,20 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    MediaSound.instance.addListener(_onSoundChanged);
     _init();
+  }
+
+  void _onSoundChanged() {
+    for (final c in _videos.values) {
+      c.setVolume(_muted ? 0 : 1);
+    }
+    if (mounted) setState(() {});
   }
 
   Future<void> _init() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      _muted = prefs.getBool('drops_muted') ?? false;
       // An old build stored a device ID for view counting; it is no longer used, so remove it
       await prefs.remove('install_id');
     } catch (_) {}
@@ -100,6 +110,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    MediaSound.instance.removeListener(_onSoundChanged);
     _flushView();
     for (final c in _videos.values) {
       c.dispose();
@@ -269,11 +280,45 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
 
   void _toggleMute() {
     HapticFeedback.selectionClick();
-    setState(() => _muted = !_muted);
-    for (final c in _videos.values) {
-      c.setVolume(_muted ? 0 : 1);
+    MediaSound.instance.toggle();
+  }
+
+  // ── Following and comments ──────────────────────────────────────────────
+
+  Future<void> _toggleFollow(Map<String, dynamic> drop) async {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    if (!auth.isAuthenticated) {
+      _snack(tr(context, 'Sign in to follow stores', 'Kirjaudu sisään seurataksesi kauppoja'));
+      return;
     }
-    SharedPreferences.getInstance().then((p) => p.setBool('drops_muted', _muted)).catchError((_) => false);
+    final storeId = asInt((drop['store'] as Map?)?['id']);
+    if (storeId == null) return;
+    final next = (drop['store'] as Map)['followedByMe'] != true;
+    HapticFeedback.lightImpact();
+    setState(() => _setFollowed(storeId, next));
+    final api = ApiClient(auth);
+    final res = next ? await api.put('/stores/$storeId/follow') : await api.delete('/stores/$storeId/follow');
+    if (!mounted) return;
+    if (!res.ok) {
+      setState(() => _setFollowed(storeId, !next));
+      _snack(res.error!);
+    } else if (next) {
+      _snack(tr(context, 'Following. New drops from this store appear in Following.', 'Seuraat kauppaa. Sen uudet julkaisut näkyvät Seuratut-välilehdellä.'));
+    }
+  }
+
+  /// Every drop of the same store shows the same follow state.
+  void _setFollowed(int storeId, bool followed) {
+    for (final d in _drops) {
+      final s = d['store'];
+      if (s is Map && asInt(s['id']) == storeId) s['followedByMe'] = followed;
+    }
+  }
+
+  Future<void> _openComments(Map<String, dynamic> drop) async {
+    await showDropComments(context, drop, onCountChanged: (n) {
+      if (mounted) setState(() => drop['commentCount'] = n);
+    });
   }
 
   Future<void> _open(Widget page) async {
@@ -334,18 +379,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   }
 
   void _report(Map<String, dynamic> drop) {
-    const reasons = {
-      'ILLEGAL_PRODUCT': ['Illegal or dangerous product', 'Laiton tai vaarallinen tuote'],
-      'COUNTERFEIT': ['Counterfeit or fake brand', 'Väärennös'],
-      'SCAM': ['Scam or misleading', 'Huijaus tai harhaanjohtava'],
-      'NUDITY': ['Nudity or sexual content', 'Alastomuus tai seksuaalinen sisältö'],
-      'VIOLENCE': ['Violence', 'Väkivalta'],
-      'HATE': ['Hate speech', 'Vihapuhe'],
-      'HARASSMENT': ['Harassment', 'Häirintä'],
-      'IP_INFRINGEMENT': ['Uses someone else\'s content or brand', 'Loukkaa tekijän- tai tavaramerkkioikeutta'],
-      'MINOR_SAFETY': ['Child safety', 'Lasten turvallisuus'],
-      'OTHER': ['Something else', 'Jokin muu'],
-    };
+    const reasons = reportReasons;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -438,9 +472,12 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
               _message(Icons.wifi_off_rounded, _error!, action: tr(context, 'Try again', 'Yritä uudelleen'), onTap: () => _load(reset: true))
             else if (_drops.isEmpty)
               _message(
-                Icons.play_circle_outline_rounded,
-                tr(context, 'No drops yet. When stores near you post videos, they show up here.',
-                    'Ei vielä julkaisuja. Kun lähialueen kaupat julkaisevat videoita, ne näkyvät täällä.'),
+                _mode == 'following' ? Icons.storefront_rounded : Icons.play_circle_outline_rounded,
+                _mode == 'following'
+                    ? tr(context, 'Follow stores to see their new drops here. Tap + on a store in For you.',
+                        'Seuraa kauppoja nähdäksesi niiden uudet julkaisut täällä. Napauta kaupan +-merkkiä Sinulle-välilehdellä.')
+                    : tr(context, 'No drops yet. When stores near you post videos, they show up here.',
+                        'Ei vielä julkaisuja. Kun lähialueen kaupat julkaisevat videoita, ne näkyvät täällä.'),
                 action: tr(context, 'Refresh', 'Päivitä'),
                 onTap: () => _load(reset: true),
               )
@@ -544,6 +581,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
             ),
             const Spacer(),
             tab('foryou', tr(context, 'For you', 'Sinulle')),
+            tab('following', tr(context, 'Following', 'Seuratut')),
             tab('latest', tr(context, 'Latest', 'Uusimmat')),
             const Spacer(),
             IconButton(
@@ -639,24 +677,53 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
 
     return Column(
       children: [
-        GestureDetector(
-          onTap: () => _open(StoreDetailScreen(store: store)),
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 20),
-            child: CircleAvatar(
-              radius: 24,
-              backgroundColor: Colors.white,
-              child: CircleAvatar(
-                radius: 22,
-                backgroundColor: AppTheme.primaryLight,
-                backgroundImage: store['logoUrl'] != null ? CachedNetworkImageProvider(store['logoUrl']) : null,
-                child: store['logoUrl'] == null ? const Icon(Icons.storefront_rounded, color: AppTheme.primary) : null,
+        Padding(
+          padding: const EdgeInsets.only(bottom: 24),
+          child: Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.bottomCenter,
+            children: [
+              GestureDetector(
+                onTap: () => _open(StoreDetailScreen(store: store)),
+                child: CircleAvatar(
+                  radius: 24,
+                  backgroundColor: Colors.white,
+                  child: CircleAvatar(
+                    radius: 22,
+                    backgroundColor: AppTheme.primaryLight,
+                    backgroundImage: store['logoUrl'] != null ? CachedNetworkImageProvider(store['logoUrl']) : null,
+                    child: store['logoUrl'] == null ? const Icon(Icons.storefront_rounded, color: AppTheme.primary) : null,
+                  ),
+                ),
               ),
-            ),
+              Positioned(
+                bottom: -10,
+                child: Semantics(
+                  button: true,
+                  label: store['followedByMe'] == true ? tr(context, 'Unfollow store', 'Lopeta seuraaminen') : tr(context, 'Follow store', 'Seuraa kauppaa'),
+                  child: GestureDetector(
+                    onTap: () => _toggleFollow(drop),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        color: store['followedByMe'] == true ? Colors.white : AppTheme.primary,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 1.5),
+                      ),
+                      child: Icon(store['followedByMe'] == true ? Icons.check_rounded : Icons.add_rounded,
+                          size: 15, color: store['followedByMe'] == true ? AppTheme.primary : Colors.white),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
         action(liked ? Icons.favorite_rounded : Icons.favorite_border_rounded, _compact(drop['likeCount']), () => _toggleLike(drop),
             color: liked ? const Color(0xFFFF4D6D) : Colors.white, tooltip: tr(context, 'Like', 'Tykkää')),
+        action(Icons.chat_bubble_outline_rounded, _compact(drop['commentCount']), () => _openComments(drop), tooltip: tr(context, 'Comments', 'Kommentit')),
         action(Icons.shopping_bag_outlined, tr(context, 'Buy', 'Osta'), () => _addToBag(drop), tooltip: tr(context, 'Add to bag', 'Lisää kassiin')),
         action(Icons.reply_rounded, _compact(drop['shareCount']), () => _share(drop), tooltip: tr(context, 'Share', 'Jaa')),
         action(Icons.more_horiz_rounded, null, () => _report(drop), tooltip: tr(context, 'More', 'Lisää')),
