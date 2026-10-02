@@ -3,9 +3,8 @@ services:
     name: malvoya-api
     runtime: node
     plan: starter
-    # EU region keeps personal data inside the EEA (GDPR Chapter V). The current live service
-    # (malvoya-api-n065) is in Oregon; Render cannot move a service between regions, so a new
-    # Frankfurt service + database is needed — see CLAUDE.md "Deployment".
+    # EU region keeps personal data inside the EEA (GDPR Chapter V). Live as malvoya-api-eu with the
+    # malvoya-db-eu database; the older Oregon service (malvoya-api-n065) is being retired.
     region: frankfurt
     rootDir: backend
     # --include=dev: NODE_ENV=production would otherwise skip TypeScript and the Prisma CLI

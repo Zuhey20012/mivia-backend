@@ -49,7 +49,7 @@ export const env = {
   allowedOrigins,
 
   // Public address of this API (share links, Stripe onboarding return pages, media webhooks)
-  publicApiUrl: (process.env.PUBLIC_API_URL || "https://malvoya-api-n065.onrender.com").replace(/\/+$/, ""),
+  publicApiUrl: (process.env.PUBLIC_API_URL || "https://malvoya-api-eu.onrender.com").replace(/\/+$/, ""),
   playStoreUrl: "https://play.google.com/store/apps/details?id=com.malvoya.customer",
 
   // Media (photos and videos). Without these, uploads are switched off and say so.

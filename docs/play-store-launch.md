@@ -10,7 +10,7 @@ Build number rule: every upload needs a higher `+N` in `pubspec.yaml` (`1.2.0+4`
 ## 1. Before the first upload
 
 - [x] Backend v2.3 deployed on Render (drops, payouts, reviews, support, legal pages).
-- [x] Legal documents are published by the API: `https://malvoya-api-n065.onrender.com/legal/privacy` (use this as the Play privacy policy URL), `/legal/terms`, `/legal/sellers`, `/legal/couriers`.
+- [x] Legal documents are published by the API: `https://malvoya-api-eu.onrender.com/legal/privacy` (use this as the Play privacy policy URL), `/legal/terms`, `/legal/sellers`, `/legal/couriers`.
 - [ ] Fill in the `[PLACEHOLDERS]` in `legal/*.md` (company name, Y-tunnus, address, commission) and push; the pages update on the next deploy.
 - [ ] Cloudinary account (photos/videos): `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` on Render. Without them uploads say they are switched off.
 - [ ] Firebase service account for push: `FIREBASE_SERVICE_ACCOUNT` on Render (Project settings → Service accounts → Generate new private key; paste the JSON).
