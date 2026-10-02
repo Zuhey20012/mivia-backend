@@ -68,6 +68,24 @@ function tokenHandler(field: "idToken" | "firebaseToken", login: (token: string,
 }
 
 export const googleLogin = tokenHandler("idToken", socialService.loginWithGoogle);
+
+export async function googleLink(req: AuthRequest, res: Response) {
+  const idToken = req.body?.idToken;
+  if (typeof idToken !== "string" || !idToken) return res.status(400).json({ ok: false, error: "idToken is required" });
+  try {
+    res.json({ ok: true, ...(await socialService.linkGoogle(req.user!.id, idToken)) });
+  } catch (e) {
+    sendError(res, e);
+  }
+}
+
+export async function googleUnlink(req: AuthRequest, res: Response) {
+  try {
+    res.json({ ok: true, ...(await socialService.unlinkGoogle(req.user!.id)) });
+  } catch (e) {
+    sendError(res, e);
+  }
+}
 export const phoneLogin  = tokenHandler("firebaseToken", socialService.loginWithPhone);
 export const appleLogin  = tokenHandler("idToken", socialService.loginWithApple);
 

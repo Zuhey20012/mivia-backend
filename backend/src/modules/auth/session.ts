@@ -9,6 +9,7 @@ export interface SessionUser {
   name: string;
   email: string;
   role: string;
+  googleSub?: string | null;
 }
 
 /** Refresh tokens are stored hashed so a database leak does not leak live sessions. */
@@ -18,7 +19,7 @@ export function hashToken(token: string): string {
 
 /** Single place where access + refresh tokens are issued for every login method. */
 export async function issueSession(user: SessionUser) {
-  const safeUser = { id: user.id, name: user.name, email: user.email, role: user.role };
+  const safeUser = { id: user.id, name: user.name, email: user.email, role: user.role, googleLinked: Boolean(user.googleSub) };
   const accessToken = signAccessToken(safeUser);
   const refreshToken = signRefreshToken(user.id);
 

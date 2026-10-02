@@ -18,13 +18,13 @@ if (!getApps().some((a) => a.name === "[DEFAULT]")) {
   }
 }
 
-type SocialUser = { id: number; name: string; email: string; role: string; isActive: boolean };
+type SocialUser = { id: number; name: string; email: string; role: string; isActive: boolean; googleSub: string | null };
 export type SignupRole = "CUSTOMER" | "VENDOR" | "COURIER";
 
 /** The role only applies when a new account is created; existing accounts keep theirs. */
-async function createSocialUser(data: { email: string; name: string; phone?: string }, role: SignupRole) {
+async function createSocialUser(data: { email: string; name: string; phone?: string; googleSub?: string }, role: SignupRole) {
   const user = await prisma.user.create({
-    data: { email: data.email, name: data.name, phone: data.phone ?? null, passwordHash: unusablePasswordHash(), role },
+    data: { email: data.email, name: data.name, phone: data.phone ?? null, googleSub: data.googleSub ?? null, passwordHash: unusablePasswordHash(), role },
   });
   if (role === "COURIER") {
     await prisma.courier.create({ data: { userId: user.id, name: user.name, phone: data.phone ?? null, isActive: false } });
@@ -40,22 +40,67 @@ function assertActive(user: SocialUser) {
   if (!user.isActive) throw new AuthError("This account is disabled", 403);
 }
 
-export async function loginWithGoogle(idToken: string, role: SignupRole = "CUSTOMER") {
+async function verifyGoogleToken(idToken: string) {
   if (!env.googleClientId) throw new AuthError("Google sign-in is not configured", 503);
-  const ticket = await googleClient.verifyIdToken({ idToken, audience: env.googleClientId });
-  const payload = ticket.getPayload();
+  let payload;
+  try {
+    payload = (await googleClient.verifyIdToken({ idToken, audience: env.googleClientId })).getPayload();
+  } catch {
+    throw new AuthError("Invalid Google token", 401);
+  }
   // Only trust emails Google has verified, otherwise an attacker could claim someone else's address.
-  if (!payload?.email || payload.email_verified !== true) throw new AuthError("Invalid Google token", 401);
+  if (!payload?.sub || !payload.email || payload.email_verified !== true) throw new AuthError("Invalid Google token", 401);
+  return { sub: payload.sub, email: payload.email.toLowerCase(), name: payload.name };
+}
 
-  const email = payload.email.toLowerCase();
-  let user = await prisma.user.findFirst({ where: { email: { equals: email, mode: "insensitive" } } });
-  if (user) {
-    assertVerifiedSignInAllowed(user);
-  } else {
-    user = await createSocialUser({ email, name: payload.name || email.split("@")[0] }, role);
+export async function loginWithGoogle(idToken: string, role: SignupRole = "CUSTOMER") {
+  const google = await verifyGoogleToken(idToken);
+
+  // A linked Google account opens the account it was linked to, whatever that account's email is.
+  let user = await prisma.user.findUnique({ where: { googleSub: google.sub } });
+  if (!user) {
+    user = await prisma.user.findFirst({ where: { email: { equals: google.email, mode: "insensitive" } } });
+    if (user) {
+      assertVerifiedSignInAllowed(user);
+      if (!user.googleSub) user = await prisma.user.update({ where: { id: user.id }, data: { googleSub: google.sub } });
+    } else {
+      user = await createSocialUser({ email: google.email, name: google.name || google.email.split("@")[0], googleSub: google.sub }, role);
+    }
   }
   assertActive(user);
   return issueSession(user);
+}
+
+/**
+ * Links a Google account to the signed-in user, so "Sign in with Google" opens this account from now on.
+ * This is how accounts made by /register (which verified sign-ins never open by email) can use Google.
+ */
+export async function linkGoogle(userId: number, idToken: string) {
+  const google = await verifyGoogleToken(idToken);
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { isActive: true, googleSub: true } });
+  if (!user || !user.isActive) throw new AuthError("This account is disabled", 403);
+  if (user.googleSub === google.sub) return { googleLinked: true, googleEmail: google.email };
+  if (user.googleSub) throw new AuthError("A different Google account is already linked. Unlink it first.", 409);
+
+  const owner = await prisma.user.findUnique({ where: { googleSub: google.sub }, select: { id: true } });
+  if (owner) throw new AuthError("This Google account is already linked to another Malvoya account", 409);
+  try {
+    await prisma.user.update({ where: { id: userId }, data: { googleSub: google.sub } });
+  } catch (e: any) {
+    if (e?.code === "P2002") throw new AuthError("This Google account is already linked to another Malvoya account", 409);
+    throw e;
+  }
+  return { googleLinked: true, googleEmail: google.email };
+}
+
+/** Only password accounts can unlink: any other account is reached by Google through its verified email anyway. */
+export async function unlinkGoogle(userId: number) {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { passwordHash: true } });
+  if (!user?.passwordHash.startsWith("$2")) {
+    throw new AuthError("Google can only be unlinked from accounts that sign in with a password.", 409);
+  }
+  await prisma.user.update({ where: { id: userId }, data: { googleSub: null } });
+  return { googleLinked: false };
 }
 
 async function verifyFirebaseToken(token: string) {

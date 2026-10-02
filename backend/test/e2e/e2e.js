@@ -93,8 +93,19 @@ async function register(name, role, extra = {}) {
   const codeNew = await call("POST", "/auth/otp/verify", { target: `otp${uniq}@example.fi`, code: "111111" });
   plantCode(`otp${uniq}@example.fi`, "222222");
   const codeAgain = await call("POST", "/auth/otp/verify", { target: `otp${uniq}@example.fi`, code: "222222" });
+  check("Google cannot be unlinked from an account without a password", (await call("DELETE", "/auth/google/link", null, codeNew.body.accessToken)).status === 409);
   check("code sign-in creates an account and returns to it", codeNew.status === 200 && codeAgain.status === 200 && codeAgain.body.user?.id === codeNew.body.user?.id, [codeNew, codeAgain]);
   check("password login still works for the registered account", (await call("POST", "/auth/login", { email: `aino${uniq}@example.fi`, password: "correct-horse-1" })).status === 200);
+
+  // Linking Google (the e2e API has no GOOGLE_CLIENT_ID, so token checks stop at 503; the link itself is set in SQL)
+  check("sessions say whether Google is linked", regA.body.user?.googleLinked === false, regA.body.user);
+  check("linking Google needs a signed-in user", (await call("POST", "/auth/google/link", { idToken: "x" })).status === 401);
+  check("linking Google needs an idToken", (await call("POST", "/auth/google/link", {}, tokenA)).status === 400);
+  check("linking Google without GOOGLE_CLIENT_ID is unavailable, not a crash", (await call("POST", "/auth/google/link", { idToken: "x" }, tokenA)).status === 503);
+  sql(`update "User" set "googleSub" = 'google-sub-${uniq}' where id = ${regA.body.user.id}`);
+  const relogin = await call("POST", "/auth/login", { email: `aino${uniq}@example.fi`, password: "correct-horse-1" });
+  const unlink = await call("DELETE", "/auth/google/link", null, tokenA);
+  check("session shows a linked Google account; unlinking clears it", relogin.body.user?.googleLinked === true && unlink.status === 200 && unlink.body.googleLinked === false && sql(`select "googleSub" is null from "User" where id = ${regA.body.user.id}`) === "t", [relogin.body.user, unlink.body]);
 
   console.log("\n— Stores, trader info and approval");
   const vendor = await register("Vera", "VENDOR");
@@ -386,10 +397,13 @@ async function register(name, role, extra = {}) {
   check("refund cancels the unpaid store payout", sql(`select status || '|' || "amountCents" from "Payout" where "orderId"=${orderId} and party='STORE'`) === "CANCELLED|0");
   await call("PUT", `/me/favorites/${p3.id}`, null, tokenA);
   await call("POST", "/me/devices", { token: `device-token-${uniq}-aaaaaaaaaaaa`, platform: "android" }, tokenA);
+  sql(`update "User" set "googleSub" = 'google-sub-${uniq}' where id = ${regA.body.user.id}`);
   const exp = await call("GET", "/auth/me/data", null, tokenA);
+  check("data export includes the linked Google account id", exp.body.data?.googleSub === `google-sub-${uniq}`, exp.body.data?.googleSub);
   check("data export includes favourites, reviews and devices, no secrets", exp.body.data?.favorites?.length === 1 && exp.body.data?.reviews?.length === 1 && exp.body.data?.devices?.length === 1 && !JSON.stringify(exp.body).includes("passwordHash") && !JSON.stringify(exp.body).includes("device-token-"), Object.keys(exp.body.data || {}));
   check("account deletion succeeds", (await call("DELETE", "/auth/me", null, tokenA)).status === 200);
   check("deletion removes favourites and devices and blanks review text", sql(`select (select count(*) from "Favorite" where "userId"=${regA.body.user.id}) + (select count(*) from "DeviceToken" where "userId"=${regA.body.user.id}) || '|' || (select comment is null from "Review" where "orderId"=${orderId})`) === "0|true");
+  check("deletion unlinks Google, so it can sign up again", sql(`select "googleSub" is null from "User" where id = ${regA.body.user.id}`) === "t");
   check("order kept for bookkeeping, personal data anonymised", sql(`select u.name || '|' || (o."deliveryAddress" is null) from "User" u join "Order" o on o."userId"=u.id where o.id=${orderId}`) === "Deleted user|true");
   check("deleted user's review shows as former customer", (await call("GET", `/stores/${storeId}/reviews`)).body.reviews[0]?.author === "Former customer");
 

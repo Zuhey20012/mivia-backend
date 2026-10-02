@@ -14,6 +14,7 @@ import '../l10n.dart';
 import '../local_notification_service.dart';
 import 'terms_legal_screen.dart';
 import 'privacy_gdpr_screen.dart';
+import '../core/google_link_tile.dart';
 
 /**
  * Malvoya Master Settings Hub
@@ -645,6 +646,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
                     onTap: () => _showCountryPicker(l10n),
                   ),
+                  Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
+                  const GoogleLinkTile(leading: Icon(Icons.link_rounded, color: AppTheme.primary, size: 22)),
                   Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
                   ListTile(
                     leading: const Icon(Icons.security_rounded, color: AppTheme.primary, size: 22),

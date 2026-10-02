@@ -8,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'config/constants.dart';
+import 'core/api_client.dart';
 
 const _secureStorage = FlutterSecureStorage();
 
@@ -19,21 +20,23 @@ class User {
   final String email;
   final String role;
   final String? name;
+  final bool googleLinked;
   final String? phone;
   final bool isActive;
 
-  User({required this.id, required this.email, required this.role, this.name, this.phone, this.isActive = true});
+  User({required this.id, required this.email, required this.role, this.name, this.phone, this.isActive = true, this.googleLinked = false});
 
   factory User.fromJson(Map<String, dynamic> json) => User(
         id: json['id'],
         email: json['email'] ?? '',
         role: json['role'] ?? kAppRole,
         name: json['name'],
+        googleLinked: json['googleLinked'] == true,
         phone: json['phone'],
         isActive: json['isActive'] ?? true,
       );
 
-  Map<String, dynamic> toJson() => {'id': id, 'email': email, 'role': role, 'name': name, 'phone': phone, 'isActive': isActive};
+  Map<String, dynamic> toJson() => {'id': id, 'email': email, 'role': role, 'name': name, 'googleLinked': googleLinked, 'phone': phone, 'isActive': isActive};
 }
 
 /// Handles sign-in, secure token storage and automatic access-token refresh.
@@ -202,6 +205,45 @@ class AuthService extends ChangeNotifier {
     } catch (_) {
       return 'Google sign-in failed. Please check your internet connection.';
     }
+  }
+
+  // ── Linking Google to the signed-in account ──────────────────────────────
+
+  bool get googleLinked => _currentUser?.googleLinked ?? false;
+
+  /// Links a Google account to this account, so "Sign in with Google" opens it from now on.
+  Future<String?> linkGoogle() async {
+    try {
+      final google = GoogleSignIn();
+      // Show the account picker even if Google was used before, so the right account gets linked
+      await google.signOut();
+      final googleUser = await google.signIn();
+      if (googleUser == null) return 'Google sign-in cancelled';
+      final idToken = (await googleUser.authentication).idToken;
+      if (idToken == null) return 'Google did not return a sign-in token';
+      final res = await ApiClient(this).post('/auth/google/link', {'idToken': idToken});
+      if (!res.ok) return res.error;
+      await _setGoogleLinked(true);
+      return null;
+    } catch (_) {
+      return 'Google sign-in failed. Please check your internet connection.';
+    }
+  }
+
+  Future<String?> unlinkGoogle() async {
+    final res = await ApiClient(this).delete('/auth/google/link');
+    if (!res.ok) return res.error;
+    await _setGoogleLinked(false);
+    return null;
+  }
+
+  Future<void> _setGoogleLinked(bool linked) async {
+    final user = _currentUser;
+    if (user == null) return;
+    _currentUser = User.fromJson({...user.toJson(), 'googleLinked': linked});
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('user', jsonEncode(_currentUser!.toJson()));
+    notifyListeners();
   }
 
   // ── Phone (Firebase verifies the SMS code, the API trusts only Firebase's token) ──

@@ -7,6 +7,7 @@ import '../config/theme.dart';
 import '../core/api_client.dart';
 import '../core/legal_links.dart';
 import '../core/strings.dart';
+import '../core/google_link_tile.dart';
 import '../services/socket_service.dart';
 import 'chatbot.dart';
 import 'drops_manager.dart';
@@ -363,6 +364,8 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
               await Navigator.push(context, MaterialPageRoute(builder: (_) => const StoreSetupScreen()));
               _load();
             }),
+            const Divider(height: 1),
+            const GoogleLinkTile(leading: CircleAvatar(backgroundColor: AppTheme.primaryLight, child: Icon(Icons.link_rounded, color: AppTheme.primary))),
             const Divider(height: 1),
             tile(Icons.help_outline_rounded, tr(context, 'Help', 'Apua'), tr(context, 'Answers for sellers', 'Vastauksia myyjille'),
                 () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChatbotScreen()))),

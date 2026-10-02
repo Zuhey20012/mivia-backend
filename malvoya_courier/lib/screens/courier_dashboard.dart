@@ -11,6 +11,7 @@ import '../core/api_client.dart';
 import '../core/media_upload.dart';
 import '../core/legal_links.dart';
 import '../core/strings.dart';
+import '../core/google_link_tile.dart';
 import '../services/courier_telemetry_service.dart';
 import '../services/socket_service.dart';
 import 'payouts_screen.dart';
@@ -566,6 +567,11 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
           },
           icon: const Icon(Icons.account_balance_outlined),
           label: Text(tr(context, 'Payouts and bank details', 'Tilitykset ja pankkitiedot')),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.divider)),
+          child: const GoogleLinkTile(),
         ),
         const SizedBox(height: 16),
         Text(tr(context, 'Recent deliveries', 'Viimeisimmät toimitukset'), style: const TextStyle(fontWeight: FontWeight.w700)),

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { register, login, refresh, logout, googleLogin, phoneLogin, appleLogin, sendOtpHandler, verifyOtpHandler, deleteMe, exportMyData } from "./auth.controller";
+import { register, login, refresh, logout, googleLogin, googleLink, googleUnlink, phoneLogin, appleLogin, sendOtpHandler, verifyOtpHandler, deleteMe, exportMyData } from "./auth.controller";
 import { authLimiter } from "../../middleware/rateLimiter";
 import { auth } from "../../middleware/auth";
 
@@ -10,6 +10,8 @@ router.post("/login",      authLimiter, login);
 router.post("/otp/send",   authLimiter, sendOtpHandler);
 router.post("/otp/verify", authLimiter, verifyOtpHandler);
 router.post("/google",     authLimiter, googleLogin);
+router.post("/google/link",   authLimiter, auth, googleLink);
+router.delete("/google/link", auth, googleUnlink);
 router.post("/phone",      authLimiter, phoneLogin);
 router.post("/apple",      authLimiter, appleLogin);
 router.post("/refresh",    refresh);

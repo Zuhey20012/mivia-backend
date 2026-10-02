@@ -126,7 +126,7 @@ function exportUser(userId: number) {
   return prisma.user.findUnique({
     where: { id: userId },
     select: {
-      id: true, email: true, name: true, phone: true, role: true, avatarUrl: true,
+      id: true, email: true, name: true, phone: true, role: true, avatarUrl: true, googleSub: true,
       address: true, latitude: true, longitude: true, createdAt: true, updatedAt: true,
       orders: { include: { items: true } },
       rentals: { include: { items: true } },
@@ -198,6 +198,7 @@ export async function deleteUserAccount(userId: number) {
         latitude: null,
         longitude: null,
         passwordHash: crypto.randomBytes(32).toString("hex"),
+        googleSub: null,
         isActive: false,
         deletedAt: new Date(),
       },
