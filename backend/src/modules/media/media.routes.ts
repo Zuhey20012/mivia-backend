@@ -7,6 +7,7 @@ import { sendError } from "../../lib/errors";
 import { verifyNotification } from "../../lib/cloudinary";
 import { MEDIA_KINDS, signUpload, verifyOwnedUpload, describe, MediaKind } from "./media.service";
 import { onVideoProcessed } from "../drops/drops.service";
+import { onProductVideoProcessed } from "../products/productVideos";
 
 const logger = pino({ name: "media" });
 const router = Router();
@@ -23,7 +24,9 @@ router.post("/media/cloudinary/notify", express.text({ type: "*/*", limit: "256k
     const body = JSON.parse(raw);
     if (body.notification_type === "eager" && typeof body.public_id === "string") {
       const failed = !!body.error || (Array.isArray(body.eager) && body.eager.some((e: any) => e?.status === "failed"));
+      // The public id belongs to either a drop or a product video; each handler ignores ids it does not know
       await onVideoProcessed(body.public_id, failed);
+      await onProductVideoProcessed(body.public_id, failed);
     }
     res.json({ received: true });
   } catch (err: any) {

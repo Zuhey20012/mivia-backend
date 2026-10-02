@@ -322,6 +322,33 @@ async function register(name, role, extra = {}) {
   check("feed never invents likes or discounts", fd?.likeCount === 0 && fd?.product.pricing.previousPriceCents === null);
   check("ranking explanation is public", (await call("GET", "/drops/ranking")).body.ranking?.personalProfiling === false);
 
+  console.log("\n— Product videos (gallery with sound)");
+  const pv = (await call("POST", "/media/sign", { kind: "product_video" }, vendor.accessToken)).body;
+  check("store signs a product video upload", pv.ok && pv.resourceType === "video" && pv.publicId?.startsWith(`malvoya/products/s${storeId}/`), pv);
+  await seedResource(pv.publicId, { duration: 12, width: 1080, height: 1920, derived: [] });
+  const pvUpload = { publicId: pv.publicId, version: 7, signature: uploadSig(pv.publicId, 7) };
+  check("customers cannot add product videos", (await call("POST", `/products/${p3.id}/videos`, pvUpload, otherCust.accessToken)).status === 403);
+  const pvAdd = await call("POST", `/products/${p3.id}/videos`, pvUpload, vendor.accessToken);
+  check("store adds a video to its product; it waits for processing", pvAdd.status === 201 && pvAdd.body.video?.status === "PROCESSING", pvAdd.body);
+  check("shoppers do not see a video that is still processing", (await call("GET", `/products/${p3.id}`)).body.product?.videos?.length === 0);
+  const pvBody = JSON.stringify({ notification_type: "eager", public_id: pv.publicId, eager: [{ transformation: "sp_auto/m3u8" }] });
+  const pvTs = String(Math.floor(Date.now() / 1000));
+  await fetch(`${API}/media/cloudinary/notify`, { method: "POST", headers: { "Content-Type": "application/json", "X-Cld-Timestamp": pvTs, "X-Cld-Signature": sha1(pvBody + pvTs + CLD_SECRET) }, body: pvBody });
+  const withVideo = (await call("GET", `/products/${p3.id}`)).body.product;
+  check("once processed, the product has a streaming video with a poster (no internal status)", withVideo?.videos?.length === 1 && /m3u8$/.test(withVideo.videos[0].hls) && /\.jpg$/.test(withVideo.videos[0].poster) && withVideo.videos[0].status === undefined, withVideo?.videos);
+  check("the store page shows the product video too", (await call("GET", `/stores/${storeId}`)).body.store?.products?.find((p) => p.id === p3.id)?.videos?.length === 1);
+  check("the same upload cannot be added twice", (await call("POST", `/products/${p3.id}/videos`, pvUpload, vendor.accessToken)).status === 409);
+  const otherPv = (await call("POST", "/media/sign", { kind: "product_video" }, otherVendor.accessToken)).body;
+  await seedResource(otherPv.publicId, { duration: 10, width: 720, height: 1280, derived: [] });
+  const otherUpload = { publicId: otherPv.publicId, version: 1, signature: uploadSig(otherPv.publicId, 1) };
+  check("a store cannot add a video to another store's product", (await call("POST", `/products/${p3.id}/videos`, otherUpload, otherVendor.accessToken)).status === 404);
+  check("a store cannot attach another store's upload", (await call("POST", `/products/${p3.id}/videos`, otherUpload, vendor.accessToken)).status === 403);
+  const longPv = (await call("POST", "/media/sign", { kind: "product_video" }, vendor.accessToken)).body;
+  await seedResource(longPv.publicId, { duration: 75, width: 720, height: 1280, derived: [] });
+  check("product videos over 60 s are refused", (await call("POST", `/products/${p3.id}/videos`, { publicId: longPv.publicId, version: 1, signature: uploadSig(longPv.publicId, 1) }, vendor.accessToken)).status === 400);
+  const pvDel = await call("DELETE", `/products/${p3.id}/videos/${pvAdd.body.video?.id}`, null, vendor.accessToken);
+  check("store removes a product video", pvDel.status === 200 && (await call("GET", `/products/${p3.id}`)).body.product?.videos?.length === 0);
+
   const long = (await call("POST", "/media/sign", { kind: "drop_video" }, vendor.accessToken)).body;
   await seedResource(long.publicId, { duration: 140, width: 720, height: 1280, derived: [] });
   check("videos over 90 s are refused", (await call("POST", "/drops", { productId: p3.id, kind: "VIDEO", rightsConfirmed: true, upload: { publicId: long.publicId, version: 1, signature: uploadSig(long.publicId, 1) } }, vendor.accessToken)).status === 400);

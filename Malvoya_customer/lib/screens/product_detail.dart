@@ -8,6 +8,7 @@ import '../core/api_client.dart';
 import '../core/strings.dart';
 import '../widgets/add_to_bag_sheet.dart';
 import '../widgets/price_tag.dart';
+import '../widgets/product_gallery.dart';
 import 'store_detail.dart';
 
 class ProductDetailScreen extends StatefulWidget {
@@ -22,7 +23,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   Map<String, dynamic>? _product;
   String? _error;
   bool _favorite = false;
-  int _page = 0;
 
   @override
   void initState() {
@@ -108,40 +108,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     );
   }
 
-  Widget _gallery(Map<String, dynamic> p) {
-    final images = (p['images'] as List?)?.cast<String>() ?? const [];
-    if (images.isEmpty) {
-      return Container(color: AppTheme.primaryLight, child: const Icon(Icons.checkroom_rounded, size: 72, color: AppTheme.primary));
-    }
-    return Stack(
-      children: [
-        PageView.builder(
-          itemCount: images.length,
-          onPageChanged: (i) => setState(() => _page = i),
-          itemBuilder: (_, i) => CachedNetworkImage(imageUrl: images[i], fit: BoxFit.cover, width: double.infinity),
-        ),
-        if (images.length > 1)
-          Positioned(
-            bottom: 14,
-            left: 0,
-            right: 0,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(
-                images.length,
-                (i) => AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  margin: const EdgeInsets.symmetric(horizontal: 3),
-                  width: i == _page ? 18 : 6,
-                  height: 6,
-                  decoration: BoxDecoration(color: Colors.white.withValues(alpha: i == _page ? 1 : 0.6), borderRadius: BorderRadius.circular(3)),
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
+  Widget _gallery(Map<String, dynamic> p) => ProductGallery(items: GalleryItem.forProduct(p));
 
   List<Widget> _details(Map<String, dynamic> p) {
     final store = (p['store'] as Map?)?.cast<String, dynamic>();

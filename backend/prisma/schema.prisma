@@ -92,6 +92,12 @@ enum MediaKind {
   IMAGE
 }
 
+enum VideoStatus {
+  PROCESSING // uploaded, waiting for the streaming versions
+  READY
+  FAILED
+}
+
 enum DropStatus {
   PROCESSING // uploaded, waiting for the video to be transcoded
   READY // visible in the feed
@@ -256,6 +262,7 @@ model Product {
   priceChanges PriceChange[]
   favorites    Favorite[]
   drops        Drop[]
+  videos       ProductVideo[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -274,6 +281,22 @@ model PriceChange {
   changedAt  DateTime @default(now())
 
   @@index([productId, changedAt])
+}
+
+/// Product videos (with sound) shown in the product gallery; uploaded by the store through a signed upload.
+model ProductVideo {
+  id          Int         @id @default(autoincrement())
+  productId   Int
+  product     Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  publicId    String      @unique // Cloudinary public id (verified signed upload)
+  status      VideoStatus @default(PROCESSING)
+  durationSec Float?
+  width       Int?
+  height      Int?
+  position    Int         @default(0)
+  createdAt   DateTime    @default(now())
+
+  @@index([productId, status])
 }
 
 model ProductVariant {

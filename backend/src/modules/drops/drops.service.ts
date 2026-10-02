@@ -4,10 +4,10 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { ApiError } from "../../lib/errors";
 import { env } from "../../config/env";
-import { destroyResource, getResource, imageUrl, videoHlsUrl, videoMp4Url, videoPosterUrl } from "../../lib/cloudinary";
+import { destroyResource, getResource, hlsReady, imageUrl, videoHlsUrl, videoMp4Url, videoPosterUrl } from "../../lib/cloudinary";
 import { pushToUser } from "../../lib/push";
 import { sendEmail, escapeHtml } from "../../services/notificationDeliveryService";
-import { priceInfoFor, presentProduct } from "../products/pricing";
+import { priceInfoFor, presentProduct, productInclude } from "../products/pricing";
 import { deliveryInfo } from "../stores/stores.service";
 import { describe, UploadProof, verifyOwnedUpload } from "../media/media.service";
 
@@ -28,7 +28,7 @@ export const REPORT_REASONS = [
 
 const dropInclude = {
   store: { select: { id: true, name: true, logoUrl: true, rating: true, totalReviews: true, sellerType: true, latitude: true, longitude: true, prepMinutes: true, ownerId: true } },
-  product: { include: { variants: { orderBy: { id: "asc" as const } } } },
+  product: { include: productInclude },
 } satisfies Prisma.DropInclude;
 
 type DropRow = Prisma.DropGetPayload<{ include: typeof dropInclude }>;
@@ -334,10 +334,6 @@ export async function createDrop(actor: { id: number; role: string }, input: {
     if (e?.code === "P2002") throw new ApiError("That video is already posted", 409);
     throw e;
   }
-}
-
-function hlsReady(derived?: { transformation: string }[]) {
-  return !!derived?.some((d) => d.transformation.startsWith("sp_auto"));
 }
 
 export async function listMine(ownerId: number) {

@@ -7,8 +7,8 @@ import {
   VIDEO_EAGER, ResourceType, DeliveryType,
 } from "../../lib/cloudinary";
 
-export type MediaKind = "product_image" | "store_image" | "drop_video" | "drop_image" | "delivery_proof" | "avatar";
-export const MEDIA_KINDS: MediaKind[] = ["product_image", "store_image", "drop_video", "drop_image", "delivery_proof", "avatar"];
+export type MediaKind = "product_image" | "product_video" | "store_image" | "drop_video" | "drop_image" | "delivery_proof" | "avatar";
+export const MEDIA_KINDS: MediaKind[] = ["product_image", "product_video", "store_image", "drop_video", "drop_image", "delivery_proof", "avatar"];
 
 type Actor = { id: number; role: string };
 
@@ -36,6 +36,11 @@ export async function targetFor(kind: MediaKind, actor: Actor, orderId?: number)
   switch (kind) {
     case "product_image":
       return { prefix: `malvoya/products/s${await storeIdFor(actor)}/`, resourceType: "image", type: "upload", formats: IMAGE_FORMATS };
+    case "product_video":
+      return {
+        prefix: `malvoya/products/s${await storeIdFor(actor)}/`, resourceType: "video", type: "upload", formats: VIDEO_FORMATS,
+        eager: VIDEO_EAGER, notify: true,
+      };
     case "store_image":
       return { prefix: `malvoya/stores/s${await storeIdFor(actor)}/`, resourceType: "image", type: "upload", formats: IMAGE_FORMATS };
     case "drop_image":
@@ -93,7 +98,7 @@ export async function verifyOwnedUpload(kind: MediaKind, actor: Actor, proof: Up
 
 /** Canonical URLs for a verified upload (the apps never send us URLs of their own). */
 export function describe(kind: MediaKind, publicId: string) {
-  if (kind === "drop_video") {
+  if (kind === "drop_video" || kind === "product_video") {
     return { publicId, hls: videoHlsUrl(publicId), mp4: videoMp4Url(publicId), poster: videoPosterUrl(publicId) };
   }
   if (kind === "delivery_proof") return { publicId };

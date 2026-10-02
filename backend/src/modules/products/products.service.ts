@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { ApiError } from "../../lib/errors";
 import { isOwnImageUrl, mediaConfigured } from "../../lib/cloudinary";
-import { priceInfoFor, presentProduct, recordPrice } from "./pricing";
+import { priceInfoFor, presentProduct, productInclude, recordPrice } from "./pricing";
 
 type VariantInput = { id?: number; size?: string; color?: string; sku?: string; stock: number; priceAdjustCents: number };
 
@@ -48,7 +48,7 @@ export async function getProductsByStore(storeId: number, query: Record<string, 
   const [products, total] = await Promise.all([
     prisma.product.findMany({
       where, skip: (page - 1) * limit, take: limit,
-      include: { variants: { orderBy: { id: "asc" } } },
+      include: productInclude,
       orderBy: [{ isFeatured: "desc" }, { createdAt: "desc" }],
     }),
     prisma.product.count({ where }),
@@ -59,7 +59,7 @@ export async function getProductsByStore(storeId: number, query: Record<string, 
 export async function getProductById(id: number, viewerId?: number) {
   const product = await prisma.product.findFirst({
     where: { id },
-    include: { variants: { orderBy: { id: "asc" } }, store: { select: { ...publicStoreSelect, ownerId: true } } },
+    include: { ...productInclude, store: { select: { ...publicStoreSelect, ownerId: true } } },
   });
   const isOwner = !!product && product.store.ownerId === viewerId;
   if (!product || (!product.store.isVerified && !isOwner)) throw new ApiError("Product not found", 404);
@@ -122,7 +122,7 @@ export async function searchProducts(q: {
   const [products, total] = await Promise.all([
     prisma.product.findMany({
       where, orderBy, skip: (q.page - 1) * q.limit, take: q.limit,
-      include: { variants: { orderBy: { id: "asc" } }, store: { select: publicStoreSelect } },
+      include: { ...productInclude, store: { select: publicStoreSelect } },
     }),
     prisma.product.count({ where }),
   ]);
@@ -150,7 +150,7 @@ export async function createProduct(ownerId: number, data: any) {
         tags: (productData.tags ?? []).map((t: string) => t.toLowerCase()),
         variants: clean.length ? { createMany: { data: clean } } : undefined,
       } as Prisma.ProductUncheckedCreateInput,
-      include: { variants: { orderBy: { id: "asc" } } },
+      include: productInclude,
     });
     await recordPrice(tx, product.id, product.salePriceCents);
     return product;
@@ -193,7 +193,7 @@ export async function updateProduct(id: number, ownerId: number, data: any) {
       if (all.length) productData.stockQuantity = all.reduce((s, v) => s + v.stock, 0);
     }
 
-    const next = await tx.product.update({ where: { id }, data: productData, include: { variants: { orderBy: { id: "asc" } } } });
+    const next = await tx.product.update({ where: { id }, data: productData, include: productInclude });
     if (productData.salePriceCents !== undefined && productData.salePriceCents !== product.salePriceCents) {
       await recordPrice(tx, id, productData.salePriceCents);
     }

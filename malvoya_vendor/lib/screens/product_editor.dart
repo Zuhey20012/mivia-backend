@@ -30,6 +30,17 @@ class _Photo {
   _Photo({this.url});
 }
 
+/// A product video: already on the product ([id] set), or uploaded and waiting to be attached on save.
+class _Video {
+  int? id;
+  String? poster;
+  String status; // UPLOADING | PENDING (uploaded, attached on save) | PROCESSING | READY | FAILED
+  UploadedMedia? upload;
+  double progress = 0;
+  String? error;
+  _Video({this.id, this.poster, this.status = 'UPLOADING'});
+}
+
 /// Create or edit a product. Photos upload as soon as they are picked.
 class ProductEditorScreen extends StatefulWidget {
   final Map<String, dynamic>? product;
@@ -54,6 +65,10 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
   late bool _handmade = widget.product?['isHandmade'] == true;
   late bool _available = widget.product?['isAvailable'] != false;
   late final List<_Photo> _photos = ((widget.product?['images'] as List?) ?? []).map((u) => _Photo(url: '$u')).toList();
+  late final List<_Video> _videos = ((widget.product?['videos'] as List?) ?? [])
+      .map((v) => _Video(id: v['id'], poster: v['poster'], status: '${v['status'] ?? 'READY'}'))
+      .toList();
+  static const _maxVideos = 3;
   late final List<_Option> _options = ((widget.product?['variants'] as List?) ?? [])
       .map((v) => _Option(id: asInt(v['id']), size: v['size'], color: v['color'], stock: asInt(v['stock']) ?? 0))
       .toList();
@@ -104,6 +119,70 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
     }
   }
 
+  Future<void> _addVideo() async {
+    if (_videos.length >= _maxVideos) return;
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(leading: const Icon(Icons.videocam_outlined), title: Text(tr(context, 'Record a video', 'Kuvaa video')), onTap: () => Navigator.pop(ctx, ImageSource.camera)),
+          ListTile(leading: const Icon(Icons.video_library_outlined), title: Text(tr(context, 'Choose from gallery', 'Valitse galleriasta')), onTap: () => Navigator.pop(ctx, ImageSource.gallery)),
+        ]),
+      ),
+    );
+    if (source == null) return;
+    final picked = await ImagePicker().pickVideo(source: source, maxDuration: const Duration(seconds: 60));
+    if (picked == null || !mounted) return;
+    final video = _Video();
+    setState(() => _videos.add(video));
+    try {
+      final media = await MediaUpload.upload(
+        api: _api,
+        kind: 'product_video',
+        file: File(picked.path),
+        onProgress: (p) {
+          if (mounted) setState(() => video.progress = p);
+        },
+      );
+      if ((media.durationSec ?? 0) > 60) throw UploadException(tr(context, 'Product videos can be up to 60 seconds.', 'Tuotevideo voi olla enintään 60 sekuntia.'));
+      video.upload = media;
+      if (_editing) {
+        await _attach(widget.product!['id'], video);
+      } else if (mounted) {
+        setState(() => video.status = 'PENDING');
+      }
+    } catch (e) {
+      if (mounted) setState(() => video.error = '$e');
+    }
+  }
+
+  /// Adds an uploaded video to the product; the server checks the upload belongs to this store.
+  Future<String?> _attach(Object productId, _Video video) async {
+    final res = await _api.post('/products/$productId/videos', video.upload!.toProof());
+    if (!mounted) return null;
+    setState(() {
+      if (res.ok) {
+        video.id = res.data['video']['id'];
+        video.poster = res.data['video']['poster'];
+        video.status = '${res.data['video']['status']}';
+      } else {
+        video.error = res.error;
+      }
+    });
+    return res.ok ? null : res.error;
+  }
+
+  Future<void> _removeVideo(_Video video) async {
+    if (video.id != null && _editing) {
+      final res = await _api.delete('/products/${widget.product!['id']}/videos/${video.id}');
+      if (!res.ok) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.error!)));
+        return;
+      }
+    }
+    if (mounted) setState(() => _videos.remove(video));
+  }
+
   int? _priceCents() {
     final v = double.tryParse(_price.text.trim().replaceAll(',', '.').replaceAll('€', ''));
     return v == null || v <= 0 ? null : (v * 100).round();
@@ -113,6 +192,10 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
     if (!_form.currentState!.validate()) return;
     if (_photos.any((p) => p.url == null && p.error == null)) {
       setState(() => _error = tr(context, 'Wait for the photos to finish uploading.', 'Odota, että kuvat on ladattu.'));
+      return;
+    }
+    if (_videos.any((v) => v.status == 'UPLOADING' && v.error == null)) {
+      setState(() => _error = tr(context, 'Wait for the videos to finish uploading.', 'Odota, että videot on ladattu.'));
       return;
     }
     if (_options.any((o) => (o.size == null && o.color == null))) {
@@ -148,6 +231,19 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
     final res = _editing ? await _api.patch('/products/${widget.product!['id']}', body) : await _api.post('/products', body);
     if (!mounted) return;
     if (res.ok) {
+      // Videos picked while creating the product are attached once it exists
+      final productId = _editing ? widget.product!['id'] : res.data['product']?['id'];
+      final pending = _videos.where((v) => v.status == 'PENDING' && v.error == null).toList();
+      String? videoError;
+      for (final v in pending) {
+        videoError = await _attach(productId, v) ?? videoError;
+      }
+      if (!mounted) return;
+      if (videoError != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('${tr(context, 'The product was saved, but a video could not be added', 'Tuote tallennettiin, mutta videota ei voitu lisätä')}: $videoError'),
+        ));
+      }
       HapticFeedback.mediumImpact();
       Navigator.pop(context, true);
     } else {
@@ -189,6 +285,31 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
             ),
             const SizedBox(height: 6),
             Text(tr(context, 'Good light and a plain background sell best. The first photo is the cover.', 'Hyvä valo ja yksinkertainen tausta myyvät parhaiten. Ensimmäinen kuva on kansikuva.'),
+                style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+            const SizedBox(height: 20),
+            _label(tr(context, 'Videos', 'Videot')),
+            SizedBox(
+              height: 150,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  for (final v in _videos) _videoTile(v),
+                  if (_videos.length < _maxVideos)
+                    GestureDetector(
+                      onTap: _addVideo,
+                      child: Container(
+                        width: 90,
+                        decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(14)),
+                        child: const Icon(Icons.video_call_outlined, color: AppTheme.primary, size: 32),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+                tr(context, 'Up to 3 videos of 60 seconds, with sound. Show the fit, the fabric moving and the details. Use only music you have the rights to.',
+                    'Enintään 3 videota, 60 sekuntia, äänen kanssa. Näytä istuvuus, kankaan liike ja yksityiskohdat. Käytä vain musiikkia, johon sinulla on oikeudet.'),
                 style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
             const SizedBox(height: 20),
             TextFormField(
@@ -328,6 +449,52 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
           ),
         ),
       );
+
+  Widget _videoTile(_Video v) {
+    final label = v.error != null
+        ? v.error!
+        : switch (v.status) {
+            'UPLOADING' => '${(v.progress * 100).round()} %',
+            'PENDING' => tr(context, 'Added on save', 'Lisätään tallennettaessa'),
+            'PROCESSING' => tr(context, 'Processing…', 'Käsitellään…'),
+            'FAILED' => tr(context, 'Could not process', 'Käsittely epäonnistui'),
+            _ => null,
+          };
+    return Padding(
+      padding: const EdgeInsets.only(right: 10),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: SizedBox(
+          width: 90,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Container(color: Colors.black87),
+              if (v.poster != null) CachedNetworkImage(imageUrl: v.poster!, fit: BoxFit.cover, errorWidget: (_, __, ___) => const SizedBox()),
+              if (v.status == 'UPLOADING' && v.error == null)
+                Center(child: CircularProgressIndicator(value: v.progress > 0 ? v.progress : null, color: Colors.white)),
+              if (v.status == 'READY') const Center(child: Icon(Icons.play_circle_fill_rounded, color: Colors.white, size: 34)),
+              if (label != null)
+                Positioned(
+                  left: 4,
+                  right: 4,
+                  bottom: 6,
+                  child: Text(label, textAlign: TextAlign.center, maxLines: 3, style: TextStyle(fontSize: 10, color: v.error != null ? AppTheme.accent : Colors.white, fontWeight: FontWeight.w600)),
+                ),
+              Positioned(
+                top: 2,
+                right: 2,
+                child: GestureDetector(
+                  onTap: () => _removeVideo(v),
+                  child: const CircleAvatar(radius: 12, backgroundColor: Colors.black54, child: Icon(Icons.close_rounded, size: 14, color: Colors.white)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _optionRow(_Option o) => Container(
         margin: const EdgeInsets.only(bottom: 10),

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { auth, AuthRequest } from "../../middleware/auth";
 import { sendError, positiveId, ApiError } from "../../lib/errors";
 import { prisma } from "../../lib/prisma";
-import { priceInfoFor, presentProduct } from "../products/pricing";
+import { priceInfoFor, presentProduct, productInclude } from "../products/pricing";
 import { getOrderRelation } from "../orders/access";
 
 const router = Router();
@@ -35,7 +35,7 @@ router.get("/me/favorites", auth, async (req: AuthRequest, res: Response) => {
       include: {
         product: {
           include: {
-            variants: { orderBy: { id: "asc" } },
+            ...productInclude,
             store: { select: { id: true, name: true, logoUrl: true, sellerType: true, rating: true } },
           },
         },

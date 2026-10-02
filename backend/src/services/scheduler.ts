@@ -4,6 +4,7 @@ import { env } from "../config/env";
 import { mediaConfigured } from "../lib/cloudinary";
 import { processDuePayouts } from "../modules/payouts/payouts.service";
 import { checkProcessingDrops } from "../modules/drops/drops.service";
+import { checkProcessingProductVideos } from "../modules/products/productVideos";
 import { purgeOldDeliveryProofs } from "../modules/orders/orders.service";
 
 const logger = pino({ name: "scheduler" });
@@ -13,6 +14,7 @@ type Job = { name: string; everyMs: number; enabled: () => boolean; run: () => P
 const jobs: Job[] = [
   { name: "payouts", everyMs: 10 * 60_000, enabled: () => !!env.stripeSecretKey, run: processDuePayouts },
   { name: "drop-processing", everyMs: 2 * 60_000, enabled: mediaConfigured, run: checkProcessingDrops },
+  { name: "product-video-processing", everyMs: 2 * 60_000, enabled: mediaConfigured, run: checkProcessingProductVideos },
   { name: "delivery-proof-purge", everyMs: 6 * 60 * 60_000, enabled: mediaConfigured, run: purgeOldDeliveryProofs },
   {
     name: "expired-sign-in-codes", everyMs: 60 * 60_000, enabled: () => true,

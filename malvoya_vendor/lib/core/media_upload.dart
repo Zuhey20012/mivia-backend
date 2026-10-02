@@ -32,13 +32,13 @@ class MediaUpload {
 
   static Future<UploadedMedia> upload({
     required ApiClient api,
-    required String kind, // product_image | store_image | drop_video | drop_image | delivery_proof
+    required String kind, // product_image | product_video | store_image | drop_video | drop_image | delivery_proof
     required File file,
     int? orderId,
     void Function(double progress)? onProgress,
   }) async {
     final length = await file.length();
-    final isVideo = kind == 'drop_video';
+    final isVideo = kind == 'drop_video' || kind == 'product_video';
     if (length > (isVideo ? maxVideoBytes : maxImageBytes)) {
       throw UploadException(isVideo
           ? 'This video is too large. Keep it under a minute or record at a lower quality.'

@@ -97,6 +97,11 @@ export function videoPosterUrl(publicId: string, width = 720) {
   return `${base()}/video/upload/so_0,c_limit,w_${width},q_auto,f_jpg/${publicId}.jpg`;
 }
 
+/** True once Cloudinary has produced the adaptive-streaming (HLS) version of a video. */
+export function hlsReady(derived?: { transformation: string }[]) {
+  return !!derived?.some((d) => d.transformation.startsWith("sp_auto"));
+}
+
 export const VIDEO_MP4_TRANSFORMATION = "c_limit,h_1280,w_720,q_auto,vc_h264";
 export const VIDEO_EAGER = `sp_auto/m3u8|${VIDEO_MP4_TRANSFORMATION}/mp4`;
 

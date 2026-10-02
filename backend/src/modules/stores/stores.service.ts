@@ -4,7 +4,7 @@ import { ApiError } from "../../lib/errors";
 import { isOwnImageUrl, mediaConfigured } from "../../lib/cloudinary";
 import { haversineKm, estimateDelivery } from "../../utils/distance";
 import { deliveryFeeForDistance } from "../../utils/pricing";
-import { priceInfoFor, presentProduct } from "../products/pricing";
+import { priceInfoFor, presentProduct, productInclude } from "../products/pricing";
 
 /** Trader information shoppers are entitled to see (DSA Art. 30, Omnibus Art. 6a CRD). */
 const publicStoreFields = {
@@ -69,7 +69,7 @@ export async function getStoreById(id: number, viewerId?: number, lat: number | 
     select: {
       ...publicStoreFields,
       ownerId: true,
-      products: { where: { isAvailable: true }, take: 60, include: { variants: { orderBy: { id: "asc" } } }, orderBy: [{ isFeatured: "desc" }, { createdAt: "desc" }] },
+      products: { where: { isAvailable: true }, take: 60, include: productInclude, orderBy: [{ isFeatured: "desc" }, { createdAt: "desc" }] },
     },
   });
   // Unverified stores are only visible to their owner
@@ -86,7 +86,7 @@ export async function getStoreById(id: number, viewerId?: number, lat: number | 
 export async function getMyStore(ownerId: number) {
   const store = await prisma.store.findUnique({
     where: { ownerId },
-    include: { products: { include: { variants: { orderBy: { id: "asc" } } }, orderBy: { createdAt: "desc" } } },
+    include: { products: { include: productInclude, orderBy: { createdAt: "desc" } } },
   });
   if (!store) return null;
   const info = await priceInfoFor(store.products);

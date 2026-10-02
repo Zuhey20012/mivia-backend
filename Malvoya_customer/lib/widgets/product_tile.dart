@@ -17,6 +17,7 @@ class ProductTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final images = (product['images'] as List?)?.cast<String>() ?? const [];
     final inStock = product['inStock'] != false;
+    final hasVideo = ((product['videos'] as List?) ?? const []).isNotEmpty;
     final store = storeName ?? product['store']?['name'];
 
     return GestureDetector(
@@ -39,6 +40,20 @@ class ProductTile extends StatelessWidget {
                     CachedNetworkImage(imageUrl: images.first, fit: BoxFit.cover, fadeInDuration: const Duration(milliseconds: 180))
                   else
                     const Icon(Icons.checkroom_rounded, size: 40, color: AppTheme.primary),
+                  if (hasVideo)
+                    Positioned(
+                      left: 8,
+                      top: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 14),
+                          const SizedBox(width: 2),
+                          Text(tr(context, 'Video', 'Video'), style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+                        ]),
+                      ),
+                    ),
                   if (!inStock)
                     Container(
                       color: Colors.black.withValues(alpha: 0.45),

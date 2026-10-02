@@ -1,5 +1,28 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
+import { videoHlsUrl, videoMp4Url, videoPosterUrl } from "../../lib/cloudinary";
+
+/** What every product query loads for presentProduct: options and videos (oldest first). */
+export const productInclude = {
+  variants: { orderBy: { id: "asc" as const } },
+  videos: { orderBy: [{ position: "asc" as const }, { id: "asc" as const }] },
+} satisfies Prisma.ProductInclude;
+
+type VideoRow = { id: number; publicId: string; status: string; durationSec: number | null; width: number | null; height: number | null };
+
+/** Playable URLs for a product video. Shoppers only ever get READY videos. */
+export function presentVideo(v: VideoRow, opts: { owner?: boolean } = {}) {
+  return {
+    id: v.id,
+    hls: videoHlsUrl(v.publicId),
+    mp4: videoMp4Url(v.publicId),
+    poster: videoPosterUrl(v.publicId),
+    durationSec: v.durationSec,
+    width: v.width,
+    height: v.height,
+    ...(opts.owner ? { status: v.status } : {}),
+  };
+}
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -73,6 +96,7 @@ type ProductWithVariants = {
   stockQuantity: number;
   isAvailable: boolean;
   variants?: { id: number; size: string | null; color: string | null; stock: number; priceAdjustCents: number; sku?: string | null }[];
+  videos?: VideoRow[];
 };
 
 /**
@@ -89,11 +113,13 @@ export function presentProduct<T extends ProductWithVariants>(product: T, info: 
     ...(opts.owner ? { stock: v.stock, sku: v.sku ?? null, priceAdjustCents: v.priceAdjustCents } : {}),
   }));
   const inStock = product.isAvailable && (variants.length ? variants.some((v) => v.inStock) : product.stockQuantity > 0);
-  const { stockQuantity, ...rest } = product;
+  const { stockQuantity, videos: videoRows, ...rest } = product;
+  const videos = (videoRows ?? []).filter((v) => opts.owner || v.status === "READY").map((v) => presentVideo(v, opts));
   return {
     ...rest,
     ...(opts.owner ? { stockQuantity } : {}),
     variants,
+    videos,
     inStock,
     pricing: info ?? { priceCents: product.salePriceCents, previousPriceCents: null, discountPct: null },
   };

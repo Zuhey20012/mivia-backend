@@ -2,7 +2,7 @@
 
 Runs the real API against a throwaway Postgres, Stripe's official `stripe-mock` and a small
 Cloudinary mock, and checks security, payments, orders, couriers, drops, pricing, payouts,
-reviews, returns, GDPR, support and legal pages (162 checks).
+reviews, returns, GDPR, support and legal pages (173 checks).
 
 ```bash
 # 1. Throwaway database and Stripe mock
