@@ -87,10 +87,11 @@ enum PaymentStatus {
 
 model User {
   id           Int      @id @default(autoincrement())
-  email        String   @unique
+  email        String?  @unique
   name         String
   phone        String?
-  passwordHash String
+  passwordHash String?
+  firebaseUid  String?  @unique
   role         UserRole @default(CUSTOMER)
   avatarUrl    String?
   address      String?

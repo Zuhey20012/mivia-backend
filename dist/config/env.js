@@ -19,6 +19,10 @@ exports.env = {
     cloudinaryCloud: process.env.CLOUDINARY_CLOUD_NAME || "",
     cloudinaryKey: process.env.CLOUDINARY_API_KEY || "",
     cloudinarySecret: process.env.CLOUDINARY_API_SECRET || "",
+    // Firebase Auth: project ID is enough to verify ID tokens. A service account
+    // (JSON string or base64 of it) additionally enables revocation checks.
+    firebaseProjectId: process.env.FIREBASE_PROJECT_ID || "",
+    firebaseServiceAccount: process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "",
     stripeSecretKey: process.env.STRIPE_SECRET_KEY || "sk_test_1234567890",
     stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || "whsec_1234567890",
     deliveryFeeCents: 299, // $2.99

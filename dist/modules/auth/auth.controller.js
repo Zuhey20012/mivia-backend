@@ -37,6 +37,8 @@ exports.register = register;
 exports.login = login;
 exports.refresh = refresh;
 exports.logout = logout;
+exports.firebaseLogin = firebaseLogin;
+exports.firebaseLink = firebaseLink;
 const auth_schema_1 = require("./auth.schema");
 const authService = __importStar(require("./auth.service"));
 async function register(req, res) {
@@ -80,4 +82,34 @@ async function logout(req, res) {
     if (refreshToken)
         await authService.logoutUser(refreshToken);
     res.json({ ok: true });
+}
+async function firebaseLogin(req, res) {
+    const result = auth_schema_1.firebaseSignInSchema.safeParse(req.body);
+    if (!result.success)
+        return res.status(400).json({ ok: false, errors: result.error.flatten() });
+    try {
+        const data = await authService.firebaseSignIn(result.data);
+        res.json({ ok: true, ...data });
+    }
+    catch (e) {
+        if (e instanceof authService.AuthError)
+            return res.status(e.status).json({ ok: false, error: e.message });
+        console.error(e);
+        res.status(500).json({ ok: false, error: "Internal server error" });
+    }
+}
+async function firebaseLink(req, res) {
+    const result = auth_schema_1.firebaseLinkSchema.safeParse(req.body);
+    if (!result.success)
+        return res.status(400).json({ ok: false, errors: result.error.flatten() });
+    try {
+        const user = await authService.linkFirebase(req.user.id, result.data.idToken);
+        res.json({ ok: true, user });
+    }
+    catch (e) {
+        if (e instanceof authService.AuthError)
+            return res.status(e.status).json({ ok: false, error: e.message });
+        console.error(e);
+        res.status(500).json({ ok: false, error: "Internal server error" });
+    }
 }
