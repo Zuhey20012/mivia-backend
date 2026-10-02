@@ -8,6 +8,7 @@ import '../core/api_client.dart';
 import '../core/legal_links.dart';
 import '../core/strings.dart';
 import '../core/google_link_tile.dart';
+import '../core/delete_account_tile.dart';
 import '../services/socket_service.dart';
 import 'chatbot.dart';
 import 'drops_manager.dart';
@@ -374,6 +375,8 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             const Divider(height: 1),
             tile(Icons.code_rounded, tr(context, 'Open-source licences', 'Avoimen lähdekoodin lisenssit'), tr(context, 'Software this app is built with', 'Ohjelmistot, joilla sovellus on tehty'),
                 () => showLicensePage(context: context, applicationName: 'Malvoya Store', applicationLegalese: '© Malvoya')),
+            const Divider(height: 1),
+            const DeleteAccountTile(leading: CircleAvatar(backgroundColor: Color(0xFFFDECEA), child: Icon(Icons.delete_forever_rounded, color: Color(0xFFD93025)))),
           ]),
         ),
         const SizedBox(height: 16),

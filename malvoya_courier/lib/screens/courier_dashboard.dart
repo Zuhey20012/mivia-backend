@@ -12,6 +12,7 @@ import '../core/media_upload.dart';
 import '../core/legal_links.dart';
 import '../core/strings.dart';
 import '../core/google_link_tile.dart';
+import '../core/delete_account_tile.dart';
 import '../services/courier_telemetry_service.dart';
 import '../services/socket_service.dart';
 import 'payouts_screen.dart';
@@ -571,7 +572,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
         const SizedBox(height: 12),
         Container(
           decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.divider)),
-          child: const GoogleLinkTile(),
+          child: const Column(children: [GoogleLinkTile(), Divider(height: 1), DeleteAccountTile()]),
         ),
         const SizedBox(height: 16),
         Text(tr(context, 'Recent deliveries', 'Viimeisimmät toimitukset'), style: const TextStyle(fontWeight: FontWeight.w700)),

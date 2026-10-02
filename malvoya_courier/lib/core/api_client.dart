@@ -44,7 +44,7 @@ class ApiClient {
       final res = await http.Response.fromStream(streamed).timeout(_timeout);
 
       if (res.statusCode == 401 && !retried && auth?.accessToken != null) {
-        if (await auth!.refreshSession()) return _send(method, path, body: body, query: query, retried: true);
+        if (await auth!.refreshSession()) return await _send(method, path, body: body, query: query, retried: true);
       }
 
       Map<String, dynamic> data = {};

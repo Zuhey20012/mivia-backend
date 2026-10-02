@@ -167,7 +167,7 @@ class AuthService extends ChangeNotifier {
               headers: {'Content-Type': 'application/json'},
               body: jsonEncode({'email': emailOrPhone.trim(), 'password': password}))
           .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) return _applySession(jsonDecode(res.body));
+      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
       return _errorFrom(res, 'Invalid email or password.');
     } catch (_) {
       return 'Could not connect. Please check your internet connection.';
@@ -181,7 +181,7 @@ class AuthService extends ChangeNotifier {
               headers: {'Content-Type': 'application/json'},
               body: jsonEncode({'name': name.trim(), 'email': email.trim(), 'password': password, 'role': kAppRole}))
           .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 201) return _applySession(jsonDecode(res.body));
+      if (res.statusCode == 201) return await _applySession(jsonDecode(res.body));
       return _errorFrom(res, 'Registration failed. Please try again.');
     } catch (_) {
       return 'Could not connect. Please check your internet connection.';
@@ -200,7 +200,7 @@ class AuthService extends ChangeNotifier {
           .post(Uri.parse('${AppConstants.apiBase}/auth/google'),
               headers: {'Content-Type': 'application/json'}, body: jsonEncode({'idToken': idToken, 'role': kAppRole}))
           .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) return _applySession(jsonDecode(res.body));
+      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
       return _errorFrom(res, 'Google sign-in failed.');
     } catch (_) {
       return 'Google sign-in failed. Please check your internet connection.';
@@ -237,10 +237,20 @@ class AuthService extends ChangeNotifier {
     return null;
   }
 
-  Future<void> _setGoogleLinked(bool linked) async {
+  Future<void> _setGoogleLinked(bool linked) => _patchUser({'googleLinked': linked});
+
+  /// Saves a new display name on the server, then on this phone.
+  Future<String?> updateName(String name) async {
+    final res = await ApiClient(this).patch('/me/profile', {'name': name});
+    if (!res.ok) return res.error;
+    await _patchUser({'name': res.data['user']?['name'] ?? name});
+    return null;
+  }
+
+  Future<void> _patchUser(Map<String, dynamic> changes) async {
     final user = _currentUser;
     if (user == null) return;
-    _currentUser = User.fromJson({...user.toJson(), 'googleLinked': linked});
+    _currentUser = User.fromJson({...user.toJson(), ...changes});
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('user', jsonEncode(_currentUser!.toJson()));
     notifyListeners();
@@ -293,7 +303,7 @@ class AuthService extends ChangeNotifier {
               headers: {'Content-Type': 'application/json'},
               body: jsonEncode({'firebaseToken': firebaseToken, 'role': kAppRole}))
           .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) return _applySession(jsonDecode(res.body));
+      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
       return _errorFrom(res, 'Phone sign-in failed.');
     } on fb_auth.FirebaseAuthException catch (e) {
       return e.code == 'invalid-verification-code' ? 'The code is incorrect.' : (e.message ?? 'Phone verification failed');
@@ -329,7 +339,7 @@ class AuthService extends ChangeNotifier {
               headers: {'Content-Type': 'application/json'},
               body: jsonEncode({'firebaseToken': firebaseIdToken, 'role': kAppRole}))
           .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) return _applySession(jsonDecode(res.body));
+      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
       return _errorFrom(res, 'Phone sign-in failed.');
     } catch (_) {
       return 'Could not connect. Please check your internet connection.';
@@ -354,7 +364,7 @@ class AuthService extends ChangeNotifier {
               headers: {'Content-Type': 'application/json'},
               body: jsonEncode({'idToken': firebaseToken, 'role': kAppRole}))
           .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) return _applySession(jsonDecode(res.body));
+      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
       return _errorFrom(res, 'Apple sign-in failed.');
     } on SignInWithAppleAuthorizationException catch (e) {
       return e.code == AuthorizationErrorCode.canceled ? null : 'Apple sign-in failed.';

@@ -39,7 +39,7 @@ docker compose up db         # local Postgres 16 (backend/docker-compose.yml; th
 ```
 The backend **refuses to start** without `JWT_SECRET` and `JWT_REFRESH_SECRET`: each needs ≥32 characters and they must differ. In production it also refuses `ALLOWED_ORIGINS=*`. All env vars are listed in `backend/.env.example`.
 
-Backend changes are verified with the end-to-end suite in `backend/test/e2e/` (159 checks: security, payments, orders, couriers, drops, pricing, payouts, reviews, returns, GDPR, support, legal). It runs the real API against a throwaway Postgres, Stripe's `stripe-mock` and a small Cloudinary mock; see its README. Add checks there when you add behaviour. Flutter apps: `flutter analyze` must report no issues.
+Backend changes are verified with the end-to-end suite in `backend/test/e2e/` (162 checks: security, payments, orders, couriers, drops, pricing, payouts, reviews, returns, GDPR, support, legal). It runs the real API against a throwaway Postgres, Stripe's `stripe-mock` and a small Cloudinary mock; see its README. Add checks there when you add behaviour. Flutter apps: `flutter analyze` must report no issues.
 
 Flutter apps (inside each app folder):
 ```bash
@@ -105,6 +105,7 @@ The simulated escrow, dispatch engine, telemetry service, "AI garment inspection
 - Courier: `CourierTelemetryService` shares position only while online, through an Android foreground service (visible notification); `setActiveOrder` ties it to the carried order.
 - Each app has `lib/auth_service.dart` built from one shared design. `kAppRole` is set per app, and accounts with another role are refused at sign-in. Tokens live in `flutter_secure_storage`. The access token is refreshed automatically a minute before it expires. Phone sign-in = Firebase verifies the SMS code, then the Firebase ID token is exchanged at `/auth/phone`. Never derive passwords or fake sessions on the client.
 - The apps never ask the server to send messages, and never report success for something the server rejected (no "saved locally" fallbacks).
+- Every app lets the user delete the account in-app (Play requirement): customer via Privacy → Delete account, store and courier via `core/delete_account_tile.dart`. Courier location sharing is stopped by an `AuthService.beforeLogout` hook, so it ends with any sign-out. Profile name changes go through `PATCH /me/profile`.
 - Payments: the customer app only opens Stripe's PaymentSheet with the server's `clientSecret`. **Never add card, CVV or IBAN input fields**; that would put the app in PCI-DSS scope.
 - State: `provider` `ChangeNotifier`s. The customer `features/order_tracking` uses `flutter_bloc` with a clean-architecture split. Localization is hand-rolled `AppLocalizations` in `Malvoya_customer/lib/l10n.dart` (fi/en). New user-facing copy is written as "Finnish / English".
 

@@ -159,7 +159,7 @@ class AuthService extends ChangeNotifier {
               headers: {'Content-Type': 'application/json'},
               body: jsonEncode({'email': emailOrPhone.trim(), 'password': password}))
           .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) return _applySession(jsonDecode(res.body));
+      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
       return _errorFrom(res, 'Invalid email or password.');
     } catch (_) {
       return 'Could not connect. Please check your internet connection.';
@@ -173,7 +173,7 @@ class AuthService extends ChangeNotifier {
               headers: {'Content-Type': 'application/json'},
               body: jsonEncode({'name': name.trim(), 'email': email.trim(), 'password': password, 'role': kAppRole}))
           .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 201) return _applySession(jsonDecode(res.body));
+      if (res.statusCode == 201) return await _applySession(jsonDecode(res.body));
       return _errorFrom(res, 'Registration failed. Please try again.');
     } catch (_) {
       return 'Could not connect. Please check your internet connection.';
@@ -192,7 +192,7 @@ class AuthService extends ChangeNotifier {
           .post(Uri.parse('${AppConstants.apiBase}/auth/google'),
               headers: {'Content-Type': 'application/json'}, body: jsonEncode({'idToken': idToken, 'role': kAppRole}))
           .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) return _applySession(jsonDecode(res.body));
+      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
       return _errorFrom(res, 'Google sign-in failed.');
     } catch (_) {
       return 'Google sign-in failed. Please check your internet connection.';
@@ -220,6 +220,14 @@ class AuthService extends ChangeNotifier {
     } catch (_) {
       return 'Google sign-in failed. Please check your internet connection.';
     }
+  }
+
+  /// Deletes the account on the server (GDPR Art. 17), then signs out on this phone.
+  Future<String?> deleteAccount() async {
+    final res = await ApiClient(this).delete('/auth/me');
+    if (!res.ok) return res.error;
+    await logout();
+    return null;
   }
 
   Future<String?> unlinkGoogle() async {
@@ -285,7 +293,7 @@ class AuthService extends ChangeNotifier {
               headers: {'Content-Type': 'application/json'},
               body: jsonEncode({'firebaseToken': firebaseToken, 'role': kAppRole}))
           .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) return _applySession(jsonDecode(res.body));
+      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
       return _errorFrom(res, 'Phone sign-in failed.');
     } on fb_auth.FirebaseAuthException catch (e) {
       return e.code == 'invalid-verification-code' ? 'The code is incorrect.' : (e.message ?? 'Phone verification failed');

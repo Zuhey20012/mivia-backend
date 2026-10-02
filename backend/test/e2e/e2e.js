@@ -93,6 +93,10 @@ async function register(name, role, extra = {}) {
   const codeNew = await call("POST", "/auth/otp/verify", { target: `otp${uniq}@example.fi`, code: "111111" });
   plantCode(`otp${uniq}@example.fi`, "222222");
   const codeAgain = await call("POST", "/auth/otp/verify", { target: `otp${uniq}@example.fi`, code: "222222" });
+  const rename = await call("PATCH", "/me/profile", { name: "  Otto Koodi  " }, codeNew.body.accessToken);
+  check("users can change their display name", rename.status === 200 && rename.body.user?.name === "Otto Koodi", rename.body);
+  check("an empty name is refused", (await call("PATCH", "/me/profile", { name: "   " }, codeNew.body.accessToken)).status === 400);
+  check("changing a name needs a signed-in user", (await call("PATCH", "/me/profile", { name: "X" })).status === 401);
   check("Google cannot be unlinked from an account without a password", (await call("DELETE", "/auth/google/link", null, codeNew.body.accessToken)).status === 409);
   check("code sign-in creates an account and returns to it", codeNew.status === 200 && codeAgain.status === 200 && codeAgain.body.user?.id === codeNew.body.user?.id, [codeNew, codeAgain]);
   check("password login still works for the registered account", (await call("POST", "/auth/login", { email: `aino${uniq}@example.fi`, password: "correct-horse-1" })).status === 200);

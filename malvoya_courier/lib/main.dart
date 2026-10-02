@@ -8,6 +8,8 @@ import 'screens/courier_welcome.dart';
 import 'screens/courier_dashboard.dart';
 import 'screens/pending_approval.dart';
 import 'core/push_service.dart';
+import 'services/courier_telemetry_service.dart';
+import 'services/socket_service.dart';
 import 'auth_service.dart';
 import 'l10n.dart';
 import 'locale_provider.dart';
@@ -16,6 +18,11 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
   try { await Firebase.initializeApp(); } catch (e) { debugPrint('Firebase: $e'); }
+  // Location sharing ends with the session, however it ends (sign-out, account deletion, expiry)
+  AuthService.beforeLogout.add((_) async {
+    CourierTelemetryService().stop();
+    CourierSocketService().disconnect();
+  });
   runApp(const MalvoyaCourierApp());
 }
 

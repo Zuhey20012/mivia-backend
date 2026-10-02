@@ -8,6 +8,24 @@ import { getOrderRelation } from "../orders/access";
 
 const router = Router();
 
+// ─── Profile ────────────────────────────────────────────────────────────────
+
+const profileSchema = z.object({ name: z.string().trim().min(1).max(80) });
+
+/** Only the display name is editable here; email and phone change only through a verified sign-in. */
+router.patch("/me/profile", auth, async (req: AuthRequest, res: Response) => {
+  const body = profileSchema.safeParse(req.body);
+  if (!body.success) return res.status(400).json({ ok: false, error: "Enter a name between 1 and 80 characters" });
+  try {
+    const user = await prisma.user.update({
+      where: { id: req.user!.id },
+      data: { name: body.data.name },
+      select: { id: true, name: true, email: true, phone: true, role: true },
+    });
+    res.json({ ok: true, user });
+  } catch (e) { sendError(res, e); }
+});
+
 // ─── Favourites (wishlist) ──────────────────────────────────────────────────
 
 router.get("/me/favorites", auth, async (req: AuthRequest, res: Response) => {
