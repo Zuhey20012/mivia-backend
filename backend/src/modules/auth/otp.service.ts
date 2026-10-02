@@ -3,7 +3,7 @@ import pino from "pino";
 import { prisma } from "../../lib/prisma";
 import { sendVerificationCode } from "../../services/notificationDeliveryService";
 import { issueSession } from "./session";
-import { AuthError, phoneToSyntheticEmail } from "./auth.service";
+import { AuthError, assertVerifiedSignInAllowed, phoneToSyntheticEmail } from "./auth.service";
 
 const logger = pino({ name: "OtpService" });
 
@@ -83,7 +83,9 @@ export async function verifyOtp(rawTarget: string, code: string) {
   let user = await prisma.user.findFirst({
     where: { OR: [{ email: { equals: email, mode: "insensitive" } }, ...(phone ? [{ phone }] : [])] },
   });
-  if (!user) {
+  if (user) {
+    assertVerifiedSignInAllowed(user);
+  } else {
     user = await prisma.user.create({
       data: {
         name: isEmail ? target.split("@")[0] : "Customer",

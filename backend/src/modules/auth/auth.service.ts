@@ -27,6 +27,18 @@ export function isSyntheticEmail(email: string) {
   return email.endsWith(`@${PHONE_EMAIL_DOMAIN}`) || email.endsWith("@deleted.invalid");
 }
 
+/**
+ * Verified sign-ins (Google, Apple, Firebase phone, one-time code) find existing accounts by email or phone.
+ * Accounts made by /register have a bcrypt password and an email/phone nobody proved, so whoever registered
+ * may not own them: opening the account here would let someone pre-register a victim's address and keep
+ * access to everything the victim later puts in it. Those accounts sign in with their password instead.
+ */
+export function assertVerifiedSignInAllowed(user: { passwordHash: string }) {
+  if (user.passwordHash.startsWith("$2")) {
+    throw new AuthError("An account with this email or phone number already exists. Please sign in with your password.", 409);
+  }
+}
+
 export async function registerUser(input: RegisterInput) {
   const identifier = input.email.trim();
   const isPhone = isPhoneIdentifier(identifier);

@@ -76,6 +76,26 @@ async function register(name, role, extra = {}) {
   const r2 = await call("POST", "/auth/refresh", { refreshToken: loginA.body.refreshToken });
   check("refresh token rotation (single use)", r1.status === 200 && r2.status === 401);
 
+  // Verified sign-ins (one-time code here; Google, Apple and Firebase phone share the rule) must not
+  // open an account made by /register: nobody proved that its email or phone belongs to them.
+  const plantCode = (target, code) => sql(`INSERT INTO "OtpCode" (target, "codeHash", "expiresAt")
+    VALUES ('${target}', '${crypto.createHash("sha256").update(`${target}:${code}`).digest("hex")}', now() + interval '10 minutes')
+    ON CONFLICT (target) DO UPDATE SET "codeHash" = EXCLUDED."codeHash", attempts = 0, "expiresAt" = EXCLUDED."expiresAt"`);
+  plantCode(`aino${uniq}@example.fi`, "123456");
+  const preHijackEmail = await call("POST", "/auth/otp/verify", { target: `aino${uniq}@example.fi`, code: "123456" });
+  check("code sign-in does not open a registered account (unproven email)", preHijackEmail.status === 409 && !preHijackEmail.body.accessToken, preHijackEmail);
+  const phoneP = `+35840${String(uniq).slice(-7)}`;
+  await call("POST", "/auth/register", { name: "Pre Hijacker", email: `prehijack${uniq}@example.fi`, phone: phoneP, password: "strong-pass-123" });
+  plantCode(phoneP, "654321");
+  const preHijackPhone = await call("POST", "/auth/otp/verify", { phone: phoneP, code: "654321" });
+  check("code sign-in does not open a registered account (unproven phone)", preHijackPhone.status === 409 && !preHijackPhone.body.accessToken, preHijackPhone);
+  plantCode(`otp${uniq}@example.fi`, "111111");
+  const codeNew = await call("POST", "/auth/otp/verify", { target: `otp${uniq}@example.fi`, code: "111111" });
+  plantCode(`otp${uniq}@example.fi`, "222222");
+  const codeAgain = await call("POST", "/auth/otp/verify", { target: `otp${uniq}@example.fi`, code: "222222" });
+  check("code sign-in creates an account and returns to it", codeNew.status === 200 && codeAgain.status === 200 && codeAgain.body.user?.id === codeNew.body.user?.id, [codeNew, codeAgain]);
+  check("password login still works for the registered account", (await call("POST", "/auth/login", { email: `aino${uniq}@example.fi`, password: "correct-horse-1" })).status === 200);
+
   console.log("\n— Stores, trader info and approval");
   const vendor = await register("Vera", "VENDOR");
   const store = await call("POST", "/stores", { name: `Vera Vintage ${uniq}`, category: "THRIFT", sellerType: "BUSINESS", businessId: "2345678-9", latitude: 60.17, longitude: 24.94, address: "Mannerheimintie 1, Helsinki", prepMinutes: 8 }, vendor.accessToken);

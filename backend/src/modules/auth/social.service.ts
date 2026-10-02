@@ -5,7 +5,7 @@ import crypto from "crypto";
 import { prisma } from "../../lib/prisma";
 import { env } from "../../config/env";
 import { issueSession } from "./session";
-import { AuthError, phoneToSyntheticEmail } from "./auth.service";
+import { AuthError, assertVerifiedSignInAllowed, phoneToSyntheticEmail } from "./auth.service";
 
 const googleClient = new OAuth2Client(env.googleClientId);
 
@@ -49,7 +49,9 @@ export async function loginWithGoogle(idToken: string, role: SignupRole = "CUSTO
 
   const email = payload.email.toLowerCase();
   let user = await prisma.user.findFirst({ where: { email: { equals: email, mode: "insensitive" } } });
-  if (!user) {
+  if (user) {
+    assertVerifiedSignInAllowed(user);
+  } else {
     user = await createSocialUser({ email, name: payload.name || email.split("@")[0] }, role);
   }
   assertActive(user);
@@ -70,7 +72,9 @@ export async function loginWithPhone(firebaseToken: string, role: SignupRole = "
   if (!phoneNumber) throw new AuthError("Invalid phone token", 401);
 
   let user = await prisma.user.findFirst({ where: { phone: phoneNumber } });
-  if (!user) {
+  if (user) {
+    assertVerifiedSignInAllowed(user);
+  } else {
     user = await createSocialUser({ phone: phoneNumber, email: phoneToSyntheticEmail(phoneNumber), name: role === "CUSTOMER" ? "Customer" : "Partner" }, role);
   }
   assertActive(user);
@@ -83,7 +87,9 @@ export async function loginWithApple(identityToken: string, role: SignupRole = "
   if (!email || decoded.email_verified === false) throw new AuthError("Apple sign-in did not provide a verified email", 401);
 
   let user = await prisma.user.findFirst({ where: { email: { equals: email, mode: "insensitive" } } });
-  if (!user) {
+  if (user) {
+    assertVerifiedSignInAllowed(user);
+  } else {
     user = await createSocialUser({ email, name: decoded.name || "Customer" }, role);
   }
   assertActive(user);
