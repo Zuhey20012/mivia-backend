@@ -50,6 +50,13 @@ services:
         sync: false
       - key: PUBLIC_API_URL
         sync: false
+      # A mailbox we control (e.g. the team Gmail). Support requests are emailed there; without it
+      # they are only in the admin panel. Mail is sent as SMTP_FROM or the SMTP_USER mailbox.
+      - key: SUPPORT_EMAIL
+        sync: false
+      # Optional order-watchdog timers in minutes (defaults shown in the admin panel → System):
+      # CHECKOUT_HOLD_MINUTES, STORE_REMINDER_MINUTES, STORE_ACCEPT_MINUTES,
+      # COURIER_REOFFER_MINUTES, COURIER_DELAY_NOTICE_MINUTES, COURIER_SEARCH_MINUTES
       # Browser origins only (admin panel). Mobile apps are not affected by CORS.
       - key: ALLOWED_ORIGINS
         value: "https://malvoya-admin.onrender.com,https://admin.malvoya.com"

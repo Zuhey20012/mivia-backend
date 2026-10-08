@@ -156,6 +156,7 @@ model User {
   devices       DeviceToken[]
   dropComments  DropComment[]
   follows       StoreFollow[]
+  launchAlert   LaunchAlert?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -201,6 +202,11 @@ model Store {
   sellerType     SellerType @default(BUSINESS)
   businessId     String? // Y-tunnus for business sellers (checked during review)
   prepMinutes    Int        @default(10) // time to get an order ready for pickup, used for ETAs
+
+  // Availability: the store can pause new orders at any time, and opening hours (Europe/Helsinki)
+  // close it automatically. openingHours = { "mon": [["09:00","18:00"]], ... }; null = always open.
+  acceptingOrders Boolean @default(true)
+  openingHours    Json?
 
   // Stripe Connect (Express) account that receives the store's payouts
   stripeAccountId String? @unique
@@ -351,6 +357,7 @@ model Order {
   courierFeeCents Int @default(0) // what the courier earns for this delivery
 
   // Lifecycle timestamps
+  confirmedAt  DateTime? // store accepted the order
   acceptedAt   DateTime? // courier accepted the job
   pickedUpAt   DateTime?
   deliveredAt  DateTime? // start of the 14-day withdrawal period (Kuluttajansuojalaki 6:14)
@@ -368,6 +375,11 @@ model Order {
   deliveryProofPublicId String?
   deliveredLat          Float?
   deliveredLng          Float?
+
+  // Watchdog bookkeeping (see services/orderWatchdog.ts)
+  storeRemindedAt         DateTime?
+  lastOfferAt             DateTime?
+  courierSearchNotifiedAt DateTime?
 
   notes   String?
   items   OrderItem[]
@@ -676,6 +688,21 @@ model DropCommentReport {
 }
 
 /// A shopper following a store: its new drops reach them in the Following feed and by push.
+/// "Tell me when Malvoya opens near me": one pinned location per user, notified once when the
+/// first store goes live within reach. Deleted with the account.
+model LaunchAlert {
+  id         Int       @id @default(autoincrement())
+  userId     Int       @unique
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  latitude   Float
+  longitude  Float
+  area       String? // what the customer typed or picked, shown in the admin demand list
+  notifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([notifiedAt])
+}
+
 model StoreFollow {
   userId    Int
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)

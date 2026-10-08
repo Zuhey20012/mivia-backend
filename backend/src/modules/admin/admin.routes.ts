@@ -7,6 +7,8 @@ import {
   getOrders,
 } from "./admin.controller";
 import moderationRoutes from "./moderation.routes";
+import { getSystemStatus } from "./system";
+import { launchDemand } from "../me/launchAlerts";
 
 const router = Router();
 
@@ -14,6 +16,8 @@ const router = Router();
 router.use(auth, requireRole("ADMIN"));
 
 router.get("/stats",                  getStats);
+router.get("/system",                 getSystemStatus);
+router.get("/launch-demand",          launchDemand);
 router.get("/users",                  getUsers);
 router.delete("/users/:id",           banUser);
 router.get("/vendors",                getVendors);

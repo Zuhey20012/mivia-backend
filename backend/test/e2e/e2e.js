@@ -1,4 +1,4 @@
-// End-to-end test for API v2.3 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
+// End-to-end test for API v2.4 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
 const { execSync } = require("child_process");
 const crypto = require("crypto");
 const { io } = require("socket.io-client");
@@ -489,6 +489,66 @@ async function register(name, role, extra = {}) {
   check("unknown legal document is 404", (await fetch(`${BASE}/legal/../../etc/passwd`)).status === 404 && (await fetch(`${BASE}/legal/secrets`)).status === 404);
   check("search filters by eco-friendly flag", (await call("GET", "/products/search?eco=true")).status === 200);
 
+  console.log("\n— Store hours, pause switch and the order watchdog");
+  sql(`update "Product" set "stockQuantity"=10, "isAvailable"=true where id=${productId}`);
+  const orderBody = { storeId, deliveryAddress: "Aleksanterinkatu 5, Helsinki", deliveryLat: 60.18, deliveryLng: 24.95, items: [{ productId, quantity: 1 }] };
+  const paused = await call("PATCH", `/stores/${storeId}`, { acceptingOrders: false }, vendor.accessToken);
+  const pausedList = (await call("GET", `/stores?search=Vera Vintage ${uniq}`)).body.stores[0];
+  check("store can pause new orders; shoppers see it", paused.status === 200 && pausedList?.openNow === false && pausedList?.closedReason === "paused", pausedList);
+  const pausedOrder = await call("POST", "/orders", orderBody, otherCust.accessToken);
+  check("a paused store takes no orders", pausedOrder.status === 409 && /not taking orders/.test(pausedOrder.body?.error), pausedOrder.body);
+  check("opening hours are validated", (await call("PATCH", `/stores/${storeId}`, { acceptingOrders: true, openingHours: { mon: [["25:00", "18:00"]] } }, vendor.accessToken)).status === 400);
+  const closedAllWeek = { mon: [], tue: [], wed: [], thu: [], fri: [], sat: [], sun: [] };
+  await call("PATCH", `/stores/${storeId}`, { acceptingOrders: true, openingHours: closedAllWeek }, vendor.accessToken);
+  const closedStore = (await call("GET", `/stores/${storeId}`)).body.store;
+  const closedOrder = await call("POST", "/orders", orderBody, otherCust.accessToken);
+  check("outside opening hours the store is closed and takes no orders", closedStore?.openNow === false && closedStore?.closedReason === "closed" && closedOrder.status === 409, [closedStore?.openNow, closedOrder.body]);
+  const reopened = await call("PATCH", `/stores/${storeId}`, { openingHours: null }, vendor.accessToken);
+  check("clearing the hours makes the store always open", reopened.status === 200 && (await call("GET", `/stores/${storeId}`)).body.store?.openNow === true, reopened.body);
+  check("only the owner can pause a store", (await call("PATCH", `/stores/${storeId}`, { acceptingOrders: false }, otherCust.accessToken)).status === 403);
+
+  // Four stuck orders, aged with SQL, for the watchdog (runs every minute) to resolve
+  const stuck = await call("POST", "/orders", orderBody, otherCust.accessToken);
+  const unpaidId = stuck.body.order?.id;
+  const stockBefore = Number(sql(`select "stockQuantity" from "Product" where id=${productId}`));
+  sql(`update "Order" set "createdAt" = now() - interval '40 minutes' where id=${unpaidId}`);
+  const mk = (status, extra) => Number(sql(`insert into "Order" ("userId","storeId","status","subtotalCents","deliveryFeeCents","courierFeeCents","commissionCents","sellerPayoutCents","totalCents","stripePaymentIntentId","paymentStatus","paidAt","deliveryAddress","deliveryLat","deliveryLng","updatedAt"${extra.cols}) values (${otherCust.user.id},${storeId},'${status}',5000,${fee},${fee},500,4500,${5000 + fee},'pi_wd_${extra.tag}_${uniq}','SUCCEEDED',${extra.paidAt},'Aleksanterinkatu 5, Helsinki',60.18,24.95,now()${extra.vals}) returning id`).split("\n")[0]);
+  const remindId = mk("PENDING", { tag: "remind", paidAt: "now() - interval '4 minutes'", cols: "", vals: "" });
+  const lateStoreId = mk("PENDING", { tag: "late", paidAt: "now() - interval '11 minutes'", cols: "", vals: "" });
+  const delayId = mk("CONFIRMED", { tag: "delay", paidAt: "now() - interval '20 minutes'", cols: `,"confirmedAt"`, vals: `,now() - interval '16 minutes'` });
+  const noCourierId = mk("CONFIRMED", { tag: "nocourier", paidAt: "now() - interval '55 minutes'", cols: `,"confirmedAt"`, vals: `,now() - interval '50 minutes'` });
+  let watched = "";
+  for (let i = 0; i < 45 && watched !== "CANCELLED"; i++) {
+    await sleep(3000);
+    watched = sql(`select status from "Order" where id=${noCourierId}`);
+  }
+  await sleep(1500);
+  const row = (id, cols) => sql(`select ${cols} from "Order" where id=${id}`);
+  check("watchdog: an unpaid checkout is cancelled and its stock released", row(unpaidId, `status || '|' || "cancelReason"`) === "CANCELLED|Payment was not completed" && Number(sql(`select "stockQuantity" from "Product" where id=${productId}`)) === stockBefore + 1, row(unpaidId, `status || '|' || coalesce("cancelReason",'')`));
+  check("watchdog: a store that has not answered gets one reminder", row(remindId, `status || '|' || ("storeRemindedAt" is not null)`) === "PENDING|true");
+  check("watchdog: an order the store never answered is refunded", row(lateStoreId, `status || '|' || "paymentStatus" || '|' || "cancelReason"`) === "CANCELLED|REFUNDED|The store did not respond in time");
+  check("watchdog: jobs nobody took are offered again and the customer hears about the delay", row(delayId, `status || '|' || ("lastOfferAt" is not null) || '|' || ("courierSearchNotifiedAt" is not null)`) === "CONFIRMED|true|true");
+  check("watchdog: with no courier at all the order is refunded", row(noCourierId, `status || '|' || "paymentStatus" || '|' || "cancelReason"`) === "CANCELLED|REFUNDED|No courier was available");
+  check("store acceptance records when it happened", sql(`select "confirmedAt" is not null from "Order" where id=${orderId}`) === "t");
+
+  console.log("\n— Launch alerts and system status");
+  check("launch alert needs a location", (await call("PUT", "/me/launch-alert", { area: "Tampere" }, otherCust.accessToken)).status === 400);
+  check("launch alert needs a signed-in user", (await call("PUT", "/me/launch-alert", { latitude: 61.4978, longitude: 23.761 })).status === 401);
+  const wait = await call("PUT", "/me/launch-alert", { latitude: 61.4978, longitude: 23.761, area: "Tampere keskusta" }, otherCust.accessToken);
+  check("customer asks to hear when Malvoya opens near them", wait.status === 200 && (await call("GET", "/me/launch-alert", null, otherCust.accessToken)).body.alert?.area === "Tampere keskusta", wait.body);
+  const demand = await call("GET", "/admin/launch-demand", null, adminToken);
+  check("admin sees where people are waiting", demand.status === 200 && demand.body.demand.some((d) => d.areas.includes("Tampere keskusta")), demand.body);
+  const tampereVendor = await register("Tuula", "VENDOR");
+  const farStore = await call("POST", "/stores", { name: `Tampere Thrift ${uniq}`, category: "THRIFT", sellerType: "PRIVATE", latitude: 61.5, longitude: 23.77 }, tampereVendor.accessToken);
+  const goLive = await call("PATCH", `/admin/vendors/${farStore.body.store.id}/approve`, null, adminToken);
+  check("approving a store nearby notifies the people waiting, once", goLive.status === 200 && goLive.body.launchAlertsSent === 1 && (await call("PATCH", `/admin/vendors/${farStore.body.store.id}/approve`, null, adminToken)).body.launchAlertsSent === 0, goLive.body);
+  check("a store far away notifies nobody", (await call("PATCH", `/admin/vendors/${storeId}/approve`, null, adminToken)).body.launchAlertsSent === 0);
+  const status = await call("GET", "/admin/system", null, adminToken);
+  check("system status says what is switched on, without secrets", status.status === 200 && status.body.integrations?.payments?.mode === "test" && status.body.marketplace?.liveStores >= 2 && !JSON.stringify(status.body).includes("sk_test_123") && !JSON.stringify(status.body).includes("cld_test_secret"), status.body);
+  check("system status lists the background jobs", status.body.backgroundJobs?.some((j) => j.name === "order-watchdog" && j.lastRunAt), status.body.backgroundJobs);
+  check("system status is admin-only", (await call("GET", "/admin/system", null, otherCust.accessToken)).status === 403);
+  check("leaving the waitlist works", (await call("DELETE", "/me/launch-alert", null, otherCust.accessToken)).status === 200 && (await call("GET", "/me/launch-alert", null, otherCust.accessToken)).body.alert === null);
+
   console.log("\n— Background jobs and input hardening");
   const leaseSql = `INSERT INTO "JobLease" ("name","lockedUntil") VALUES ('t${uniq}', now() + interval '1 minute') ON CONFLICT ("name") DO UPDATE SET "lockedUntil" = now() + interval '1 minute' WHERE "JobLease"."lockedUntil" < now() RETURNING "name"`;
   const firstLine = (q) => sql(q).split(/\r?\n/)[0];
@@ -499,7 +559,7 @@ async function register(name, role, extra = {}) {
   check("huge search input rejected", (await call("GET", `/products/search?q=${"a".repeat(200)}`)).status === 400);
   const cors = await fetch(`${API}/stores`, { headers: { Origin: "https://evil.example" } });
   check("CORS does not allow unknown origins", !cors.headers.get("access-control-allow-origin"));
-  check("health reports v2.3.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.3.0");
+  check("health reports v2.4.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.4.0");
 
   [vendorSock, custSock, otherSock, c1Sock, c2Sock].forEach((s) => s.close());
   console.log(`\n${pass} passed, ${fail} failed`);

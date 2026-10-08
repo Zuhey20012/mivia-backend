@@ -1,4 +1,11 @@
 import { z } from "zod";
+import { openingHoursSchema } from "../../utils/openingHours";
+
+// Availability: pause switch and weekly opening hours (Finnish time); null clears the hours (always open)
+const availability = {
+  acceptingOrders: z.boolean().optional(),
+  openingHours:    openingHoursSchema.nullable().optional(),
+};
 
 export const createStoreSchema = z.object({
   name:          z.string().min(2).max(100),
@@ -25,6 +32,7 @@ export const createStoreSchema = z.object({
   sellerType:    z.enum(["BUSINESS", "PRIVATE"]).optional(), // older app builds do not send it
   businessId:    z.string().trim().regex(/^\d{7}-\d$/, "Y-tunnus format is 1234567-8").optional(),
   prepMinutes:   z.number().int().min(0).max(120).optional(),
+  ...availability,
 }).refine((d) => d.sellerType !== "BUSINESS" || !!d.businessId, {
   message: "Business sellers must give their Y-tunnus",
   path: ["businessId"],
@@ -43,6 +51,7 @@ export const updateStoreSchema = z.object({
   logoUrl:     z.string().url().startsWith("https://").optional(),
   bannerUrl:   z.string().url().startsWith("https://").optional(),
   prepMinutes: z.number().int().min(0).max(120).optional(),
+  ...availability,
 });
 
 export const storeQuerySchema = z.object({

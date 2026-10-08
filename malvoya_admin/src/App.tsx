@@ -11,6 +11,7 @@ import Settings from './pages/Settings';
 import Moderation from './pages/Moderation';
 import Payouts from './pages/Payouts';
 import Support from './pages/Support';
+import System from './pages/System';
 
 function RequireAuth({ children }: { children: React.ReactElement }) {
   const token = localStorage.getItem('token');
@@ -33,6 +34,7 @@ function App() {
         <Route path="/moderation" element={<RequireAuth><Moderation /></RequireAuth>} />
         <Route path="/payouts"  element={<RequireAuth><Payouts /></RequireAuth>} />
         <Route path="/support"  element={<RequireAuth><Support /></RequireAuth>} />
+        <Route path="/system"   element={<RequireAuth><System /></RequireAuth>} />
         <Route path="*"         element={<Navigate to="/" replace />} />
       </Routes>
     </Router>

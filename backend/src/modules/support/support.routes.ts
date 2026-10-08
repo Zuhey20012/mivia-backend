@@ -7,7 +7,8 @@ import { sendError, ApiError } from "../../lib/errors";
 import { sendEmail, escapeHtml } from "../../services/notificationDeliveryService";
 import { isSyntheticEmail } from "../auth/auth.service";
 
-const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || "support@malvoya.com";
+// Requests are always saved for the admin panel; they are also emailed when a support mailbox is set.
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || "";
 const router = Router();
 
 // A person can send a handful of requests an hour; more is spam
@@ -41,7 +42,7 @@ router.post("/support", supportLimiter, optionalAuth, async (req: AuthRequest, r
 
     const text = `Support request #${request.id} (${body.data.app})\nFrom: ${email}${req.user ? ` (user ${req.user.id})` : ""}\n` +
       `${body.data.orderId ? `Order: #${body.data.orderId}\n` : ""}Topic: ${body.data.topic}\n\n${body.data.message}`;
-    sendEmail(SUPPORT_EMAIL, `Malvoya support #${request.id}: ${body.data.topic}`, `<pre style="font-family:inherit;white-space:pre-wrap">${escapeHtml(text)}</pre>`, text).catch(() => {});
+    if (SUPPORT_EMAIL) sendEmail(SUPPORT_EMAIL, `Malvoya support #${request.id}: ${body.data.topic}`, `<pre style="font-family:inherit;white-space:pre-wrap">${escapeHtml(text)}</pre>`, text).catch(() => {});
     const ack = `We received your message (#${request.id}) and will reply to ${email}.\n\nViestisi (#${request.id}) on vastaanotettu. Vastaamme osoitteeseen ${email}.`;
     sendEmail(email, `Malvoya – we got your message #${request.id}`, `<p>${escapeHtml(ack).replace(/\n/g, "<br>")}</p>`, ack).catch(() => {});
 

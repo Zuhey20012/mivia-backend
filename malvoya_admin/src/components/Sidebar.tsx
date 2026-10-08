@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, ShoppingBag, Users, Truck,
-  Store, CheckSquare, LogOut, Settings, Flag, Banknote, LifeBuoy
+  Store, CheckSquare, LogOut, Settings, Flag, Banknote, LifeBuoy, Activity
 } from 'lucide-react';
 
 const nav = [
@@ -14,6 +14,7 @@ const nav = [
   { to: '/moderation',icon: Flag,           label: 'Moderation' },
   { to: '/payouts',  icon: Banknote,        label: 'Payouts'    },
   { to: '/support',  icon: LifeBuoy,        label: 'Support'    },
+  { to: '/system',   icon: Activity,        label: 'System'     },
 ];
 
 export default function Sidebar() {

@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { prisma } from "../../lib/prisma";
 import { revokeAllSessions } from "../auth/session";
+import { notifyLaunchAlertsNear } from "../me/launchAlerts";
 
 function idParam(req: Request) {
   const id = Number(req.params.id);
@@ -9,7 +10,7 @@ function idParam(req: Request) {
 
 // ─── Overview Stats ────────────────────────────────────────────────────────────
 export async function getStats(_req: Request, res: Response) {
-  const [customers, stores, couriers, orders, revenue, pendingVendors, pendingCouriers, activeOrders, liveDrops, openReports, failedPayouts] = await Promise.all([
+  const [customers, stores, couriers, orders, revenue, pendingVendors, pendingCouriers, activeOrders, liveDrops, openReports, failedPayouts, waitlist] = await Promise.all([
     prisma.user.count({ where: { role: "CUSTOMER", isActive: true } }),
     prisma.store.count(),
     prisma.courier.count({ where: { userId: { not: null } } }),
@@ -21,6 +22,7 @@ export async function getStats(_req: Request, res: Response) {
     prisma.drop.count({ where: { status: "READY" } }),
     prisma.dropReport.count({ where: { status: "OPEN" } }),
     prisma.payout.count({ where: { status: "FAILED" } }),
+    prisma.launchAlert.count({ where: { notifiedAt: null } }),
   ]);
 
   res.json({
@@ -39,6 +41,7 @@ export async function getStats(_req: Request, res: Response) {
       liveDrops,
       openReports,
       failedPayouts,
+      waitlist,
     },
   });
 }
@@ -86,9 +89,12 @@ export async function getVendors(req: Request, res: Response) {
 export async function approveVendor(req: Request, res: Response) {
   const id = idParam(req);
   if (!id) return res.status(404).json({ ok: false, error: "Store not found" });
-  const store = await prisma.store.update({ where: { id }, data: { isVerified: true } }).catch(() => null);
-  if (!store) return res.status(404).json({ ok: false, error: "Store not found" });
-  res.json({ ok: true, store });
+  const before = await prisma.store.findUnique({ where: { id }, select: { isVerified: true } });
+  if (!before) return res.status(404).json({ ok: false, error: "Store not found" });
+  const store = await prisma.store.update({ where: { id }, data: { isVerified: true } });
+  // First time live: tell customers who asked to hear when Malvoya opens near them
+  const notified = before.isVerified ? 0 : await notifyLaunchAlertsNear(store).catch(() => 0);
+  res.json({ ok: true, store, launchAlertsSent: notified });
 }
 
 /** Rejecting hides the store; stores with orders cannot be deleted (bookkeeping). */

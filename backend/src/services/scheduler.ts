@@ -6,12 +6,14 @@ import { processDuePayouts } from "../modules/payouts/payouts.service";
 import { checkProcessingDrops } from "../modules/drops/drops.service";
 import { checkProcessingProductVideos } from "../modules/products/productVideos";
 import { purgeOldDeliveryProofs } from "../modules/orders/orders.service";
+import { runOrderWatchdog } from "./orderWatchdog";
 
 const logger = pino({ name: "scheduler" });
 
 type Job = { name: string; everyMs: number; enabled: () => boolean; run: () => Promise<unknown> };
 
 const jobs: Job[] = [
+  { name: "order-watchdog", everyMs: 60_000, enabled: () => true, run: runOrderWatchdog },
   { name: "payouts", everyMs: 10 * 60_000, enabled: () => !!env.stripeSecretKey, run: processDuePayouts },
   { name: "drop-processing", everyMs: 2 * 60_000, enabled: mediaConfigured, run: checkProcessingDrops },
   { name: "product-video-processing", everyMs: 2 * 60_000, enabled: mediaConfigured, run: checkProcessingProductVideos },

@@ -18,6 +18,7 @@ import 'core/delivery_location.dart';
 import 'core/push_service.dart';
 import 'core/strings.dart';
 import 'screens/order_detail.dart';
+import 'screens/store_detail.dart';
 
 /// Lets a tapped push notification open the right screen from anywhere.
 final navigatorKey = GlobalKey<NavigatorState>();
@@ -62,6 +63,11 @@ void main() async {
     final orderId = asInt(data['orderId']);
     if (data['type'] == 'order' && orderId != null) {
       navigatorKey.currentState?.push(MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: orderId)));
+    }
+    // "Malvoya is open near you" opens the new store
+    final storeId = asInt(data['storeId']);
+    if (data['type'] == 'store' && storeId != null) {
+      navigatorKey.currentState?.push(MaterialPageRoute(builder: (_) => StoreDetailScreen(store: {'id': storeId})));
     }
   };
 

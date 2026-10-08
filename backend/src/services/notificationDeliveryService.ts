@@ -12,7 +12,8 @@ export interface DeliveryResult {
 }
 
 const BRAND = "Malvoya";
-const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || "support@malvoya.com";
+// Only a mailbox we actually control: malvoya.com is not ours to send from or receive at.
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || "";
 
 export function escapeHtml(value: unknown): string {
   return String(value ?? "")
@@ -58,7 +59,8 @@ export async function sendEmail(to: string, subject: string, html: string, text:
     return { delivered: true, simulated: true };
   }
   try {
-    await transport.sendMail({ from: process.env.SMTP_FROM || `"${BRAND}" <no-reply@malvoya.com>`, to, subject, html, text });
+    // Send as the mailbox we log in with (e.g. a Gmail address); a foreign domain would fail SPF/DMARC
+    await transport.sendMail({ from: process.env.SMTP_FROM || `"${BRAND}" <${process.env.SMTP_USER}>`, to, subject, html, text });
     return { delivered: true };
   } catch (err: any) {
     logger.error({ err: err?.message, to: mask(to) }, "Email delivery failed");
@@ -106,7 +108,7 @@ function layout(title: string, bodyHtml: string) {
 <div style="padding:24px 28px;border-bottom:1px solid #E5E5EA;font-weight:700;font-size:20px;letter-spacing:-0.3px">${BRAND}</div>
 <div style="padding:28px">${bodyHtml}</div>
 <div style="padding:18px 28px;background:#FAFAFC;color:#86868B;font-size:12px;line-height:1.5">
-Tämä on automaattinen viesti. / This is an automated message.<br>Asiakaspalvelu / Support: <a href="mailto:${SUPPORT_EMAIL}" style="color:#86868B">${SUPPORT_EMAIL}</a>
+Tämä on automaattinen viesti. / This is an automated message.<br>${SUPPORT_EMAIL ? `Asiakaspalvelu / Support: <a href="mailto:${SUPPORT_EMAIL}" style="color:#86868B">${SUPPORT_EMAIL}</a>` : "Asiakaspalvelu / Support: Malvoya-sovellus → Tuki / the Malvoya app → Support"}
 </div></div></body></html>`;
 }
 

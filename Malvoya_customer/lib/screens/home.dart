@@ -17,6 +17,8 @@ import 'returns_screen.dart';
 import 'search.dart';
 import '../core/delivery_location.dart';
 import '../core/strings.dart';
+import '../core/store_hours.dart';
+import '../core/api_client.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shimmer/shimmer.dart';
 
@@ -43,6 +45,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   bool hasActiveOrder = false;
   Map<String, dynamic>? activeOrder;
   String _currentDeliveryCity = 'Helsinki (Keskusta)';
+
+  // "Tell me when Malvoya opens near me"
+  bool _alertSaved = false;
+  bool _alertBusy = false;
 
   late AnimationController _pulseCtrl;
   late Animation<double> _pulseAnim;
@@ -71,6 +77,41 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       fetchStores();
     });
     checkActiveOrders();
+    _loadLaunchAlert();
+  }
+
+  Future<void> _loadLaunchAlert() async {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    if (!auth.isAuthenticated) return;
+    final res = await ApiClient(auth).get('/me/launch-alert');
+    if (mounted && res.ok) setState(() => _alertSaved = res.data['alert'] != null && res.data['alert']['notifiedAt'] == null);
+  }
+
+  Future<void> _toggleLaunchAlert() async {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final messenger = ScaffoldMessenger.of(context);
+    if (!auth.isAuthenticated) {
+      messenger.showSnackBar(SnackBar(content: Text(tr(context, 'Sign in or create an account to get a notification.', 'Kirjaudu tai luo tili saadaksesi ilmoituksen.'))));
+      return;
+    }
+    final loc = DeliveryLocation.instance;
+    if (!_alertSaved && !loc.hasCoordinates) {
+      messenger.showSnackBar(SnackBar(content: Text(tr(context, 'Pin your address on the map first.', 'Merkitse ensin osoitteesi kartalle.'))));
+      _pickAddress();
+      return;
+    }
+    HapticFeedback.mediumImpact();
+    setState(() => _alertBusy = true);
+    final api = ApiClient(auth);
+    final res = _alertSaved
+        ? await api.delete('/me/launch-alert')
+        : await api.put('/me/launch-alert', {'latitude': loc.lat, 'longitude': loc.lng, 'area': _currentDeliveryCity});
+    if (!mounted) return;
+    setState(() {
+      _alertBusy = false;
+      if (res.ok) _alertSaved = !_alertSaved;
+    });
+    if (!res.ok) messenger.showSnackBar(SnackBar(content: Text(res.error ?? tr(context, 'Something went wrong', 'Jokin meni vikaan'))));
   }
 
   void _onLocationChanged() {
@@ -494,6 +535,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     final reviews = asInt(store['totalReviews']) ?? 0;
     final eta = etaWindow(store);
     final km = store['distanceKm'];
+    final closed = closedLabel(context, store);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -528,7 +570,17 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                             ? CircleAvatar(radius: 34, backgroundImage: CachedNetworkImageProvider(store['logoUrl']))
                             : Icon(Icons.storefront_outlined, size: 48, color: AppTheme.clayInk.withValues(alpha: 0.8)),
                       ),
-                    if (eta != null)
+                    if (closed != null)
+                      Container(
+                        color: Colors.white.withValues(alpha: AppTheme.isDarkMode(context) ? 0.12 : 0.45),
+                        alignment: Alignment.center,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          decoration: BoxDecoration(color: AppTheme.ink, borderRadius: BorderRadius.circular(16)),
+                          child: Text(closed, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
+                        ),
+                      ),
+                    if (eta != null && closed == null)
                       Positioned(
                         left: 12,
                         top: 12,
@@ -650,6 +702,26 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             textAlign: TextAlign.center,
             style: TextStyle(color: AppTheme.secondaryText(context), fontSize: 14, height: 1.45),
           ),
+          const SizedBox(height: 18),
+          if (_alertSaved) ...[
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.notifications_active_rounded, color: AppTheme.success, size: 20),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(tr(context, 'We will tell you when a store opens near you.', 'Kerromme, kun lähellesi avautuu kauppa.'),
+                      style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
+                ),
+              ],
+            ),
+            TextButton(onPressed: _alertBusy ? null : _toggleLaunchAlert, child: Text(tr(context, 'Stop reminding me', 'Lopeta muistutukset'))),
+          ] else
+            ElevatedButton.icon(
+              onPressed: _alertBusy ? null : _toggleLaunchAlert,
+              icon: const Icon(Icons.notifications_none_rounded),
+              label: Text(tr(context, 'Notify me when it opens here', 'Ilmoita kun täällä aukeaa')),
+            ),
         ],
       ),
     );

@@ -1,6 +1,6 @@
 {
     "name": "malvoya-backend",
-    "version": "2.3.0",
+    "version": "2.4.0",
     "private": true,
     "scripts": {
         "test:e2e": "node test/e2e/e2e.js",

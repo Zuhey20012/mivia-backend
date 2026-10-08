@@ -8,6 +8,7 @@ import '../checkout.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
 import '../core/delivery_location.dart';
+import '../core/store_hours.dart';
 import '../core/strings.dart';
 import '../widgets/product_tile.dart';
 import 'drops_feed.dart';
@@ -169,11 +170,30 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
     final reviews = asInt(_store['totalReviews']) ?? 0;
     final eta = etaWindow(_store);
     final isPrivate = _store['sellerType'] == 'PRIVATE';
+    final closed = closedLabel(context, _store);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (closed != null)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine),
+                borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+              ),
+              child: Row(children: [
+                const Icon(Icons.schedule_rounded, color: Color(0xFF8A5A00)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text('$closed. ${tr(context, 'You can look around and save favourites.', 'Voit katsella ja tallentaa suosikkeja.')}',
+                      style: TextStyle(fontWeight: FontWeight.w600, color: AppTheme.primaryText(context), height: 1.35)),
+                ),
+              ]),
+            ),
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: Row(children: [

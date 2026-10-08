@@ -43,6 +43,8 @@ export async function offerOrderToCouriers(orderId: number) {
     createdAt: order.createdAt,
   };
 
+  await prisma.order.update({ where: { id: orderId }, data: { lastOfferAt: new Date() } });
+
   const couriers = await prisma.courier.findMany({
     where: { isApproved: true, isActive: true, currentOrderId: null },
     select: { id: true, userId: true, latitude: true, longitude: true, updatedAt: true },

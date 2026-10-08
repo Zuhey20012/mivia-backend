@@ -9,23 +9,35 @@ import api from '../utils/api';
 interface Stats {
   customers: number; vendors: number; couriers: number;
   totalOrders: number; activeOrders: number;
-  pendingApprovals: number; revenueCents: number;
+  pendingApprovals: number; revenueCents: number; waitlist?: number;
 }
 
 function fmt(cents: number) {
-  return '$' + (cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2 });
+  return new Intl.NumberFormat('fi-FI', { style: 'currency', currency: 'EUR' }).format(cents / 100);
 }
+
+type Integration = { configured: boolean; mode?: 'live' | 'test' | 'off' };
+const LABELS: Record<string, string> = {
+  payments: 'Payments (Stripe)', paymentWebhook: 'Payment confirmations', email: 'Email',
+  supportInbox: 'Support inbox', sms: 'SMS codes', pushNotifications: 'Push notifications',
+  photosAndVideos: 'Photos and videos (Cloudinary)', googleSignIn: 'Google sign-in',
+};
 
 export default function Overview() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [integrations, setIntegrations] = useState<Record<string, Integration> | null>(null);
+  const [ready, setReady] = useState<boolean | null>(null);
 
   const load = async () => {
     setLoading(true);
     try {
-      const res = await api.get('/admin/stats');
+      const [res, sys] = await Promise.all([api.get('/admin/stats'), api.get('/admin/system')]);
       setStats(res.data.stats);
+      setIntegrations(sys.data.integrations);
+      setReady(sys.data.readyForOrders);
+      setError('');
     } catch {
       setError('Failed to load stats. Make sure backend is running.');
     } finally {
@@ -38,8 +50,8 @@ export default function Overview() {
   const cards = stats ? [
     { label: 'Total Revenue',     value: fmt(stats.revenueCents), sub: 'Paid orders', icon: TrendingUp, color: 'text-green-500',  bg: 'bg-green-50'  },
     { label: 'Active Orders',     value: String(stats.activeOrders), sub: 'In progress right now', icon: ShoppingBag, color: 'text-blue-500',   bg: 'bg-blue-50'   },
-    { label: 'Total Vendors',     value: String(stats.vendors), sub: 'Approved stores', icon: Store, color: 'text-purple-500', bg: 'bg-purple-50' },
-    { label: 'Total Couriers',    value: String(stats.couriers), sub: 'Registered drivers', icon: Truck, color: 'text-orange-500', bg: 'bg-orange-50' },
+    { label: 'Stores',            value: String(stats.vendors), sub: 'Live and in review', icon: Store, color: 'text-purple-500', bg: 'bg-purple-50' },
+    { label: 'Couriers',          value: String(stats.couriers), sub: 'Signed up', icon: Truck, color: 'text-orange-500', bg: 'bg-orange-50' },
     { label: 'Total Customers',   value: String(stats.customers), sub: 'Registered users', icon: Users, color: 'text-pink-500',   bg: 'bg-pink-50'   },
     { label: 'Pending Approvals', value: String(stats.pendingApprovals), sub: 'Need your review', icon: Clock, color: 'text-yellow-500', bg: 'bg-yellow-50' },
   ] : [];
@@ -83,22 +95,28 @@ export default function Overview() {
         }
       </div>
 
-      {/* Platform Health */}
+      {/* Platform status, as reported by the API itself (details on the System page) */}
       <div className="apple-card">
-        <h2 style={{ fontWeight:600, marginBottom:'1.25rem' }}>Platform Status</h2>
+        <div style={{ display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'1.25rem' }}>
+          <h2 style={{ fontWeight:600 }}>Platform status</h2>
+          <a href="#/system" style={{ color:'#0071E3',fontSize:'0.875rem',fontWeight:500 }}>
+            {ready === null ? 'Details' : ready ? 'Ready for real orders · details' : 'Not ready for real orders · see why'}
+          </a>
+        </div>
         <div style={{ display:'flex',flexDirection:'column',gap:'0' }}>
           {[
-            { label: 'Backend API',              ok: true  },
-            { label: 'Database (PostgreSQL)',     ok: !error },
-            { label: 'Payments (Stripe)',         ok: true  },
-            { label: 'Image Storage (Cloudinary)',ok: true  },
-            { label: 'Real-time (Socket.io)',     ok: true  },
-          ].map(({ label, ok }) => (
+            { label: 'API and database', ok: !error && integrations !== null, text: error ? 'Unreachable' : 'Up' },
+            ...Object.entries(integrations ?? {}).map(([k, v]) => ({
+              label: LABELS[k] ?? k,
+              ok: v.configured && v.mode !== 'test',
+              text: v.mode === 'test' ? 'Test mode' : v.configured ? 'On' : 'Not set up',
+            })),
+          ].map(({ label, ok, text }) => (
             <div key={label} style={{ display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0.625rem 0',borderBottom:'1px solid #F5F5F7' }}>
               <span style={{ fontSize:'0.875rem',color:'#3C3C43' }}>{label}</span>
-              <span style={{ display:'flex',alignItems:'center',gap:'0.375rem',fontSize:'0.75rem',fontWeight:500,color: ok ? '#34C759' : '#EF4444' }}>
+              <span style={{ display:'flex',alignItems:'center',gap:'0.375rem',fontSize:'0.75rem',fontWeight:500,color: ok ? '#34C759' : '#B45309' }}>
                 {ok ? <CheckCircle style={{width:'14px',height:'14px'}} /> : <XCircle style={{width:'14px',height:'14px'}} />}
-                {ok ? 'Operational' : 'Error'}
+                {text}
               </span>
             </div>
           ))}

@@ -14,6 +14,7 @@ import { estimateDelivery } from "../../utils/distance";
 import { verifyOwnedUpload, UploadProof } from "../media/media.service";
 import { adjustStorePayoutForRefund, createPayoutsForOrder } from "../payouts/payouts.service";
 import { Actor, getCourierForUser, getOrderRelation } from "./access";
+import { storeAvailability } from "../../utils/openingHours";
 
 const logger = pino({ name: "orders" });
 
@@ -33,6 +34,14 @@ export async function createOrder(userId: number, input: {
 }) {
   const store = await prisma.store.findUnique({ where: { id: input.storeId } });
   if (!store || !store.isVerified) throw new OrderError("This store is not accepting orders", 404);
+  const availability = storeAvailability(store);
+  if (!availability.openNow) {
+    const opens = availability.opensAt ? ` It opens again at ${availability.opensAt.time}.` : "";
+    throw new OrderError(
+      availability.closedReason === "paused" ? "This store is not taking orders right now." : `This store is closed right now.${opens}`,
+      409,
+    );
+  }
 
   // Price is always computed server-side from the database.
   const order = await prisma.$transaction(async (tx) => {
@@ -110,7 +119,7 @@ export async function createOrder(userId: number, input: {
     await prisma.order.update({ where: { id: order.id }, data: { stripePaymentIntentId: paymentIntent.id } });
     return { order: { ...order, stripePaymentIntentId: paymentIntent.id }, clientSecret: paymentIntent.client_secret };
   } catch (err) {
-    await cancelOrderInternal(order.id, "Payment could not be started");
+    await cancelOrderInternal(order.id, "Payment could not be started", { notifyCustomer: false });
     throw err;
   }
 }
@@ -184,8 +193,11 @@ async function restock(tx: Prisma.TransactionClient, orderId: number) {
   }
 }
 
-/** Cancels, restocks and refunds (or voids the unpaid PaymentIntent). Idempotent. */
-async function cancelOrderInternal(orderId: number, reason: string) {
+/**
+ * Cancels, restocks and refunds (or voids the unpaid PaymentIntent). Idempotent.
+ * `notifyCustomer: false` is for checkouts the customer abandoned themselves.
+ */
+export async function cancelOrderInternal(orderId: number, reason: string, opts: { notifyCustomer?: boolean; customerMessage?: string } = {}) {
   const order = await prisma.order.findUnique({ where: { id: orderId } });
   if (!order || order.status === "CANCELLED") return order;
   if (order.status === "SHIPPED" || order.status === "DELIVERED") {
@@ -227,13 +239,16 @@ async function cancelOrderInternal(orderId: number, reason: string) {
     }
   }
 
-  emitOrderStatus(orderId, { status: "CANCELLED" });
+  emitOrderStatus(orderId, { status: "CANCELLED", cancelReason: reason });
   emitToStore(order.storeId, "order:status", { orderId, status: "CANCELLED" });
-  pushToUser(order.userId, {
-    title: `Order #${orderId} was cancelled`,
-    body: order.paymentStatus === "SUCCEEDED" ? "Your money is on its way back to you." : "You have not been charged.",
-    data: { type: "order", orderId: String(orderId) },
-  }).catch(() => {});
+  if (opts.notifyCustomer !== false) {
+    const money = order.paymentStatus === "SUCCEEDED" ? "Your money is on its way back to you." : "You have not been charged.";
+    pushToUser(order.userId, {
+      title: `Order #${orderId} was cancelled`,
+      body: opts.customerMessage ? `${opts.customerMessage} ${money}` : money,
+      data: { type: "order", orderId: String(orderId) },
+    }).catch(() => {});
+  }
   return updated;
 }
 
@@ -290,6 +305,7 @@ export async function updateOrderStatus(orderId: number, actor: Actor, next: Ord
         status: next,
         ...(next === "DELIVERED" ? { deliveredAt: new Date(), handoverMethod: "ADMIN" } : {}),
         ...(next === "SHIPPED" ? { pickedUpAt: new Date() } : {}),
+        ...(next === "CONFIRMED" ? { confirmedAt: new Date() } : {}),
       },
     });
     if (res.count === 0) throw new OrderError("The order changed in the meantime, please refresh", 409);

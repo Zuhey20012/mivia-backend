@@ -1,11 +1,12 @@
 import { prisma } from "../../lib/prisma";
-import { StoreCategory } from "@prisma/client";
+import { Prisma, StoreCategory } from "@prisma/client";
 import { ApiError } from "../../lib/errors";
 import { isOwnImageUrl, mediaConfigured } from "../../lib/cloudinary";
 import { haversineKm, estimateDelivery } from "../../utils/distance";
 import { deliveryFeeForDistance } from "../../utils/pricing";
 import { priceInfoFor, presentProduct, productInclude } from "../products/pricing";
 import { followInfo } from "../drops/social";
+import { storeAvailability } from "../../utils/openingHours";
 
 /** Trader information shoppers are entitled to see (DSA Art. 30, Omnibus Art. 6a CRD). */
 const publicStoreFields = {
@@ -13,6 +14,7 @@ const publicStoreFields = {
   logoUrl: true, bannerUrl: true, isHomeBased: true, isEcoFriendly: true,
   isVerified: true, address: true, latitude: true, longitude: true,
   rating: true, totalReviews: true, sellerType: true, businessId: true, prepMinutes: true,
+  acceptingOrders: true, openingHours: true,
 } as const;
 
 export function deliveryInfo(store: { latitude: number | null; longitude: number | null; prepMinutes?: number }, lat: number | null, lng: number | null) {
@@ -51,10 +53,12 @@ export async function getStores(query: {
 
   const userLat = query.lat ? Number(query.lat) : null;
   const userLng = query.lng ? Number(query.lng) : null;
-  const enriched = stores.map((s) => ({ ...s, ...deliveryInfo(s, userLat, userLng) }));
+  const enriched = stores.map((s) => ({ ...s, ...deliveryInfo(s, userLat, userLng), ...storeAvailability(s) }));
 
   if (userLat !== null && userLng !== null) {
     enriched.sort((a, b) => {
+      // Open stores first, then nearest
+      if (a.openNow !== b.openNow) return a.openNow ? -1 : 1;
       if (a.distanceKm === null) return 1;
       if (b.distanceKm === null) return -1;
       return a.distanceKm - b.distanceKm;
@@ -81,6 +85,7 @@ export async function getStoreById(id: number, viewerId?: number, lat: number | 
     ...publicStore,
     ...follow,
     ...deliveryInfo(publicStore, lat, lng),
+    ...storeAvailability(publicStore),
     products: products.map((p) => presentProduct(p, info.get(p.id))),
   };
 }
@@ -92,7 +97,7 @@ export async function getMyStore(ownerId: number) {
   });
   if (!store) return null;
   const info = await priceInfoFor(store.products);
-  return { ...store, products: store.products.map((p) => presentProduct(p, info.get(p.id), { owner: true })) };
+  return { ...store, ...storeAvailability(store), products: store.products.map((p) => presentProduct(p, info.get(p.id), { owner: true })) };
 }
 
 function assertOwnStoreImages(data: { logoUrl?: string; bannerUrl?: string }, storeId: number | null) {
@@ -104,7 +109,13 @@ function assertOwnStoreImages(data: { logoUrl?: string; bannerUrl?: string }, st
   }
 }
 
-export async function createStore(ownerId: number, data: any) {
+/** null from the app means "no opening hours" (always open); Prisma needs DbNull for that. */
+function withJsonNulls(data: any) {
+  return data.openingHours === null ? { ...data, openingHours: Prisma.DbNull } : data;
+}
+
+export async function createStore(ownerId: number, input: any) {
+  const data = withJsonNulls(input);
   const existing = await prisma.store.findUnique({ where: { ownerId } });
   if (existing) {
     // A reviewed store cannot relabel itself (e.g. business → private) without a new review
@@ -120,7 +131,8 @@ export async function createStore(ownerId: number, data: any) {
   return prisma.store.create({ data: { ...fields, ownerId, isVerified: false } });
 }
 
-export async function updateStore(id: number, ownerId: number, data: any) {
+export async function updateStore(id: number, ownerId: number, input: any) {
+  const data = withJsonNulls(input);
   const store = await prisma.store.findUnique({ where: { id } });
   if (!store) throw new ApiError("Store not found", 404);
   if (store.ownerId !== ownerId) throw new ApiError("Forbidden", 403);

@@ -25,6 +25,8 @@ import paymentsRoutes from "./modules/payments/payments.routes";
 import mediaRoutes    from "./modules/media/media.routes";
 import dropsRoutes, { shareRouter } from "./modules/drops/drops.routes";
 import meRoutes       from "./modules/me/me.routes";
+import { launchAlertRoutes } from "./modules/me/launchAlerts";
+import { integrationStatus } from "./modules/admin/system";
 import payoutsRoutes  from "./modules/payouts/payouts.routes";
 import legalRoutes    from "./modules/legal/legal.routes";
 import supportRoutes  from "./modules/support/support.routes";
@@ -48,7 +50,11 @@ app.use(pinoHttp({
     return id;
   },
   redact: ["req.headers.authorization", "req.headers.cookie", "req.headers['stripe-signature']"],
-  serializers: { req: (req) => ({ id: req.id, method: req.method, url: req.url?.split("?")[0] }) },
+  // Status code only: response headers are the same on every request and only bloat the logs
+  serializers: {
+    req: (req) => ({ id: req.id, method: req.method, url: req.url?.split("?")[0] }),
+    res: (res) => ({ statusCode: res.statusCode }),
+  },
   autoLogging: { ignore: (req) => req.url === "/health" },
 }));
 
@@ -68,7 +74,7 @@ app.use(express.json({ limit: "100kb" }));
 app.use(globalLimiter);
 
 // Liveness: the process is up. Readiness: it can also reach the database.
-app.get("/health", (_req, res) => res.json({ ok: true, status: "healthy", version: "2.3.0" }));
+app.get("/health", (_req, res) => res.json({ ok: true, status: "healthy", version: "2.4.0" }));
 app.get("/health/ready", async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
@@ -86,6 +92,7 @@ app.use("/api/v1",        courierRoutes);
 app.use("/api/v1",        ordersRoutes);
 app.use("/api/v1",        dropsRoutes);
 app.use("/api/v1",        meRoutes);
+app.use("/api/v1",        launchAlertRoutes);
 app.use("/api/v1",        payoutsRoutes);
 app.use("/api/v1",        supportRoutes);
 app.use("/api/v1/admin",  adminRoutes);
@@ -98,7 +105,10 @@ app.use(errorHandler);
 server.keepAliveTimeout = 65_000; // longer than typical load-balancer idle timeouts
 server.headersTimeout = 66_000;
 server.listen(env.port, () => {
-  logger.info(`Malvoya API v2.3 listening on port ${env.port} (${env.nodeEnv})`);
+  logger.info(`Malvoya API v2.4 listening on port ${env.port} (${env.nodeEnv})`);
+  // Yes/no per integration (never secrets), so the deploy log shows at a glance what is switched on
+  const on = integrationStatus();
+  logger.info({ integrations: Object.fromEntries(Object.entries(on).map(([k, v]) => [k, "mode" in v ? v.mode : v.configured ? "on" : "off"])) }, "Integrations");
   if (process.env.DISABLE_SCHEDULER !== "true") startScheduler();
 });
 

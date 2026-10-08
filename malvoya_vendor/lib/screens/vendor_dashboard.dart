@@ -16,6 +16,7 @@ import 'payouts_screen.dart';
 import 'product_editor.dart';
 import 'returns_manager.dart';
 import 'store_setup.dart';
+import 'opening_hours_screen.dart';
 
 /// The store owner's home: incoming orders, products, drops and the store itself.
 class VendorDashboard extends StatefulWidget {
@@ -71,6 +72,66 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       if (res.ok) _store = Map<String, dynamic>.from(res.data['store']);
     });
     await _loadOrders();
+  }
+
+  bool _switching = false;
+
+  /// The store's "online" switch: off means customers see the store as paused and cannot order.
+  Future<void> _setAccepting(bool value) async {
+    final id = asInt(_store?['id']);
+    if (id == null) return;
+    HapticFeedback.mediumImpact();
+    setState(() => _switching = true);
+    final res = await _api.patch('/stores/$id', {'acceptingOrders': value});
+    if (!mounted) return;
+    setState(() => _switching = false);
+    if (!res.ok) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.error ?? tr(context, 'Could not change it', 'Muutos epäonnistui'))));
+      return;
+    }
+    await _load();
+  }
+
+  String _opensText(Map? opensAt) {
+    if (opensAt == null) return '';
+    final days = isFinnish(context)
+        ? {'mon': 'ma', 'tue': 'ti', 'wed': 'ke', 'thu': 'to', 'fri': 'pe', 'sat': 'la', 'sun': 'su'}
+        : {'mon': 'Mon', 'tue': 'Tue', 'wed': 'Wed', 'thu': 'Thu', 'fri': 'Fri', 'sat': 'Sat', 'sun': 'Sun'};
+    final inDays = asInt(opensAt['inDays']) ?? 0;
+    final when = inDays == 0 ? '' : inDays == 1 ? tr(context, 'tomorrow ', 'huomenna ') : '${days[opensAt['day']] ?? ''} ';
+    return ' · ${tr(context, 'opens', 'aukeaa')} $when${opensAt['time']}';
+  }
+
+  Widget _availabilityCard() {
+    final accepting = _store?['acceptingOrders'] != false;
+    final openNow = _store?['openNow'] != false;
+    final (title, subtitle, bg, fg) = !accepting
+        ? (tr(context, 'Paused', 'Tauolla'), tr(context, 'Customers cannot order right now', 'Asiakkaat eivät voi tilata nyt'), AppTheme.sand, AppTheme.textPrimary)
+        : !openNow
+            ? (tr(context, 'Closed now', 'Suljettu nyt') + _opensText(_store?['opensAt'] as Map?),
+                tr(context, 'Outside your opening hours', 'Aukioloaikojen ulkopuolella'), AppTheme.sunshineLight, const Color(0xFF6A4500))
+            : (tr(context, 'Open — taking orders', 'Auki — otetaan tilauksia'),
+                tr(context, 'Answer new orders within 10 minutes', 'Vastaa uusiin tilauksiin 10 minuutissa'), AppTheme.primaryLight, AppTheme.primary);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.fromLTRB(16, 12, 10, 12),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(AppTheme.radiusLg - 2)),
+      child: Row(children: [
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: AppTheme.display(size: 18, color: fg)),
+            const SizedBox(height: 2),
+            Text(subtitle, style: TextStyle(fontSize: 13, color: fg.withValues(alpha: 0.85))),
+          ]),
+        ),
+        _switching
+            ? const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5)))
+            : Semantics(
+                label: tr(context, 'Take new orders', 'Ota vastaan tilauksia'),
+                child: Switch(value: accepting, onChanged: _setAccepting),
+              ),
+      ]),
+    );
   }
 
   Future<void> _loadOrders() async {
@@ -184,6 +245,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          _availabilityCard(),
           if (_orders.isEmpty) ...[
             const SizedBox(height: 64),
             Center(
@@ -384,6 +446,16 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             const Divider(height: 1),
             tile(Icons.assignment_return_outlined, tr(context, 'Returns', 'Palautukset'), tr(context, 'Approve and refund returns', 'Hyväksy ja hyvitä palautukset'),
                 () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ReturnsManager()))),
+            const Divider(height: 1),
+            tile(Icons.schedule_rounded, tr(context, 'Opening hours', 'Aukioloajat'),
+                _store?['openingHours'] == null ? tr(context, 'Not set — open whenever orders are on', 'Ei asetettu — auki aina, kun tilaukset ovat päällä') : tr(context, 'Closed automatically outside them', 'Suljettu automaattisesti niiden ulkopuolella'),
+                () async {
+              final id = asInt(_store?['id']);
+              if (id == null) return;
+              final saved = await Navigator.push<bool>(context, MaterialPageRoute(
+                  builder: (_) => OpeningHoursScreen(storeId: id, initial: (_store?['openingHours'] as Map?)?.cast<String, dynamic>())));
+              if (saved == true) _load();
+            }),
             const Divider(height: 1),
             tile(Icons.storefront_outlined, tr(context, 'Store details', 'Kaupan tiedot'), tr(context, 'Name, address, pictures, seller type', 'Nimi, osoite, kuvat, myyjätyyppi'), () async {
               await Navigator.push(context, MaterialPageRoute(builder: (_) => const StoreSetupScreen()));
