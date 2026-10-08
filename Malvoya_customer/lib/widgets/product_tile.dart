@@ -21,6 +21,7 @@ class ProductTile extends StatelessWidget {
     final store = storeName ?? product['store']?['name'];
 
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: () {
         HapticFeedback.selectionClick();
         Navigator.push(context, MaterialPageRoute(builder: (_) => ProductDetailScreen(productId: asInt(product['id'])!)));
@@ -31,35 +32,39 @@ class ProductTile extends StatelessWidget {
           AspectRatio(
             aspectRatio: 4 / 5,
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(AppTheme.radiusMd + 2),
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  Container(color: AppTheme.primary.withValues(alpha: 0.06)),
+                  Container(color: AppTheme.pastel(context, AppTheme.clay, AppTheme.clayInk)),
                   if (images.isNotEmpty)
                     CachedNetworkImage(imageUrl: images.first, fit: BoxFit.cover, fadeInDuration: const Duration(milliseconds: 180))
                   else
-                    const Icon(Icons.checkroom_rounded, size: 40, color: AppTheme.primary),
+                    Icon(Icons.checkroom_outlined, size: 44, color: AppTheme.clayInk.withValues(alpha: 0.8)),
                   if (hasVideo)
                     Positioned(
                       left: 8,
                       top: 8,
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
+                        decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(12)),
                         child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 14),
+                          const Icon(Icons.play_arrow_rounded, color: AppTheme.ink, size: 14),
                           const SizedBox(width: 2),
-                          Text(tr(context, 'Video', 'Video'), style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+                          Text(tr(context, 'Video', 'Video'), style: const TextStyle(color: AppTheme.ink, fontSize: 11, fontWeight: FontWeight.w800)),
                         ]),
                       ),
                     ),
                   if (!inStock)
                     Container(
-                      color: Colors.black.withValues(alpha: 0.45),
+                      color: Colors.white.withValues(alpha: 0.55),
                       alignment: Alignment.center,
-                      child: Text(tr(context, 'Sold out', 'Loppuunmyyty'),
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(color: AppTheme.ink, borderRadius: BorderRadius.circular(14)),
+                        child: Text(tr(context, 'Sold out', 'Loppuunmyyty'),
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12.5)),
+                      ),
                     ),
                 ],
               ),
@@ -70,7 +75,7 @@ class ProductTile extends StatelessWidget {
             product['name'] ?? '',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.primaryText(context)),
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5, color: AppTheme.primaryText(context)),
           ),
           if (store != null && '$store'.isNotEmpty)
             Text(store, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: AppTheme.secondaryText(context))),

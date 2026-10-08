@@ -111,8 +111,8 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                     background: _store['bannerUrl'] != null
                         ? CachedNetworkImage(imageUrl: _store['bannerUrl'], fit: BoxFit.cover)
                         : Container(
-                            decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF8E4FAE), AppTheme.primary])),
-                            child: const Center(child: Icon(Icons.storefront_rounded, size: 72, color: Colors.white24)),
+                            color: AppTheme.isDarkMode(context) ? const Color(0xFF3A2F42) : AppTheme.primary,
+                            child: Center(child: Icon(Icons.storefront_outlined, size: 72, color: Colors.white.withValues(alpha: 0.25))),
                           ),
                   ),
                 ),
@@ -376,16 +376,23 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
               Navigator.push(context, MaterialPageRoute(builder: (_) => const CheckoutPage()));
             },
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-              decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(22)),
+              height: 62,
+              padding: const EdgeInsets.fromLTRB(8, 8, 18, 8),
+              decoration: BoxDecoration(
+                color: AppTheme.primary,
+                borderRadius: BorderRadius.circular(31),
+                boxShadow: [BoxShadow(color: AppTheme.primary.withValues(alpha: 0.3), blurRadius: 20, offset: const Offset(0, 8))],
+              ),
               child: Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.25), borderRadius: BorderRadius.circular(12)),
-                    child: Text('${cart.itemCount}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 13)),
+                    width: 46,
+                    height: 46,
+                    alignment: Alignment.center,
+                    decoration: const BoxDecoration(color: AppTheme.sunshine, shape: BoxShape.circle),
+                    child: Text('${cart.itemCount}', style: const TextStyle(color: AppTheme.ink, fontWeight: FontWeight.w800, fontSize: 17)),
                   ),
-                  const SizedBox(width: 14),
+                  const SizedBox(width: 12),
                   Text(euro(context, (cart.total * 100).round()), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 17)),
                   const Spacer(),
                   Text(tr(context, 'View bag', 'Näytä kassi'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14)),

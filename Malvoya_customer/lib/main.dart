@@ -5,6 +5,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
 import 'config/constants.dart';
+import 'core/font_licenses.dart';
 import 'screens/main_navigation.dart';
 import 'screens/login.dart';
 import 'cart.dart';
@@ -23,6 +24,7 @@ final navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  registerFontLicenses();
 
   // Lock to portrait
   await SystemChrome.setPreferredOrientations([

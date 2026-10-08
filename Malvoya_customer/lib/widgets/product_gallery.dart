@@ -59,7 +59,10 @@ class _ProductGalleryState extends State<ProductGallery> {
   Widget build(BuildContext context) {
     final items = widget.items;
     if (items.isEmpty) {
-      return Container(color: AppTheme.primaryLight, child: const Icon(Icons.checkroom_rounded, size: 72, color: AppTheme.primary));
+      return Container(
+        color: AppTheme.pastel(context, AppTheme.clay, AppTheme.clayInk),
+        child: Icon(Icons.checkroom_outlined, size: 96, color: AppTheme.clayInk.withValues(alpha: 0.8)),
+      );
     }
     return Stack(
       children: [

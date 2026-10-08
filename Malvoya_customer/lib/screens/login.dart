@@ -1,3 +1,4 @@
+import '../core/strings.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../widgets/brand_mark.dart';
@@ -129,6 +130,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     showModalBottomSheet(
+      showDragHandle: false,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -652,6 +654,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final textSecondary = AppTheme.secondaryText(context);
 
     showModalBottomSheet(
+      showDragHandle: false,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -778,7 +781,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   children: [
                     BrandTile(size: 76, background: AppTheme.primary),
                     const SizedBox(height: 16),
-                    Text('Malvoya', style: TextStyle(fontSize: 30, fontWeight: FontWeight.w700, color: textPrimary, letterSpacing: -0.8)),
+                    Text('Malvoya', style: AppTheme.display(context, size: 34)),
                     const SizedBox(height: 4),
                     Text(l10n.translate('boutiques'), style: TextStyle(fontSize: 14, color: textSecondary, fontWeight: FontWeight.w500)),
                   ],
@@ -787,7 +790,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
               const SizedBox(height: 36),
 
-              Text(l10n.translate('welcomeBack'), style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: textPrimary, letterSpacing: -0.5)),
+              Text(l10n.translate('welcomeBack'), style: AppTheme.display(context, size: 28)),
               const SizedBox(height: 6),
               Text(l10n.translate('signInToContinue'), style: TextStyle(fontSize: 14, color: textSecondary)),
               const SizedBox(height: 28),
@@ -801,7 +804,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 enableSuggestions: false,
                 style: TextStyle(color: textPrimary),
                 decoration: InputDecoration(
-                  labelText: '${l10n.translate('email')} / ${l10n.translate('phoneLabel')}',
+                  labelText: tr(context, 'Email or phone number', 'Sähköposti tai puhelinnumero'),
                   prefixIcon: const Icon(Icons.mail_outline_rounded),
                 ),
               ),
@@ -831,7 +834,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
                     color: const Color(0xFFFFF0F0),
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: const Color(0xFFFFCDD2)),
                   ),
                   child: Row(
@@ -879,7 +882,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 style: OutlinedButton.styleFrom(
                   side: BorderSide(color: cardBorder),
                   padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  minimumSize: const Size.fromHeight(54),
                   backgroundColor: cardBg,
                 ),
                 child: Row(
@@ -900,7 +903,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 style: OutlinedButton.styleFrom(
                   side: BorderSide(color: cardBorder),
                   padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  minimumSize: const Size.fromHeight(54),
                   backgroundColor: cardBg,
                 ),
                 child: Row(
@@ -923,19 +926,20 @@ class _LoginScreenState extends State<LoginScreen> {
                   await auth.loginAsGuest();
                 },
                 style: OutlinedButton.styleFrom(
-                  side: BorderSide(color: AppTheme.primary.withValues(alpha: 0.5), width: 1.5),
+                  side: BorderSide.none,
                   padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                  backgroundColor: AppTheme.primary.withValues(alpha: 0.04),
+                  minimumSize: const Size.fromHeight(54),
+                  backgroundColor: AppTheme.sunshine,
+                  foregroundColor: AppTheme.ink,
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.explore_outlined, size: 20, color: AppTheme.primary),
+                    const Icon(Icons.explore_outlined, size: 20, color: AppTheme.ink),
                     const SizedBox(width: 8),
                     Text(
                       l10n.translate('guestLogin'),
-                      style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primary, fontSize: 15),
+                      style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.ink, fontSize: 15),
                     ),
                   ],
                 ),
@@ -949,8 +953,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   onPressed: () {
                     Navigator.push(context, MaterialPageRoute(builder: (_) => const RegisterScreen()));
                   },
-                  child: RichText(
-                    text: TextSpan(
+                  child: Text.rich(
+                    TextSpan(
                       text: '${l10n.translate('dontHaveAccount')} ',
                       style: TextStyle(color: textSecondary, fontSize: 14),
                       children: [

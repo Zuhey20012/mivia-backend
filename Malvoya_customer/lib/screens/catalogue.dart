@@ -156,7 +156,9 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
                     _search();
                   }),
             isDense: true,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+            border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(26)), borderSide: BorderSide.none),
+            enabledBorder: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(26)), borderSide: BorderSide.none),
+            focusedBorder: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(26)), borderSide: BorderSide.none),
             filled: true,
             fillColor: AppTheme.inputBackground(context),
           ),

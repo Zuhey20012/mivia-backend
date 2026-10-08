@@ -14,6 +14,7 @@ String variantLabel(Map v) => [v['size'], v['color']].where((x) => x != null && 
 Future<bool> showAddToBagSheet(BuildContext context, Map<String, dynamic> product, {Map<String, dynamic>? store}) async {
   HapticFeedback.selectionClick();
   final added = await showModalBottomSheet<bool>(
+    showDragHandle: false,
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
@@ -129,12 +130,15 @@ class _AddToBagSheetState extends State<_AddToBagSheet> {
           Row(
             children: [
               ClipRRect(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(16),
                 child: SizedBox(
                   width: 64,
                   height: 80,
                   child: images.isEmpty
-                      ? Container(color: AppTheme.primaryLight, child: const Icon(Icons.checkroom_rounded, color: AppTheme.primary))
+                      ? Container(
+                          color: AppTheme.pastel(context, AppTheme.clay, AppTheme.clayInk),
+                          child: const Icon(Icons.checkroom_outlined, color: AppTheme.clayInk),
+                        )
                       : CachedNetworkImage(imageUrl: images.first, fit: BoxFit.cover),
                 ),
               ),
@@ -143,7 +147,7 @@ class _AddToBagSheetState extends State<_AddToBagSheet> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(p['name'] ?? '', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
+                    Text(p['name'] ?? '', style: AppTheme.display(context, size: 19)),
                     if (widget.store?['name'] != null)
                       Text(widget.store!['name'], style: TextStyle(fontSize: 13, color: AppTheme.secondaryText(context))),
                     const SizedBox(height: 4),
@@ -165,17 +169,48 @@ class _AddToBagSheetState extends State<_AddToBagSheet> {
                 final id = asInt(v['id']);
                 final available = v['inStock'] == true;
                 final selected = id == _variantId;
-                return ChoiceChip(
-                  label: Text(variantLabel(v)),
+                final dark = AppTheme.isDarkMode(context);
+                final brand = dark ? const Color(0xFFC9A3DD) : AppTheme.primary;
+                return Semantics(
+                  button: true,
                   selected: selected,
-                  onSelected: available ? (_) => setState(() => _variantId = id) : null,
-                  labelStyle: TextStyle(
-                    color: selected ? Colors.white : (available ? AppTheme.primaryText(context) : AppTheme.secondaryText(context)),
-                    decoration: available ? null : TextDecoration.lineThrough,
-                    fontWeight: FontWeight.w600,
+                  enabled: available,
+                  label: available ? variantLabel(v) : '${variantLabel(v)}, ${tr(context, 'sold out', 'loppu')}',
+                  excludeSemantics: true,
+                  child: GestureDetector(
+                    onTap: available
+                        ? () {
+                            HapticFeedback.selectionClick();
+                            setState(() => _variantId = id);
+                          }
+                        : null,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      constraints: const BoxConstraints(minWidth: 60, minHeight: 48),
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? AppTheme.pastel(context, AppTheme.lilac, AppTheme.primary)
+                            : (available ? AppTheme.cardBackground(context) : AppTheme.inputBackground(context)),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: selected ? brand : AppTheme.cardBorder(context), width: selected ? 2 : 1.5),
+                      ),
+                      // widthFactor/heightFactor keep the tile as small as its label (min 60 × 48)
+                      child: Center(
+                       widthFactor: 1,
+                       heightFactor: 1,
+                       child: Text(
+                        variantLabel(v),
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          color: selected ? brand : (available ? AppTheme.primaryText(context) : AppTheme.secondaryText(context)),
+                          decoration: available ? null : TextDecoration.lineThrough,
+                        ),
+                       ),
+                      ),
+                    ),
                   ),
-                  selectedColor: AppTheme.primary,
-                  showCheckmark: false,
                 );
               }).toList(),
             ),
@@ -201,7 +236,7 @@ class _AddToBagSheetState extends State<_AddToBagSheet> {
           const SizedBox(height: 18),
           SizedBox(
             width: double.infinity,
-            height: 52,
+            height: 56,
             child: FilledButton(
               onPressed: canAdd ? _add : null,
               child: Text(

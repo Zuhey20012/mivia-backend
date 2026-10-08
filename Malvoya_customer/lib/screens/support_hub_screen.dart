@@ -120,6 +120,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
     final topicTitle = _getTopicTitle(l10n, topic);
 
     showModalBottomSheet(
+      showDragHandle: false,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,

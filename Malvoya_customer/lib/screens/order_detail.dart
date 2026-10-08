@@ -418,8 +418,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 6)]),
           child: Icon(icon, color: Colors.white, size: 18),
         );
-    return SizedBox(
-      height: 260,
+    return Container(
+      height: 280,
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(AppTheme.radiusLg)),
       child: FlutterMap(
         mapController: _map,
         options: MapOptions(initialCenter: points.first, initialZoom: 14, maxZoom: 18),
@@ -430,11 +433,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           MarkerLayer(markers: [
             if (_storePos != null) Marker(point: _storePos!, width: 38, height: 38, child: pin(Icons.storefront_rounded, AppTheme.primary)),
             if (_homePos != null) Marker(point: _homePos!, width: 38, height: 38, child: pin(Icons.home_rounded, AppTheme.success)),
-            if (_courier != null) Marker(point: _courier!, width: 44, height: 44, child: pin(Icons.pedal_bike_rounded, const Color(0xFFC2412D))),
+            if (_courier != null) Marker(point: _courier!, width: 46, height: 46, child: pin(Icons.pedal_bike_rounded, AppTheme.lingon)),
           ]),
           const Align(
             alignment: Alignment.bottomRight,
-            child: Padding(padding: EdgeInsets.all(4), child: Text('© OpenStreetMap', style: TextStyle(fontSize: 10))),
+            child: Padding(padding: EdgeInsets.all(8), child: Text('© OpenStreetMap', style: TextStyle(fontSize: 10, color: Colors.black87))),
           ),
         ],
       ),
@@ -446,7 +449,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
           color: AppTheme.cardBackground(context),
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(AppTheme.radiusLg),
           border: Border.all(color: AppTheme.cardBorder(context)),
         ),
         child: child,
@@ -466,37 +469,117 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     final courierName = (o['courier']?['name'] ?? '').toString().split(' ').first;
     final stale = _courierSeenAt != null && DateTime.now().difference(_courierSeenAt!) > const Duration(minutes: 2);
 
+    final done = steps.where((s) => s.$3).length;
+    final brand = AppTheme.isDarkMode(context) ? const Color(0xFFC9A3DD) : AppTheme.primary;
+    final showCourier = courierName.isNotEmpty && _active.contains(status);
+
     return _card(Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           cancelled ? tr(context, 'Cancelled', 'Peruttu') : (eta ?? tr(context, 'Waiting for the store', 'Odotetaan kauppaa')),
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppTheme.primaryText(context)),
+          style: AppTheme.display(context, size: 25),
         ),
-        if (courierName.isNotEmpty && _active.contains(status))
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(
-              '${tr(context, 'Courier', 'Kuriiri')}: $courierName${stale ? ' · ${tr(context, 'location updating…', 'sijaintia päivitetään…')}' : ''}',
-              style: TextStyle(color: AppTheme.secondaryText(context)),
-            ),
-          ),
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text('#${o['id']} · ${o['store']?['name'] ?? ''}', style: TextStyle(color: AppTheme.secondaryText(context))),
+        ),
         if (cancelled && o['cancelReason'] != null)
           Padding(padding: const EdgeInsets.only(top: 4), child: Text(o['cancelReason'], style: TextStyle(color: AppTheme.secondaryText(context)))),
         if (!cancelled) ...[
-          const SizedBox(height: 16),
-          for (final s in steps)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
+          const SizedBox(height: 14),
+          // One segment per step, filled as the order moves along
+          Row(
+            children: [
+              for (var i = 0; i < steps.length; i++) ...[
+                if (i > 0) const SizedBox(width: 4),
+                Expanded(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 400),
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: i < done ? brand : AppTheme.cardBorder(context),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          if (showCourier) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: AppTheme.inputBackground(context), borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
               child: Row(
                 children: [
-                  Icon(s.$3 ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
-                      size: 20, color: s.$3 ? AppTheme.success : AppTheme.cardBorder(context)),
-                  const SizedBox(width: 10),
-                  Expanded(child: Text(s.$1, style: TextStyle(color: s.$3 ? AppTheme.primaryText(context) : AppTheme.secondaryText(context)))),
-                  if (s.$2 != null) Text(_clock(s.$2!), style: TextStyle(color: AppTheme.secondaryText(context), fontSize: 13)),
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(color: AppTheme.pastel(context, AppTheme.peach, AppTheme.lingon), shape: BoxShape.circle),
+                    child: const Icon(Icons.pedal_bike_rounded, color: AppTheme.lingon, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(tr(context, '$courierName is delivering', '$courierName toimittaa'),
+                            style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
+                        if (stale)
+                          Text(tr(context, 'Location updating…', 'Sijaintia päivitetään…'),
+                              style: TextStyle(fontSize: 12.5, color: AppTheme.secondaryText(context))),
+                      ],
+                    ),
+                  ),
+                  if (['CONFIRMED', 'PROCESSING', 'SHIPPED'].contains(status))
+                    Tooltip(
+                      message: tr(context, 'Chat with courier', 'Chat kuriirin kanssa'),
+                      child: Material(
+                        color: AppTheme.primary,
+                        shape: const CircleBorder(),
+                        child: InkWell(
+                          customBorder: const CircleBorder(),
+                          onTap: _openChat,
+                          child: const SizedBox(width: 44, height: 44, child: Icon(Icons.chat_bubble_outline_rounded, color: Colors.white, size: 20)),
+                        ),
+                      ),
+                    ),
                 ],
               ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          for (var i = 0; i < steps.length; i++)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Column(
+                  children: [
+                    Container(
+                      width: 18,
+                      height: 18,
+                      decoration: BoxDecoration(
+                        color: steps[i].$3 ? brand : Colors.transparent,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: steps[i].$3 ? brand : AppTheme.cardBorder(context), width: 2),
+                      ),
+                      child: steps[i].$3 ? const Icon(Icons.check_rounded, size: 12, color: Colors.white) : null,
+                    ),
+                    if (i < steps.length - 1)
+                      Container(width: 2, height: 22, color: steps[i + 1].$3 ? brand : AppTheme.cardBorder(context)),
+                  ],
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(steps[i].$1,
+                      style: TextStyle(
+                        fontWeight: steps[i].$3 ? FontWeight.w600 : FontWeight.w400,
+                        color: steps[i].$3 ? AppTheme.primaryText(context) : AppTheme.secondaryText(context),
+                      )),
+                ),
+                if (steps[i].$2 != null) Text(_clock(steps[i].$2!), style: TextStyle(color: AppTheme.secondaryText(context), fontSize: 13)),
+              ],
             ),
         ],
       ],
@@ -516,7 +599,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     return _card(Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(o['store']?['name'] ?? '', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: AppTheme.primaryText(context))),
+        Text(o['store']?['name'] ?? '', style: AppTheme.display(context, size: 18)),
         if (o['deliveryAddress'] != null) Text(o['deliveryAddress'], style: TextStyle(color: muted, fontSize: 13)),
         const Divider(height: 24),
         for (final i in items)
@@ -547,8 +630,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     final withinReturn = delivered != null && DateTime.now().difference(delivered).inDays < 14;
     final withinReview = delivered != null && DateTime.now().difference(delivered).inDays < 30;
     final buttons = <Widget>[
-      if (o['courier'] != null && ['CONFIRMED', 'PROCESSING', 'SHIPPED'].contains(status))
-        _button(Icons.chat_bubble_outline_rounded, tr(context, 'Chat with courier', 'Chat kuriirin kanssa'), _openChat),
       if (status == 'PENDING') _button(Icons.close_rounded, tr(context, 'Cancel order', 'Peru tilaus'), _cancel),
       if (status == 'DELIVERED' && o['handoverMethod'] == 'PHOTO')
         _button(Icons.photo_camera_outlined, tr(context, 'Delivery photo', 'Toimituskuva'), _showProof),
@@ -572,7 +653,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         padding: const EdgeInsets.only(bottom: 10),
         child: SizedBox(
           width: double.infinity,
-          height: 50,
+          height: 54,
           child: primary
               ? FilledButton.icon(onPressed: onTap, icon: Icon(icon), label: Text(label))
               : OutlinedButton.icon(onPressed: onTap, icon: Icon(icon), label: Text(label)),

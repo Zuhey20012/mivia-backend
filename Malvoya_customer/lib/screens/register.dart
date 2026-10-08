@@ -80,6 +80,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final textSecondary = AppTheme.secondaryText(context);
 
     showModalBottomSheet(
+      showDragHandle: false,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -389,8 +390,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
               Center(
                 child: TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: RichText(
-                    text: TextSpan(
+                  child: Text.rich(
+                    TextSpan(
                       text: '${l10n.translate('alreadyHaveAccount')} ',
                       style: TextStyle(color: textSecondary, fontSize: 14),
                       children: [

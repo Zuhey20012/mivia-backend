@@ -437,8 +437,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   onPressed: () {
                     Navigator.push(context, MaterialPageRoute(builder: (_) => const RegisterScreen()));
                   },
-                  child: RichText(
-                    text: TextSpan(
+                  child: Text.rich(
+                    TextSpan(
                       text: "New vendor? ",
                       style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
                       children: const [

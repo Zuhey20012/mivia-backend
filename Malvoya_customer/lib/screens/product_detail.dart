@@ -88,13 +88,25 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   pinned: true,
                   expandedHeight: MediaQuery.of(context).size.width * 1.2,
                   backgroundColor: AppTheme.scaffoldBackground(context),
-                  actions: [
-                    IconButton(
-                      tooltip: tr(context, 'Favourite', 'Suosikki'),
-                      icon: Icon(_favorite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                          color: _favorite ? const Color(0xFFC2412D) : null),
-                      onPressed: _toggleFavorite,
+                  leading: Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: _circleButton(
+                      icon: Icons.arrow_back_rounded,
+                      tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+                      onTap: () => Navigator.maybePop(context),
                     ),
+                  ),
+                  actions: [
+                    Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: _circleButton(
+                        icon: _favorite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                        color: _favorite ? AppTheme.lingon : AppTheme.ink,
+                        tooltip: tr(context, 'Favourite', 'Suosikki'),
+                        onTap: _toggleFavorite,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
                   ],
                   flexibleSpace: FlexibleSpaceBar(background: _gallery(p)),
                 ),
@@ -108,21 +120,38 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     );
   }
 
+  Widget _circleButton({required IconData icon, required String tooltip, required VoidCallback onTap, Color color = AppTheme.ink}) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.white,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: SizedBox(width: 44, height: 44, child: Icon(icon, color: color, size: 22)),
+        ),
+      ),
+    );
+  }
+
   Widget _gallery(Map<String, dynamic> p) => ProductGallery(items: GalleryItem.forProduct(p));
 
   List<Widget> _details(Map<String, dynamic> p) {
     final store = (p['store'] as Map?)?.cast<String, dynamic>();
     final text = AppTheme.primaryText(context);
     final muted = AppTheme.secondaryText(context);
-    final chips = <String>[
-      _conditionLabel(p['condition']),
-      if (p['isSecondHand'] == true) tr(context, 'Second hand', 'Käytetty'),
-      if (p['isEcoFriendly'] == true) tr(context, 'Eco-friendly', 'Ympäristöystävällinen'),
-      if (p['isHandmade'] == true) tr(context, 'Handmade', 'Käsintehty'),
-    ].where((c) => c.isNotEmpty).toList();
+    final dark = AppTheme.isDarkMode(context);
+    // Each fact gets its own soft colour: condition lilac, second hand butter, eco mint, handmade peach
+    final chips = <(String, Color, Color)>[
+      (_conditionLabel(p['condition']), AppTheme.lilac, AppTheme.primary),
+      if (p['isSecondHand'] == true) (tr(context, 'Second hand', 'Käytetty'), AppTheme.sunshineLight, const Color(0xFF8A5A00)),
+      if (p['isEcoFriendly'] == true) (tr(context, 'Eco-friendly', 'Ympäristöystävällinen'), AppTheme.mint, const Color(0xFF1D6B44)),
+      if (p['isHandmade'] == true) (tr(context, 'Handmade', 'Käsintehty'), AppTheme.peach, AppTheme.lingon),
+    ].where((c) => c.$1.isNotEmpty).toList();
 
     return [
-      Text(p['name'] ?? '', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700, letterSpacing: -0.3, color: text)),
+      Text(p['name'] ?? '', style: AppTheme.display(context, size: 27)),
       const SizedBox(height: 8),
       PriceTag(pricing: p['pricing'] as Map<String, dynamic>?, size: 20, showReferenceLabel: true),
       const SizedBox(height: 4),
@@ -134,9 +163,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           runSpacing: 8,
           children: chips
               .map((c) => Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(color: AppTheme.primary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(10)),
-                    child: Text(c, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppTheme.primary)),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    decoration: BoxDecoration(color: AppTheme.pastel(context, c.$2, c.$3), borderRadius: BorderRadius.circular(16)),
+                    child: Text(c.$1, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: dark ? Color.lerp(c.$3, Colors.white, 0.5) : c.$3)),
                   ))
               .toList(),
         ),
@@ -148,35 +177,44 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       const SizedBox(height: 18),
       _row(Icons.straighten_rounded, tr(context, 'Size guide', 'Kokotaulukko'), () => _showSizeGuide()),
       if (store != null) ...[
-        const Divider(height: 28),
+        const SizedBox(height: 14),
         InkWell(
+          borderRadius: BorderRadius.circular(AppTheme.radiusMd + 2),
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => StoreDetailScreen(store: store))),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 22,
-                backgroundColor: AppTheme.primaryLight,
-                backgroundImage: store['logoUrl'] != null ? CachedNetworkImageProvider(store['logoUrl']) : null,
-                child: store['logoUrl'] == null ? const Icon(Icons.storefront_rounded, color: AppTheme.primary) : null,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(store['name'] ?? '', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: text)),
-                    Text(
-                      [
-                        store['sellerType'] == 'PRIVATE' ? tr(context, 'Private seller', 'Yksityinen myyjä') : tr(context, 'Business seller', 'Yritysmyyjä'),
-                        if ((asInt(store['totalReviews']) ?? 0) > 0) '★ ${store['rating']} (${store['totalReviews']})',
-                      ].join(' · '),
-                      style: TextStyle(fontSize: 12.5, color: muted),
-                    ),
-                  ],
+          child: Ink(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppTheme.cardBackground(context),
+              borderRadius: BorderRadius.circular(AppTheme.radiusMd + 2),
+              border: Border.all(color: AppTheme.cardBorder(context)),
+            ),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 22,
+                  backgroundColor: AppTheme.primaryLight,
+                  backgroundImage: store['logoUrl'] != null ? CachedNetworkImageProvider(store['logoUrl']) : null,
+                  child: store['logoUrl'] == null ? const Icon(Icons.storefront_rounded, color: AppTheme.primary) : null,
                 ),
-              ),
-              Icon(Icons.chevron_right_rounded, color: muted),
-            ],
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(store['name'] ?? '', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: text)),
+                      Text(
+                        [
+                          store['sellerType'] == 'PRIVATE' ? tr(context, 'Private seller', 'Yksityinen myyjä') : tr(context, 'Business seller', 'Yritysmyyjä'),
+                          if ((asInt(store['totalReviews']) ?? 0) > 0) '★ ${store['rating']} (${store['totalReviews']})',
+                        ].join(' · '),
+                        style: TextStyle(fontSize: 12.5, color: muted),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded, color: muted),
+              ],
+            ),
           ),
         ),
         const SizedBox(height: 8),
@@ -225,7 +263,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(tr(context, 'Seller information', 'Myyjän tiedot'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            Text(tr(context, 'Seller information', 'Myyjän tiedot'), style: AppTheme.display(context, size: 21)),
             const SizedBox(height: 14),
             Text(store['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
             if (!isPrivate && store['businessId'] != null) Text('Y-tunnus ${store['businessId']}'),
@@ -233,7 +271,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             const SizedBox(height: 12),
             Text(
               isPrivate
-                  ? tr(context, 'This seller has told Malvoya they are a private person selling their own items, not a business. EU consumer rights such as the 14-day right of withdrawal do not apply to purchases from private sellers.',
+                  ? tr(
+                      context,
+                      'This seller has told Malvoya they are a private person selling their own items, not a business. EU consumer rights such as the 14-day right of withdrawal do not apply to purchases from private sellers.',
                       'Myyjä on ilmoittanut Malvoyalle olevansa yksityishenkilö, joka myy omia tavaroitaan. EU:n kuluttajansuoja, kuten 14 päivän peruuttamisoikeus, ei koske ostoja yksityisiltä myyjiltä.')
                   : tr(context, 'This seller is a business. Consumer protection law applies, including the 14-day right of withdrawal from delivery.',
                       'Myyjä on yritys. Ostoon sovelletaan kuluttajansuojalakia, mukaan lukien 14 päivän peruuttamisoikeus toimituksesta.'),
@@ -262,9 +302,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(tr(context, 'Size guide (EU)', 'Kokotaulukko (EU)'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            Text(tr(context, 'Size guide (EU)', 'Kokotaulukko (EU)'), style: AppTheme.display(context, size: 21)),
             const SizedBox(height: 4),
-            Text(tr(context, 'Body measurements in cm. Brands vary — check the description for the store\'s own sizing.',
+            Text(
+                tr(context, 'Body measurements in cm. Brands vary — check the description for the store\'s own sizing.',
                     'Vartalon mitat senttimetreinä. Merkkien koot vaihtelevat — katso kaupan oma mitoitus kuvauksesta.'),
                 style: TextStyle(fontSize: 12.5, color: AppTheme.secondaryText(context))),
             const SizedBox(height: 14),
@@ -274,8 +315,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   for (final h in [tr(context, 'Size', 'Koko'), 'EU', tr(context, 'Chest', 'Rinta'), tr(context, 'Waist', 'Vyötärö')])
                     Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(h, style: const TextStyle(fontWeight: FontWeight.w700))),
                 ]),
-                for (final r in rows)
-                  TableRow(children: [for (final c in r) Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Text(c))]),
+                for (final r in rows) TableRow(children: [for (final c in r) Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Text(c))]),
               ],
             ),
           ],
@@ -287,16 +327,17 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   Widget _buyBar(Map<String, dynamic> p) {
     final inStock = p['inStock'] != false;
     return Container(
-      padding: EdgeInsets.fromLTRB(20, 12, 20, 12 + MediaQuery.of(context).viewPadding.bottom),
+      padding: EdgeInsets.fromLTRB(20, 14, 16, 14 + MediaQuery.of(context).viewPadding.bottom),
       decoration: BoxDecoration(
         color: AppTheme.cardBackground(context),
-        border: Border(top: BorderSide(color: AppTheme.cardBorder(context))),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 20, offset: const Offset(0, -4))],
       ),
       child: Row(
         children: [
           Expanded(child: PriceTag(pricing: p['pricing'] as Map<String, dynamic>?, size: 18)),
           SizedBox(
-            height: 50,
+            height: 54,
             child: FilledButton.icon(
               onPressed: inStock
                   ? () async {

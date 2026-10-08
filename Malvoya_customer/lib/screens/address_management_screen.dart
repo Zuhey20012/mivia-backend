@@ -56,6 +56,7 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
     String labelType = existingAddress?['labelType'] ?? 'Home';
 
     showModalBottomSheet(
+      showDragHandle: false,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,

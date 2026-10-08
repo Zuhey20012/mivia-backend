@@ -15,6 +15,7 @@ class LanguagePickerSheet {
     final dividerColor = isDark ? Colors.white12 : Colors.grey.shade200;
 
     showModalBottomSheet(
+      showDragHandle: false,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,

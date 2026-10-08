@@ -38,7 +38,7 @@ class PriceTag extends StatelessWidget {
           children: [
             Text(
               euro(context, price),
-              style: TextStyle(fontSize: size, fontWeight: FontWeight.w800, color: previous != null ? const Color(0xFFC2412D) : main),
+              style: TextStyle(fontSize: size, fontWeight: FontWeight.w800, color: previous != null ? AppTheme.lingon : main),
             ),
             if (previous != null)
               Text(
@@ -52,8 +52,8 @@ class PriceTag extends StatelessWidget {
             if (pct != null)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(color: const Color(0xFFC2412D), borderRadius: BorderRadius.circular(6)),
-                child: Text('−$pct %', style: TextStyle(color: Colors.white, fontSize: size * 0.62, fontWeight: FontWeight.w800)),
+                decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(8)),
+                child: Text('−$pct %', style: TextStyle(color: AppTheme.ink, fontSize: size * 0.64, fontWeight: FontWeight.w800)),
               ),
           ],
         ),

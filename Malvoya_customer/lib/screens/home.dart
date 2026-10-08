@@ -14,15 +14,26 @@ import 'order_detail.dart';
 import 'location_selector_modal.dart';
 import 'notification_center_drawer.dart';
 import 'returns_screen.dart';
+import 'search.dart';
 import '../core/delivery_location.dart';
 import '../core/strings.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shimmer/shimmer.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  /// Switches the app to the Drops tab.
+  final VoidCallback? onOpenDrops;
+  const HomeScreen({super.key, this.onOpenDrops});
   @override
   State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _Category {
+  final String name;
+  final IconData icon;
+  final Color tile;
+  final Color hue;
+  const _Category(this.name, this.icon, this.tile, this.hue);
 }
 
 class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
@@ -33,33 +44,26 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   Map<String, dynamic>? activeOrder;
   String _currentDeliveryCity = 'Helsinki (Keskusta)';
 
-  late AnimationController _radarPulseCtrl;
-  late Animation<double> _radarPulseAnim;
+  late AnimationController _pulseCtrl;
+  late Animation<double> _pulseAnim;
 
-  final List<Map<String, dynamic>> categories = [
-    {'name': 'Clothing', 'icon': Icons.checkroom_rounded, 'color': Color(0xFF6D2E8C)},
-    {'name': 'Shoes', 'icon': Icons.snowshoeing_rounded, 'color': Color(0xFF8E4FAE)},
-    {'name': 'Bags', 'icon': Icons.shopping_bag_rounded, 'color': Color(0xFF9B5DB8)},
-    {'name': 'Accessories', 'icon': Icons.watch_rounded, 'color': Color(0xFFE08A00)},
-    {'name': 'Jewelry', 'icon': Icons.diamond_rounded, 'color': Color(0xFF248A52)},
-    {'name': 'Vintage', 'icon': Icons.auto_awesome_rounded, 'color': Color(0xFF6D2E8C)},
-    {'name': 'Beauty', 'icon': Icons.spa_rounded, 'color': Color(0xFFC2412D)},
-    {'name': 'Home', 'icon': Icons.chair_rounded, 'color': Color(0xFF6366F1)},
-    {'name': 'Returns', 'icon': Icons.assignment_return_rounded, 'color': Color(0xFF6D2E8C)},
-    {'name': 'Eco-Friendly', 'icon': Icons.eco_rounded, 'color': Color(0xFF248A52)},
-    {'name': 'Second Hand', 'icon': Icons.recycling_rounded, 'color': Color(0xFF8E4FAE)},
+  static const _categories = [
+    _Category('Clothing', Icons.checkroom_rounded, AppTheme.lilac, AppTheme.primary),
+    _Category('Shoes', Icons.snowshoeing_rounded, AppTheme.clay, AppTheme.clayInk),
+    _Category('Bags', Icons.shopping_bag_outlined, AppTheme.mint, AppTheme.moss),
+    _Category('Accessories', Icons.watch_outlined, AppTheme.sunshineLight, Color(0xFF8A5A00)),
+    _Category('Jewelry', Icons.diamond_outlined, AppTheme.lilac, AppTheme.primary),
+    _Category('Vintage', Icons.auto_awesome_outlined, AppTheme.peach, AppTheme.lingon),
+    _Category('Beauty', Icons.spa_outlined, AppTheme.peach, AppTheme.lingon),
+    _Category('Home', Icons.chair_outlined, AppTheme.clay, AppTheme.clayInk),
+    _Category('Returns', Icons.assignment_return_outlined, AppTheme.sand, AppTheme.inkSecondary),
   ];
 
   @override
   void initState() {
     super.initState();
-    _radarPulseCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1800),
-    )..repeat(reverse: true);
-    _radarPulseAnim = Tween<double>(begin: 0.85, end: 1.18).animate(
-      CurvedAnimation(parent: _radarPulseCtrl, curve: Curves.easeInOut),
-    );
+    _pulseCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1800))..repeat(reverse: true);
+    _pulseAnim = Tween<double>(begin: 0.9, end: 1.12).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
     DeliveryLocation.instance.addListener(_onLocationChanged);
     DeliveryLocation.instance.load().then((_) {
       final addr = DeliveryLocation.instance.address;
@@ -89,20 +93,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       if (res.statusCode == 200 && mounted) {
         final data = jsonDecode(res.body);
         final list = data is List ? data : (data['orders'] ?? []);
-        final activeList = list.where((o) =>
-          ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED'].contains(o['status'])
-        ).toList();
-        if (activeList.isNotEmpty) {
-          setState(() {
-            hasActiveOrder = true;
-            activeOrder = Map<String, dynamic>.from(activeList.first);
-          });
-        } else {
-          setState(() {
-            hasActiveOrder = false;
-            activeOrder = null;
-          });
-        }
+        final activeList = list.where((o) => ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED'].contains(o['status'])).toList();
+        setState(() {
+          hasActiveOrder = activeList.isNotEmpty;
+          activeOrder = activeList.isNotEmpty ? Map<String, dynamic>.from(activeList.first) : null;
+        });
       }
     } catch (_) {}
   }
@@ -110,7 +105,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   @override
   void dispose() {
     DeliveryLocation.instance.removeListener(_onLocationChanged);
-    _radarPulseCtrl.dispose();
+    _pulseCtrl.dispose();
     super.dispose();
   }
 
@@ -120,21 +115,19 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       final res = await http
           .get(Uri.parse('${AppConstants.apiBase}/stores').replace(queryParameters: q.isEmpty ? null : q))
           .timeout(const Duration(seconds: 12));
+      if (!mounted) return;
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
-        if (mounted) {
-          setState(() {
-            stores = data['stores'] ?? [];
-            loading = false;
-          });
-        }
+        setState(() {
+          stores = data['stores'] ?? [];
+          loading = false;
+          error = false;
+        });
       } else {
-        if (mounted) {
-          setState(() {
-            error = true;
-            loading = false;
-          });
-        }
+        setState(() {
+          error = true;
+          loading = false;
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -146,212 +139,478 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     }
   }
 
-  Widget _buildCategoryItem(BuildContext context, Map<String, dynamic> cat, AppLocalizations l10n) {
-    final catColor = cat['color'] as Color? ?? AppTheme.primary;
-    final catName = cat['name'] as String;
-    final localizedName = l10n.translateCategory(catName);
-    final textPrimary = AppTheme.primaryText(context);
+  Future<void> _refresh() async {
+    await Future.wait([fetchStores(), checkActiveOrders()]);
+  }
 
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.lightImpact();
-        if (catName == 'Returns') {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const ReturnsScreen()),
-          );
-        } else {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => CategoryDetailScreen(categoryName: catName),
-            ),
-          );
-        }
-      },
-      child: Container(
-        margin: const EdgeInsets.only(right: 14),
-        child: Column(
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    catColor.withValues(alpha: 0.28),
-                    catColor.withValues(alpha: 0.08),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: catColor.withValues(alpha: 0.35),
-                  width: 1.5,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: catColor.withValues(alpha: 0.15),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
+  void _openCategory(String name) {
+    HapticFeedback.lightImpact();
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => name == 'Returns' ? const ReturnsScreen() : CategoryDetailScreen(categoryName: name)),
+    );
+  }
+
+  void _pickAddress() {
+    HapticFeedback.selectionClick();
+    showModalBottomSheet(
+      showDragHandle: false,
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => LocationSelectorModal(
+        currentLocation: _currentDeliveryCity,
+        onLocationSelected: (newCity) => setState(() => _currentDeliveryCity = newCity),
+      ),
+    );
+  }
+
+  // ── Header ───────────────────────────────────────────────────────────────
+  Widget _header(BuildContext context, AppLocalizations l10n) {
+    final textPrimary = AppTheme.primaryText(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 12, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Semantics(
+              button: true,
+              label: '${l10n.translate('deliveringTo')} $_currentDeliveryCity',
+              excludeSemantics: true,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: _pickAddress,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        l10n.translate('deliveringTo'),
+                        style: TextStyle(
+                          color: AppTheme.isDarkMode(context) ? const Color(0xFFC9A3DD) : AppTheme.primary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              _currentDeliveryCity,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textPrimary, letterSpacing: -0.2),
+                            ),
+                          ),
+                          Icon(Icons.keyboard_arrow_down_rounded, size: 22, color: textPrimary),
+                        ],
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              child: Center(
-                child: Icon(cat['icon'] as IconData, color: catColor, size: 28),
-              ),
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: 72,
-              child: Text(
-                localizedName,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12,
-                  color: textPrimary,
                 ),
               ),
             ),
-          ],
+          ),
+          const SizedBox(width: 8),
+          _roundButton(
+            context,
+            icon: Icons.notifications_none_rounded,
+            label: tr(context, 'Updates', 'Ilmoitukset'),
+            onTap: () {
+              HapticFeedback.lightImpact();
+              NotificationCenterDrawer.show(context);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _roundButton(BuildContext context, {required IconData icon, required String label, required VoidCallback onTap}) {
+    return Tooltip(
+      message: label,
+      child: Material(
+        color: AppTheme.cardBackground(context),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: AppTheme.cardBorder(context)),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: SizedBox(width: 48, height: 48, child: Icon(icon, size: 22, color: AppTheme.primaryText(context))),
         ),
       ),
     );
   }
 
+  Widget _searchPill(BuildContext context) {
+    final sub = AppTheme.secondaryText(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+      child: Material(
+        color: AppTheme.inputBackground(context),
+        shape: const StadiumBorder(),
+        child: InkWell(
+          customBorder: const StadiumBorder(),
+          onTap: () {
+            HapticFeedback.selectionClick();
+            Navigator.push(context, MaterialPageRoute(builder: (_) => const SearchScreen()));
+          },
+          child: SizedBox(
+            height: 52,
+            child: Row(
+              children: [
+                const SizedBox(width: 18),
+                Icon(Icons.search_rounded, color: sub, size: 22),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    tr(context, 'Search items and stores', 'Hae tuotteita ja kauppoja'),
+                    style: TextStyle(color: sub, fontSize: 15.5, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Active order ─────────────────────────────────────────────────────────
   /// Shown only while you have a real order on its way.
-  Widget _buildRadarBanner(BuildContext context, AppLocalizations l10n, bool isDark) {
+  Widget _activeOrderCard(BuildContext context) {
     final order = activeOrder;
     if (!hasActiveOrder || order == null) return const SizedBox.shrink();
-    final status = order['status'];
-    final label = switch (status) {
+    final label = switch (order['status']) {
       'PENDING' => tr(context, 'Waiting for the store', 'Odottaa kauppaa'),
       'CONFIRMED' => tr(context, 'Accepted by the store', 'Kauppa hyväksyi'),
       'PROCESSING' => tr(context, 'Being packed', 'Pakataan'),
       _ => tr(context, 'On its way to you', 'Matkalla sinulle'),
     };
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.mediumImpact();
-        Navigator.push(context, MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: asInt(order['id'])!)));
-      },
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(20)),
-        child: Row(
-          children: [
-            ScaleTransition(
-              scale: _radarPulseAnim,
-              child: const Icon(Icons.delivery_dining_rounded, color: Colors.white, size: 30),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      child: Material(
+        color: AppTheme.primary,
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+          onTap: () {
+            HapticFeedback.mediumImpact();
+            Navigator.push(context, MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: asInt(order['id'])!)));
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                ScaleTransition(
+                  scale: _pulseAnim,
+                  child: Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.16), shape: BoxShape.circle),
+                    child: const Icon(Icons.delivery_dining_rounded, color: Colors.white, size: 26),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
+                      Text('${order['store']?['name'] ?? ''} · #${order['id']}',
+                          maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                  decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(20)),
+                  child: Text(tr(context, 'Track', 'Seuraa'),
+                      style: const TextStyle(color: AppTheme.ink, fontWeight: FontWeight.w800, fontSize: 13.5)),
+                ),
+              ],
             ),
-            const SizedBox(width: 14),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Bento: Drops + two favourite shelves ────────────────────────────────
+  Widget _bento(BuildContext context, AppLocalizations l10n) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
+      child: SizedBox(
+        height: 214,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: _bentoTile(
+                context,
+                color: AppTheme.primary,
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  widget.onOpenDrops?.call();
+                },
+                child: Stack(
+                  children: [
+                    Positioned(
+                      right: -18,
+                      bottom: 26,
+                      child: Icon(Icons.play_circle_outline_rounded, size: 120, color: Colors.white.withValues(alpha: 0.18)),
+                    ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(12)),
+                          child: Text(tr(context, 'Watch & shop', 'Katso ja osta'),
+                              style: const TextStyle(color: AppTheme.ink, fontSize: 12, fontWeight: FontWeight.w800)),
+                        ),
+                        const Spacer(),
+                        Text(
+                          tr(context, 'Drops\nnear you', 'Dropit\nlähelläsi'),
+                          style: AppTheme.display(context, size: 26, color: Colors.white),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
             Expanded(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
-                  Text('${order['store']?['name'] ?? ''} · #${order['id']}', style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                  Expanded(
+                    child: _shelfTile(context, l10n, 'Second Hand', Icons.recycling_rounded, AppTheme.sunshine, AppTheme.ink),
+                  ),
+                  const SizedBox(height: 10),
+                  Expanded(
+                    child: _shelfTile(
+                      context,
+                      l10n,
+                      'Eco-Friendly',
+                      Icons.eco_outlined,
+                      AppTheme.pastel(context, AppTheme.mint, AppTheme.emerald),
+                      AppTheme.isDarkMode(context) ? const Color(0xFF8FD5AE) : const Color(0xFF1D6B44),
+                    ),
+                  ),
                 ],
               ),
             ),
-            Text(tr(context, 'Track', 'Seuraa'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-            const Icon(Icons.chevron_right_rounded, color: Colors.white),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildStoreCard(BuildContext context, Map<String, dynamic> store, bool isDark) {
+  Widget _bentoTile(BuildContext context, {required Color color, required VoidCallback onTap, required Widget child}) {
+    return Material(
+      color: color,
+      borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(onTap: onTap, child: Padding(padding: const EdgeInsets.all(14), child: child)),
+    );
+  }
+
+  Widget _shelfTile(BuildContext context, AppLocalizations l10n, String name, IconData icon, Color bg, Color fg) {
+    return _bentoTile(
+      context,
+      color: bg,
+      onTap: () => _openCategory(name),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: fg, size: 26),
+          const Spacer(),
+          Text(l10n.translateCategory(name),
+              maxLines: 1, overflow: TextOverflow.ellipsis, style: AppTheme.display(context, size: 18, color: fg)),
+        ],
+      ),
+    );
+  }
+
+  // ── Categories ───────────────────────────────────────────────────────────
+  Widget _categoryRow(BuildContext context, AppLocalizations l10n) {
+    final textPrimary = AppTheme.primaryText(context);
+    final dark = AppTheme.isDarkMode(context);
+    return SizedBox(
+      height: 100,
+      child: ListView.separated(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        physics: const BouncingScrollPhysics(),
+        scrollDirection: Axis.horizontal,
+        itemCount: _categories.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 6),
+        itemBuilder: (context, i) {
+          final c = _categories[i];
+          final label = l10n.translateCategory(c.name);
+          return Semantics(
+            button: true,
+            label: label,
+            excludeSemantics: true,
+            child: GestureDetector(
+              onTap: () => _openCategory(c.name),
+              child: SizedBox(
+                width: 76,
+                child: Column(
+                  children: [
+                    Container(
+                      width: 66,
+                      height: 66,
+                      decoration: BoxDecoration(
+                        color: AppTheme.pastel(context, c.tile, c.hue),
+                        borderRadius: BorderRadius.circular(22),
+                      ),
+                      child: Icon(c.icon, size: 28, color: dark ? Color.lerp(c.hue, Colors.white, 0.45) : c.hue),
+                    ),
+                    const SizedBox(height: 7),
+                    Text(label,
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: textPrimary)),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  // ── Stores ───────────────────────────────────────────────────────────────
+  Widget _storeCard(BuildContext context, Map<String, dynamic> store) {
     final textPrimary = AppTheme.primaryText(context);
     final textSecondary = AppTheme.secondaryText(context);
     final reviews = asInt(store['totalReviews']) ?? 0;
     final eta = etaWindow(store);
     final km = store['distanceKm'];
 
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.lightImpact();
-        Navigator.push(context, MaterialPageRoute(builder: (_) => StoreDetailScreen(store: store)));
-      },
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 20),
-        decoration: BoxDecoration(
-          color: AppTheme.cardBackground(context),
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: AppTheme.cardBorder(context), width: 1.2),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Material(
+        color: AppTheme.cardBackground(context),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+          side: BorderSide(color: AppTheme.cardBorder(context)),
         ),
         clipBehavior: Clip.antiAlias,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              height: 140,
-              width: double.infinity,
-              child: store['bannerUrl'] != null
-                  ? CachedNetworkImage(imageUrl: store['bannerUrl'], fit: BoxFit.cover)
-                  : Container(
-                      decoration: const BoxDecoration(gradient: LinearGradient(colors: [Color(0xFF6D2E8C), Color(0xFF55226E)])),
-                      child: Center(
+        child: InkWell(
+          onTap: () {
+            HapticFeedback.lightImpact();
+            Navigator.push(context, MaterialPageRoute(builder: (_) => StoreDetailScreen(store: store)));
+          },
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                height: 136,
+                width: double.infinity,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (store['bannerUrl'] != null)
+                      CachedNetworkImage(imageUrl: store['bannerUrl'], fit: BoxFit.cover)
+                    else
+                      Container(
+                        color: AppTheme.pastel(context, AppTheme.clay, AppTheme.clayInk),
+                        alignment: Alignment.center,
                         child: store['logoUrl'] != null
                             ? CircleAvatar(radius: 34, backgroundImage: CachedNetworkImageProvider(store['logoUrl']))
-                            : const Icon(Icons.storefront_rounded, size: 56, color: Colors.white),
+                            : Icon(Icons.storefront_outlined, size: 48, color: AppTheme.clayInk.withValues(alpha: 0.8)),
                       ),
-                    ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(store['name'] ?? '', maxLines: 1, overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: textPrimary)),
+                    if (eta != null)
+                      Positioned(
+                        left: 12,
+                        top: 12,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(14)),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.schedule_rounded, size: 15, color: AppTheme.ink),
+                              const SizedBox(width: 4),
+                              Text(eta, style: const TextStyle(color: AppTheme.ink, fontWeight: FontWeight.w800, fontSize: 12.5)),
+                            ],
+                          ),
+                        ),
                       ),
-                      if (reviews > 0) ...[
-                        const Icon(Icons.star_rounded, size: 17, color: Color(0xFFE08A00)),
-                        const SizedBox(width: 3),
-                        Text('${store['rating']} ($reviews)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textPrimary)),
-                      ] else
-                        Text(tr(context, 'New', 'Uusi'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppTheme.primary)),
-                    ],
-                  ),
-                  if ((store['description'] ?? '').toString().isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    Text(store['description'], maxLines: 2, overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: textSecondary, fontSize: 13, height: 1.3)),
                   ],
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 14,
-                    runSpacing: 6,
-                    children: [
-                      if (eta != null) _meta(Icons.schedule_rounded, eta, textSecondary),
-                      _meta(Icons.delivery_dining_rounded, '${euro(context, store['deliveryFeeCents'])} ${tr(context, 'delivery', 'toimitus')}', textSecondary),
-                      if (km != null) _meta(Icons.near_me_outlined, '$km km', textSecondary),
-                      if (store['sellerType'] == 'PRIVATE') _meta(Icons.person_outline_rounded, tr(context, 'Private seller', 'Yksityinen myyjä'), textSecondary),
-                    ],
-                  ),
-                  if (!DeliveryLocation.instance.hasCoordinates)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        tr(context, 'Pin your address on the map to see the exact delivery fee and time.',
-                            'Merkitse osoitteesi kartalle nähdäksesi tarkan toimitusmaksun ja -ajan.'),
-                        style: TextStyle(fontSize: 11.5, color: textSecondary),
-                      ),
-                    ),
-                ],
+                ),
               ),
-            ),
-          ],
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(store['name'] ?? '',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: textPrimary)),
+                        ),
+                        if (reviews > 0) ...[
+                          const Icon(Icons.star_rounded, size: 18, color: AppTheme.warning),
+                          const SizedBox(width: 3),
+                          Text('${store['rating']} ($reviews)',
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textPrimary)),
+                        ] else
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: AppTheme.pastel(context, AppTheme.lilac, AppTheme.primary),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(tr(context, 'New', 'Uusi'),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 12,
+                                  color: AppTheme.isDarkMode(context) ? const Color(0xFFC9A3DD) : AppTheme.primary,
+                                )),
+                          ),
+                      ],
+                    ),
+                    if ((store['description'] ?? '').toString().isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(store['description'],
+                          maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: textSecondary, fontSize: 13.5, height: 1.35)),
+                    ],
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 14,
+                      runSpacing: 6,
+                      children: [
+                        _meta(Icons.delivery_dining_outlined, '${euro(context, store['deliveryFeeCents'])} ${tr(context, 'delivery', 'toimitus')}', textSecondary),
+                        if (km != null) _meta(Icons.near_me_outlined, '$km km', textSecondary),
+                        if (store['sellerType'] == 'PRIVATE') _meta(Icons.person_outline_rounded, tr(context, 'Private seller', 'Yksityinen myyjä'), textSecondary),
+                      ],
+                    ),
+                    if (!DeliveryLocation.instance.hasCoordinates)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          tr(context, 'Pin your address on the map to see the exact delivery fee and time.',
+                              'Merkitse osoitteesi kartalle nähdäksesi tarkan toimitusmaksun ja -ajan.'),
+                          style: TextStyle(fontSize: 12, color: textSecondary),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -362,95 +621,64 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         children: [
           Icon(icon, size: 16, color: color),
           const SizedBox(width: 4),
-          Text(text, style: TextStyle(color: color, fontWeight: FontWeight.w600, fontSize: 12.5)),
+          Text(text, style: TextStyle(color: color, fontWeight: FontWeight.w600, fontSize: 13)),
         ],
       );
 
-  Widget _buildStoresEmptyState(BuildContext context, AppLocalizations l10n, bool isDark) {
+  Widget _emptyState(BuildContext context, AppLocalizations l10n) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(26),
+      padding: const EdgeInsets.fromLTRB(24, 28, 24, 26),
       decoration: BoxDecoration(
-        color: AppTheme.cardBackground(context),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: AppTheme.cardBorder(context), width: 1.2),
+        color: AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine),
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 58,
-            height: 58,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF6D2E8C), Color(0xFF55226E)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF6D2E8C).withValues(alpha: 0.35),
-                  blurRadius: 20,
-                  spreadRadius: 2,
-                ),
-              ],
-            ),
-            child: const Center(
-              child: Icon(Icons.storefront_rounded, color: Colors.white, size: 28),
-            ),
+            width: 64,
+            height: 64,
+            decoration: const BoxDecoration(color: AppTheme.sunshine, shape: BoxShape.circle),
+            child: const Icon(Icons.storefront_outlined, color: AppTheme.ink, size: 30),
           ),
           const SizedBox(height: 14),
-          Text(
-            l10n.translate('launchingCityTitle'),
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppTheme.primaryText(context),
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
+          Text(l10n.translate('launchingCityTitle'), textAlign: TextAlign.center, style: AppTheme.display(context, size: 20)),
           const SizedBox(height: 8),
           Text(
             l10n.translate('launchingCitySubtitle'),
             textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppTheme.secondaryText(context),
-              fontSize: 13,
-              height: 1.4,
-            ),
+            style: TextStyle(color: AppTheme.secondaryText(context), fontSize: 14, height: 1.45),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildShimmerStoreCard(BuildContext context, bool isDark) {
+  Widget _shimmerCard(BuildContext context, bool isDark) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 20),
+      margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
         color: AppTheme.cardBackground(context),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppTheme.cardBorder(context), width: 1.2),
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        border: Border.all(color: AppTheme.cardBorder(context)),
       ),
       clipBehavior: Clip.antiAlias,
       child: Shimmer.fromColors(
-        baseColor: isDark ? Colors.grey[800]! : Colors.grey[300]!,
-        highlightColor: isDark ? Colors.grey[700]! : Colors.grey[100]!,
+        baseColor: isDark ? const Color(0xFF2A2331) : AppTheme.sand,
+        highlightColor: isDark ? const Color(0xFF3A3242) : Colors.white,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(height: 140, width: double.infinity, color: Colors.white),
+            Container(height: 136, width: double.infinity, color: Colors.white),
             Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(height: 20, width: 200, color: Colors.white),
-                  const SizedBox(height: 6),
-                  Container(height: 14, width: 150, color: Colors.white),
-                  const SizedBox(height: 12),
-                  Container(height: 14, width: 100, color: Colors.white),
+                  Container(height: 18, width: 180, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(9))),
+                  const SizedBox(height: 10),
+                  Container(height: 14, width: 120, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(7))),
                 ],
               ),
             ),
@@ -460,6 +688,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
+  Widget _sectionTitle(BuildContext context, String text) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 24, 16, 12),
+        child: Text(text, style: AppTheme.display(context, size: 21)),
+      );
+
   @override
   Widget build(BuildContext context) {
     return Consumer<LocaleProvider>(
@@ -468,175 +701,66 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         final isDark = Theme.of(context).brightness == Brightness.dark;
         final textPrimary = AppTheme.primaryText(context);
         final textSecondary = AppTheme.secondaryText(context);
+        final bottomInset = MediaQuery.of(context).padding.bottom;
 
         return Scaffold(
           backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-          appBar: AppBar(
-            backgroundColor: isDark ? const Color(0xFF221C29) : Colors.white,
-            elevation: 0,
-            scrolledUnderElevation: 0,
-            title: GestureDetector(
-              onTap: () {
-                HapticFeedback.selectionClick();
-                showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  backgroundColor: Colors.transparent,
-                  builder: (_) => LocationSelectorModal(
-                    currentLocation: _currentDeliveryCity,
-                    onLocationSelected: (newCity) {
-                      setState(() {
-                        _currentDeliveryCity = newCity;
-                      });
-                    },
-                  ),
-                );
-              },
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          body: SafeArea(
+            bottom: false,
+            child: RefreshIndicator(
+              color: AppTheme.primary,
+              onRefresh: _refresh,
+              child: ListView(
+                physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+                // Room for the floating tab bar and bag bar
+                padding: EdgeInsets.only(bottom: bottomInset + 86),
                 children: [
-                  Text(
-                    l10n.translate('deliveringTo'),
-                    style: const TextStyle(
-                      color: Color(0xFF6D2E8C),
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.3,
-                    ),
-                  ),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        _currentDeliveryCity,
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                          color: textPrimary,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      Icon(Icons.keyboard_arrow_down_rounded, size: 20, color: textSecondary),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              IconButton(
-                icon: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF6D2E8C).withValues(alpha: 0.12),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.notifications_none_rounded, size: 20, color: Color(0xFF6D2E8C)),
-                ),
-                onPressed: () {
-                  HapticFeedback.lightImpact();
-                  NotificationCenterDrawer.show(context);
-                },
-              ),
-              const SizedBox(width: 8),
-            ],
-          ),
-          body: RefreshIndicator(
-            color: const Color(0xFF6D2E8C),
-            onRefresh: fetchStores,
-            child: SingleChildScrollView(
-              physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Live Courier Radar Banner
-                    _buildRadarBanner(context, l10n, isDark),
-
-                    // Categories Section
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  _header(context, l10n),
+                  _searchPill(context),
+                  _activeOrderCard(context),
+                  _bento(context, l10n),
+                  _sectionTitle(context, l10n.translate('categories')),
+                  _categoryRow(context, l10n),
+                  _sectionTitle(context, l10n.translate('storesNearYou')),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Column(
                       children: [
-                        Text(
-                          l10n.translate('categories'),
-                          style: TextStyle(
-                            fontSize: 19,
-                            fontWeight: FontWeight.w800,
-                            color: textPrimary,
-                            letterSpacing: -0.3,
-                          ),
-                        ),
+                        if (loading)
+                          ...List.generate(2, (_) => _shimmerCard(context, isDark))
+                        else if (error)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 28),
+                            child: Column(
+                              children: [
+                                Icon(Icons.wifi_off_rounded, size: 44, color: textSecondary),
+                                const SizedBox(height: 14),
+                                Text(l10n.translate('couldNotLoadStores'),
+                                    style: TextStyle(color: textPrimary, fontWeight: FontWeight.w600), textAlign: TextAlign.center),
+                                const SizedBox(height: 14),
+                                ElevatedButton.icon(
+                                  onPressed: () {
+                                    setState(() {
+                                      loading = true;
+                                      error = false;
+                                    });
+                                    fetchStores();
+                                  },
+                                  style: ElevatedButton.styleFrom(minimumSize: const Size(160, 50)),
+                                  icon: const Icon(Icons.refresh_rounded),
+                                  label: Text(tr(context, 'Try again', 'Yritä uudelleen')),
+                                ),
+                              ],
+                            ),
+                          )
+                        else if (stores.isEmpty)
+                          _emptyState(context, l10n)
+                        else
+                          ...stores.map((s) => _storeCard(context, Map<String, dynamic>.from(s))),
                       ],
                     ),
-                    const SizedBox(height: 14),
-                    SizedBox(
-                      height: 104,
-                      child: ListView.builder(
-                        physics: const BouncingScrollPhysics(),
-                        scrollDirection: Axis.horizontal,
-                        itemCount: categories.length,
-                        itemBuilder: (context, index) =>
-                            _buildCategoryItem(context, categories[index], l10n),
-                      ),
-                    ),
-
-                    const SizedBox(height: 28),
-
-                    // Stores Near You Section
-                    Text(
-                      l10n.translate('storesNearYou'),
-                      style: TextStyle(
-                        fontSize: 19,
-                        fontWeight: FontWeight.w800,
-                        color: textPrimary,
-                        letterSpacing: -0.3,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-
-                    if (loading)
-                      Column(
-                        children: List.generate(3, (index) => _buildShimmerStoreCard(context, isDark)),
-                      )
-                    else if (error)
-                      Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(32.0),
-                          child: Column(
-                            children: [
-                              Icon(Icons.wifi_off_rounded, size: 48, color: textSecondary),
-                              const SizedBox(height: 16),
-                              Text(
-                                l10n.translate('couldNotLoadStores'),
-                                style: TextStyle(color: textPrimary, fontWeight: FontWeight.w600),
-                                textAlign: TextAlign.center,
-                              ),
-                              const SizedBox(height: 16),
-                              ElevatedButton.icon(
-                                onPressed: () {
-                                  setState(() {
-                                    loading = true;
-                                    error = false;
-                                  });
-                                  fetchStores();
-                                },
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF6D2E8C),
-                                  foregroundColor: Colors.white,
-                                ),
-                                icon: const Icon(Icons.refresh_rounded),
-                                label: const Text('Retry'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      )
-                    else if (stores.isEmpty)
-                      _buildStoresEmptyState(context, l10n, isDark)
-                    else
-                      ...stores.map((s) => _buildStoreCard(context, s, isDark)),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),

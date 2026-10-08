@@ -215,7 +215,12 @@ class _CheckoutPageState extends State<CheckoutPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const SizedBox(height: 8),
-            const Icon(Icons.check_circle_rounded, color: Color(0xFF34C759), size: 56),
+            Container(
+              width: 72,
+              height: 72,
+              decoration: const BoxDecoration(color: AppTheme.sunshine, shape: BoxShape.circle),
+              child: const Icon(Icons.check_rounded, color: AppTheme.ink, size: 40),
+            ),
             const SizedBox(height: 12),
             Text(
               'Order #$orderId • €${total.toStringAsFixed(2)}',
@@ -319,13 +324,17 @@ class _CheckoutPageState extends State<CheckoutPage> {
                             child: Row(
                               children: [
                                 Container(
-                                  width: 48,
-                                  height: 48,
+                                  width: 52,
+                                  height: 60,
+                                  clipBehavior: Clip.antiAlias,
                                   decoration: BoxDecoration(
-                                    gradient: AppTheme.primaryGradient,
+                                    color: AppTheme.pastel(context, AppTheme.clay, AppTheme.clayInk),
                                     borderRadius: BorderRadius.circular(14),
                                   ),
-                                  child: const Icon(Icons.checkroom_rounded, color: Colors.white, size: 24),
+                                  child: item.imageUrl != null
+                                      ? Image.network(item.imageUrl!, fit: BoxFit.cover,
+                                          errorBuilder: (_, __, ___) => const Icon(Icons.checkroom_outlined, color: AppTheme.clayInk))
+                                      : const Icon(Icons.checkroom_outlined, color: AppTheme.clayInk, size: 24),
                                 ),
                                 const SizedBox(width: 12),
                                 Expanded(

@@ -332,8 +332,8 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        title: Text(name.isEmpty ? 'Malvoya Courier' : '${tr(context, 'Hi', 'Hei')} $name'),
+        centerTitle: false,
+        title: Text(name.isEmpty ? 'Malvoya Courier' : '${tr(context, 'Hi', 'Hei')} $name', style: AppTheme.display(size: 22)),
         actions: [
           IconButton(tooltip: tr(context, 'How jobs are offered', 'Miten keikat tarjotaan'), icon: const Icon(Icons.info_outline_rounded), onPressed: _howJobsWork),
           IconButton(tooltip: tr(context, 'Sign out', 'Kirjaudu ulos'), icon: const Icon(Icons.logout_rounded), onPressed: () async {
@@ -344,9 +344,11 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
         ],
         bottom: TabBar(
           controller: _tabs,
-          labelColor: AppTheme.primary,
-          unselectedLabelColor: AppTheme.textSecondary,
-          indicatorColor: AppTheme.primary,
+          indicatorSize: TabBarIndicatorSize.label,
+          indicator: const UnderlineTabIndicator(
+            borderSide: BorderSide(color: AppTheme.primary, width: 3),
+            borderRadius: BorderRadius.all(Radius.circular(2)),
+          ),
           tabs: [
             Tab(text: '${tr(context, 'Jobs', 'Keikat')}${_jobs.isNotEmpty && active == null ? ' (${_jobs.length})' : ''}'),
             Tab(text: tr(context, 'Delivery', 'Toimitus')),
@@ -365,12 +367,23 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     );
   }
 
-  Widget _onlineBar() => Container(
-        color: _online ? AppTheme.success : AppTheme.textPrimary,
-        padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
+  Widget _onlineBar() => AnimatedContainer(
+        duration: const Duration(milliseconds: 250),
+        margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+        decoration: BoxDecoration(
+          color: _online ? AppTheme.success : AppTheme.textPrimary,
+          borderRadius: BorderRadius.circular(30),
+        ),
+        padding: const EdgeInsets.fromLTRB(8, 8, 12, 8),
         child: Row(children: [
-          Icon(_online ? Icons.circle : Icons.circle_outlined, size: 12, color: Colors.white),
-          const SizedBox(width: 10),
+          Container(
+            width: 40,
+            height: 40,
+            decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+            child: Icon(_online ? Icons.pedal_bike_rounded : Icons.power_settings_new_rounded,
+                size: 22, color: _online ? AppTheme.success : AppTheme.textPrimary),
+          ),
+          const SizedBox(width: 12),
           Expanded(
             child: Text(
               _online
@@ -411,17 +424,33 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
                 }
                 return Container(
                   margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppTheme.divider)),
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(AppTheme.radiusLg), border: Border.all(color: AppTheme.divider)),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Row(children: [
-                      Text(euro(context, j['courierFeeCents'] ?? j['deliveryFeeCents']), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
+                      Text(euro(context, j['courierFeeCents'] ?? j['deliveryFeeCents']), style: AppTheme.display(size: 32)),
                       const Spacer(),
-                      Text('${j['itemCount']} ${tr(context, 'item(s)', 'tuote(tta)')}', style: const TextStyle(color: AppTheme.textSecondary)),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(12)),
+                        child: Text('${j['itemCount']} ${tr(context, 'item(s)', 'tuote(tta)')}',
+                            style: const TextStyle(color: Color(0xFF8A5A00), fontWeight: FontWeight.w800, fontSize: 12.5)),
+                      ),
                     ]),
-                    const SizedBox(height: 8),
-                    Text('${tr(context, 'Pick up', 'Nouto')}: ${s['name'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w700)),
-                    if (s['address'] != null) Text(s['address'], style: const TextStyle(color: AppTheme.textSecondary)),
+                    const SizedBox(height: 12),
+                    Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Container(width: 12, height: 12, decoration: const BoxDecoration(color: AppTheme.primary, shape: BoxShape.circle)),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text('${tr(context, 'Pick up', 'Nouto')}: ${s['name'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                          if (s['address'] != null) Text(s['address'], style: const TextStyle(color: AppTheme.textSecondary)),
+                        ]),
+                      ),
+                    ]),
                     const SizedBox(height: 6),
                     Text(
                       [
@@ -432,7 +461,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
                     ),
                     Text(tr(context, 'The exact address is shown after you accept.', 'Tarkka osoite näytetään hyväksynnän jälkeen.'), style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
                     const SizedBox(height: 12),
-                    SizedBox(width: double.infinity, height: 50, child: FilledButton(onPressed: () => _accept(j), child: Text(tr(context, 'Accept job', 'Ota keikka')))),
+                    SizedBox(width: double.infinity, height: 56, child: FilledButton(onPressed: () => _accept(j), child: Text(tr(context, 'Accept job', 'Ota keikka')))),
                   ]),
                 );
               }).toList(),
@@ -453,15 +482,15 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: current ? AppTheme.primary : AppTheme.divider, width: current ? 1.6 : 1),
+            borderRadius: BorderRadius.circular(AppTheme.radiusLg - 2),
+            border: Border.all(color: current ? AppTheme.primary : AppTheme.divider, width: current ? 2 : 1),
           ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               CircleAvatar(radius: 13, backgroundColor: done ? AppTheme.success : (current ? AppTheme.primary : AppTheme.divider),
                   child: done ? const Icon(Icons.check, size: 16, color: Colors.white) : Text('$n', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700))),
               const SizedBox(width: 10),
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+              Expanded(child: Text(title, style: AppTheme.display(size: 18))),
             ]),
             if (current) ...[const SizedBox(height: 10), ...children],
           ]),
@@ -496,11 +525,18 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
             ],
           ]),
           const SizedBox(height: 10),
-          SizedBox(width: double.infinity, height: 50, child: FilledButton(onPressed: () => _pickedUp(o), child: Text(tr(context, 'I have the order', 'Tilaus on mukanani')))),
+          SizedBox(width: double.infinity, height: 56, child: FilledButton(onPressed: () => _pickedUp(o), child: Text(tr(context, 'I have the order', 'Tilaus on mukanani')))),
         ]),
         step(2, '${tr(context, 'Deliver to', 'Toimita')} ${customer.isEmpty ? tr(context, 'the customer', 'asiakkaalle') : customer}', false, pickedUp, [
           if (o['deliveryAddress'] != null) Text(o['deliveryAddress'], style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-          if ((o['notes'] ?? '').toString().isNotEmpty) Padding(padding: const EdgeInsets.only(top: 4), child: Text('“${o['notes']}”', style: const TextStyle(fontStyle: FontStyle.italic))),
+          if ((o['notes'] ?? '').toString().isNotEmpty)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(top: 8),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(14)),
+              child: Text('“${o['notes']}”', style: const TextStyle(color: Color(0xFF6A4500), height: 1.4)),
+            ),
           const SizedBox(height: 12),
           Row(children: [
             Expanded(child: OutlinedButton.icon(
@@ -512,7 +548,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
             Expanded(child: OutlinedButton.icon(onPressed: () => _openChat(o), icon: const Icon(Icons.chat_bubble_outline_rounded), label: Text(tr(context, 'Chat', 'Chat')))),
           ]),
           const SizedBox(height: 10),
-          SizedBox(width: double.infinity, height: 50, child: FilledButton(onPressed: () => _complete(o), child: Text(tr(context, 'Complete delivery', 'Merkitse toimitetuksi')))),
+          SizedBox(width: double.infinity, height: 56, child: FilledButton(onPressed: () => _complete(o), child: Text(tr(context, 'Complete delivery', 'Merkitse toimitetuksi')))),
         ]),
         Text(tr(context, 'Keep the app open or in the background while delivering so the customer can follow you.', 'Pidä sovellus auki tai taustalla toimituksen aikana, jotta asiakas voi seurata sinua.'),
             style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
@@ -530,13 +566,18 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
           return d != null && d.year == today.year && d.month == today.month && d.day == today.day;
         })
         .fold<int>(0, (s, o) => s + (asInt(o['courierFeeCents']) ?? 0));
-    Widget stat(String label, dynamic cents) => Expanded(
+    Widget stat(String label, dynamic cents, {bool highlight = false}) => Expanded(
           child: Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.divider)),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: highlight ? AppTheme.sunshine : Colors.white,
+              borderRadius: BorderRadius.circular(AppTheme.radiusMd + 2),
+              border: highlight ? null : Border.all(color: AppTheme.divider),
+            ),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(label, style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
-              Text(euro(context, cents), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+              Text(label, style: TextStyle(fontSize: 12.5, color: highlight ? AppTheme.textPrimary : AppTheme.textSecondary, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 2),
+              Text(euro(context, cents), style: AppTheme.display(size: 22)),
             ]),
           ),
         );
@@ -544,7 +585,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
       onRefresh: () async => Future.wait([_loadEarnings(), _loadMine()]),
       child: ListView(padding: const EdgeInsets.all(16), children: [
         Row(children: [
-          stat(tr(context, 'Today', 'Tänään'), todayCents),
+          stat(tr(context, 'Today', 'Tänään'), todayCents, highlight: true),
           const SizedBox(width: 10),
           stat(tr(context, 'This week (paid)', 'Tällä viikolla'), summary['paidThisWeekCents']),
         ]),
@@ -575,7 +616,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
           child: const Column(children: [GoogleLinkTile(), Divider(height: 1), DeleteAccountTile()]),
         ),
         const SizedBox(height: 16),
-        Text(tr(context, 'Recent deliveries', 'Viimeisimmät toimitukset'), style: const TextStyle(fontWeight: FontWeight.w700)),
+        Text(tr(context, 'Recent deliveries', 'Viimeisimmät toimitukset'), style: AppTheme.display(size: 18)),
         for (final o in delivered.take(30))
           ListTile(
             contentPadding: EdgeInsets.zero,
@@ -596,8 +637,13 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
         child: Padding(
           padding: const EdgeInsets.all(40),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, size: 56, color: AppTheme.textSecondary),
-            const SizedBox(height: 12),
+            Container(
+              width: 88,
+              height: 88,
+              decoration: const BoxDecoration(color: AppTheme.primaryLight, shape: BoxShape.circle),
+              child: Icon(icon, size: 40, color: AppTheme.primary),
+            ),
+            const SizedBox(height: 16),
             Text(text, textAlign: TextAlign.center, style: const TextStyle(color: AppTheme.textSecondary, height: 1.4)),
           ]),
         ),

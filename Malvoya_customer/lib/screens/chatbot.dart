@@ -149,6 +149,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
     final cardBorder = AppTheme.cardBorder(context);
 
     showModalBottomSheet(
+      showDragHandle: false,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,

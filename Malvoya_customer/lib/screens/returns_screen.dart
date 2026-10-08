@@ -167,7 +167,8 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                     ],
                     const SizedBox(height: 16),
                     SizedBox(
-                      height: 52,
+                      width: double.infinity,
+                      height: 54,
                       child: FilledButton(
                         onPressed: submitting || selectedOrder == null
                             ? null

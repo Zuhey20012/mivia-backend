@@ -15,6 +15,7 @@ class NotificationCenterDrawer extends StatefulWidget {
   static void show(BuildContext context) {
     HapticFeedback.mediumImpact();
     showModalBottomSheet(
+      showDragHandle: false,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,

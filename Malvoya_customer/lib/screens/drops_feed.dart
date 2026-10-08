@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -523,28 +524,27 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   Widget _topBar() {
     Widget tab(String mode, String label) {
       final selected = _mode == mode;
-      return GestureDetector(
-        onTap: () => _switchMode(mode),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(label,
-                  style: TextStyle(
-                    color: selected ? Colors.white : Colors.white60,
-                    fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                    fontSize: 16,
-                    shadows: const [Shadow(blurRadius: 8, color: Colors.black54)],
-                  )),
-              const SizedBox(height: 4),
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                width: selected ? 22 : 0,
-                height: 3,
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(2)),
-              ),
-            ],
+      return Semantics(
+        button: true,
+        selected: selected,
+        child: GestureDetector(
+          onTap: () => _switchMode(mode),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            height: 36,
+            padding: const EdgeInsets.symmetric(horizontal: 13),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: selected ? Colors.white : Colors.transparent,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Text(label,
+                style: TextStyle(
+                  color: selected ? AppTheme.ink : Colors.white,
+                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                  fontSize: 14.5,
+                )),
           ),
         ),
       );
@@ -579,11 +579,26 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
               icon: const Icon(Icons.info_outline_rounded, color: Colors.white),
               onPressed: () => _explain(current),
             ),
-            const Spacer(),
-            tab('foryou', tr(context, 'For you', 'Sinulle')),
-            tab('following', tr(context, 'Following', 'Seuratut')),
-            tab('latest', tr(context, 'Latest', 'Uusimmat')),
-            const Spacer(),
+            // Three feeds in one pill; shrinks to fit narrow phones and long translations
+            Expanded(
+              child: Center(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(21)),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        tab('foryou', tr(context, 'For you', 'Sinulle')),
+                        tab('following', tr(context, 'Following', 'Seuratut')),
+                        tab('latest', tr(context, 'Latest', 'Uusimmat')),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
             IconButton(
               tooltip: _muted ? tr(context, 'Sound on', 'Ääni päälle') : tr(context, 'Mute', 'Mykistä'),
               icon: Icon(_muted ? Icons.volume_off_rounded : Icons.volume_up_rounded, color: Colors.white),
@@ -601,7 +616,8 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     final controller = _videos[id];
     final ready = controller != null && controller.value.isInitialized;
     // Inside the tab bar the navigation bar covers the bottom; opened on its own it does not
-    final bottomInset = (widget.standalone ? 24 : 84) + MediaQuery.of(context).viewPadding.bottom;
+    final safeBottom = MediaQuery.of(context).viewPadding.bottom;
+    final double bottomInset = widget.standalone ? 24.0 + safeBottom : 66.0 + math.max(12.0, safeBottom) + 16;
 
     return GestureDetector(
       onTap: () {
@@ -645,7 +661,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                 controller,
                 allowScrubbing: true,
                 padding: EdgeInsets.zero,
-                colors: const VideoProgressColors(playedColor: Colors.white, bufferedColor: Colors.white24, backgroundColor: Colors.white10),
+                colors: const VideoProgressColors(playedColor: AppTheme.sunshine, bufferedColor: Colors.white24, backgroundColor: Colors.white10),
               ),
             ),
         ],
@@ -724,7 +740,34 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
         action(liked ? Icons.favorite_rounded : Icons.favorite_border_rounded, _compact(drop['likeCount']), () => _toggleLike(drop),
             color: liked ? const Color(0xFFFF4D6D) : Colors.white, tooltip: tr(context, 'Like', 'Tykkää')),
         action(Icons.chat_bubble_outline_rounded, _compact(drop['commentCount']), () => _openComments(drop), tooltip: tr(context, 'Comments', 'Kommentit')),
-        action(Icons.shopping_bag_outlined, tr(context, 'Buy', 'Osta'), () => _addToBag(drop), tooltip: tr(context, 'Add to bag', 'Lisää kassiin')),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 18),
+          child: Semantics(
+            button: true,
+            label: tr(context, 'Add to bag', 'Lisää kassiin'),
+            excludeSemantics: true,
+            child: GestureDetector(
+              onTap: () => _addToBag(drop),
+              child: Column(
+                children: [
+                  Container(
+                    width: 50,
+                    height: 50,
+                    decoration: BoxDecoration(
+                      color: AppTheme.sunshine,
+                      shape: BoxShape.circle,
+                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 10)],
+                    ),
+                    child: const Icon(Icons.shopping_bag_outlined, size: 25, color: AppTheme.ink),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(tr(context, 'Buy', 'Osta'),
+                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800, shadows: [Shadow(blurRadius: 6, color: Colors.black54)])),
+                ],
+              ),
+            ),
+          ),
+        ),
         action(Icons.reply_rounded, _compact(drop['shareCount']), () => _share(drop), tooltip: tr(context, 'Share', 'Jaa')),
         action(Icons.more_horiz_rounded, null, () => _report(drop), tooltip: tr(context, 'More', 'Lisää')),
       ],
@@ -755,7 +798,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
             child: Container(
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(color: Colors.black38, borderRadius: BorderRadius.circular(8)),
+              decoration: BoxDecoration(color: Colors.black38, borderRadius: BorderRadius.circular(14)),
               child: Text(drop['reason'], style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
             ),
           ),
@@ -788,11 +831,11 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
           onTap: () => _open(ProductDetailScreen(productId: asInt(product['id'])!)),
           child: Container(
             padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.94), borderRadius: BorderRadius.circular(16)),
+            decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.96), borderRadius: BorderRadius.circular(AppTheme.radiusMd + 2)),
             child: Row(
               children: [
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(12),
                   child: SizedBox(
                     width: 48,
                     height: 58,
@@ -822,7 +865,12 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                 ),
                 FilledButton(
                   onPressed: product['inStock'] == false ? null : () => _addToBag(drop),
-                  style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 14), minimumSize: const Size(0, 40)),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                    minimumSize: const Size(0, 44),
+                  ),
                   child: Text(product['inStock'] == false ? tr(context, 'Sold out', 'Loppu') : tr(context, 'Add', 'Lisää')),
                 ),
               ],

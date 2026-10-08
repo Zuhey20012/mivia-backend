@@ -112,11 +112,11 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        backgroundColor: Colors.white,
         titleSpacing: 16,
+        toolbarHeight: 64,
         title: Row(children: [
           CircleAvatar(
-            radius: 18,
+            radius: 22,
             backgroundColor: AppTheme.primaryLight,
             backgroundImage: _store?['logoUrl'] != null ? CachedNetworkImageProvider(_store!['logoUrl']) : null,
             child: _store?['logoUrl'] == null ? const Icon(Icons.storefront_outlined, color: AppTheme.primary, size: 20) : null,
@@ -124,26 +124,35 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           const SizedBox(width: 10),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(_store?['name'] ?? 'Malvoya Store', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700), overflow: TextOverflow.ellipsis),
-              Text(
-                _store?['isVerified'] == true ? tr(context, 'Live — customers can order', 'Julkaistu — asiakkaat voivat tilata') : tr(context, 'In review — not visible yet', 'Tarkistuksessa — ei vielä näkyvissä'),
-                style: TextStyle(fontSize: 11.5, color: _store?['isVerified'] == true ? AppTheme.primary : AppTheme.warning, fontWeight: FontWeight.w600),
+              Text(_store?['name'] ?? 'Malvoya Store', style: AppTheme.display(size: 18), overflow: TextOverflow.ellipsis),
+              const SizedBox(height: 3),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: _store?['isVerified'] == true ? AppTheme.primaryLight : AppTheme.sunshineLight,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  _store?['isVerified'] == true ? tr(context, 'Live — customers can order', 'Julkaistu — asiakkaat voivat tilata') : tr(context, 'In review — not visible yet', 'Tarkistuksessa — ei vielä näkyvissä'),
+                  style: TextStyle(fontSize: 11.5, color: _store?['isVerified'] == true ? AppTheme.primary : const Color(0xFF8A5A00), fontWeight: FontWeight.w700),
+                ),
               ),
             ]),
           ),
         ]),
         bottom: TabBar(
           controller: _tabs,
-          labelColor: AppTheme.primary,
-          unselectedLabelColor: AppTheme.textSecondary,
-          indicatorColor: AppTheme.primary,
-          labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+          indicatorSize: TabBarIndicatorSize.label,
+          indicator: const UnderlineTabIndicator(
+            borderSide: BorderSide(color: AppTheme.primary, width: 3),
+            borderRadius: BorderRadius.all(Radius.circular(2)),
+          ),
           tabs: [
             Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [
               Text(tr(context, 'Orders', 'Tilaukset')),
               if (newOrders > 0) ...[
                 const SizedBox(width: 6),
-                CircleAvatar(radius: 9, backgroundColor: AppTheme.accent, child: Text('$newOrders', style: const TextStyle(fontSize: 10.5, color: Colors.white, fontWeight: FontWeight.w800))),
+                CircleAvatar(radius: 10, backgroundColor: AppTheme.sunshine, child: Text('$newOrders', style: const TextStyle(fontSize: 11, color: AppTheme.textPrimary, fontWeight: FontWeight.w800))),
               ],
             ])),
             Tab(text: tr(context, 'Products', 'Tuotteet')),
@@ -175,17 +184,27 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          if (_orders.isEmpty)
+          if (_orders.isEmpty) ...[
+            const SizedBox(height: 64),
+            Center(
+              child: Container(
+                width: 88,
+                height: 88,
+                decoration: const BoxDecoration(color: AppTheme.sunshineLight, shape: BoxShape.circle),
+                child: const Icon(Icons.receipt_long_outlined, size: 40, color: Color(0xFF8A5A00)),
+              ),
+            ),
             Padding(
-              padding: const EdgeInsets.only(top: 80),
+              padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
               child: Text(
                 _store?['isVerified'] == true
                     ? tr(context, 'No orders yet. New orders appear here the moment they are paid, with a sound and a notification.', 'Ei vielä tilauksia. Uudet tilaukset näkyvät täällä heti maksun jälkeen.')
                     : tr(context, 'Your store is in review. Add products and drops meanwhile — they go live when you are approved.', 'Kauppasi on tarkistuksessa. Lisää sillä välin tuotteita ja julkaisuja — ne julkaistaan hyväksynnän jälkeen.'),
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: AppTheme.textSecondary, height: 1.4),
+                style: const TextStyle(color: AppTheme.textSecondary, height: 1.45, fontSize: 15),
               ),
             ),
+          ],
           for (final o in active) _orderCard(o),
           if (done.isNotEmpty) Padding(padding: const EdgeInsets.fromLTRB(4, 16, 4, 8), child: Text(tr(context, 'Earlier', 'Aiemmat'), style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.textSecondary))),
           for (final o in done) _orderCard(o),
@@ -198,21 +217,22 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     final status = o['status'];
     final items = (o['items'] as List?) ?? [];
     final created = DateTime.tryParse('${o['createdAt']}')?.toLocal();
-    final (label, color) = switch (status) {
-      'PENDING' => (tr(context, 'New — accept or decline', 'Uusi — hyväksy tai hylkää'), AppTheme.accent),
-      'CONFIRMED' => (tr(context, 'Accepted — pack it', 'Hyväksytty — pakkaa'), AppTheme.primary),
-      'PROCESSING' => (tr(context, 'Ready — waiting for courier', 'Valmis — odottaa kuriiria'), AppTheme.primary),
-      'SHIPPED' => (tr(context, 'With the courier', 'Kuriirilla'), AppTheme.primary),
-      'DELIVERED' => (tr(context, 'Delivered', 'Toimitettu'), AppTheme.textSecondary),
-      _ => (tr(context, 'Cancelled / refunded', 'Peruttu / hyvitetty'), AppTheme.textSecondary),
+    // Status as a soft pill: new orders are sunny so they stand out, active ones green, finished grey
+    final (label, bg, fg) = switch (status) {
+      'PENDING' => (tr(context, 'New — accept or decline', 'Uusi — hyväksy tai hylkää'), AppTheme.sunshine, AppTheme.textPrimary),
+      'CONFIRMED' => (tr(context, 'Accepted — pack it', 'Hyväksytty — pakkaa'), AppTheme.primaryLight, AppTheme.primary),
+      'PROCESSING' => (tr(context, 'Ready — waiting for courier', 'Valmis — odottaa kuriiria'), AppTheme.primaryLight, AppTheme.primary),
+      'SHIPPED' => (tr(context, 'With the courier', 'Kuriirilla'), AppTheme.peach, AppTheme.accent),
+      'DELIVERED' => (tr(context, 'Delivered', 'Toimitettu'), AppTheme.sand, AppTheme.textSecondary),
+      _ => (tr(context, 'Cancelled / refunded', 'Peruttu / hyvitetty'), AppTheme.sand, AppTheme.textSecondary),
     };
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: status == 'PENDING' ? AppTheme.accent : AppTheme.divider, width: status == 'PENDING' ? 1.5 : 1),
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg - 2),
+        border: Border.all(color: status == 'PENDING' ? AppTheme.primary : AppTheme.divider, width: status == 'PENDING' ? 2 : 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -223,8 +243,12 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             const Spacer(),
             Text(euro(context, o['subtotalCents']), style: const TextStyle(fontWeight: FontWeight.w800)),
           ]),
-          const SizedBox(height: 4),
-          Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 13)),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
+            child: Text(label, style: TextStyle(color: fg, fontWeight: FontWeight.w800, fontSize: 12.5)),
+          ),
           const Divider(height: 20),
           for (final i in items)
             Padding(
