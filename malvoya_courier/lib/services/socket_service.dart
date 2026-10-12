@@ -26,6 +26,8 @@ class CourierSocketService extends ChangeNotifier {
       baseUrl,
       io.OptionBuilder()
           .setTransports(['websocket'])
+          // A fresh manager each time, so a new sign-in token is really used (the client caches sockets per host)
+          .enableForceNew()
           .setAuth({'token': accessToken})
           .enableAutoConnect()
           .enableReconnection()
@@ -57,7 +59,21 @@ class CourierSocketService extends ChangeNotifier {
     });
   }
 
-  void emitTelemetry(Map<String, dynamic> data) => _socket?.emit('courier:telemetry', data);
+  /// After the internet comes back: reconnect with the current token if the live connection is down.
+  /// Automatic reconnection would reuse the handshake token, which expires after 15 minutes.
+  /// Followed orders are kept and their rooms joined again on connect.
+  void ensureConnected(String accessToken) {
+    if (_socket != null && _connected) return;
+    _socket?.dispose();
+    _socket = null;
+    connect(accessToken);
+  }
+
+  /// Positions are sent only while connected: the client would otherwise buffer them offline and
+  /// replay stale positions on reconnect (the HTTP fallback covers the gap).
+  void emitTelemetry(Map<String, dynamic> data) {
+    if (_connected) _socket?.emit('courier:telemetry', data);
+  }
 
   /// Follow an order the courier is carrying (status updates and chat).
   void trackOrder(int orderId) {

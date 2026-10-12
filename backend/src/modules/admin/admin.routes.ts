@@ -7,6 +7,7 @@ import {
   getOrders,
 } from "./admin.controller";
 import moderationRoutes from "./moderation.routes";
+import promoRoutes from "../promos/promos.routes";
 import { getSystemStatus } from "./system";
 import { launchDemand } from "../me/launchAlerts";
 
@@ -28,5 +29,6 @@ router.patch("/couriers/:id/approve", approveCourier);
 router.patch("/couriers/:id/suspend", suspendCourier);
 router.get("/orders",                 getOrders);
 router.use(moderationRoutes);
+router.use(promoRoutes); // /promo-codes
 
 export default router;

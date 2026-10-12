@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 import '../auth_service.dart';
 import '../config/constants.dart';
+import 'strings.dart';
 
 /// Result of an API call. [error] is always a sentence that can be shown to the user.
 class ApiResult {
@@ -76,5 +78,26 @@ class ApiClient {
     if (status == 429) return 'Too many attempts. Please wait a moment.';
     if (status >= 500) return 'Something went wrong on our side. Please try again.';
     return 'Something went wrong. Please try again.';
+  }
+}
+
+/// The client's own fixed messages in Finnish; server messages are shown as they come.
+const _fiMessages = {
+  'The server took too long to answer. Please try again.': 'Palvelin ei vastannut ajoissa. Yritä uudelleen.',
+  'Could not reach Malvoya. Check your connection and try again.': 'Malvoyaan ei saatu yhteyttä. Tarkista yhteys ja yritä uudelleen.',
+  'Please sign in again.': 'Kirjaudu sisään uudelleen.',
+  'You do not have access to this.': 'Sinulla ei ole pääsyä tähän.',
+  'Not found.': 'Ei löytynyt.',
+  'Too many attempts. Please wait a moment.': 'Liian monta yritystä. Odota hetki.',
+  'Something went wrong on our side. Please try again.': 'Jotain meni vikaan meidän päässämme. Yritä uudelleen.',
+  'Something went wrong. Please try again.': 'Jotain meni vikaan. Yritä uudelleen.',
+};
+
+extension ApiResultText on ApiResult {
+  /// [error] in the app's language where the client wrote it.
+  String? errorText(BuildContext context) {
+    final e = error;
+    if (e == null) return null;
+    return isFinnish(context) ? (_fiMessages[e] ?? e) : e;
   }
 }

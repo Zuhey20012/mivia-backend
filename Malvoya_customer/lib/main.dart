@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -16,10 +17,13 @@ import 'locale_provider.dart';
 import 'theme_provider.dart';
 import 'local_notification_service.dart';
 import 'core/delivery_location.dart';
+import 'core/network_status.dart';
 import 'core/push_service.dart';
 import 'core/strings.dart';
 import 'screens/order_detail.dart';
 import 'screens/store_detail.dart';
+import 'services/socket_service.dart';
+import 'widgets/offline_banner.dart';
 
 /// Lets a tapped push notification open the right screen from anywhere.
 final navigatorKey = GlobalKey<NavigatorState>();
@@ -59,6 +63,9 @@ void main() async {
   }
 
   await DeliveryLocation.instance.load();
+  unawaited(NetworkStatus.instance.start());
+  // Live order updates belong to the signed-in account; close the connection on sign-out
+  AuthService.beforeLogout.add((_) async => CustomerSocketService().disconnect());
 
   PushService.instance.onOpen = (data) {
     final orderId = asInt(data['orderId']);
@@ -136,7 +143,11 @@ class MalvoyaApp extends StatelessWidget {
               Locale('hi', ''),
             ],
             // Asks the server whether this build is still supported or Malvoya is in maintenance
-            builder: (context, child) => AppGate(app: 'customer', child: child ?? const SizedBox.shrink()),
+            builder: (context, child) => AppGate(
+              app: 'customer',
+              // A slim "no internet" notice above every screen while the phone is offline
+              child: OfflineBanner(child: child ?? const SizedBox.shrink()),
+            ),
             home: Consumer<AuthService>(
               builder: (context, auth, child) {
                 final screen = !auth.canBrowse ? const LoginScreen() : const MainNavigation();

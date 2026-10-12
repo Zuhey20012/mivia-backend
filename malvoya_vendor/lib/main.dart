@@ -6,6 +6,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'config/theme.dart';
 import 'core/font_licenses.dart';
 import 'core/app_gate.dart';
+import 'core/connectivity.dart';
 import 'screens/login.dart';
 import 'screens/vendor_dashboard.dart';
 import 'screens/pending_approval.dart';
@@ -17,6 +18,8 @@ import 'core/push_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   registerFontLicenses();
+  // Shows a "No internet" strip and lets screens refresh when the connection comes back
+  ConnectivityService.instance.start();
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
   try { await Firebase.initializeApp(); } catch (e) { debugPrint('Firebase: $e'); }
   runApp(const MalvoyaVendorApp());
@@ -76,7 +79,7 @@ class MalvoyaVendorApp extends StatelessWidget {
             Locale('hi', ''),
           ],
           // Asks the server whether this build is still supported or Malvoya is in maintenance
-          builder: (context, child) => AppGate(app: 'store', child: child ?? const SizedBox.shrink()),
+          builder: (context, child) => OfflineBanner(child: AppGate(app: 'store', child: child ?? const SizedBox.shrink())),
           home: Consumer<AuthService>(
             builder: (context, auth, child) {
               if (!auth.isAuthenticated) return const LoginScreen();

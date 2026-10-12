@@ -11,6 +11,7 @@ import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
 import '../core/delivery_location.dart';
+import '../core/network_status.dart';
 import '../core/media_sound.dart';
 import '../core/report_reasons.dart';
 import '../core/strings.dart';
@@ -64,6 +65,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     MediaSound.instance.addListener(_onSoundChanged);
+    NetworkStatus.instance.addListener(_onNetwork);
     _init();
   }
 
@@ -72,6 +74,11 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
       c.setVolume(_muted ? 0 : 1);
     }
     if (mounted) setState(() {});
+  }
+
+  /// Back online after the feed failed to load: try again by itself.
+  void _onNetwork() {
+    if (mounted && NetworkStatus.instance.online && _error != null && !_loading) _load(reset: true);
   }
 
   Future<void> _init() async {
@@ -112,6 +119,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     MediaSound.instance.removeListener(_onSoundChanged);
+    NetworkStatus.instance.removeListener(_onNetwork);
     _flushView();
     for (final c in _videos.values) {
       c.dispose();

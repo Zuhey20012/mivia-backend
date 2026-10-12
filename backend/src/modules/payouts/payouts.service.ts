@@ -151,7 +151,13 @@ async function releaseWaiting(kind: "STORE" | "COURIER", id: number) {
 /** Sends every due transfer. Safe to run repeatedly: each transfer has an idempotency key. */
 export async function processDuePayouts() {
   const due = await prisma.payout.findMany({
-    where: { status: "SCHEDULED", releaseAt: { lte: new Date() } },
+    where: {
+      status: "SCHEDULED",
+      releaseAt: { lte: new Date() },
+      // A store is not paid while a return on the order is still open: the refund may take the
+      // money back. The payout goes out once the return is refunded (reduced) or rejected.
+      NOT: { party: "STORE", order: { returns: { some: { status: { in: ["REQUESTED", "APPROVED", "IN_TRANSIT", "RECEIVED"] } } } } },
+    },
     include: {
       order: { select: { stripePaymentIntentId: true } },
       store: { select: { stripeAccountId: true, payoutsEnabled: true, ownerId: true } },
@@ -217,8 +223,14 @@ export async function adjustStorePayoutForRefund(orderId: number, refundCents: n
     return;
   }
   if (!["SCHEDULED", "WAITING_FOR_ACCOUNT", "FAILED"].includes(payout.status)) return;
-  const commissionBack = Math.round(Math.min(refundCents, order.subtotalCents) * order.store.commissionRate);
-  const next = Math.max(0, payout.amountCents - (refundCents - commissionBack));
+  // A promo discount is paid by Malvoya, not the store: scale the refund back up to the undiscounted
+  // value, so a full withdrawal takes back the whole store payout and a partial one its fair share.
+  const paidExTip = order.totalCents - order.tipCents;
+  const value = order.discountCents > 0 && paidExTip > 0
+    ? Math.round((refundCents * (paidExTip + order.discountCents)) / paidExTip)
+    : refundCents;
+  const commissionBack = Math.round(Math.min(value, order.subtotalCents) * order.store.commissionRate);
+  const next = Math.max(0, payout.amountCents - (value - commissionBack));
   await prisma.payout.update({ where: { id: payout.id }, data: { amountCents: next, ...(next === 0 ? { status: "CANCELLED" } : {}) } });
 }
 

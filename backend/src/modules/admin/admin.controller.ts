@@ -9,13 +9,40 @@ function idParam(req: Request) {
 }
 
 // ─── Overview Stats ────────────────────────────────────────────────────────────
+
+type Sums = {
+  commissionCents: number | null; serviceFeeCents: number | null; smallOrderFeeCents: number | null; discountCents: number | null;
+  deliveryFeeCents: number | null; courierFeeCents: number | null; tipCents: number | null;
+};
+
+/** What Malvoya keeps: commission + fees + the part of the delivery fee not paid to couriers − promo discounts. */
+function platformRevenue(sum: Sums) {
+  const commissionCents = sum.commissionCents ?? 0;
+  const serviceFeeCents = sum.serviceFeeCents ?? 0;
+  const smallOrderFeeCents = sum.smallOrderFeeCents ?? 0;
+  const discountCents = sum.discountCents ?? 0;
+  // courierFeeCents includes tips, which are not Malvoya's money
+  const deliveryMarginCents = (sum.deliveryFeeCents ?? 0) - ((sum.courierFeeCents ?? 0) - (sum.tipCents ?? 0));
+  return {
+    commissionCents, serviceFeeCents, smallOrderFeeCents, deliveryMarginCents, discountCents,
+    netPlatformRevenueCents: commissionCents + serviceFeeCents + smallOrderFeeCents + deliveryMarginCents - discountCents,
+  };
+}
 export async function getStats(_req: Request, res: Response) {
-  const [customers, stores, couriers, orders, revenue, pendingVendors, pendingCouriers, activeOrders, liveDrops, openReports, failedPayouts, waitlist] = await Promise.all([
+  const [customers, stores, couriers, orders, revenue, earned, pendingVendors, pendingCouriers, activeOrders, liveDrops, openReports, failedPayouts, waitlist] = await Promise.all([
     prisma.user.count({ where: { role: "CUSTOMER", isActive: true } }),
     prisma.store.count(),
     prisma.courier.count({ where: { userId: { not: null } } }),
     prisma.order.count(),
-    prisma.order.aggregate({ where: { paymentStatus: "SUCCEEDED" }, _sum: { totalCents: true, commissionCents: true } }),
+    prisma.order.aggregate({ where: { paymentStatus: "SUCCEEDED" }, _sum: { totalCents: true } }),
+    // Malvoya's own revenue: paid orders that were not refunded or cancelled
+    prisma.order.aggregate({
+      where: { paymentStatus: "SUCCEEDED", status: { not: "CANCELLED" } },
+      _sum: {
+        commissionCents: true, serviceFeeCents: true, smallOrderFeeCents: true, discountCents: true,
+        deliveryFeeCents: true, courierFeeCents: true, tipCents: true,
+      },
+    }),
     prisma.store.count({ where: { isVerified: false } }),
     prisma.courier.count({ where: { isApproved: false, userId: { not: null } } }),
     prisma.order.count({ where: { status: { in: ["PENDING", "CONFIRMED", "PROCESSING", "SHIPPED"] }, paymentStatus: "SUCCEEDED" } }),
@@ -37,7 +64,7 @@ export async function getStats(_req: Request, res: Response) {
       pendingVendors,
       pendingCouriers,
       revenueCents: revenue._sum.totalCents ?? 0,
-      commissionCents: revenue._sum.commissionCents ?? 0,
+      ...platformRevenue(earned._sum),
       liveDrops,
       openReports,
       failedPayouts,

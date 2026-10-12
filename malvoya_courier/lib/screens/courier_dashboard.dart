@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
+import '../core/connectivity.dart';
 import '../core/media_upload.dart';
 import '../core/legal_links.dart';
 import '../core/strings.dart';
@@ -57,17 +59,40 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
       if (mounted && asInt(m['orderId']) == asInt(_active?['id'])) setState(() => _chat.add(m));
     };
     WidgetsBinding.instance.addPostFrameCallback((_) => _init());
+    _restored = ConnectivityService.instance.onRestored.listen((_) => _backOnline());
   }
+
+  StreamSubscription<void>? _restored;
+  bool _meLoaded = false;
 
   @override
   void dispose() {
+    _restored?.cancel();
     _tabs.dispose();
     super.dispose();
+  }
+
+  /// The internet is back. During a delivery the customer must see the courier again quickly:
+  /// load the orders first (this also renews an expired session), then reconnect the live
+  /// connection with the fresh token and send the latest position straight away.
+  Future<void> _backOnline() async {
+    if (!mounted) return;
+    // Opened without internet: nothing is known yet, start properly
+    if (!_meLoaded) return _init();
+    await _loadMine();
+    if (!mounted) return;
+    if (_online) {
+      final token = _auth.accessToken ?? '';
+      CourierSocketService().ensureConnected(token);
+      CourierTelemetryService().resume(token);
+    }
+    await Future.wait([_loadJobs(), _loadEarnings()]);
   }
 
   Future<void> _init() async {
     final me = await _api.get('/courier/me');
     if (!mounted) return;
+    _meLoaded = me.ok;
     final online = me.ok && me.data['courier']?['isOnline'] == true;
     setState(() => _online = online);
     if (online) await _startSharing();
@@ -402,9 +427,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     if (active != null) {
       return _empty(Icons.pedal_bike_rounded, tr(context, 'Finish your current delivery to take the next job.', 'Tee nykyinen toimitus loppuun ottaaksesi seuraavan keikan.'));
     }
-    if (!_online) {
-      return _empty(Icons.power_settings_new_rounded, tr(context, 'Go online to see jobs near you.', 'Mene linjoille nähdäksesi keikat lähelläsi.'));
-    }
+    if (!_online) return _goOnlinePrompt();
     final here = CourierTelemetryService().lastPosition;
     return RefreshIndicator(
       onRefresh: _loadJobs,
@@ -430,10 +453,12 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
                     Row(children: [
                       Text(euro(context, j['courierFeeCents'] ?? j['deliveryFeeCents']), style: AppTheme.display(size: 32)),
                       if ((asInt(j['tipCents']) ?? 0) > 0)
-                        Padding(
-                          padding: const EdgeInsets.only(left: 8),
+                        Container(
+                          margin: const EdgeInsets.only(left: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(12)),
                           child: Text('${tr(context, 'incl. tip', 'sis. tipin')} ${euro(context, j['tipCents'])}',
-                              style: const TextStyle(color: AppTheme.success, fontWeight: FontWeight.w800, fontSize: 13)),
+                              style: const TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w800, fontSize: 12.5)),
                         ),
                       const Spacer(),
                       Container(
@@ -457,15 +482,21 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
                         ]),
                       ),
                     ]),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 12),
+                    Row(children: [
+                      _distanceTile(Icons.storefront_outlined, tr(context, 'You → store', 'Sinä → kauppa'), toStore ?? '–'),
+                      const SizedBox(width: 8),
+                      _distanceTile(Icons.location_on_outlined, tr(context, 'Store → drop-off area', 'Kauppa → toimitusalue'), drop == null ? '–' : '~$drop'),
+                    ]),
+                    const SizedBox(height: 8),
                     Text(
-                      [
-                        if (toStore != null) '${tr(context, 'To store', 'Kauppaan')} $toStore',
-                        if (drop != null) '${tr(context, 'then', 'sitten')} ~$drop ${tr(context, 'to the customer', 'asiakkaalle')}',
-                      ].join(' · '),
-                      style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                      toStore == null
+                          ? tr(context, 'Distance to the store appears once your location is found. The exact address is shown after you accept.',
+                              'Etäisyys kauppaan näkyy, kun sijaintisi löytyy. Tarkka osoite näytetään hyväksynnän jälkeen.')
+                          : tr(context, 'Straight-line distances. The exact address is shown after you accept.',
+                              'Linnuntie-etäisyydet. Tarkka osoite näytetään hyväksynnän jälkeen.'),
+                      style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
                     ),
-                    Text(tr(context, 'The exact address is shown after you accept.', 'Tarkka osoite näytetään hyväksynnän jälkeen.'), style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
                     const SizedBox(height: 12),
                     SizedBox(width: double.infinity, height: 56, child: FilledButton(onPressed: () => _accept(j), child: Text(tr(context, 'Accept job', 'Ota keikka')))),
                   ]),
@@ -474,6 +505,58 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
             ),
     );
   }
+
+  Widget _distanceTile(IconData icon, String label, String value) => Expanded(
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          decoration: BoxDecoration(color: AppTheme.sand, borderRadius: BorderRadius.circular(14)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Icon(icon, size: 15, color: AppTheme.textSecondary),
+              const SizedBox(width: 4),
+              Expanded(child: Text(label, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary, fontWeight: FontWeight.w600))),
+            ]),
+            const SizedBox(height: 2),
+            Text(value, style: AppTheme.display(size: 20)),
+          ]),
+        ),
+      );
+
+  /// Offline couriers get no jobs: make going online the obvious next step.
+  Widget _goOnlinePrompt() => Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(32),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 96,
+              height: 96,
+              decoration: const BoxDecoration(color: AppTheme.sunshineLight, shape: BoxShape.circle),
+              child: const Icon(Icons.pedal_bike_rounded, size: 46, color: AppTheme.primary),
+            ),
+            const SizedBox(height: 18),
+            Text(tr(context, 'You are offline', 'Olet poissa linjoilta'), style: AppTheme.display(size: 24), textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            Text(
+              tr(context, 'Go online to get job offers near you. Your location is shared only while you are online.',
+                  'Mene linjoille saadaksesi keikkatarjouksia lähelläsi. Sijaintisi jaetaan vain, kun olet linjoilla.'),
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppTheme.textSecondary, height: 1.45),
+            ),
+            const SizedBox(height: 22),
+            SizedBox(
+              width: double.infinity,
+              height: 58,
+              child: FilledButton.icon(
+                onPressed: _switching ? null : _toggleOnline,
+                icon: _switching
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                    : const Icon(Icons.power_settings_new_rounded),
+                label: Text(tr(context, 'Go online', 'Mene linjoille'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+              ),
+            ),
+          ]),
+        ),
+      );
 
   Widget _deliveryTab(Map<String, dynamic>? o) {
     if (o == null) return _empty(Icons.inventory_2_outlined, tr(context, 'No delivery in progress.', 'Ei toimitusta käynnissä.'));
@@ -565,14 +648,19 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
   Widget _earningsTab() {
     final summary = (_earnings?['summary'] as Map?) ?? {};
     final delivered = _mine.where((o) => o['status'] == 'DELIVERED').toList();
-    final today = DateTime.now();
-    final todayCents = delivered
-        .where((o) {
-          final d = DateTime.tryParse('${o['deliveredAt']}')?.toLocal();
-          return d != null && d.year == today.year && d.month == today.month && d.day == today.day;
-        })
-        .fold<int>(0, (s, o) => s + (asInt(o['courierFeeCents']) ?? 0));
-    Widget stat(String label, dynamic cents, {bool highlight = false}) => Expanded(
+    final now = DateTime.now();
+    final weekAgo = now.subtract(const Duration(days: 7));
+    DateTime? deliveredAt(Map o) => DateTime.tryParse('${o['deliveredAt']}')?.toLocal();
+    final today = delivered.where((o) {
+      final d = deliveredAt(o);
+      return d != null && d.year == now.year && d.month == now.month && d.day == now.day;
+    }).toList();
+    int sum(Iterable<Map> list, String key) => list.fold<int>(0, (s, o) => s + (asInt(o[key]) ?? 0));
+    final todayCents = sum(today, 'courierFeeCents'); // the courier's pay already includes the tip
+    final todayTips = sum(today, 'tipCents');
+    final weekTips = sum(delivered.where((o) => deliveredAt(o)?.isAfter(weekAgo) ?? false), 'tipCents');
+
+    Widget stat(String label, String value, {String? sub, bool highlight = false}) => Expanded(
           child: Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -583,38 +671,73 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(label, style: TextStyle(fontSize: 12.5, color: highlight ? AppTheme.textPrimary : AppTheme.textSecondary, fontWeight: FontWeight.w600)),
               const SizedBox(height: 2),
-              Text(euro(context, cents), style: AppTheme.display(size: 22)),
+              Text(value, style: AppTheme.display(size: 22)),
+              if (sub != null) Text(sub, style: TextStyle(fontSize: 12, color: highlight ? AppTheme.textPrimary : AppTheme.textSecondary, fontWeight: FontWeight.w600)),
             ]),
           ),
         );
+    final waitingForAccount = asInt(summary['waitingForAccountCents']) ?? 0;
     return RefreshIndicator(
       onRefresh: () async => Future.wait([_loadEarnings(), _loadMine()]),
       child: ListView(padding: const EdgeInsets.all(16), children: [
         Row(children: [
-          stat(tr(context, 'Today', 'Tänään'), todayCents, highlight: true),
+          stat(tr(context, 'Today', 'Tänään'), euro(context, todayCents),
+              sub: todayTips > 0 ? '${tr(context, 'incl. tips', 'sis. tipit')} ${euro(context, todayTips)}' : null, highlight: true),
           const SizedBox(width: 10),
-          stat(tr(context, 'This week (paid)', 'Tällä viikolla'), summary['paidThisWeekCents']),
+          stat(tr(context, 'Deliveries today', 'Toimituksia tänään'), '${today.length}'),
         ]),
         const SizedBox(height: 10),
         Row(children: [
-          stat(tr(context, 'Paid out', 'Maksettu'), summary['paidCents']),
+          stat(tr(context, 'Tips today', 'Tipit tänään'), euro(context, todayTips)),
           const SizedBox(width: 10),
-          stat(tr(context, 'Waiting', 'Odottaa'), (asInt(summary['scheduledCents']) ?? 0) + (asInt(summary['waitingForAccountCents']) ?? 0)),
+          stat(tr(context, 'Tips, 7 days', 'Tipit, 7 pv'), euro(context, weekTips)),
         ]),
-        if ((asInt(summary['waitingForAccountCents']) ?? 0) > 0)
+        const SizedBox(height: 10),
+        Row(children: [
+          stat(tr(context, 'Paid this week', 'Maksettu tällä viikolla'), euro(context, summary['paidThisWeekCents'])),
+          const SizedBox(width: 10),
+          stat(tr(context, 'Waiting', 'Odottaa'), euro(context, (asInt(summary['scheduledCents']) ?? 0) + waitingForAccount)),
+        ]),
+        const SizedBox(height: 10),
+        Row(children: [
+          stat(tr(context, 'Paid out in total', 'Maksettu yhteensä'), euro(context, summary['paidCents'])),
+        ]),
+        if (waitingForAccount > 0)
           Padding(
             padding: const EdgeInsets.only(top: 10),
             child: Text(tr(context, 'Set up payouts to receive the money you have earned.', 'Ota tilitykset käyttöön saadaksesi ansaitsemasi rahat.'),
                 style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w600)),
           ),
         const SizedBox(height: 12),
-        FilledButton.icon(
-          onPressed: () async {
-            await Navigator.push(context, MaterialPageRoute(builder: (_) => const PayoutsScreen()));
-            _loadEarnings();
-          },
-          icon: const Icon(Icons.account_balance_outlined),
-          label: Text(tr(context, 'Payouts and bank details', 'Tilitykset ja pankkitiedot')),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.schedule_rounded, size: 20, color: Color(0xFF6A4500)),
+              const SizedBox(width: 8),
+              Expanded(child: Text(tr(context, 'When do I get paid?', 'Milloin saan rahat?'), style: AppTheme.display(size: 17, color: const Color(0xFF6A4500)))),
+            ]),
+            const SizedBox(height: 8),
+            Text(
+              tr(context,
+                  'You are paid after each delivery. Once payouts are set up, the pay for a delivery, including the whole tip, is sent to your Stripe account right after you hand it over (if Stripe is busy, it is retried within minutes). Stripe then moves it to your bank on your payout schedule, usually within a few working days (the very first payout can take longer). Money earned before you set up payouts waits safely and is sent as soon as setup is done.',
+                  'Saat maksun jokaisesta toimituksesta. Kun tilitykset on otettu käyttöön, toimituksen palkkio ja koko tippi lähetetään Stripe-tilillesi heti luovutuksen jälkeen (jos Stripe ei vastaa, yritetään uudelleen muutaman minuutin kuluttua). Stripe siirtää rahat pankkitilillesi maksuaikataulusi mukaan, yleensä muutaman arkipäivän kuluessa (ensimmäinen maksu voi kestää pidempään). Ennen käyttöönottoa ansaitut rahat odottavat tallessa ja lähetetään heti, kun käyttöönotto on valmis.'),
+              style: const TextStyle(color: Color(0xFF6A4500), height: 1.45, fontSize: 13.5),
+            ),
+          ]),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: () async {
+              await Navigator.push(context, MaterialPageRoute(builder: (_) => const PayoutsScreen()));
+              _loadEarnings();
+            },
+            icon: const Icon(Icons.account_balance_outlined),
+            label: Text(tr(context, 'Payouts and bank details', 'Tilitykset ja pankkitiedot')),
+          ),
         ),
         const SizedBox(height: 12),
         Container(
@@ -627,7 +750,10 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
           ListTile(
             contentPadding: EdgeInsets.zero,
             title: Text('${o['store']?['name'] ?? ''} · #${o['id']}'),
-            subtitle: Text(_when(o['deliveredAt'])),
+            subtitle: Text([
+              _when(o['deliveredAt']),
+              if ((asInt(o['tipCents']) ?? 0) > 0) '${tr(context, 'incl. tip', 'sis. tipin')} ${euro(context, o['tipCents'])}',
+            ].join(' · ')),
             trailing: Text(euro(context, o['courierFeeCents']), style: const TextStyle(fontWeight: FontWeight.w700)),
           ),
       ]),

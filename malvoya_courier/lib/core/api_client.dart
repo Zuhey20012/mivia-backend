@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../auth_service.dart';
 import '../config/constants.dart';
+import 'connectivity.dart';
 
 /// Result of an API call. [error] is always a sentence that can be shown to the user.
 class ApiResult {
@@ -58,6 +59,8 @@ class ApiClient {
     } on TimeoutException {
       return const ApiResult(0, {}, 'The server took too long to answer. Please try again.');
     } catch (_) {
+      // Lets the "No internet" strip appear even if the system did not report a network change
+      ConnectivityService.instance.verify();
       return const ApiResult(0, {}, 'Could not reach Malvoya. Check your connection and try again.');
     }
   }

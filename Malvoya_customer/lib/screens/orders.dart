@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -5,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
+import '../core/network_status.dart';
 import '../core/reorder.dart';
 import '../core/strings.dart';
 import '../services/socket_service.dart';
@@ -19,38 +21,97 @@ class OrdersScreen extends StatefulWidget {
   State<OrdersScreen> createState() => _OrdersScreenState();
 }
 
-class _OrdersScreenState extends State<OrdersScreen> {
+class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver {
   List<Map<String, dynamic>> _orders = [];
   bool _loading = true;
   String? _error;
+  Timer? _reloadSoon;
+  bool _inFlight = false;
+  bool _again = false;
+
+  /// Orders whose room this screen joined, so live status events reach the list.
+  final Set<int> _tracked = {};
 
   static const _active = ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED'];
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    NetworkStatus.instance.addListener(_onNetwork);
+    final socket = CustomerSocketService();
+    socket.addOrderStatusListener(_onOrderStatus);
+    socket.addReconnectListener(_reloadQuietly);
     _load();
-    CustomerSocketService().addListener(_onSocket);
   }
 
   @override
   void dispose() {
-    CustomerSocketService().removeListener(_onSocket);
+    WidgetsBinding.instance.removeObserver(this);
+    NetworkStatus.instance.removeListener(_onNetwork);
+    final socket = CustomerSocketService();
+    socket.removeOrderStatusListener(_onOrderStatus);
+    socket.removeReconnectListener(_reloadQuietly);
+    for (final id in _tracked) {
+      socket.stopTracking(id);
+    }
+    _reloadSoon?.cancel();
     super.dispose();
   }
 
-  void _onSocket() {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _reloadQuietly();
+  }
+
+  void _onNetwork() {
+    if (NetworkStatus.instance.online) _reloadQuietly();
+  }
+
+  void _onOrderStatus(Map<String, dynamic> data) {
+    // Several events can arrive together (paid, then accepted); one reload is enough
+    _reloadSoon?.cancel();
+    _reloadSoon = Timer(const Duration(milliseconds: 300), _reloadQuietly);
+  }
+
+  void _reloadQuietly() {
     if (mounted) _load(quiet: true);
   }
 
+  /// Joins the live room of every order that can still change, and leaves the others.
+  void _syncTracking(AuthService auth) {
+    final socket = CustomerSocketService();
+    final live = _orders
+        .where((o) => _active.contains(o['status']))
+        .map((o) => asInt(o['id']))
+        .whereType<int>()
+        .toSet();
+    if (live.isNotEmpty) socket.connect(auth.accessToken ?? '');
+    for (final id in live.difference(_tracked)) {
+      socket.trackOrder(id);
+    }
+    for (final id in _tracked.difference(live)) {
+      socket.stopTracking(id);
+    }
+    _tracked
+      ..clear()
+      ..addAll(live);
+  }
+
   Future<void> _load({bool quiet = false}) async {
+    if (_inFlight) {
+      _again = true;
+      return;
+    }
     final auth = Provider.of<AuthService>(context, listen: false);
     if (!auth.isAuthenticated) {
       setState(() => _loading = false);
       return;
     }
     if (!quiet) setState(() => _loading = true);
+    _inFlight = true;
     final res = await ApiClient(auth).get('/orders');
+    _inFlight = false;
     if (!mounted) return;
     setState(() {
       _loading = false;
@@ -61,10 +122,16 @@ class _OrdersScreenState extends State<OrdersScreen> {
             .where((o) => !(o['status'] == 'CANCELLED' && o['paymentStatus'] == 'PENDING'))
             .toList();
         _error = null;
-      } else {
-        _error = res.error;
+      } else if (!quiet || _orders.isEmpty) {
+        // A failed background refresh keeps the list that is already on screen
+        _error = res.errorText(context);
       }
     });
+    if (res.ok) _syncTracking(auth);
+    if (_again) {
+      _again = false;
+      _load(quiet: true);
+    }
   }
 
   @override
@@ -91,7 +158,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
           : _loading
               ? const Center(child: CircularProgressIndicator())
               : RefreshIndicator(
-                  onRefresh: _load,
+                  onRefresh: () => _load(quiet: true),
                   child: _error != null
                       ? ListView(children: [_empty(Icons.wifi_off_rounded, _error!)])
                       : _orders.isEmpty
@@ -189,7 +256,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                   Text(o['store']?['name'] ?? '', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppTheme.primaryText(context))),
                   const SizedBox(height: 2),
                   Text(
-                    '${tr(context, '$count item(s)', '$count tuote(tta)')} · ${euro(context, o['totalCents'])}'
+                    '${count == 1 ? tr(context, '1 item', '1 tuote') : tr(context, '$count items', '$count tuotetta')} · ${euro(context, o['totalCents'])}'
                     '${created != null ? ' · ${created.day}.${created.month}.' : ''}',
                     style: TextStyle(fontSize: 13, color: AppTheme.secondaryText(context)),
                   ),

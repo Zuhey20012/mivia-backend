@@ -1,5 +1,7 @@
-// End-to-end test for API v2.5 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
-const { execSync } = require("child_process");
+// End-to-end test for API v2.6 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
+const { execSync, spawn } = require("child_process");
+const fs = require("fs");
+const path = require("path");
 const crypto = require("crypto");
 const { io } = require("socket.io-client");
 
@@ -17,8 +19,8 @@ function sql(q) {
   return execSync(`docker exec -i malvoya-test-db psql -U postgres -d malvoya_test -tA`, { input: q }).toString().trim();
 }
 let ipSeq = 1;
-async function call(method, path, body, token, raw) {
-  const res = await fetch(`${API}${path}`, {
+async function callAt(api, method, path, body, token, raw) {
+  const res = await fetch(`${api}${path}`, {
     method,
     headers: {
       "Content-Type": "application/json",
@@ -33,6 +35,28 @@ async function call(method, path, body, token, raw) {
   try { json = await res.json(); } catch {}
   return { status: res.status, body: json };
 }
+const call = (...args) => callAt(API, ...args);
+
+// A second API instance with the fee levers switched on (same database), started for the fee checks only
+const testEnv = Object.fromEntries(fs.readFileSync(path.join(__dirname, "test.env"), "utf8").split(/\r?\n/)
+  .filter((l) => l && !l.startsWith("#") && l.includes("="))
+  .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]));
+const FEE_BASE = "http://localhost:4556";
+const FEE_API = `${FEE_BASE}/api/v1`;
+let feeApi = null;
+async function startFeeApi(extraEnv) {
+  feeApi = spawn(process.execPath, ["dist/index.js"], {
+    cwd: path.join(__dirname, "..", ".."),
+    env: { ...process.env, ...testEnv, PORT: "4556", PUBLIC_API_URL: FEE_BASE, DISABLE_SCHEDULER: "true", ...extraEnv },
+    stdio: "ignore",
+  });
+  for (let i = 0; i < 60; i++) {
+    try { if ((await fetch(`${FEE_BASE}/health`)).ok) return true; } catch {}
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
+}
+process.on("exit", () => { if (feeApi) feeApi.kill(); });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function connect(token) {
   return new Promise((resolve) => {
@@ -466,6 +490,11 @@ async function register(name, role, extra = {}) {
   console.log("\n— Returns, refunds and GDPR");
   const ret = await call("POST", "/returns", { orderId, reason: "CHANGED_MIND" }, tokenA);
   check("customer starts a return within 14 days of delivery", ret.status === 201, ret.body);
+  // Make the store payout due and let the payout job run (the admin retry runs the same job)
+  const storePayoutId = sql(`select id from "Payout" where "orderId"=${orderId} and party='STORE'`);
+  sql(`update "Payout" set status='FAILED', "releaseAt"=now() - interval '1 day' where id=${storePayoutId}`);
+  await call("POST", `/admin/payouts/${storePayoutId}/retry`, null, adminToken);
+  check("store is not paid while a return is open", sql(`select status from "Payout" where id=${storePayoutId}`) === "SCHEDULED");
   const vendorReturns = await call("GET", "/returns", null, vendor.accessToken);
   check("store sees returns of its orders", vendorReturns.body.returns?.some((r) => r.id === ret.body.return.id), vendorReturns.body);
   check("outsider cannot process the return", (await call("PATCH", `/returns/${ret.body.return.id}/status`, { status: "APPROVED" }, otherVendor.accessToken)).status === 403);
@@ -549,6 +578,140 @@ async function register(name, role, extra = {}) {
   check("apps learn whether their build is still supported", cfg.status === 200 && cfg.body.updateRequired === false && cfg.body.maintenance?.active === false && cfg.body.storeUrl.includes("com.malvoya.customer"), cfg.body);
   check("app config rejects unknown apps", (await call("GET", "/app-config?app=evil")).status === 400);
 
+  console.log("\n— Fees, exact quotes and promo codes");
+  sql(`update "Product" set "stockQuantity"=50 where id=${productId}`);
+  const MONEY = ["subtotalCents", "deliveryFeeCents", "serviceFeeCents", "smallOrderFeeCents", "discountCents", "tipCents", "totalCents"];
+  const sameMoney = (q, o) => !!q && !!o && MONEY.every((k) => q[k] === o[k]);
+  const stockOf = (id) => Number(sql(`select "stockQuantity" from "Product" where id=${id}`));
+  const addr = "Aleksanterinkatu 5, Helsinki";
+  const quoteBody = { storeId, deliveryLat: 60.18, deliveryLng: 24.95, items: [{ productId, quantity: 1 }], tipCents: 150 };
+  const quote = (body, tok, api = API) => callAt(api, "POST", "/orders/quote", body, tok);
+  const order = (body, tok, api = API) => callAt(api, "POST", "/orders", { deliveryAddress: addr, ...body }, tok);
+  const payOrder = (o) => call("POST", "/payments/webhook", null, null, signedWebhook({
+    id: `evt_promo_${o.id}_${uniq}`, type: "payment_intent.succeeded",
+    data: { object: { id: o.stripePaymentIntentId, amount_received: o.totalCents, metadata: { type: "ORDER", orderId: String(o.id) } } },
+  }));
+
+  const sysDefault = (await call("GET", "/admin/system", null, adminToken)).body;
+  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.6.0", sysDefault.pricing);
+  const stockBeforeQuote = stockOf(productId);
+  const ordersBeforeQuote = sql(`select count(*) from "Order" where "userId"=${otherCust.user.id}`);
+  const q0 = await quote(quoteBody, otherCust.accessToken);
+  const qq = q0.body?.quote;
+  check("quote: exact total with no extra fees by default", q0.status === 200 && qq.serviceFeeCents === 0 && qq.smallOrderFeeCents === 0 && qq.smallOrderThresholdCents === 0 && qq.discountCents === 0 && qq.promo === null && qq.promoError === null && qq.totalCents === 5000 + qq.deliveryFeeCents + 150 && qq.deliveryFeeCents === fee, q0.body);
+  check("quote says whether the store is open", qq?.store?.openNow === true && qq.store.closedReason === null && "opensAt" in qq.store, qq?.store);
+  check("a quote reserves no stock and creates no order", stockOf(productId) === stockBeforeQuote && sql(`select count(*) from "Order" where "userId"=${otherCust.user.id}`) === ordersBeforeQuote);
+  const o0 = await order(quoteBody, otherCust.accessToken);
+  check("the order charges exactly the quoted price", o0.status === 201 && sameMoney(qq, o0.body.order) && o0.body.order.promoCodeId === null, [qq, o0.body.order]);
+  check("quote needs a signed-in customer", (await quote(quoteBody)).status === 401 && (await quote(quoteBody, vendor.accessToken)).status === 403);
+  const badItemQ = await quote({ ...quoteBody, items: [{ productId: 999999, quantity: 1 }] }, otherCust.accessToken);
+  const badItemO = await order({ ...quoteBody, items: [{ productId: 999999, quantity: 1 }] }, otherCust.accessToken);
+  check("quote refuses unknown items like checkout does", badItemQ.status === 400 && badItemQ.status === badItemO.status && badItemQ.body.error === badItemO.body.error, [badItemQ.body, badItemO.body]);
+  check("quote refuses more than the stock like checkout does", (await quote({ ...quoteBody, items: [{ productId, quantity: 20 }, { productId, quantity: 20 }, { productId, quantity: 20 }] }, otherCust.accessToken)).status === 400);
+  check("quote for an unknown store is 404", (await quote({ ...quoteBody, storeId: 999999 }, otherCust.accessToken)).status === 404);
+
+  console.log("\n— Promo codes (admin)");
+  const mkPromo = (body, tok = adminToken) => call("POST", "/admin/promo-codes", body, tok);
+  check("promo codes need a signed-in admin", (await call("GET", "/admin/promo-codes")).status === 401);
+  check("customers cannot list, create or change promo codes", (await call("GET", "/admin/promo-codes", null, otherCust.accessToken)).status === 403 && (await mkPromo({ code: `HACK${uniq}`, description: "free stuff", kind: "PERCENT", value: 100 }, otherCust.accessToken)).status === 403 && (await call("PATCH", "/admin/promo-codes/1", { active: true }, vendor.accessToken)).status === 403);
+  const ten = await mkPromo({ code: `ten-${uniq}`, description: "10 % off", kind: "PERCENT", value: 10 });
+  check("admin creates a code; it is stored in capitals", ten.status === 201 && ten.body.promoCode.code === `TEN-${uniq}` && ten.body.promoCode.perUserLimit === 1 && ten.body.promoCode.active === true, ten.body);
+  check("codes are unique (any case)", (await mkPromo({ code: `Ten-${uniq}`, description: "again", kind: "AMOUNT", value: 100 })).status === 409);
+  check("a percentage above 100 is refused", (await mkPromo({ code: `BAD-${uniq}`, description: "bad one", kind: "PERCENT", value: 150 })).status === 400);
+
+  console.log("\n— Promo codes at checkout");
+  const pirjo = await register("Pirjo");
+  const qTen = (await quote({ ...quoteBody, promoCode: ` ten-${uniq} ` }, pirjo.accessToken)).body.quote;
+  check("percentage code: 10 % of the items off, shown with its description", qTen?.discountCents === 500 && qTen.totalCents === 5000 + fee + 150 - 500 && qTen.promo?.code === `TEN-${uniq}` && qTen.promo?.description === "10 % off" && qTen.promoError === null, qTen);
+  const oTen = await order({ ...quoteBody, promoCode: `TEN-${uniq}` }, pirjo.accessToken);
+  const ot = oTen.body.order;
+  check("an order with a code charges the quoted price", oTen.status === 201 && sameMoney(qTen, ot) && ot.promoCodeId === ten.body.promoCode.id && ot.promoCode?.code === `TEN-${uniq}`, oTen.body);
+  check("Malvoya pays the discount: store and courier pay are not reduced", ot?.commissionCents === 500 && ot?.sellerPayoutCents === 4500 && ot?.courierFeeCents === fee + 150, ot);
+  check("an unpaid order does not use the code up", sql(`select count(*) from "PromoRedemption" where "promoCodeId"=${ten.body.promoCode.id}`) === "0");
+  check("an unknown code is reported, the quote still works", (await quote({ ...quoteBody, promoCode: "NOPE-NOPE" }, pirjo.accessToken)).body.quote?.promoError?.includes("not valid"));
+
+  const seven = await mkPromo({ code: `SEVEN-${uniq}`, description: "7 € off from 60 €", kind: "AMOUNT", value: 700, minSubtotalCents: 6000 });
+  const qLow = await quote({ ...quoteBody, promoCode: `SEVEN-${uniq}` }, pirjo.accessToken);
+  check("amount code below its minimum: no discount and a readable reason", seven.status === 201 && qLow.status === 200 && qLow.body.quote.discountCents === 0 && qLow.body.quote.promo === null && /60,00/.test(qLow.body.quote.promoError || ""), qLow.body);
+  const qHigh = (await quote({ ...quoteBody, items: [{ productId, quantity: 2 }], promoCode: `SEVEN-${uniq}` }, pirjo.accessToken)).body.quote;
+  check("amount code at or above its minimum takes the amount off", qHigh?.discountCents === 700 && qHigh.totalCents === 10000 + fee + 150 - 700, qHigh);
+  const stockBeforeRefused = stockOf(productId);
+  const oLow = await order({ ...quoteBody, promoCode: `SEVEN-${uniq}` }, pirjo.accessToken);
+  check("checkout refuses a code that does not apply (409), and takes no stock", oLow.status === 409 && /60,00/.test(oLow.body.error || "") && stockOf(productId) === stockBeforeRefused, oLow.body);
+
+  const yesterday = new Date(Date.now() - 86_400_000).toISOString();
+  const tomorrow = new Date(Date.now() + 86_400_000).toISOString();
+  await mkPromo({ code: `OLD-${uniq}`, description: "Summer sale", kind: "PERCENT", value: 20, endsAt: yesterday });
+  check("an expired code gives no discount", /expired/.test((await quote({ ...quoteBody, promoCode: `OLD-${uniq}` }, pirjo.accessToken)).body.quote?.promoError || ""));
+  const oOld = await order({ ...quoteBody, promoCode: `OLD-${uniq}` }, pirjo.accessToken);
+  check("checkout refuses an expired code with a readable error", oOld.status === 409 && /expired/.test(oOld.body.error || ""), oOld.body);
+  await mkPromo({ code: `SOON-${uniq}`, description: "Starts tomorrow", kind: "PERCENT", value: 20, startsAt: tomorrow });
+  check("a code that has not started gives no discount", /not active yet/.test((await quote({ ...quoteBody, promoCode: `SOON-${uniq}` }, pirjo.accessToken)).body.quote?.promoError || ""));
+  const off = await call("PATCH", `/admin/promo-codes/${ten.body.promoCode.id}`, { active: false }, adminToken);
+  check("admin deactivates a code; it stops working", off.status === 200 && off.body.promoCode.active === false && /not valid/.test((await quote({ ...quoteBody, promoCode: `TEN-${uniq}` }, pirjo.accessToken)).body.quote?.promoError || ""), off.body);
+  await call("PATCH", `/admin/promo-codes/${ten.body.promoCode.id}`, { active: true }, adminToken);
+
+  const first = await mkPromo({ code: `FIRST-${uniq}`, description: "5 € off your first order", kind: "AMOUNT", value: 500, firstOrderOnly: true });
+  check("first-order code works for a new customer", (await quote({ ...quoteBody, promoCode: `FIRST-${uniq}` }, pirjo.accessToken)).body.quote?.discountCents === 500);
+  check("first-order code is refused for a customer with paid orders", /first order/.test((await quote({ ...quoteBody, promoCode: `FIRST-${uniq}` }, otherCust.accessToken)).body.quote?.promoError || ""));
+
+  const once = await mkPromo({ code: `ONCE-${uniq}`, description: "3 € off, one use", kind: "AMOUNT", value: 300, maxRedemptions: 1 });
+  const oOnce = (await order({ ...quoteBody, promoCode: `ONCE-${uniq}` }, pirjo.accessToken)).body.order;
+  check("an order with a limited code is created", oOnce?.discountCents === 300, oOnce);
+  check("paying the order uses the code (once, even if Stripe repeats itself)", (await payOrder(oOnce)).status === 200 && (await payOrder(oOnce)).status === 200 && sql(`select count(*) || '|' || sum("discountCents") from "PromoRedemption" where "promoCodeId"=${once.body.promoCode.id}`) === "1|300");
+  check("a code with no uses left is used up for everyone", /run out/.test((await quote({ ...quoteBody, promoCode: `ONCE-${uniq}` }, otherCust.accessToken)).body.quote?.promoError || "") && (await order({ ...quoteBody, promoCode: `ONCE-${uniq}` }, otherCust.accessToken)).status === 409);
+  check("after the first paid order the first-order code no longer applies", /first order/.test((await quote({ ...quoteBody, promoCode: `FIRST-${uniq}` }, pirjo.accessToken)).body.quote?.promoError || ""));
+  const cancelOnce = await call("POST", `/orders/${oOnce.id}/cancel`, null, pirjo.accessToken);
+  check("cancelling before delivery gives the code back", cancelOnce.status === 200 && sql(`select count(*) from "PromoRedemption" where "promoCodeId"=${once.body.promoCode.id}`) === "0" && (await quote({ ...quoteBody, promoCode: `ONCE-${uniq}` }, otherCust.accessToken)).body.quote?.discountCents === 300, cancelOnce.body);
+  check("a cancelled order does not count as a first order", (await quote({ ...quoteBody, promoCode: `FIRST-${uniq}` }, pirjo.accessToken)).body.quote?.discountCents === 500);
+
+  const twice = await mkPromo({ code: `PERUSER-${uniq}`, description: "2 € off", kind: "AMOUNT", value: 200 });
+  const oTw = (await order({ ...quoteBody, promoCode: `PERUSER-${uniq}` }, pirjo.accessToken)).body.order;
+  await payOrder(oTw);
+  check("each customer can use a code once by default", /already used/.test((await quote({ ...quoteBody, promoCode: `PERUSER-${uniq}` }, pirjo.accessToken)).body.quote?.promoError || "") && (await quote({ ...quoteBody, promoCode: `PERUSER-${uniq}` }, otherCust.accessToken)).body.quote?.discountCents === 200);
+  const listP = await call("GET", "/admin/promo-codes", null, adminToken);
+  const lp = listP.body.promoCodes?.find((p) => p.id === twice.body.promoCode.id);
+  check("admin list shows how often a code was used and the discount given", listP.status === 200 && lp?.redemptionCount === 1 && lp?.discountGivenCents === 200, lp);
+  const ended = await call("PATCH", `/admin/promo-codes/${twice.body.promoCode.id}`, { endsAt: yesterday }, adminToken);
+  check("admin ends a campaign; paid orders keep their discount", ended.status === 200 && /expired/.test((await quote({ ...quoteBody, promoCode: `PERUSER-${uniq}` }, otherCust.accessToken)).body.quote?.promoError || "") && sql(`select "discountCents" from "Order" where id=${oTw.id}`) === "200");
+  check("changing an unknown code is 404", (await call("PATCH", "/admin/promo-codes/999999", { active: false }, adminToken)).status === 404);
+
+  const socks = (await call("POST", "/products", { name: "Wool socks", category: "Socks", salePriceCents: 100, stockQuantity: 20, images: [ownImage(storeId, "socks")] }, vendor.accessToken)).body.product;
+  await mkPromo({ code: `BIG-${uniq}`, description: "1000 € off", kind: "AMOUNT", value: 100000 });
+  const qBig = (await quote({ ...quoteBody, tipCents: 0, items: [{ productId: socks.id, quantity: 1 }], promoCode: `BIG-${uniq}` }, otherCust.accessToken)).body.quote;
+  check("a discount never exceeds the item subtotal", qBig?.discountCents === 100 && qBig.totalCents === qBig.deliveryFeeCents && qBig.totalCents >= 50, qBig);
+  // The 0,50 € floor only bites when delivery is below 0,50 €, which the API never charges: check the engine directly
+  Object.assign(process.env, testEnv);
+  const engine = require(path.join(__dirname, "..", "..", "dist", "utils", "pricing.js"));
+  const zeroFees = { serviceFeePercent: 0, serviceFeeMinCents: 0, serviceFeeMaxCents: 0, smallOrderThresholdCents: 0, smallOrderFeeCents: 0 };
+  const floor = engine.calcCheckoutPricing({ subtotalCents: 100, commissionRate: 0.1, deliveryFeeCents: 0, promo: { kind: "AMOUNT", value: 1000, maxDiscountCents: null }, config: zeroFees, courierFeeShare: 1 });
+  check("a discount never takes the charge below 0,50 € (Stripe minimum)", floor.discountCents === 50 && floor.totalCents === 50 && floor.commissionCents === 10 && floor.sellerPayoutCents === 90, floor);
+  const capped = engine.calcCheckoutPricing({ subtotalCents: 20000, commissionRate: 0.1, deliveryFeeCents: 190, promo: { kind: "PERCENT", value: 50, maxDiscountCents: 1500 }, config: zeroFees, courierFeeShare: 1 });
+  check("a percentage code respects its maximum discount", capped.discountCents === 1500 && capped.totalCents === 20000 + 190 - 1500, capped);
+
+  console.log("\n— Fees switched on (second API instance with fee env vars)");
+  const feeUp = await startFeeApi({ SERVICE_FEE_PERCENT: "5", SERVICE_FEE_MIN_CENTS: "49", SERVICE_FEE_MAX_CENTS: "300", SMALL_ORDER_THRESHOLD_CENTS: "6000", SMALL_ORDER_FEE_CENTS: "150" });
+  check("API starts with fee settings", feeUp);
+  const qF = (await quote({ ...quoteBody, tipCents: 0 }, otherCust.accessToken, FEE_API)).body.quote;
+  check("service fee (5 %) and small-order fee are added below the threshold", qF?.serviceFeeCents === 250 && qF.smallOrderFeeCents === 150 && qF.smallOrderThresholdCents === 6000 && qF.totalCents === 5000 + fee + 250 + 150, qF);
+  const oF = await order({ ...quoteBody, tipCents: 0 }, otherCust.accessToken, FEE_API);
+  check("the order with fees charges exactly the quoted price; fees are Malvoya's, not the store's", oF.status === 201 && sameMoney(qF, oF.body.order) && oF.body.order.commissionCents === 500 && oF.body.order.sellerPayoutCents === 4500 && oF.body.order.courierFeeCents === fee, oF.body);
+  const qF2 = (await quote({ ...quoteBody, tipCents: 0, items: [{ productId, quantity: 2 }] }, otherCust.accessToken, FEE_API)).body.quote;
+  check("service fee is capped at its maximum; no small-order fee above the threshold", qF2?.serviceFeeCents === 300 && qF2.smallOrderFeeCents === 0, qF2);
+  const qF3 = (await quote({ ...quoteBody, tipCents: 0, items: [{ productId: socks.id, quantity: 1 }] }, otherCust.accessToken, FEE_API)).body.quote;
+  check("service fee has its minimum", qF3?.serviceFeeCents === 49 && qF3.smallOrderFeeCents === 150, qF3);
+  const qF4 = (await quote({ ...quoteBody, promoCode: `TEN-${uniq}` }, otherCust.accessToken, FEE_API)).body.quote;
+  check("fees, tip and promo together add up", qF4?.discountCents === 500 && qF4.totalCents === 5000 + fee + 250 + 150 + 150 - 500, qF4);
+  const sysF = (await callAt(FEE_API, "GET", "/admin/system", null, adminToken)).body;
+  check("system status shows the fee settings in use", sysF.pricing?.serviceFeePercent === 5 && sysF.pricing?.serviceFeeMaxCents === 300 && sysF.pricing?.smallOrderFeeCents === 150, sysF.pricing);
+  check("paying an order with fees works (the webhook checks the exact amount)", (await payOrder(oF.body.order)).status === 200 && sql(`select "paymentStatus" from "Order" where id=${oF.body.order.id}`) === "SUCCEEDED");
+  feeApi.kill();
+  feeApi = null;
+
+  const rev = (await call("GET", "/admin/stats", null, adminToken)).body.stats;
+  check("admin stats show Malvoya's revenue", rev.serviceFeeCents >= 250 && rev.smallOrderFeeCents >= 150 && rev.discountCents >= 200 && rev.commissionCents > 0 && rev.netPlatformRevenueCents === rev.commissionCents + rev.serviceFeeCents + rev.smallOrderFeeCents + rev.deliveryMarginCents - rev.discountCents, rev);
+  check("tips are not counted as Malvoya's delivery margin", rev.deliveryMarginCents === 0, rev.deliveryMarginCents);
+
   console.log("\n— Launch alerts and system status");
   check("launch alert needs a location", (await call("PUT", "/me/launch-alert", { area: "Tampere" }, otherCust.accessToken)).status === 400);
   check("launch alert needs a signed-in user", (await call("PUT", "/me/launch-alert", { latitude: 61.4978, longitude: 23.761 })).status === 401);
@@ -577,7 +740,7 @@ async function register(name, role, extra = {}) {
   check("huge search input rejected", (await call("GET", `/products/search?q=${"a".repeat(200)}`)).status === 400);
   const cors = await fetch(`${API}/stores`, { headers: { Origin: "https://evil.example" } });
   check("CORS does not allow unknown origins", !cors.headers.get("access-control-allow-origin"));
-  check("health reports v2.5.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.5.0");
+  check("health reports v2.6.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.6.0");
 
   [vendorSock, custSock, otherSock, c1Sock, c2Sock].forEach((s) => s.close());
   console.log(`\n${pass} passed, ${fail} failed`);

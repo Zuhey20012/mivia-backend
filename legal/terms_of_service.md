@@ -25,6 +25,8 @@ Malvoya arranges payment and local delivery by independent couriers.
 
 - All prices are in euros and include VAT where the seller is VAT-registered.
 - The total price, including the delivery fee, is shown before you pay.
+- Malvoya may charge a service fee or a small-order fee (for orders below a set amount). Any such fee is shown as its own line, and included in the total, before you pay. You never pay more than the total shown at checkout.
+- **Promo codes.** A promo code gives the discount described with it, under its stated conditions (for example a minimum order or first order only). Unless the code says otherwise, each customer can use a code once. A code cannot be exchanged for cash. Malvoya pays the discount; the seller and the courier are paid in full. Malvoya can end a campaign at any time, but a discount on an order you have already paid is honoured. If your order is cancelled before delivery, you can use the code again.
 - You can add an optional tip for the courier at checkout. The whole tip goes to the courier. If the order is cancelled, the tip is refunded with the rest of the payment.
 - Payment is processed by Stripe. The order is confirmed only after the payment has been confirmed.
 - Malvoya never sees your card or bank details.
@@ -47,7 +49,7 @@ You can cancel an order in the app until the store accepts it. The full amount i
 
 - You may withdraw from a purchase within **14 days of receiving the item**, without giving a reason (Consumer Protection Act, chapter 6).
 - Start the return in the app (Profile → Returns) or send an unambiguous statement to [support@malvoya.com].
-- We refund the price and the original standard delivery fee within 14 days of receiving your withdrawal. The refund goes to your original payment method.
+- We refund the price and the original standard delivery fee (and any service or small-order fee, less a promo discount) within 14 days of receiving your withdrawal. The refund goes to your original payment method.
 - A refund may be delayed until the item has been received back.
 - You pay the cost of returning the item unless the seller has agreed otherwise [OR: "Malvoya arranges and pays for courier pick-up"].
 - A deduction may be made only if the item has lost value because it was handled beyond what is necessary to establish its nature, characteristics and functioning. Any deduction is explained to you in writing.

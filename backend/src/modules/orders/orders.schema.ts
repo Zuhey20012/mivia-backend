@@ -8,12 +8,17 @@ export const createOrderSchema = z.object({
   notes:           z.string().max(500).optional(),
   // Optional courier tip in cents (max 20 €); it is added to the total and paid to the courier in full
   tipCents:        z.number().int().min(0).max(2000).optional(),
+  // Optional promo code (platform-funded discount); an unusable code is refused with 409
+  promoCode:       z.string().trim().max(40).optional(),
   items: z.array(z.object({
     productId: z.number().int().positive(),
     variantId: z.number().int().positive().optional(),
     quantity:  z.number().int().min(1).max(20),
   })).min(1).max(50),
 });
+
+// Exact price before payment: the same basket as an order, without the address
+export const quoteOrderSchema = createOrderSchema.omit({ deliveryAddress: true, notes: true });
 
 export const createRentalSchema = z.object({
   startDate: z.string().datetime(),

@@ -5,6 +5,7 @@ import { mediaConfigured } from "../../lib/cloudinary";
 import { pushConfigured } from "../../lib/push";
 import { sendError } from "../../lib/errors";
 import { storeAvailability } from "../../utils/openingHours";
+import { MIN_CHARGE_CENTS } from "../../utils/pricing";
 import { appConfigSummary } from "../appConfig/appConfig.routes";
 
 const startedAt = new Date();
@@ -76,7 +77,7 @@ export async function getSystemStatus(_req: Request, res: Response) {
 
     res.json({
       ok: true,
-      version: "2.5.0",
+      version: "2.6.0",
       region: "frankfurt",
       startedAt,
       readyForOrders: blockers.length === 0,
@@ -90,6 +91,12 @@ export async function getSystemStatus(_req: Request, res: Response) {
       },
       ordersInFlight: { waitingForStore, waitingForCourier },
       timers: t,
+      // Fee levers (0 = off). Changed with env vars on Render; promo codes live under /admin/promo-codes.
+      pricing: {
+        ...env.pricing,
+        courierFeeShare: env.courierFeeShare,
+        minChargeCents: MIN_CHARGE_CENTS,
+      },
       apps: appConfigSummary(),
       backgroundJobs: jobs.map((j) => ({ name: j.name, lastRunAt: j.lastRunAt })),
     });

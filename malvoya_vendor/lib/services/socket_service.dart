@@ -20,6 +20,8 @@ class VendorSocketService extends ChangeNotifier {
     final baseUrl = AppConstants.apiBase.replaceAll('/api/v1', '');
     _socket = io.io(baseUrl, io.OptionBuilder()
         .setTransports(['websocket'])
+        // A fresh manager each time, so a new sign-in token is really used (the client caches sockets per host)
+        .enableForceNew()
         .setAuth({'token': accessToken})
         .enableAutoConnect()
         .enableReconnection()
@@ -58,6 +60,17 @@ class VendorSocketService extends ChangeNotifier {
       debugPrint('[VendorSocket] Order status update: $data');
       notifyListeners();
     });
+  }
+
+  /// After the internet comes back: reconnect with the current token if the live connection is down
+  /// (automatic reconnection gives up after 10 tries and would reuse an expired token).
+  void ensureConnected(String accessToken) {
+    if (_socket != null && _connected) return;
+    if (_socket != null) {
+      _socket!.dispose();
+      _socket = null;
+    }
+    connect(accessToken);
   }
 
   void joinStoreRoom(dynamic storeId) {

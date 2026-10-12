@@ -3,9 +3,11 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
+import '../core/connectivity.dart';
 import '../core/legal_links.dart';
 import '../core/strings.dart';
 import '../core/google_link_tile.dart';
@@ -50,9 +52,21 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     WidgetsBinding.instance.addObserver(this);
     // Safety net if the live connection drops: look for new orders every 30 s while open
     _poll = Timer.periodic(const Duration(seconds: 30), (_) => _loadOrders());
+    // Keeps "Waiting 4 min" on new orders current, even while offline
+    _tick = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (mounted && _orders.any(_isWaiting)) setState(() {});
+    });
+    // Back online: reconnect the live connection with a fresh token and catch up on orders
+    _restored = ConnectivityService.instance.onRestored.listen((_) {
+      if (!mounted) return;
+      VendorSocketService().ensureConnected(Provider.of<AuthService>(context, listen: false).accessToken ?? '');
+      _load();
+    });
   }
 
   Timer? _poll;
+  Timer? _tick;
+  StreamSubscription<void>? _restored;
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -62,6 +76,8 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
   @override
   void dispose() {
     _poll?.cancel();
+    _tick?.cancel();
+    _restored?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     PushService.instance.stopRinging();
     VendorSocketService().removeListener(_onSocket);
@@ -86,6 +102,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       _error = res.ok ? null : res.error;
       if (res.ok) _store = Map<String, dynamic>.from(res.data['store']);
     });
+    if (res.ok) _loadNormalPrep();
     await _loadOrders();
   }
 
@@ -105,6 +122,110 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       return;
     }
     await _load();
+  }
+
+  // ── Busy mode: preparation time ──────────────────────────────────────────
+  // Customers' delivery estimates include the store's preparation time. "+10 min" remembers the
+  // usual time on this phone so "Back to normal" can restore it.
+
+  bool _savingPrep = false;
+  int? _normalPrep;
+
+  int get _prep => asInt(_store?['prepMinutes']) ?? 10;
+  String get _prepKey => 'prep_normal_${_store?['id']}';
+
+  Future<void> _loadNormalPrep() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      var normal = prefs.getInt(_prepKey);
+      // Changed elsewhere (e.g. in store details) to the usual time or less: not busy any more
+      if (normal != null && _prep <= normal) {
+        await prefs.remove(_prepKey);
+        normal = null;
+      }
+      if (mounted) setState(() => _normalPrep = normal);
+    } catch (_) {}
+  }
+
+  Future<void> _setPrep(int minutes, {required bool busy}) async {
+    final id = asInt(_store?['id']);
+    if (id == null || _savingPrep) return;
+    HapticFeedback.selectionClick();
+    final before = _prep;
+    final normalBefore = _normalPrep;
+    setState(() {
+      _savingPrep = true;
+      _store!['prepMinutes'] = minutes;
+      _normalPrep = busy ? (normalBefore ?? before) : null;
+    });
+    final res = await _api.patch('/stores/$id', {'prepMinutes': minutes});
+    if (!mounted) return;
+    if (!res.ok) {
+      setState(() {
+        _savingPrep = false;
+        _store!['prepMinutes'] = before;
+        _normalPrep = normalBefore;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.error ?? tr(context, 'Could not change it', 'Muutos epäonnistui'))));
+      return;
+    }
+    setState(() => _savingPrep = false);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (_normalPrep == null) {
+        await prefs.remove(_prepKey);
+      } else {
+        await prefs.setInt(_prepKey, _normalPrep!);
+      }
+    } catch (_) {}
+  }
+
+  Widget _prepRow(Color fg) {
+    final busy = _normalPrep != null && _prep > _normalPrep!;
+    final pill = ButtonStyle(
+      minimumSize: const WidgetStatePropertyAll(Size(0, 40)),
+      padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 14)),
+      visualDensity: VisualDensity.compact,
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(busy ? Icons.local_fire_department_rounded : Icons.timer_outlined, size: 18, color: fg),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              busy
+                  ? tr(context, 'Busy — preparation time $_prep min', 'Kiire — valmisteluaika $_prep min')
+                  : tr(context, 'Preparation time $_prep min', 'Valmisteluaika $_prep min'),
+              style: TextStyle(fontWeight: FontWeight.w700, color: fg),
+            ),
+          ),
+          if (_savingPrep) SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: fg)),
+        ]),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          FilledButton.tonal(
+            style: pill,
+            onPressed: _savingPrep || _prep >= 120 ? null : () => _setPrep((_prep + 10).clamp(0, 120), busy: true),
+            child: const Text('+10 min'),
+          ),
+          if (busy)
+            OutlinedButton(
+              style: pill,
+              onPressed: _savingPrep ? null : () => _setPrep(_normalPrep!, busy: false),
+              child: Text(tr(context, 'Back to normal (${_normalPrep!} min)', 'Takaisin normaaliin (${_normalPrep!} min)')),
+            ),
+        ]),
+        if (busy)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(tr(context, 'Customers see longer delivery times while you are busy.', 'Asiakkaat näkevät pidemmät toimitusajat kiireen aikana.'),
+                style: TextStyle(fontSize: 12.5, color: fg.withValues(alpha: 0.85))),
+          ),
+      ]),
+    );
   }
 
   String _opensText(Map? opensAt) {
@@ -131,20 +252,24 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.fromLTRB(16, 12, 10, 12),
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(AppTheme.radiusLg - 2)),
-      child: Row(children: [
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: AppTheme.display(size: 18, color: fg)),
-            const SizedBox(height: 2),
-            Text(subtitle, style: TextStyle(fontSize: 13, color: fg.withValues(alpha: 0.85))),
-          ]),
-        ),
-        _switching
-            ? const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5)))
-            : Semantics(
-                label: tr(context, 'Take new orders', 'Ota vastaan tilauksia'),
-                child: Switch(value: accepting, onChanged: _setAccepting),
-              ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(title, style: AppTheme.display(size: 18, color: fg)),
+              const SizedBox(height: 2),
+              Text(subtitle, style: TextStyle(fontSize: 13, color: fg.withValues(alpha: 0.85))),
+            ]),
+          ),
+          _switching
+              ? const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5)))
+              : Semantics(
+                  label: tr(context, 'Take new orders', 'Ota vastaan tilauksia'),
+                  child: Switch(value: accepting, onChanged: _setAccepting),
+                ),
+        ]),
+        // Preparation time only matters while the store takes orders
+        if (accepting) _prepRow(fg),
       ]),
     );
   }
@@ -293,6 +418,80 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     );
   }
 
+  /// Paid and not answered yet: the store has 10 minutes before the order is refunded automatically.
+  bool _isWaiting(Map<String, dynamic> o) => o['status'] == 'PENDING' && o['paymentStatus'] == 'SUCCEEDED';
+
+  Widget _waitingNote(Map<String, dynamic> o) {
+    // The 10-minute limit counts from payment (the server's order watchdog)
+    final since = DateTime.tryParse('${o['paidAt'] ?? o['createdAt']}')?.toLocal();
+    final waited = since == null ? 0 : DateTime.now().difference(since).inMinutes.clamp(0, 999);
+    final left = 10 - waited;
+    final urgent = left <= 3;
+    final fg = urgent ? const Color(0xFFD93025) : const Color(0xFF6A4500);
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(color: urgent ? const Color(0xFFFDECEA) : AppTheme.sunshineLight, borderRadius: BorderRadius.circular(14)),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(Icons.hourglass_bottom_rounded, size: 18, color: fg),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(
+              waited < 1 ? tr(context, 'Just came in', 'Tuli juuri') : tr(context, 'Waiting $waited min', 'Odottanut $waited min'),
+              style: TextStyle(fontWeight: FontWeight.w800, color: fg),
+            ),
+            Text(
+              left > 0
+                  ? tr(context, 'Unanswered orders are refunded automatically after 10 minutes ($left min left).',
+                      'Vastaamattomat tilaukset hyvitetään automaattisesti 10 minuutin jälkeen ($left min jäljellä).')
+                  : tr(context, 'Unanswered orders are refunded automatically after 10 minutes. Answer now.',
+                      'Vastaamattomat tilaukset hyvitetään automaattisesti 10 minuutin jälkeen. Vastaa nyt.'),
+              style: TextStyle(fontSize: 12.5, color: fg, height: 1.35),
+            ),
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  Widget _itemLine(Map i) {
+    final variant = i['variant'] as Map?;
+    final options = [
+      if ((variant?['size'] ?? '').toString().isNotEmpty) '${tr(context, 'Size', 'Koko')} ${variant!['size']}',
+      if ((variant?['color'] ?? '').toString().isNotEmpty) '${tr(context, 'Colour', 'Väri')} ${variant!['color']}',
+    ];
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(
+          constraints: const BoxConstraints(minWidth: 34),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+          decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(8)),
+          child: Text('${i['quantity']}×', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.primary)),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('${i['product']?['name'] ?? ''}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            if (options.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Wrap(spacing: 6, runSpacing: 4, children: [
+                  for (final opt in options)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(color: AppTheme.sand, borderRadius: BorderRadius.circular(8)),
+                      child: Text(opt, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+                    ),
+                ]),
+              ),
+          ]),
+        ),
+      ]),
+    );
+  }
+
   Widget _orderCard(Map<String, dynamic> o) {
     final status = o['status'];
     final items = (o['items'] as List?) ?? [];
@@ -329,15 +528,18 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
             child: Text(label, style: TextStyle(color: fg, fontWeight: FontWeight.w800, fontSize: 12.5)),
           ),
+          if (_isWaiting(o)) _waitingNote(o),
           const Divider(height: 20),
-          for (final i in items)
+          for (final i in items) _itemLine(i as Map),
+          if ((asInt(o['tipCents']) ?? 0) > 0)
             Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Text(
-                '${i['quantity']}×  ${i['product']?['name'] ?? ''}'
-                '${i['variant'] != null ? '  ·  ${[i['variant']['size'], i['variant']['color']].where((x) => x != null).join(' · ')}' : ''}',
-                style: const TextStyle(fontSize: 14.5),
-              ),
+              padding: const EdgeInsets.only(top: 2),
+              child: Row(children: [
+                const Icon(Icons.volunteer_activism_outlined, size: 16, color: AppTheme.textSecondary),
+                const SizedBox(width: 6),
+                Text('${tr(context, 'Tip for the courier', 'Tippi kuriirille')} ${euro(context, o['tipCents'])}',
+                    style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
+              ]),
             ),
           if (o['courier'] != null && ['CONFIRMED', 'PROCESSING'].contains(status))
             Padding(
@@ -363,6 +565,37 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
   }
 
   // ── Products ────────────────────────────────────────────────────────────
+
+  final Set<dynamic> _savingProducts = {};
+
+  /// Quick "sold out" switch: hides the product from shoppers at once (optimistic), and puts it
+  /// back if the server refuses.
+  Future<void> _setProductAvailable(Map<String, dynamic> p, bool value) async {
+    final id = p['id'];
+    final stored = ((_store?['products'] as List?) ?? []).whereType<Map>().where((x) => x['id'] == id).firstOrNull;
+    if (stored == null || _savingProducts.contains(id)) return;
+    HapticFeedback.selectionClick();
+    final before = stored['isAvailable'] != false;
+    setState(() {
+      stored['isAvailable'] = value;
+      _savingProducts.add(id);
+    });
+    final res = await _api.patch('/products/$id', {'isAvailable': value});
+    if (!mounted) return;
+    setState(() {
+      _savingProducts.remove(id);
+      if (!res.ok) stored['isAvailable'] = before;
+    });
+    final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(
+      content: Text(!res.ok
+          ? (res.error ?? tr(context, 'Could not change it', 'Muutos epäonnistui'))
+          : value
+              ? tr(context, '${p['name']} is available again', '${p['name']} on taas saatavilla')
+              : tr(context, '${p['name']} is sold out and hidden from shoppers', '${p['name']} on loppu ja piilotettu asiakkailta')),
+      duration: const Duration(seconds: 2),
+    ));
+  }
 
   Widget _productsTab() {
     final products = ((_store?['products'] as List?) ?? []).map((p) => Map<String, dynamic>.from(p)).toList();
@@ -391,6 +624,8 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           final images = (p['images'] as List?)?.cast<String>() ?? const [];
           final variants = (p['variants'] as List?) ?? [];
           final stock = variants.isEmpty ? (asInt(p['stockQuantity']) ?? 0) : variants.fold<int>(0, (s, v) => s + (asInt(v['stock']) ?? 0));
+          final available = p['isAvailable'] != false;
+          final saving = _savingProducts.contains(p['id']);
           return InkWell(
             onTap: () => _editProduct(p),
             borderRadius: BorderRadius.circular(16),
@@ -398,12 +633,15 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.divider)),
               child: Row(children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: SizedBox(
-                    width: 64,
-                    height: 78,
-                    child: images.isEmpty ? Container(color: AppTheme.primaryLight, child: const Icon(Icons.image_outlined, color: AppTheme.primary)) : CachedNetworkImage(imageUrl: images.first, fit: BoxFit.cover),
+                Opacity(
+                  opacity: available ? 1 : 0.45,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: SizedBox(
+                      width: 64,
+                      height: 78,
+                      child: images.isEmpty ? Container(color: AppTheme.primaryLight, child: const Icon(Icons.image_outlined, color: AppTheme.primary)) : CachedNetworkImage(imageUrl: images.first, fit: BoxFit.cover),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -413,16 +651,26 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                     Text(euro(context, p['salePriceCents']), style: const TextStyle(fontWeight: FontWeight.w600)),
                     Text(
                       [
-                        stock == 0 ? tr(context, 'Sold out', 'Loppu') : '$stock ${tr(context, 'in stock', 'varastossa')}',
+                        stock == 0 ? tr(context, 'Out of stock', 'Ei varastossa') : '$stock ${tr(context, 'in stock', 'varastossa')}',
                         if (variants.isNotEmpty) '${variants.length} ${tr(context, 'options', 'vaihtoehtoa')}',
-                        if (p['isAvailable'] == false) tr(context, 'Hidden', 'Piilotettu'),
                         if (images.isEmpty) tr(context, 'No photo', 'Ei kuvaa'),
                       ].join(' · '),
                       style: TextStyle(fontSize: 12.5, color: stock == 0 || images.isEmpty ? AppTheme.accent : AppTheme.textSecondary),
                     ),
                   ]),
                 ),
-                const Icon(Icons.chevron_right_rounded, color: AppTheme.textSecondary),
+                const SizedBox(width: 6),
+                // Wolt-style quick switch: off = sold out, hidden from shoppers until switched back on
+                Column(mainAxisSize: MainAxisSize.min, children: [
+                  Semantics(
+                    label: tr(context, 'Available to shoppers', 'Saatavilla asiakkaille'),
+                    child: Switch(value: available, onChanged: saving ? null : (v) => _setProductAvailable(p, v)),
+                  ),
+                  Text(
+                    available ? tr(context, 'Available', 'Saatavilla') : tr(context, 'Sold out', 'Loppu'),
+                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: available ? AppTheme.primary : AppTheme.accent),
+                  ),
+                ]),
               ]),
             ),
           );

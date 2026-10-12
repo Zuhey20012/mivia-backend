@@ -16,6 +16,7 @@ import 'notification_center_drawer.dart';
 import 'returns_screen.dart';
 import 'search.dart';
 import '../core/delivery_location.dart';
+import '../core/network_status.dart';
 import '../core/strings.dart';
 import '../core/store_hours.dart';
 import '../core/api_client.dart';
@@ -44,7 +45,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   bool error = false;
   bool hasActiveOrder = false;
   Map<String, dynamic>? activeOrder;
-  String _currentDeliveryCity = 'Helsinki (Keskusta)';
+  /// The active delivery address; empty until the customer picks one (never a made-up default).
+  String _currentDeliveryCity = '';
 
   // "Tell me when Malvoya opens near me"
   bool _alertSaved = false;
@@ -71,9 +73,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _pulseCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1800))..repeat(reverse: true);
     _pulseAnim = Tween<double>(begin: 0.9, end: 1.12).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
     DeliveryLocation.instance.addListener(_onLocationChanged);
+    NetworkStatus.instance.addListener(_onNetwork);
     DeliveryLocation.instance.load().then((_) {
       final addr = DeliveryLocation.instance.address;
-      if (addr != null && mounted) setState(() => _currentDeliveryCity = addr);
+      if (addr != null && addr.isNotEmpty && mounted) setState(() => _currentDeliveryCity = addr);
       fetchStores();
     });
     checkActiveOrders();
@@ -114,6 +117,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     if (!res.ok) messenger.showSnackBar(SnackBar(content: Text(res.error ?? tr(context, 'Something went wrong', 'Jokin meni vikaan'))));
   }
 
+  /// Back online after a failed load: try again without the customer having to pull to refresh.
+  void _onNetwork() {
+    if (!mounted || !NetworkStatus.instance.online || !error) return;
+    setState(() => loading = true);
+    _refresh();
+  }
+
   void _onLocationChanged() {
     if (!mounted) return;
     setState(() => loading = true);
@@ -146,6 +156,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   @override
   void dispose() {
     DeliveryLocation.instance.removeListener(_onLocationChanged);
+    NetworkStatus.instance.removeListener(_onNetwork);
     _pulseCtrl.dispose();
     super.dispose();
   }
@@ -207,6 +218,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   // ── Header ───────────────────────────────────────────────────────────────
+  String _addressLabel(BuildContext context) => _currentDeliveryCity.isEmpty
+      ? tr(context, 'Choose your address', 'Valitse osoitteesi')
+      : _currentDeliveryCity;
+
   Widget _header(BuildContext context, AppLocalizations l10n) {
     final textPrimary = AppTheme.primaryText(context);
     return Padding(
@@ -216,7 +231,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           Expanded(
             child: Semantics(
               button: true,
-              label: '${l10n.translate('deliveringTo')} $_currentDeliveryCity',
+              label: '${l10n.translate('deliveringTo')} ${_addressLabel(context)}',
               excludeSemantics: true,
               child: InkWell(
                 borderRadius: BorderRadius.circular(14),
@@ -238,7 +253,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                         children: [
                           Flexible(
                             child: Text(
-                              _currentDeliveryCity,
+                              _addressLabel(context),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textPrimary, letterSpacing: -0.2),

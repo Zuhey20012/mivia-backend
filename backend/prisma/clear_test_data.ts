@@ -6,6 +6,7 @@ async function main() {
   console.log("🧹 Clearing Malvoya Test Data for Live Launch...");
 
   // Delete in order of dependencies
+  await prisma.promoRedemption.deleteMany({});
   await prisma.orderItem.deleteMany({});
   await prisma.order.deleteMany({});
   await prisma.product.deleteMany({});

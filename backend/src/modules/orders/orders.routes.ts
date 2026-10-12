@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { auth, requireRole } from "../../middleware/auth";
 import {
-  createOrder, listOrders, getOrder, cancelOrder, updateOrderStatus,
+  createOrder, quoteOrder, listOrders, getOrder, cancelOrder, updateOrderStatus,
   createRental, listRentals, getRental,
   createReturn, listReturns, getReturn, updateReturnStatus,
   deliverOrder, getDeliveryProof,
@@ -11,6 +11,8 @@ const router = Router();
 
 // Orders — `:id(\\d+)` keeps paths like /orders/available (courier router) from being captured here.
 router.post("/orders",                        auth, requireRole("CUSTOMER"), createOrder);
+// Exact price (fees, promo discount, total) before payment; reserves and creates nothing
+router.post("/orders/quote",                  auth, requireRole("CUSTOMER"), quoteOrder);
 router.get("/orders",                         auth, listOrders);
 router.get("/orders/:id(\\d+)",               auth, getOrder);
 router.post("/orders/:id(\\d+)/cancel",       auth, requireRole("CUSTOMER"), cancelOrder);

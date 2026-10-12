@@ -32,6 +32,27 @@ function minutes(name: string, fallback: number) {
   return Number.isFinite(v) && v > 0 ? v : fallback;
 }
 
+/** Non-negative whole cents from the environment; anything else falls back to the default (0 = off). */
+function cents(name: string, fallback = 0) {
+  const v = Number(process.env[name]);
+  return Number.isInteger(v) && v >= 0 ? v : fallback;
+}
+
+/** Fee settings. Every lever is off (0) unless the owner sets it on Render. */
+function pricingConfig() {
+  const pct = Number(process.env.SERVICE_FEE_PERCENT);
+  return {
+    // Service fee: a percentage of the item subtotal, clamped to min/max (max 0 = no cap)
+    serviceFeePercent:        Number.isFinite(pct) && pct > 0 ? Math.min(pct, 50) : 0,
+    serviceFeeMinCents:       cents("SERVICE_FEE_MIN_CENTS"),
+    serviceFeeMaxCents:       cents("SERVICE_FEE_MAX_CENTS"),
+    // Small-order fee: charged when the item subtotal is below the threshold (threshold 0 = off)
+    smallOrderThresholdCents: cents("SMALL_ORDER_THRESHOLD_CENTS"),
+    smallOrderFeeCents:       cents("SMALL_ORDER_FEE_CENTS"),
+  };
+}
+export type PricingConfig = ReturnType<typeof pricingConfig>;
+
 export const env = {
   port:         Number(process.env.PORT)          || 4000,
   nodeEnv,
@@ -71,6 +92,8 @@ export const env = {
   returnWindowDays:  14,  // statutory withdrawal period, counted from delivery
   // Share of the delivery fee paid to the courier (1 = the whole fee)
   courierFeeShare:   Math.min(1, Math.max(0, Number(process.env.COURIER_FEE_SHARE ?? 1))),
+  // Service and small-order fees (all off by default)
+  pricing: pricingConfig(),
   // Store payouts are released once the return window has passed
   storePayoutHoldDays: 15,
 

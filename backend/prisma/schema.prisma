@@ -144,19 +144,20 @@ model User {
   isActive  Boolean   @default(true) // false = banned or deleted
   deletedAt DateTime? // set when the account is anonymised (GDPR Art. 17)
 
-  store         Store?
-  courier       Courier?
-  orders        Order[]
-  rentals       Rental[]
-  returns       Return[]
-  refreshTokens RefreshToken[]
-  favorites     Favorite[]
-  dropLikes     DropLike[]
-  reviews       Review[]
-  devices       DeviceToken[]
-  dropComments  DropComment[]
-  follows       StoreFollow[]
-  launchAlert   LaunchAlert?
+  store            Store?
+  courier          Courier?
+  orders           Order[]
+  rentals          Rental[]
+  returns          Return[]
+  refreshTokens    RefreshToken[]
+  favorites        Favorite[]
+  dropLikes        DropLike[]
+  reviews          Review[]
+  devices          DeviceToken[]
+  dropComments     DropComment[]
+  follows          StoreFollow[]
+  launchAlert      LaunchAlert?
+  promoRedemptions PromoRedemption[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -346,7 +347,15 @@ model Order {
   deliveryFeeCents  Int @default(299) // €2.99
   commissionCents   Int // 10% of subtotal → Mivia keeps
   sellerPayoutCents Int // subtotal − commission → seller gets
-  totalCents        Int // subtotalCents + deliveryFeeCents (what customer pays)
+  totalCents        Int // subtotal + delivery + service fee + small-order fee + tip − discount (what the customer pays)
+
+  // Platform fees and platform-funded discount (all off by default; see utils/pricing.ts)
+  serviceFeeCents    Int              @default(0)
+  smallOrderFeeCents Int              @default(0)
+  discountCents      Int              @default(0) // promo discount paid by Malvoya: store and courier pay are not reduced
+  promoCodeId        Int?
+  promoCode          PromoCode?       @relation(fields: [promoCodeId], references: [id])
+  promoRedemption    PromoRedemption?
 
   // Stripe
   stripePaymentIntentId String?
@@ -397,6 +406,7 @@ model Order {
   @@index([storeId, paymentStatus, createdAt])
   @@index([courierId, status])
   @@index([status, paymentStatus, courierId])
+  @@index([promoCodeId])
 }
 
 model OrderItem {
@@ -823,5 +833,52 @@ model SupportRequest {
   updatedAt DateTime      @updatedAt
 
   @@index([status, createdAt])
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────
+// PROMO CODES (platform-funded discounts)
+// ─────────────────────────────────────────────
+
+enum PromoKind {
+  PERCENT // value = percent of the item subtotal (1–100)
+  AMOUNT // value = cents off
+}
+
+model PromoCode {
+  id               Int       @id @default(autoincrement())
+  code             String    @unique // stored uppercase
+  description      String
+  kind             PromoKind
+  value            Int
+  maxDiscountCents Int? // cap for PERCENT codes
+  minSubtotalCents Int       @default(0)
+  firstOrderOnly   Boolean   @default(false) // only for users without an earlier paid order
+  maxRedemptions   Int? // across all customers; null = unlimited
+  perUserLimit     Int       @default(1)
+  startsAt         DateTime?
+  endsAt           DateTime?
+  active           Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+
+  orders      Order[]
+  redemptions PromoRedemption[]
+
+  @@index([active, createdAt])
+}
+
+// One row per PAID order that used a code; deleted again if that order is cancelled before delivery.
+model PromoRedemption {
+  id            Int       @id @default(autoincrement())
+  orderId       Int       @unique
+  order         Order     @relation(fields: [orderId], references: [id])
+  userId        Int
+  user          User      @relation(fields: [userId], references: [id])
+  promoCodeId   Int
+  promoCode     PromoCode @relation(fields: [promoCodeId], references: [id])
+  discountCents Int
+  createdAt     DateTime  @default(now())
+
+  @@index([promoCodeId, userId])
   @@index([userId])
 }

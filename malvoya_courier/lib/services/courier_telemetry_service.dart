@@ -71,6 +71,16 @@ class CourierTelemetryService extends ChangeNotifier {
 
   void updateToken(String? token) => _token = token ?? _token;
 
+  /// The internet is back: send the latest position right away instead of waiting for the next
+  /// tick, so the customer sees the courier again within seconds. GPS itself keeps running offline.
+  void resume(String? token) {
+    updateToken(token);
+    if (_positions == null) return;
+    _lastHttp = DateTime.fromMillisecondsSinceEpoch(0);
+    if (_last != null) _onPosition(_last!);
+    _sendHttp();
+  }
+
   void _onPosition(Position p) {
     _last = p;
     if (_orderId != null) {

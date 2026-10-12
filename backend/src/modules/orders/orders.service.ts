@@ -1,8 +1,8 @@
-import { Prisma, OrderStatus } from "@prisma/client";
+import { Prisma, OrderStatus, PromoCode } from "@prisma/client";
 import pino from "pino";
 import { prisma } from "../../lib/prisma";
 import { getStripe } from "../../lib/stripe";
-import { calcOrderPricing, calcRentalPricing, deliveryFeeForDistance } from "../../utils/pricing";
+import { calcCheckoutPricing, calcRentalPricing, deliveryFeeForDistance } from "../../utils/pricing";
 import { haversineKm } from "../../utils/distance";
 import { env } from "../../config/env";
 import { emitOrderStatus, emitToStore } from "../../lib/socket";
@@ -15,6 +15,8 @@ import { verifyOwnedUpload, UploadProof } from "../media/media.service";
 import { adjustStorePayoutForRefund, createPayoutsForOrder } from "../payouts/payouts.service";
 import { Actor, getCourierForUser, getOrderRelation } from "./access";
 import { storeAvailability } from "../../utils/openingHours";
+import { ApiError } from "../../lib/errors";
+import { checkPromo } from "../promos/promos.service";
 
 const logger = pino({ name: "orders" });
 
@@ -26,67 +28,166 @@ export class OrderError extends Error {
 
 type ItemInput = { productId: number; variantId?: number; quantity: number };
 
+type Db = Prisma.TransactionClient | typeof prisma;
+
+type CheckoutInput = {
+  storeId: number; deliveryLat?: number; deliveryLng?: number; items: ItemInput[]; tipCents?: number; promoCode?: string;
+};
+
 // ─── ORDERS (SALE) ──────────────────────────────────────────────────────────
 
-export async function createOrder(userId: number, input: {
-  storeId: number; deliveryAddress: string; deliveryLat?: number;
-  deliveryLng?: number; notes?: string; items: ItemInput[]; tipCents?: number;
-}) {
-  const store = await prisma.store.findUnique({ where: { id: input.storeId } });
+async function loadOrderStore(storeId: number) {
+  const store = await prisma.store.findUnique({ where: { id: storeId } });
   if (!store || !store.isVerified) throw new OrderError("This store is not accepting orders", 404);
-  const availability = storeAvailability(store);
-  if (!availability.openNow) {
-    const opens = availability.opensAt ? ` It opens again at ${availability.opensAt.time}.` : "";
-    throw new OrderError(
-      availability.closedReason === "paused" ? "This store is not taking orders right now." : `This store is closed right now.${opens}`,
-      409,
-    );
-  }
+  return store;
+}
 
-  // Price is always computed server-side from the database.
-  const order = await prisma.$transaction(async (tx) => {
-    let subtotalCents = 0;
-    const itemsData: Prisma.OrderItemCreateManyOrderInput[] = [];
+function closedStoreError(availability: ReturnType<typeof storeAvailability>) {
+  const opens = availability.opensAt ? ` It opens again at ${availability.opensAt.time}.` : "";
+  return new OrderError(
+    availability.closedReason === "paused" ? "This store is not taking orders right now." : `This store is closed right now.${opens}`,
+    409,
+  );
+}
 
-    for (const item of input.items) {
-      const product = await tx.product.findUnique({ where: { id: item.productId } });
-      if (!product || product.storeId !== store.id) throw new OrderError(`Product ${item.productId} is not sold by this store`);
-      if (!product.canBeSold || !product.isAvailable || product.salePriceCents === null) {
-        throw new OrderError(`${product.name} is not available for purchase`);
-      }
+/**
+ * Prices the basket from the database. With `reserve`, stock is taken with conditional decrements
+ * (createOrder, inside its transaction); without, it is only checked (quote), with the same errors.
+ */
+async function priceItems(db: Db, storeId: number, items: ItemInput[], reserve: boolean) {
+  let subtotalCents = 0;
+  const lines: Prisma.OrderItemCreateManyOrderInput[] = [];
+  const wanted = new Map<string, number>(); // quote: quantities asked so far per product / option
 
-      let unitCents = product.salePriceCents;
-      if (item.variantId) {
-        const variant = await tx.productVariant.findUnique({ where: { id: item.variantId } });
-        if (!variant || variant.productId !== product.id) throw new OrderError(`Invalid option for ${product.name}`);
-        const reserved = await tx.productVariant.updateMany({
+  for (const item of items) {
+    const product = await db.product.findUnique({ where: { id: item.productId } });
+    if (!product || product.storeId !== storeId) throw new OrderError(`Product ${item.productId} is not sold by this store`);
+    if (!product.canBeSold || !product.isAvailable || product.salePriceCents === null) {
+      throw new OrderError(`${product.name} is not available for purchase`);
+    }
+
+    let unitCents = product.salePriceCents;
+    if (item.variantId) {
+      const variant = await db.productVariant.findUnique({ where: { id: item.variantId } });
+      if (!variant || variant.productId !== product.id) throw new OrderError(`Invalid option for ${product.name}`);
+      const outOfStock = new OrderError(`${product.name} (${variant.size ?? variant.color ?? "option"}) is out of stock`);
+      if (reserve) {
+        const reserved = await db.productVariant.updateMany({
           where: { id: variant.id, stock: { gte: item.quantity } },
           data: { stock: { decrement: item.quantity } },
         });
-        if (reserved.count === 0) throw new OrderError(`${product.name} (${variant.size ?? variant.color ?? "option"}) is out of stock`);
-        unitCents += variant.priceAdjustCents;
+        if (reserved.count === 0) throw outOfStock;
+      } else {
+        const key = `v${variant.id}`;
+        const total = (wanted.get(key) ?? 0) + item.quantity;
+        if (variant.stock < total) throw outOfStock;
+        wanted.set(key, total);
       }
+      unitCents += variant.priceAdjustCents;
+    }
 
+    if (reserve) {
       // Conditional decrement: never oversell when two customers check out at the same time.
-      const reserved = await tx.product.updateMany({
+      const reserved = await db.product.updateMany({
         where: { id: product.id, stockQuantity: { gte: item.quantity } },
         data: { stockQuantity: { decrement: item.quantity } },
       });
       if (reserved.count === 0) throw new OrderError(`Insufficient stock for ${product.name}`);
-
-      subtotalCents += unitCents * item.quantity;
-      itemsData.push({ productId: product.id, variantId: item.variantId, quantity: item.quantity, unitCents });
+    } else {
+      const key = `p${product.id}`;
+      const total = (wanted.get(key) ?? 0) + item.quantity;
+      if (product.stockQuantity < total) throw new OrderError(`Insufficient stock for ${product.name}`);
+      wanted.set(key, total);
     }
 
-    const distanceKm =
-      store.latitude !== null && store.longitude !== null && input.deliveryLat !== undefined && input.deliveryLng !== undefined
-        ? haversineKm(store.latitude, store.longitude, input.deliveryLat, input.deliveryLng)
-        : null;
-    const base = calcOrderPricing(subtotalCents, store.commissionRate, deliveryFeeForDistance(distanceKm));
-    // The tip is not Malvoya's money: no commission, added to the total, paid to the courier in full
-    const tipCents = input.tipCents ?? 0;
-    const pricing = { ...base, totalCents: base.totalCents + tipCents };
-    const courierFeeCents = Math.round(pricing.deliveryFeeCents * env.courierFeeShare) + tipCents;
+    subtotalCents += unitCents * item.quantity;
+    lines.push({ productId: product.id, variantId: item.variantId, quantity: item.quantity, unitCents });
+  }
+  return { subtotalCents, lines };
+}
+
+function deliveryDistanceKm(store: { latitude: number | null; longitude: number | null }, lat?: number, lng?: number) {
+  return store.latitude !== null && store.longitude !== null && lat !== undefined && lng !== undefined
+    ? haversineKm(store.latitude, store.longitude, lat, lng)
+    : null;
+}
+
+/** The one place a checkout is priced; used by both the quote and createOrder. */
+function priceCheckout(
+  store: { commissionRate: number; latitude: number | null; longitude: number | null },
+  input: CheckoutInput,
+  subtotalCents: number,
+  promo: PromoCode | null,
+) {
+  const distanceKm = deliveryDistanceKm(store, input.deliveryLat, input.deliveryLng);
+  const pricing = calcCheckoutPricing({
+    subtotalCents,
+    commissionRate: store.commissionRate,
+    deliveryFeeCents: deliveryFeeForDistance(distanceKm),
+    tipCents: input.tipCents ?? 0,
+    promo,
+  });
+  return { pricing, distanceKm };
+}
+
+/** Checks a promo code for this checkout; turns "cannot be used" into an OrderError with the user-readable reason. */
+async function promoForCheckout(db: Db, code: string | undefined, userId: number, subtotalCents: number) {
+  if (!code?.trim()) return null;
+  try {
+    return await checkPromo(db, code, userId, subtotalCents);
+  } catch (e) {
+    if (e instanceof ApiError) throw new OrderError(e.message, e.status);
+    throw e;
+  }
+}
+
+/**
+ * Exact price before payment. Reserves nothing and creates nothing. Items and store give the same
+ * errors as createOrder; a promo code that cannot be used comes back as `promoError` (still 200).
+ */
+export async function quoteOrder(userId: number, input: CheckoutInput) {
+  const store = await loadOrderStore(input.storeId);
+  const { subtotalCents } = await priceItems(prisma, store.id, input.items, false);
+
+  let promo: PromoCode | null = null;
+  let promoError: string | null = null;
+  try {
+    promo = await promoForCheckout(prisma, input.promoCode, userId, subtotalCents);
+  } catch (e) {
+    if (!(e instanceof OrderError)) throw e;
+    promoError = e.message;
+  }
+
+  const { pricing } = priceCheckout(store, input, subtotalCents, promo);
+  const cfg = env.pricing;
+  const availability = storeAvailability(store);
+  return {
+    subtotalCents: pricing.subtotalCents,
+    deliveryFeeCents: pricing.deliveryFeeCents,
+    serviceFeeCents: pricing.serviceFeeCents,
+    smallOrderFeeCents: pricing.smallOrderFeeCents,
+    // Below this item subtotal a small-order fee applies (0 = no small-order fee)
+    smallOrderThresholdCents: cfg.smallOrderFeeCents > 0 ? cfg.smallOrderThresholdCents : 0,
+    discountCents: pricing.discountCents,
+    tipCents: pricing.tipCents,
+    totalCents: pricing.totalCents,
+    promo: promo ? { code: promo.code, description: promo.description } : null,
+    promoError,
+    store: { openNow: availability.openNow, closedReason: availability.closedReason, opensAt: availability.opensAt },
+  };
+}
+
+export async function createOrder(userId: number, input: CheckoutInput & { deliveryAddress: string; notes?: string }) {
+  const store = await loadOrderStore(input.storeId);
+  const availability = storeAvailability(store);
+  if (!availability.openNow) throw closedStoreError(availability);
+
+  // Price is always computed server-side from the database.
+  const order = await prisma.$transaction(async (tx) => {
+    const { subtotalCents, lines } = await priceItems(tx, store.id, input.items, true);
+    // A code that cannot be used is refused (409), so the customer never pays a different price than quoted.
+    const promo = await promoForCheckout(tx, input.promoCode, userId, subtotalCents);
+    const { pricing, distanceKm } = priceCheckout(store, input, subtotalCents, promo);
     const etaMinutes = distanceKm === null ? null : estimateDelivery(distanceKm, store.prepMinutes).etaMinutes;
 
     return tx.order.create({
@@ -97,13 +198,12 @@ export async function createOrder(userId: number, input: {
         deliveryLat: input.deliveryLat,
         deliveryLng: input.deliveryLng,
         notes: input.notes,
-        ...pricing,
-        tipCents,
-        courierFeeCents,
+        ...pricing, // includes tipCents and courierFeeCents (the tip goes to the courier in full, no commission)
+        promoCodeId: promo?.id ?? null,
         etaMinutes,
-        items: { createMany: { data: itemsData } },
+        items: { createMany: { data: lines } },
       },
-      include: { items: true },
+      include: { items: true, promoCode: { select: { code: true, description: true } } },
     });
   });
 
@@ -132,7 +232,10 @@ export async function createOrder(userId: number, input: {
 export async function markOrderPaid(orderId: number, paymentIntentId: string, amountReceived: number) {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
-    include: { user: true, store: true, items: { include: { product: { select: { name: true } } } } },
+    include: {
+      user: true, store: true, items: { include: { product: { select: { name: true } } } },
+      promoCode: { select: { code: true } },
+    },
   });
   if (!order || order.stripePaymentIntentId !== paymentIntentId) {
     logger.warn({ orderId, paymentIntentId }, "Payment for unknown order/intent");
@@ -150,7 +253,17 @@ export async function markOrderPaid(orderId: number, paymentIntentId: string, am
     return;
   }
 
-  await prisma.order.update({ where: { id: orderId }, data: { paymentStatus: "SUCCEEDED", paidAt: new Date() } });
+  // A promo code counts as used only once the order is paid (released again if it is cancelled before delivery)
+  await prisma.$transaction([
+    prisma.order.update({ where: { id: orderId }, data: { paymentStatus: "SUCCEEDED", paidAt: new Date() } }),
+    ...(order.promoCodeId
+      ? [prisma.promoRedemption.upsert({
+          where: { orderId },
+          create: { orderId, userId: order.userId, promoCodeId: order.promoCodeId, discountCents: order.discountCents },
+          update: {},
+        })]
+      : []),
+  ]);
 
   emitToStore(order.storeId, "order:new", {
     id: order.id,
@@ -176,6 +289,10 @@ export async function markOrderPaid(orderId: number, paymentIntentId: string, am
     items: order.items.map((i) => ({ name: i.product.name, quantity: i.quantity, unitCents: i.unitCents })),
     subtotalCents: order.subtotalCents,
     deliveryFeeCents: order.deliveryFeeCents,
+    serviceFeeCents: order.serviceFeeCents,
+    smallOrderFeeCents: order.smallOrderFeeCents,
+    discountCents: order.discountCents,
+    promoCode: order.promoCode?.code ?? null,
     tipCents: order.tipCents,
     totalCents: order.totalCents,
     deliveryAddress: order.deliveryAddress,
@@ -218,6 +335,8 @@ export async function cancelOrderInternal(orderId: number, reason: string, opts:
     });
     if (res.count === 0) return null;
     await restock(tx, orderId);
+    // The customer gets the promo code back
+    await tx.promoRedemption.deleteMany({ where: { orderId } });
     if (order.courierId) {
       await tx.courier.updateMany({ where: { id: order.courierId, currentOrderId: orderId }, data: { currentOrderId: null } });
     }
@@ -427,6 +546,7 @@ export async function getOrder(id: number, actor: Actor) {
       items: { include: { product: { select: { id: true, name: true, images: true } }, variant: { select: { size: true, color: true } } } },
       courier: courierPublic,
       store: { select: { id: true, name: true, address: true, latitude: true, longitude: true, logoUrl: true, phone: true } },
+      promoCode: { select: { code: true, description: true } },
     },
   });
 }
@@ -677,8 +797,10 @@ export async function updateReturnStatus(id: number, actor: Actor, data: {
   const itemsCents = order.subtotalCents;
   const deduction = data.damageDedCents ?? 0;
   if (deduction > 0 && !data.conditionNote) throw new OrderError("Explain the deduction in the condition note");
-  // Full withdrawal refunds the original delivery fee as well (Kuluttajansuojalaki 6:16)
-  const refundCents = data.refundCents ?? itemsCents + order.deliveryFeeCents - deduction;
+  // Full withdrawal refunds what was paid for the goods and the original delivery, including any service or
+  // small-order fee, less a promo discount (Kuluttajansuojalaki 6:16). The courier tip is not part of the sale.
+  const paidForSale = itemsCents + order.deliveryFeeCents + order.serviceFeeCents + order.smallOrderFeeCents - order.discountCents;
+  const refundCents = data.refundCents ?? paidForSale - deduction;
   const refundable = order.totalCents - order.refundedCents;
   if (refundCents <= 0 || refundCents > refundable) throw new OrderError(`Refund must be between 0.01 and ${(refundable / 100).toFixed(2)} €`);
   if (!order.stripePaymentIntentId || order.paymentStatus !== "SUCCEEDED") throw new OrderError("Order has no captured payment to refund", 409);
@@ -726,6 +848,7 @@ export async function listReturns(actor: Actor) {
       order: {
         select: {
           id: true, totalCents: true, subtotalCents: true, deliveryFeeCents: true, refundedCents: true, deliveredAt: true,
+          serviceFeeCents: true, smallOrderFeeCents: true, discountCents: true, tipCents: true,
           store: { select: { name: true } },
           items: { select: { quantity: true, unitCents: true, product: { select: { name: true, images: true } }, variant: { select: { size: true, color: true } } } },
         },

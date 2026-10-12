@@ -2,7 +2,7 @@ import { Response } from "express";
 import { z } from "zod";
 import { AuthRequest } from "../../middleware/auth";
 import {
-  createOrderSchema, createRentalSchema, createReturnSchema, updateReturnStatusSchema, updateOrderStatusSchema,
+  createOrderSchema, quoteOrderSchema, createRentalSchema, createReturnSchema, updateReturnStatusSchema, updateOrderStatusSchema,
 } from "./orders.schema";
 import * as ordersService from "./orders.service";
 
@@ -28,6 +28,14 @@ export async function createOrder(req: AuthRequest, res: Response) {
   try {
     const data = await ordersService.createOrder(req.user!.id, result.data);
     res.status(201).json({ ok: true, ...data });
+  } catch (e) { sendOrderError(res, e); }
+}
+
+export async function quoteOrder(req: AuthRequest, res: Response) {
+  const result = quoteOrderSchema.safeParse(req.body);
+  if (!result.success) return res.status(400).json({ ok: false, errors: result.error.flatten() });
+  try {
+    res.json({ ok: true, quote: await ordersService.quoteOrder(req.user!.id, result.data) });
   } catch (e) { sendOrderError(res, e); }
 }
 

@@ -10,6 +10,9 @@ interface Stats {
   customers: number; vendors: number; couriers: number;
   totalOrders: number; activeOrders: number;
   pendingApprovals: number; revenueCents: number; waitlist?: number;
+  // Malvoya's own revenue over paid orders that were not refunded or cancelled
+  commissionCents?: number; serviceFeeCents?: number; smallOrderFeeCents?: number;
+  deliveryMarginCents?: number; discountCents?: number; netPlatformRevenueCents?: number;
 }
 
 function fmt(cents: number) {
@@ -94,6 +97,34 @@ export default function Overview() {
             ))
         }
       </div>
+
+      {/* Malvoya's revenue: what the platform keeps after paying stores and couriers */}
+      {stats && (
+        <div className="apple-card" style={{ marginBottom:'2rem' }}>
+          <div style={{ display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'1.25rem' }}>
+            <h2 style={{ fontWeight:600 }}>Revenue</h2>
+            <span style={{ fontSize:'0.75rem',color:'#8E8E93' }}>Paid orders, not refunded</span>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:'0 2rem' }}>
+            {[
+              { label: 'Store commission', cents: stats.commissionCents ?? 0 },
+              { label: 'Service fees', cents: stats.serviceFeeCents ?? 0 },
+              { label: 'Small-order fees', cents: stats.smallOrderFeeCents ?? 0 },
+              { label: 'Delivery margin (after courier pay)', cents: stats.deliveryMarginCents ?? 0 },
+              { label: 'Promo discounts paid by Malvoya', cents: -(stats.discountCents ?? 0) },
+            ].map(({ label, cents }) => (
+              <div key={label} style={{ display:'flex',justifyContent:'space-between',gap:'1rem',padding:'0.625rem 0',borderBottom:'1px solid #F5F5F7' }}>
+                <span style={{ fontSize:'0.875rem',color:'#3C3C43' }}>{label}</span>
+                <span style={{ fontSize:'0.875rem',fontWeight:500,color: cents < 0 ? '#B45309' : '#1D1D1F',whiteSpace:'nowrap' }}>{fmt(cents)}</span>
+              </div>
+            ))}
+            <div style={{ display:'flex',justifyContent:'space-between',gap:'1rem',padding:'0.625rem 0' }}>
+              <span style={{ fontSize:'0.875rem',fontWeight:600 }}>Net platform revenue</span>
+              <span style={{ fontSize:'1rem',fontWeight:600,whiteSpace:'nowrap' }}>{fmt(stats.netPlatformRevenueCents ?? 0)}</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Platform status, as reported by the API itself (details on the System page) */}
       <div className="apple-card">

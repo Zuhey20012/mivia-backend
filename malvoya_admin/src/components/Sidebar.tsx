@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, ShoppingBag, Users, Truck,
-  Store, CheckSquare, LogOut, Settings, Flag, Banknote, LifeBuoy, Activity
+  Store, CheckSquare, LogOut, Settings, Flag, Banknote, LifeBuoy, Activity, Ticket
 } from 'lucide-react';
 
 const nav = [
@@ -13,6 +13,7 @@ const nav = [
   { to: '/approvals',icon: CheckSquare,     label: 'Approvals'  },
   { to: '/moderation',icon: Flag,           label: 'Moderation' },
   { to: '/payouts',  icon: Banknote,        label: 'Payouts'    },
+  { to: '/promo-codes', icon: Ticket,       label: 'Promo codes' },
   { to: '/support',  icon: LifeBuoy,        label: 'Support'    },
   { to: '/system',   icon: Activity,        label: 'System'     },
 ];

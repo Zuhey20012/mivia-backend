@@ -9,6 +9,7 @@ import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
 import '../core/reorder.dart';
+import '../core/network_status.dart';
 import '../core/strings.dart';
 import '../services/socket_service.dart';
 import 'returns_screen.dart';
@@ -23,7 +24,7 @@ class OrderDetailScreen extends StatefulWidget {
   State<OrderDetailScreen> createState() => _OrderDetailScreenState();
 }
 
-class _OrderDetailScreenState extends State<OrderDetailScreen> {
+class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindingObserver {
   Map<String, dynamic>? _order;
   Map<String, dynamic>? _review;
   String? _error;
@@ -38,40 +39,77 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    NetworkStatus.instance.addListener(_onNetwork);
     _load();
-    final auth = Provider.of<AuthService>(context, listen: false);
     final socket = CustomerSocketService();
-    socket.connect(auth.accessToken ?? '');
+    _connectSocket();
     socket.trackOrder(widget.orderId);
     socket.joinChat(widget.orderId);
-    socket.onCourierLocationUpdate = (d) {
-      if (asInt(d['orderId']) != widget.orderId) return;
-      final lat = (d['lat'] as num?)?.toDouble();
-      final lng = (d['lng'] as num?)?.toDouble();
-      if (lat == null || lng == null || !mounted) return;
-      setState(() {
-        _courier = LatLng(lat, lng);
-        _courierSeenAt = DateTime.now();
-      });
-    };
-    socket.onOrderStatusUpdate = (d) {
-      if (asInt(d['orderId']) == widget.orderId) _load();
-    };
-    socket.onChatMessage = (d) {
-      if (asInt(d['orderId']) != widget.orderId || !mounted) return;
-      setState(() => _chat.add(d));
-    };
+    socket.addCourierLocationListener(_onCourierLocation);
+    socket.addOrderStatusListener(_onOrderStatus);
+    socket.addChatListener(_onChatMessage);
+    socket.addReconnectListener(_onReconnect);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    NetworkStatus.instance.removeListener(_onNetwork);
     final socket = CustomerSocketService();
-    socket.onCourierLocationUpdate = null;
-    socket.onOrderStatusUpdate = null;
-    socket.onChatMessage = null;
+    socket.removeCourierLocationListener(_onCourierLocation);
+    socket.removeOrderStatusListener(_onOrderStatus);
+    socket.removeChatListener(_onChatMessage);
+    socket.removeReconnectListener(_onReconnect);
     socket.stopTracking(widget.orderId);
+    socket.leaveChat(widget.orderId);
     _map.dispose();
     super.dispose();
+  }
+
+  void _connectSocket() {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    CustomerSocketService().connect(auth.accessToken ?? '');
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Events may have been missed while the app was in the background
+    if (state == AppLifecycleState.resumed && mounted) {
+      _connectSocket();
+      _load();
+    }
+  }
+
+  void _onNetwork() {
+    if (NetworkStatus.instance.online && mounted) {
+      _connectSocket();
+      _load();
+    }
+  }
+
+  void _onReconnect() {
+    if (mounted) _load();
+  }
+
+  void _onCourierLocation(Map<String, dynamic> d) {
+    if (asInt(d['orderId']) != widget.orderId) return;
+    final lat = (d['lat'] as num?)?.toDouble();
+    final lng = (d['lng'] as num?)?.toDouble();
+    if (lat == null || lng == null || !mounted) return;
+    setState(() {
+      _courier = LatLng(lat, lng);
+      _courierSeenAt = DateTime.now();
+    });
+  }
+
+  void _onOrderStatus(Map<String, dynamic> d) {
+    if (asInt(d['orderId']) == widget.orderId && mounted) _load();
+  }
+
+  void _onChatMessage(Map<String, dynamic> d) {
+    if (asInt(d['orderId']) != widget.orderId || !mounted) return;
+    setState(() => _chat.add(d));
   }
 
   Future<void> _load() async {
@@ -79,7 +117,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     final res = await api.get('/orders/${widget.orderId}');
     if (!mounted) return;
     if (!res.ok) {
-      setState(() => _error = res.error);
+      setState(() => _error = res.errorText(context));
       return;
     }
     final order = Map<String, dynamic>.from(res.data['order']);
@@ -169,14 +207,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     if (ok != true || !mounted) return;
     final res = await ApiClient(Provider.of<AuthService>(context, listen: false)).post('/orders/${widget.orderId}/cancel');
     if (!mounted) return;
-    _snack(res.ok ? tr(context, 'Order cancelled', 'Tilaus peruttu') : res.error!);
+    _snack(res.ok ? tr(context, 'Order cancelled', 'Tilaus peruttu') : res.errorText(context)!);
     _load();
   }
 
   Future<void> _showProof() async {
     final res = await ApiClient(Provider.of<AuthService>(context, listen: false)).get('/orders/${widget.orderId}/proof');
     if (!mounted) return;
-    if (!res.ok) return _snack(res.error!);
+    if (!res.ok) return _snack(res.errorText(context)!);
     final url = res.data['proof']?['photoUrl'];
     showDialog(
       context: context,
@@ -261,7 +299,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                             if (res.ok) {
                               Navigator.pop(ctx, true);
                             } else {
-                              ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text(res.error!)));
+                              ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text(res.errorText(context)!)));
                             }
                           },
                     child: Text(tr(context, 'Send review', 'Lähetä arvio')),
@@ -296,7 +334,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
         void send(String text) {
           if (text.trim().isEmpty) return;
-          CustomerSocketService().sendChatMessage(widget.orderId, text.trim(), myName.isEmpty ? 'Customer' : myName);
+          CustomerSocketService().sendChatMessage(widget.orderId, text.trim(), myName.isEmpty ? tr(context, 'Customer', 'Asiakas') : myName);
           input.clear();
           Future.delayed(const Duration(milliseconds: 400), () {
             if (ctx.mounted) set(() {});
@@ -590,6 +628,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     ));
   }
 
+  /// The promo code used for this order: the API sends `{code, description}` (or just the code).
+  String? _promoCode(Map<String, dynamic> o) {
+    final p = o['promoCode'];
+    final code = p is Map ? p['code'] : p;
+    return code is String && code.isNotEmpty ? code : null;
+  }
+
   Widget _itemsCard(Map<String, dynamic> o) {
     final items = (o['items'] as List?) ?? [];
     final muted = AppTheme.secondaryText(context);
@@ -622,6 +667,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         const Divider(height: 20),
         line(tr(context, 'Items', 'Tuotteet'), o['subtotalCents']),
         line(tr(context, 'Delivery', 'Toimitus'), o['deliveryFeeCents']),
+        if ((asInt(o['serviceFeeCents']) ?? 0) > 0) line(tr(context, 'Service fee', 'Palvelumaksu'), o['serviceFeeCents']),
+        if ((asInt(o['smallOrderFeeCents']) ?? 0) > 0) line(tr(context, 'Small-order fee', 'Pientilauslisä'), o['smallOrderFeeCents']),
+        if ((asInt(o['discountCents']) ?? 0) > 0)
+          line(
+            _promoCode(o) == null ? tr(context, 'Discount', 'Alennus') : '${tr(context, 'Discount', 'Alennus')} (${_promoCode(o)})',
+            -(asInt(o['discountCents']) ?? 0),
+          ),
         if ((asInt(o['tipCents']) ?? 0) > 0) line(tr(context, 'Courier tip', 'Tippi kuriirille'), o['tipCents']),
         line(tr(context, 'Total (VAT incl.)', 'Yhteensä (sis. ALV)'), o['totalCents'], bold: true),
         if ((asInt(o['refundedCents']) ?? 0) > 0) line(tr(context, 'Refunded', 'Hyvitetty'), o['refundedCents']),
@@ -643,8 +695,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       if (_review != null)
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
-          child: Text('${tr(context, 'Your rating', 'Arviosi')}: ${'★' * (asInt(_review!['storeRating']) ?? 0)}',
-              style: TextStyle(color: AppTheme.secondaryText(context))),
+          child: Semantics(
+            label: '${tr(context, 'Your rating', 'Arviosi')}: ${asInt(_review!['storeRating']) ?? 0}/5',
+            excludeSemantics: true,
+            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Text('${tr(context, 'Your rating', 'Arviosi')}: ', style: TextStyle(color: AppTheme.secondaryText(context))),
+              for (var i = 0; i < 5; i++)
+                Icon(i < (asInt(_review!['storeRating']) ?? 0) ? Icons.star_rounded : Icons.star_outline_rounded,
+                    size: 18, color: AppTheme.warning),
+            ]),
+          ),
         ),
       if (status == 'DELIVERED' || status == 'CANCELLED')
         _button(Icons.replay_rounded, tr(context, 'Order again', 'Tilaa uudelleen'), () => reorder(context, o), primary: status == 'DELIVERED' && _review != null),
