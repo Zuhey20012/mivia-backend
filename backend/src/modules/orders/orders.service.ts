@@ -30,7 +30,7 @@ type ItemInput = { productId: number; variantId?: number; quantity: number };
 
 export async function createOrder(userId: number, input: {
   storeId: number; deliveryAddress: string; deliveryLat?: number;
-  deliveryLng?: number; notes?: string; items: ItemInput[];
+  deliveryLng?: number; notes?: string; items: ItemInput[]; tipCents?: number;
 }) {
   const store = await prisma.store.findUnique({ where: { id: input.storeId } });
   if (!store || !store.isVerified) throw new OrderError("This store is not accepting orders", 404);
@@ -82,8 +82,11 @@ export async function createOrder(userId: number, input: {
       store.latitude !== null && store.longitude !== null && input.deliveryLat !== undefined && input.deliveryLng !== undefined
         ? haversineKm(store.latitude, store.longitude, input.deliveryLat, input.deliveryLng)
         : null;
-    const pricing = calcOrderPricing(subtotalCents, store.commissionRate, deliveryFeeForDistance(distanceKm));
-    const courierFeeCents = Math.round(pricing.deliveryFeeCents * env.courierFeeShare);
+    const base = calcOrderPricing(subtotalCents, store.commissionRate, deliveryFeeForDistance(distanceKm));
+    // The tip is not Malvoya's money: no commission, added to the total, paid to the courier in full
+    const tipCents = input.tipCents ?? 0;
+    const pricing = { ...base, totalCents: base.totalCents + tipCents };
+    const courierFeeCents = Math.round(pricing.deliveryFeeCents * env.courierFeeShare) + tipCents;
     const etaMinutes = distanceKm === null ? null : estimateDelivery(distanceKm, store.prepMinutes).etaMinutes;
 
     return tx.order.create({
@@ -95,6 +98,7 @@ export async function createOrder(userId: number, input: {
         deliveryLng: input.deliveryLng,
         notes: input.notes,
         ...pricing,
+        tipCents,
         courierFeeCents,
         etaMinutes,
         items: { createMany: { data: itemsData } },
@@ -161,6 +165,7 @@ export async function markOrderPaid(orderId: number, paymentIntentId: string, am
     title: `New order #${order.id}`,
     body: `${order.items.reduce((n, i) => n + i.quantity, 0)} item(s) · ${(order.subtotalCents / 100).toFixed(2).replace(".", ",")} € — accept it in Malvoya Store.`,
     data: { type: "order", orderId: String(order.id) },
+    channel: "new_orders",
   }).catch(() => {});
 
   sendOrderConfirmation({
@@ -171,6 +176,7 @@ export async function markOrderPaid(orderId: number, paymentIntentId: string, am
     items: order.items.map((i) => ({ name: i.product.name, quantity: i.quantity, unitCents: i.unitCents })),
     subtotalCents: order.subtotalCents,
     deliveryFeeCents: order.deliveryFeeCents,
+    tipCents: order.tipCents,
     totalCents: order.totalCents,
     deliveryAddress: order.deliveryAddress,
   }).catch(() => {});
@@ -476,7 +482,8 @@ export async function listAvailableOrders(userId: number) {
     store: o.store,
     itemCount: o.items.reduce((sum, i) => sum + i.quantity, 0),
     deliveryFeeCents: o.deliveryFeeCents,
-    courierFeeCents: o.courierFeeCents,
+    courierFeeCents: o.courierFeeCents, // tip included
+    tipCents: o.tipCents,
     deliveryAreaLat: o.deliveryLat === null ? null : Math.round(o.deliveryLat * 100) / 100,
     deliveryAreaLng: o.deliveryLng === null ? null : Math.round(o.deliveryLng * 100) / 100,
     createdAt: o.createdAt,

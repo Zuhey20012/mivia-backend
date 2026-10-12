@@ -126,6 +126,7 @@ export async function sendVerificationCode(target: string, channel: "sms" | "ema
 }
 
 export interface OrderConfirmationData {
+  tipCents?: number;
   orderId: number;
   customerName: string;
   email?: string | null;
@@ -152,6 +153,7 @@ export async function sendOrderConfirmation(data: OrderConfirmationData): Promis
 <p style="margin:0 0 12px">Myyjä / Seller: <strong>${escapeHtml(data.storeName)}</strong></p>
 <table style="width:100%;border-collapse:collapse;font-size:15px">${rows}
 <tr><td style="padding:6px 0;border-top:1px solid #E5E5EA">Toimitus / Delivery</td><td style="padding:6px 0;border-top:1px solid #E5E5EA;text-align:right">${formatCents(data.deliveryFeeCents)}</td></tr>
+${data.tipCents ? `<tr><td style="padding:6px 0">Tippi kuriirille / Courier tip</td><td style="padding:6px 0;text-align:right">${formatCents(data.tipCents)}</td></tr>` : ""}
 <tr><td style="padding:10px 0;font-weight:700">Yhteensä / Total (sis. ALV / incl. VAT)</td><td style="padding:10px 0;text-align:right;font-weight:700">${formatCents(data.totalCents)}</td></tr></table>
 ${data.deliveryAddress ? `<p style="margin:16px 0 0;color:#6E6E73;font-size:14px">Toimitusosoite / Delivery address: ${escapeHtml(data.deliveryAddress)}</p>` : ""}
 <p style="margin:20px 0 0;color:#6E6E73;font-size:13px;line-height:1.5">Sinulla on 14 päivän peruuttamisoikeus tuotteen vastaanottamisesta. You have a 14-day right of withdrawal from the day you receive the item.</p>`

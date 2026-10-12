@@ -36,6 +36,7 @@ Documents are checked through [VERIFICATION METHOD], not collected in the app.
 ## 5. Fees and payment
 
 - The fee for each job is shown before acceptance. By default the Courier earns the full delivery fee the customer pays [CONFIRM OR CHANGE].
+- Tips: customers can add an optional tip at checkout. Malvoya passes every tip to the Courier in full and takes no commission on it. A tip shown in an offer is already included in the fee shown.
 - Each completed delivery is paid to the Courier's own Stripe account right after delivery (Stripe Connect). Stripe verifies the Courier's identity and bank account on its own pages.
 - The Courier is responsible for their own taxes and insurance as an independent contractor.
 - Malvoya provides a monthly statement of completed jobs and fees.

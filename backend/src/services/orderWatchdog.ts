@@ -48,6 +48,7 @@ export async function runOrderWatchdog() {
       title: `Order #${o.id} is waiting for you`,
       body: `Accept or decline it in Malvoya Store. It is cancelled and refunded automatically in about ${left} min.`,
       data: { type: "order", orderId: String(o.id) },
+      channel: "new_orders",
     }).catch(() => {});
     emitToStore(o.storeId, "order:reminder", { orderId: o.id, cancelsInMinutes: left });
     result.storeReminders++;

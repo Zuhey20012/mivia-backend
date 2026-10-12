@@ -6,6 +6,8 @@ export const createOrderSchema = z.object({
   deliveryLat:     z.number().min(-90).max(90).optional(),
   deliveryLng:     z.number().min(-180).max(180).optional(),
   notes:           z.string().max(500).optional(),
+  // Optional courier tip in cents (max 20 €); it is added to the total and paid to the courier in full
+  tipCents:        z.number().int().min(0).max(2000).optional(),
   items: z.array(z.object({
     productId: z.number().int().positive(),
     variantId: z.number().int().positive().optional(),

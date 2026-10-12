@@ -5,6 +5,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'config/theme.dart';
 import 'core/font_licenses.dart';
+import 'core/app_gate.dart';
 import 'screens/courier_welcome.dart';
 import 'screens/courier_dashboard.dart';
 import 'screens/pending_approval.dart';
@@ -81,6 +82,8 @@ class MalvoyaCourierApp extends StatelessWidget {
             Locale('zh', ''),
             Locale('hi', ''),
           ],
+          // Asks the server whether this build is still supported or Malvoya is in maintenance
+          builder: (context, child) => AppGate(app: 'courier', child: child ?? const SizedBox.shrink()),
           home: Consumer<AuthService>(
             builder: (context, auth, child) {
               if (!auth.isAuthenticated) return const CourierWelcomeScreen();

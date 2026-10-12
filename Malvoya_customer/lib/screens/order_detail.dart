@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
+import '../core/reorder.dart';
 import '../core/strings.dart';
 import '../services/socket_service.dart';
 import 'returns_screen.dart';
@@ -133,6 +134,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
     if (!_active.contains(status)) return null;
     final home = _homePos;
+    if (status == 'SHIPPED' && o['arrivingNotifiedAt'] != null) {
+      return tr(context, 'Your courier is arriving', 'Kuriiri on perillä hetken päästä');
+    }
     if (status == 'SHIPPED' && _courier != null && home != null) {
       final meters = const Distance().as(LengthUnit.Meter, _courier!, home);
       final minutes = (meters / 250).ceil() + 2; // cycling ~15 km/h plus handover
@@ -618,6 +622,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         const Divider(height: 20),
         line(tr(context, 'Items', 'Tuotteet'), o['subtotalCents']),
         line(tr(context, 'Delivery', 'Toimitus'), o['deliveryFeeCents']),
+        if ((asInt(o['tipCents']) ?? 0) > 0) line(tr(context, 'Courier tip', 'Tippi kuriirille'), o['tipCents']),
         line(tr(context, 'Total (VAT incl.)', 'Yhteensä (sis. ALV)'), o['totalCents'], bold: true),
         if ((asInt(o['refundedCents']) ?? 0) > 0) line(tr(context, 'Refunded', 'Hyvitetty'), o['refundedCents']),
       ],
@@ -641,6 +646,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           child: Text('${tr(context, 'Your rating', 'Arviosi')}: ${'★' * (asInt(_review!['storeRating']) ?? 0)}',
               style: TextStyle(color: AppTheme.secondaryText(context))),
         ),
+      if (status == 'DELIVERED' || status == 'CANCELLED')
+        _button(Icons.replay_rounded, tr(context, 'Order again', 'Tilaa uudelleen'), () => reorder(context, o), primary: status == 'DELIVERED' && _review != null),
       if (status == 'DELIVERED' && withinReturn)
         _button(Icons.assignment_return_outlined, tr(context, 'Return items', 'Palauta tuotteita'),
             () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ReturnsScreen()))),

@@ -4,12 +4,16 @@ import { verifyAccessToken } from "../utils/jwt";
 import { prisma } from "./prisma";
 import { env } from "../config/env";
 import { getOrderRelation, getRentalRelation, getCourierForUser } from "../modules/orders/access";
+import { haversineKm } from "../utils/distance";
+import { pushToUser } from "./push";
 
 let io: SocketServer | null = null;
 
 type SocketUser = { id: number; role: string; email: string };
 
 const LOCATION_DB_WRITE_INTERVAL_MS = 15_000;
+/** "Your courier is arriving" goes out once, when a carried order is this close to the door. */
+const ARRIVING_RADIUS_KM = 0.3;
 
 function toId(value: unknown): number | null {
   const n = Number(value);
@@ -80,6 +84,8 @@ export function initSocket(httpServer: HttpServer): SocketServer {
 
     // ── Courier live location ──────────────────────────────────────────────
     const verifiedCourierOrders = new Set<number>();
+    // Destination of each verified order, for the one-time "arriving" notification
+    const destinations = new Map<number, { lat: number; lng: number; userId: number; notified: boolean; triedAt: number }>();
     let lastDbWrite = 0;
 
     const handleLocation = async (data: any) => {
@@ -92,10 +98,13 @@ export function initSocket(httpServer: HttpServer): SocketServer {
       if (!verifiedCourierOrders.has(orderId)) {
         const order = await prisma.order.findFirst({
           where: { id: orderId, courierId, status: { in: ["CONFIRMED", "PROCESSING", "SHIPPED"] } },
-          select: { id: true },
+          select: { id: true, userId: true, deliveryLat: true, deliveryLng: true, arrivingNotifiedAt: true },
         }).catch(() => null);
         if (!order) return;
         verifiedCourierOrders.add(orderId);
+        if (order.deliveryLat !== null && order.deliveryLng !== null) {
+          destinations.set(orderId, { lat: order.deliveryLat, lng: order.deliveryLng, userId: order.userId, notified: !!order.arrivingNotifiedAt, triedAt: 0 });
+        }
       }
 
       io!.to(`order:${orderId}`).emit("courier:location", {
@@ -108,6 +117,25 @@ export function initSocket(httpServer: HttpServer): SocketServer {
         etaMinutes: toId(data?.etaMinutes) ?? undefined,
         timestamp: Date.now(),
       });
+
+      const dest = destinations.get(orderId);
+      // Near the door before pickup (status not SHIPPED yet) is retried at most every 30 s
+      if (dest && !dest.notified && Date.now() - dest.triedAt > 30_000 && haversineKm(lat, lng, dest.lat, dest.lng) <= ARRIVING_RADIUS_KM) {
+        dest.notified = true;
+        dest.triedAt = Date.now();
+        // Only once per order and only after pickup, even across reconnects and several instances
+        prisma.order.updateMany({ where: { id: orderId, status: "SHIPPED", arrivingNotifiedAt: null }, data: { arrivingNotifiedAt: new Date() } })
+          .then((r) => {
+            if (!r.count) { dest.notified = false; return; }
+            pushToUser(dest.userId, {
+              title: "Your courier is arriving",
+              body: `Order #${orderId} is almost at your door.`,
+              data: { type: "order", orderId: String(orderId) },
+            }).catch(() => {});
+            io!.to(`order:${orderId}`).emit("order:status", { orderId, arriving: true, timestamp: new Date().toISOString() });
+          })
+          .catch(() => { dest.notified = false; });
+      }
 
       if (Date.now() - lastDbWrite > LOCATION_DB_WRITE_INTERVAL_MS) {
         lastDbWrite = Date.now();

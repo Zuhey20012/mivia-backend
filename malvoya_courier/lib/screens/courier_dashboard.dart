@@ -429,6 +429,12 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Row(children: [
                       Text(euro(context, j['courierFeeCents'] ?? j['deliveryFeeCents']), style: AppTheme.display(size: 32)),
+                      if ((asInt(j['tipCents']) ?? 0) > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: Text('${tr(context, 'incl. tip', 'sis. tipin')} ${euro(context, j['tipCents'])}',
+                              style: const TextStyle(color: AppTheme.success, fontWeight: FontWeight.w800, fontSize: 13)),
+                        ),
                       const Spacer(),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),

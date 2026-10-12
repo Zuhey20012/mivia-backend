@@ -5,6 +5,7 @@ import { mediaConfigured } from "../../lib/cloudinary";
 import { pushConfigured } from "../../lib/push";
 import { sendError } from "../../lib/errors";
 import { storeAvailability } from "../../utils/openingHours";
+import { appConfigSummary } from "../appConfig/appConfig.routes";
 
 const startedAt = new Date();
 
@@ -61,6 +62,7 @@ export async function getSystemStatus(_req: Request, res: Response) {
     if (!integrations.paymentWebhook.configured) blockers.push("Paid orders are never confirmed: add STRIPE_WEBHOOK_SECRET on Render.");
     if (!integrations.pushNotifications.configured) blockers.push("No push notifications: stores and couriers will not hear about new orders. Add FIREBASE_SERVICE_ACCOUNT.");
     if (!integrations.photosAndVideos.configured) blockers.push("Photo and video uploads are off: add the three CLOUDINARY_* settings.");
+    if (process.env.MAINTENANCE_MESSAGE?.trim()) blockers.push("Maintenance message is on: the apps show it instead of letting people order. Remove MAINTENANCE_MESSAGE on Render to reopen.");
     if (liveStores.length === 0) blockers.push("No approved stores yet.");
     if (approvedCouriers === 0) blockers.push("No approved couriers yet.");
 
@@ -74,7 +76,7 @@ export async function getSystemStatus(_req: Request, res: Response) {
 
     res.json({
       ok: true,
-      version: "2.4.0",
+      version: "2.5.0",
       region: "frankfurt",
       startedAt,
       readyForOrders: blockers.length === 0,
@@ -88,6 +90,7 @@ export async function getSystemStatus(_req: Request, res: Response) {
       },
       ordersInFlight: { waitingForStore, waitingForCourier },
       timers: t,
+      apps: appConfigSummary(),
       backgroundJobs: jobs.map((j) => ({ name: j.name, lastRunAt: j.lastRunAt })),
     });
   } catch (e) { sendError(res, e); }

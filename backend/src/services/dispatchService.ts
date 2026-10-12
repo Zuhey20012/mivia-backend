@@ -39,7 +39,8 @@ export async function offerOrderToCouriers(orderId: number) {
     deliveryAreaLat: approximate(order.deliveryLat),
     deliveryAreaLng: approximate(order.deliveryLng),
     deliveryFeeCents: order.deliveryFeeCents,
-    courierFeeCents: order.courierFeeCents,
+    courierFeeCents: order.courierFeeCents, // tip included
+    tipCents: order.tipCents,
     createdAt: order.createdAt,
   };
 

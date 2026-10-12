@@ -354,7 +354,8 @@ model Order {
   paidAt                DateTime?
   refundedCents         Int           @default(0)
 
-  courierFeeCents Int @default(0) // what the courier earns for this delivery
+  courierFeeCents Int @default(0) // what the courier earns for this delivery, tip included
+  tipCents        Int @default(0) // optional tip chosen at checkout; goes to the courier in full
 
   // Lifecycle timestamps
   confirmedAt  DateTime? // store accepted the order
@@ -380,6 +381,7 @@ model Order {
   storeRemindedAt         DateTime?
   lastOfferAt             DateTime?
   courierSearchNotifiedAt DateTime?
+  arrivingNotifiedAt      DateTime? // "your courier is arriving" push, sent once
 
   notes   String?
   items   OrderItem[]

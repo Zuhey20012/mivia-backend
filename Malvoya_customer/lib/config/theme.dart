@@ -1,4 +1,3 @@
-import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
 /// Malvoya brand theme: "Birch Market".
@@ -121,10 +120,12 @@ class AppTheme {
       );
 
   // ── Shared component styling ─────────────────────────────────────────────
-  static const _pageTransitions = PageTransitionsTheme(builders: {
-    TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-    TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
-    TargetPlatform.android: PredictiveBackPageTransitionsBuilder(),
+  // Flutter's defaults (the iOS slide on iOS/macOS) plus Android's predictive-back animation.
+  // Spreading the defaults avoids naming CupertinoPageTransitionsBuilder, which moved from
+  // material to cupertino in newer Flutter releases.
+  static final _pageTransitions = PageTransitionsTheme(builders: {
+    ...const PageTransitionsTheme().builders,
+    TargetPlatform.android: const PredictiveBackPageTransitionsBuilder(),
   });
 
   static ThemeData _base({

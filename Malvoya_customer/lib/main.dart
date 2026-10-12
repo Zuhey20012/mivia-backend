@@ -6,6 +6,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
 import 'config/constants.dart';
 import 'core/font_licenses.dart';
+import 'core/app_gate.dart';
 import 'screens/main_navigation.dart';
 import 'screens/login.dart';
 import 'cart.dart';
@@ -134,6 +135,8 @@ class MalvoyaApp extends StatelessWidget {
               Locale('zh', ''),
               Locale('hi', ''),
             ],
+            // Asks the server whether this build is still supported or Malvoya is in maintenance
+            builder: (context, child) => AppGate(app: 'customer', child: child ?? const SizedBox.shrink()),
             home: Consumer<AuthService>(
               builder: (context, auth, child) {
                 final screen = !auth.canBrowse ? const LoginScreen() : const MainNavigation();

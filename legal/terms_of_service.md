@@ -25,6 +25,7 @@ Malvoya arranges payment and local delivery by independent couriers.
 
 - All prices are in euros and include VAT where the seller is VAT-registered.
 - The total price, including the delivery fee, is shown before you pay.
+- You can add an optional tip for the courier at checkout. The whole tip goes to the courier. If the order is cancelled, the tip is refunded with the rest of the payment.
 - Payment is processed by Stripe. The order is confirmed only after the payment has been confirmed.
 - Malvoya never sees your card or bank details.
 

@@ -24,7 +24,17 @@ class PushService {
     importance: Importance.high,
   );
 
+  /// Loud channel for new and waiting orders (the server sends those pushes here too).
+  static const _newOrders = AndroidNotificationChannel(
+    'new_orders',
+    'New orders',
+    description: 'Rings until you accept or decline a new order',
+    importance: Importance.max,
+  );
+  static const _alarmId = 9001;
+
   final _local = FlutterLocalNotificationsPlugin();
+  bool _ringing = false;
   AuthService? _auth;
   String? _token;
   int? _registeredFor;
@@ -62,6 +72,9 @@ class PushService {
       await _local
           .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
           ?.createNotificationChannel(_channel);
+      await _local
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+          ?.createNotificationChannel(_newOrders);
 
       FirebaseMessaging.onMessage.listen(_showWhileOpen);
       FirebaseMessaging.onMessageOpenedApp.listen((m) => onOpen?.call(m.data));
@@ -111,6 +124,48 @@ class PushService {
     _registeredFor = null;
     if (token == null || !auth.isAuthenticated) return;
     await ApiClient(auth).delete('/me/devices', {'token': token});
+  }
+
+  /// Like a shop tablet: keeps ringing (the phone's own notification sound, repeated by Android's
+  /// "insistent" flag) until every paid order is accepted or declined, or the alert is tapped.
+  Future<void> ringNewOrders(int waiting) async {
+    if (waiting <= 0) return stopRinging();
+    if (_ringing) return;
+    _ringing = true;
+    try {
+      await _local.show(
+        _alarmId,
+        waiting == 1 ? 'New order waiting' : '$waiting new orders waiting',
+        'Accept or decline in Malvoya Store. / Hyväksy tai hylkää Malvoya Storessa.',
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            _newOrders.id,
+            _newOrders.name,
+            channelDescription: _newOrders.description,
+            importance: Importance.max,
+            priority: Priority.max,
+            category: AndroidNotificationCategory.alarm,
+            icon: '@mipmap/launcher_icon',
+            ongoing: true,
+            autoCancel: true,
+            additionalFlags: Int32List.fromList(<int>[4]), // FLAG_INSISTENT: repeat the sound
+          ),
+          iOS: const DarwinNotificationDetails(presentSound: true, interruptionLevel: InterruptionLevel.timeSensitive),
+        ),
+        payload: jsonEncode({'type': 'orders'}),
+      );
+    } catch (e) {
+      _ringing = false;
+      debugPrint('New-order alert failed: $e');
+    }
+  }
+
+  Future<void> stopRinging() async {
+    if (!_ringing) return;
+    _ringing = false;
+    try {
+      await _local.cancel(_alarmId);
+    } catch (_) {}
   }
 
   /// Android does not show notifications for an app that is open, so show them ourselves.

@@ -38,6 +38,8 @@ export type PushMessage = {
   body: string;
   /** Deep-link data for the app, e.g. { type: "order", orderId: "12" }. Values must be strings. */
   data?: Record<string, string>;
+  /** Android channel: "new_orders" is the loud one in the store app (new and waiting orders). */
+  channel?: "orders" | "new_orders";
 };
 
 export async function pushToUser(userId: number, msg: PushMessage) {
@@ -62,7 +64,7 @@ async function sendBatch(m: Messaging, tokens: string[], msg: PushMessage) {
       tokens,
       notification: { title: msg.title.slice(0, 120), body: msg.body.slice(0, 240) },
       data: msg.data,
-      android: { priority: "high", notification: { channelId: "orders" } },
+      android: { priority: "high", notification: { channelId: msg.channel ?? "orders" } },
       apns: { payload: { aps: { sound: "default" } } },
     });
     // Forget tokens that belong to uninstalled apps

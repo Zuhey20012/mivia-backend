@@ -1,19 +1,24 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
+import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'core/delivery_location.dart';
-import 'config/constants.dart';
-import 'config/theme.dart';
 import 'auth_service.dart';
 import 'cart.dart';
-import 'realtime_notification_service.dart';
+import 'config/constants.dart';
+import 'config/theme.dart';
+import 'core/api_client.dart';
+import 'core/delivery_location.dart';
+import 'core/store_hours.dart';
+import 'core/strings.dart';
 import 'local_notification_service.dart';
-import 'l10n.dart';
-import 'package:flutter_stripe/flutter_stripe.dart';
+import 'models.dart';
+import 'realtime_notification_service.dart';
+import 'screens/location_selector_modal.dart';
+import 'screens/order_detail.dart';
 
+/// Checkout: address, items, an optional courier tip and the exact price the server will charge.
+/// Payment details are only ever entered in Stripe's own payment sheet.
 class CheckoutPage extends StatefulWidget {
   const CheckoutPage({super.key});
   @override
@@ -21,32 +26,21 @@ class CheckoutPage extends StatefulWidget {
 }
 
 class _CheckoutPageState extends State<CheckoutPage> {
-  bool _loading = false;
+  static const _tips = [0, 100, 200, 300, 500];
+
+  bool _paying = false;
   String? _errorMessage;
   final _addressCtrl = TextEditingController();
-  
-  // Payment details are entered only in Stripe's payment sheet (card, Apple/Google Pay, SEPA…)
-  final String _selectedPaymentMethod = 'stripe';
+  int _tipCents = 0;
+
+  /// The store as the server sees it for this address: real delivery fee and whether it is open.
+  Map<String, dynamic>? _store;
+  int? _quotedForStore;
 
   @override
   void initState() {
     super.initState();
     _loadSavedAddress();
-  }
-
-  Future<void> _loadSavedAddress() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await DeliveryLocation.instance.load();
-      final savedAddr = prefs.getString('malvoya_active_address') ??
-                        prefs.getString('saved_default_address') ?? 
-                        prefs.getString('user_delivery_address');
-      if (savedAddr != null && savedAddr.isNotEmpty && mounted) {
-        setState(() {
-          _addressCtrl.text = savedAddr;
-        });
-      }
-    } catch (_) {}
   }
 
   @override
@@ -55,824 +49,480 @@ class _CheckoutPageState extends State<CheckoutPage> {
     super.dispose();
   }
 
-  // European SEPA IBAN Modulo-97 Algorithm
-
-  Future<void> _placeOrder(CartService cart) async {
-    if (_addressCtrl.text.trim().isEmpty) {
-      setState(() => _errorMessage = 'Please enter your delivery address.');
-      return;
-    }
-
+  Future<void> _loadSavedAddress() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('user_delivery_address', _addressCtrl.text.trim());
-      await prefs.setString('saved_default_address', _addressCtrl.text.trim());
-      await prefs.setString('malvoya_active_address', _addressCtrl.text.trim());
+      await DeliveryLocation.instance.load();
+      final saved = DeliveryLocation.instance.address ??
+          prefs.getString('malvoya_active_address') ??
+          prefs.getString('saved_default_address') ??
+          prefs.getString('user_delivery_address');
+      if (saved != null && saved.isNotEmpty && mounted) setState(() => _addressCtrl.text = saved);
     } catch (_) {}
+  }
 
-    setState(() { _loading = true; _errorMessage = null; });
-    HapticFeedback.mediumImpact();
+  bool get _pinned {
+    final loc = DeliveryLocation.instance;
+    return loc.hasCoordinates && loc.address?.trim() == _addressCtrl.text.trim();
+  }
 
+  /// Fetches the store with the pinned coordinates, so the fee shown is the fee charged.
+  Future<void> _quote(int storeId) async {
+    _quotedForStore = storeId;
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final res = await ApiClient(auth).get('/stores/$storeId', query: _pinned ? DeliveryLocation.instance.query : null);
+    if (mounted && res.ok) setState(() => _store = Map<String, dynamic>.from(res.data['store']));
+  }
+
+  Future<void> _pickAddress(int? storeId) async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: false,
+      backgroundColor: Colors.transparent,
+      builder: (_) => LocationSelectorModal(currentLocation: _addressCtrl.text),
+    );
+    await DeliveryLocation.instance.load();
+    final addr = DeliveryLocation.instance.address;
+    if (!mounted) return;
+    if (addr != null && addr.isNotEmpty) setState(() => _addressCtrl.text = addr);
+    if (storeId != null) _quote(storeId);
+  }
+
+  Future<void> _placeOrder(CartService cart) async {
+    final address = _addressCtrl.text.trim();
+    if (address.length < 5) {
+      setState(() => _errorMessage = tr(context, 'Enter your delivery address.', 'Kirjoita toimitusosoitteesi.'));
+      return;
+    }
     final auth = Provider.of<AuthService>(context, listen: false);
     if (!auth.isAuthenticated) {
-      setState(() { _errorMessage = 'You must be logged in to checkout.'; _loading = false; });
+      setState(() => _errorMessage = tr(context, 'Sign in to place an order.', 'Kirjaudu sisään tehdäksesi tilauksen.'));
       return;
     }
 
-    final loc = DeliveryLocation.instance;
+    setState(() {
+      _paying = true;
+      _errorMessage = null;
+    });
+    HapticFeedback.mediumImpact();
     try {
-      final response = await http.post(
-        Uri.parse('${AppConstants.apiBase}/orders'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${auth.accessToken}',
-        },
-        body: jsonEncode({
-          'storeId': cart.storeId,
-          'deliveryAddress': _addressCtrl.text.trim(),
-          // Coordinates only when this is the address that was pinned on the map
-          if (loc.hasCoordinates && loc.address?.trim() == _addressCtrl.text.trim()) ...{
-            'deliveryLat': loc.lat,
-            'deliveryLng': loc.lng,
-          },
-          'items': cart.items.map((i) => i.toOrderItem()..removeWhere((_, v) => v == null)).toList(),
-        }),
-      );
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('malvoya_active_address', address);
+    } catch (_) {}
 
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        final resData = jsonDecode(response.body);
-        final orderData = resData['order'];
-        final clientSecret = resData['clientSecret'];
-        // The server calculates the price; show exactly what is charged.
-        final totalCharged = ((orderData['totalCents'] as num?) ?? 0) / 100;
-        final orderId = orderData['id'].toString();
-        if (clientSecret == null || clientSecret.toString().isEmpty) {
-          throw Exception('Payment could not be started. Please try again.');
-        }
-
-        // Stripe PaymentSheet: card details never touch Malvoya; 3-D Secure (PSD2 SCA) is handled by Stripe.
-        await Stripe.instance.initPaymentSheet(
-          paymentSheetParameters: SetupPaymentSheetParameters(
-            paymentIntentClientSecret: clientSecret.toString(),
-            merchantDisplayName: 'Malvoya',
-            style: ThemeMode.system,
-            allowsDelayedPaymentMethods: true, // SEPA Direct Debit settles after a few days
-            googlePay: PaymentSheetGooglePay(
-              merchantCountryCode: 'FI',
-              currencyCode: 'EUR',
-              testEnv: AppConstants.stripePublishableKey.startsWith('pk_test_'),
-            ),
-          ),
-        );
-        await Stripe.instance.presentPaymentSheet();
-
-        // Reached ONLY after payment verification succeeds
-        await _dispatchRealtimeAlerts(totalCharged, auth, orderId: orderId);
-
-        HapticFeedback.heavyImpact();
-        cart.clear();
-        if (mounted) _showSuccessDialog(orderData, totalCharged, auth);
-      } else {
-        final errBody = jsonDecode(response.body);
-        throw Exception(errBody['error'] ?? 'Failed to place order');
-      }
-
-    } on StripeException catch (e) {
-      if (mounted) {
-        final isCancelled = e.error.code == FailureCode.Canceled;
-        showDialog(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: Text(isCancelled ? 'Payment Cancelled' : 'Payment Failed', style: const TextStyle(fontWeight: FontWeight.bold)),
-            content: Text(isCancelled ? 'Your order was not placed and your card was not charged.' : (e.error.localizedMessage ?? 'Transaction was declined by your bank.')),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('OK', style: TextStyle(color: Color(0xFF6D2E8C), fontWeight: FontWeight.bold)),
-              ),
-            ],
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        showDialog(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Checkout Failed', style: TextStyle(fontWeight: FontWeight.bold)),
-            content: Text('Could not complete order: ${e.toString().replaceAll("Exception: ", "")}'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('OK', style: TextStyle(color: Color(0xFF6D2E8C), fontWeight: FontWeight.bold)),
-              ),
-            ],
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _loading = false);
+    final loc = DeliveryLocation.instance;
+    final res = await ApiClient(auth).post('/orders', {
+      'storeId': cart.storeId,
+      'deliveryAddress': address,
+      // Coordinates only when this is the address that was pinned on the map
+      if (_pinned) ...{'deliveryLat': loc.lat, 'deliveryLng': loc.lng},
+      if (_tipCents > 0) 'tipCents': _tipCents,
+      'items': cart.items.map((i) => i.toOrderItem()..removeWhere((_, v) => v == null)).toList(),
+    });
+    if (!mounted) return;
+    if (!res.ok) {
+      setState(() {
+        _paying = false;
+        _errorMessage = res.error ?? tr(context, 'The order could not be placed. Please try again.', 'Tilausta ei voitu tehdä. Yritä uudelleen.');
+      });
+      return;
     }
-  }
 
-  Future<void> _dispatchRealtimeAlerts(double amount, AuthService auth, {String? orderId}) async {
-    // The confirmation email is sent by the server once Stripe confirms the payment.
+    final order = Map<String, dynamic>.from(res.data['order']);
+    final clientSecret = res.data['clientSecret']?.toString() ?? '';
+    final orderId = asInt(order['id'])!;
+    final charged = asInt(order['totalCents']) ?? 0;
+    try {
+      if (clientSecret.isEmpty) throw StateError('no client secret');
+      // Stripe PaymentSheet: card details never touch Malvoya; 3-D Secure (PSD2 SCA) is handled by Stripe.
+      await Stripe.instance.initPaymentSheet(
+        paymentSheetParameters: SetupPaymentSheetParameters(
+          paymentIntentClientSecret: clientSecret,
+          merchantDisplayName: 'Malvoya',
+          style: ThemeMode.system,
+          allowsDelayedPaymentMethods: true, // SEPA Direct Debit settles after a few days
+          googlePay: PaymentSheetGooglePay(
+            merchantCountryCode: 'FI',
+            currencyCode: 'EUR',
+            testEnv: AppConstants.stripePublishableKey.startsWith('pk_test_'),
+          ),
+        ),
+      );
+      await Stripe.instance.presentPaymentSheet();
+    } on StripeException catch (e) {
+      if (!mounted) return;
+      final cancelled = e.error.code == FailureCode.Canceled;
+      setState(() {
+        _paying = false;
+        _errorMessage = cancelled
+            ? tr(context, 'Payment cancelled. You were not charged.', 'Maksu peruttiin. Sinua ei veloitettu.')
+            : (e.error.localizedMessage ?? tr(context, 'Your bank declined the payment.', 'Pankkisi hylkäsi maksun.'));
+      });
+      return;
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _paying = false;
+        _errorMessage = tr(context, 'Payment could not be started. You were not charged.', 'Maksua ei voitu aloittaa. Sinua ei veloitettu.');
+      });
+      return;
+    }
+
+    // Paid in the sheet; the order is confirmed when Stripe tells the server
+    HapticFeedback.heavyImpact();
     try {
       await LocalNotificationService.showNotification(
         id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
-        title: 'Tilaus #$orderId vastaanotettu / Order #$orderId received',
-        body: 'Payment of €${amount.toStringAsFixed(2)} submitted. We will email you when it is confirmed.',
+        title: tr(context, 'Order #$orderId received', 'Tilaus #$orderId vastaanotettu'),
+        body: tr(context, 'Payment of ${euro(context, charged)} submitted. Follow your order live in the app.',
+            'Maksu ${euro(context, charged)} lähetetty. Seuraa tilaustasi sovelluksessa.'),
       );
     } catch (_) {}
-
     if (!mounted) return;
     RealtimeNotificationService.notifyOrderPlaced(
       context,
-      orderId: orderId ?? '',
-      total: amount,
-      paymentMethod: _selectedPaymentMethod,
+      orderId: '$orderId',
+      total: charged / 100,
+      paymentMethod: 'stripe',
       email: auth.currentUser?.email ?? '',
       phone: auth.currentUser?.phone,
     );
-  }
-
-  void _showSuccessDialog(dynamic order, double total, AuthService auth) {
-    final orderId = order?['id']?.toString() ?? '';
-    final email = auth.currentUser?.email ?? '';
-    final hasRealEmail = email.isNotEmpty && !email.endsWith('@phone.malvoya.app');
-    if (!mounted) return;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final secondary = isDark ? const Color(0xFF98989D) : const Color(0xFF6E6E73);
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog.adaptive(
-        title: const Text('Kiitos! / Thank you!'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            Container(
-              width: 72,
-              height: 72,
-              decoration: const BoxDecoration(color: AppTheme.sunshine, shape: BoxShape.circle),
-              child: const Icon(Icons.check_rounded, color: AppTheme.ink, size: 40),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Order #$orderId • €${total.toStringAsFixed(2)}',
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              hasRealEmail
-                  ? 'Your payment was submitted. We will email the order confirmation to $email once the payment is confirmed. The store will then prepare your order.'
-                  : 'Your payment was submitted. You can follow your order in the Orders tab once the payment is confirmed.',
-              style: TextStyle(color: secondary, fontSize: 14, height: 1.4),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              Navigator.of(context).popUntil((r) => r.isFirst);
-            },
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
+    cart.clear();
+    // Straight to live tracking, like the big delivery apps
+    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: orderId)));
   }
 
   @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
     final cart = Provider.of<CartService>(context);
-    final subtotal = cart.total;
-    const deliveryFee = 2.99;
-    final total = subtotal + deliveryFee;
+    final storeId = cart.storeId;
+    if (storeId != null && _quotedForStore != storeId) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _quote(storeId));
+    }
 
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardBg = AppTheme.cardBackground(context);
-    final borderColor = AppTheme.cardBorder(context);
-    final textPrimary = AppTheme.primaryText(context);
-    final textSecondary = AppTheme.secondaryText(context);
-    final inputBg = AppTheme.inputBackground(context);
+    final subtotalCents = (cart.total * 100).round();
+    final feeCents = asInt(_store?['deliveryFeeCents']);
+    final totalCents = subtotalCents + (feeCents ?? 0) + _tipCents;
+    final closed = closedLabel(context, _store);
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(l10n.translate('checkout'), style: const TextStyle(fontWeight: FontWeight.w800)),
-        centerTitle: true,
-      ),
+      appBar: AppBar(title: Text(tr(context, 'Checkout', 'Kassa'))),
       body: cart.items.isEmpty
-          ? _buildEmptyCart(textPrimary, textSecondary)
+          ? _emptyCart()
           : Column(
               children: [
                 Expanded(
                   child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                     children: [
-                      // Address section
-                      _buildSection(
-                        title: '📍 ${l10n.translate('deliveryAddress')}',
-                        cardBg: cardBg,
-                        borderColor: borderColor,
-                        textPrimary: textPrimary,
-                        children: [
+                      if (closed != null) ...[
+                        _notice(Icons.schedule_rounded, '${_store?['name'] ?? ''}: $closed. ${tr(context, 'You can pay when it opens.', 'Voit maksaa, kun se aukeaa.')}'),
+                        const SizedBox(height: 12),
+                      ],
+                      _section(
+                        tr(context, 'Delivery address', 'Toimitusosoite'),
+                        [
                           TextField(
                             controller: _addressCtrl,
-                            style: TextStyle(color: textPrimary),
+                            onChanged: (_) => setState(() {}),
+                            textInputAction: TextInputAction.done,
                             decoration: InputDecoration(
-                              hintText: 'Street address, apartment, postal code',
-                              hintStyle: TextStyle(color: textSecondary),
-                              prefixIcon: const Icon(Icons.location_on_outlined, size: 20),
-                              filled: true,
-                              fillColor: inputBg,
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                              hintText: tr(context, 'Street, number, apartment, postcode', 'Katu, numero, asunto, postinumero'),
+                              prefixIcon: const Icon(Icons.location_on_outlined),
                             ),
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Payment Method Selector
-                      _buildPaymentMethodSelector(
-                        cardBg: cardBg,
-                        borderColor: borderColor,
-                        inputBg: inputBg,
-                        textPrimary: textPrimary,
-                        textSecondary: textSecondary,
-                        isDark: isDark,
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Order items
-                      _buildSection(
-                        title: l10n.locale.languageCode == 'fi' ? '🛍️ Valitsemasi tuotteet' : '🛍️ Your Boutique Pieces',
-                        cardBg: cardBg,
-                        borderColor: borderColor,
-                        textPrimary: textPrimary,
-                        children: [
-                          ...cart.items.map((item) => Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 52,
-                                  height: 60,
-                                  clipBehavior: Clip.antiAlias,
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.pastel(context, AppTheme.clay, AppTheme.clayInk),
-                                    borderRadius: BorderRadius.circular(14),
-                                  ),
-                                  child: item.imageUrl != null
-                                      ? Image.network(item.imageUrl!, fit: BoxFit.cover,
-                                          errorBuilder: (_, __, ___) => const Icon(Icons.checkroom_outlined, color: AppTheme.clayInk))
-                                      : const Icon(Icons.checkroom_outlined, color: AppTheme.clayInk, size: 24),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        item.name,
-                                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary),
-                                      ),
-                                      Text(
-                                        '${item.price.toStringAsFixed(2)} € / kpl',
-                                        style: TextStyle(color: textSecondary, fontSize: 12),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                _QuantityControl(
-                                  quantity: item.quantity,
-                                  textPrimary: textPrimary,
-                                  onDecrement: () => cart.changeQuantity(item, item.quantity - 1),
-                                  onIncrement: () => cart.changeQuantity(item, item.quantity + 1),
-                                ),
-                                const SizedBox(width: 12),
-                                Text(
-                                  '${(item.price * item.quantity).toStringAsFixed(2)} €',
-                                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: textPrimary),
-                                ),
-                              ],
-                            ),
-                          )),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Order summary
-                      _buildSection(
-                        title: l10n.locale.languageCode == 'fi' ? '💳 Tilauksen yhteenveto' : '💳 Order Summary',
-                        cardBg: cardBg,
-                        borderColor: borderColor,
-                        textPrimary: textPrimary,
-                        children: [
-                          _summaryRow(l10n.locale.languageCode == 'fi' ? 'Välisumma' : 'Subtotal', '${subtotal.toStringAsFixed(2)} €', textPrimary, textSecondary),
                           const SizedBox(height: 8),
-                          _summaryRow(l10n.locale.languageCode == 'fi' ? 'Lähikuriirin toimitus' : 'Local Courier Delivery', '${deliveryFee.toStringAsFixed(2)} €', textPrimary, textSecondary),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                            child: Divider(color: borderColor),
-                          ),
-                          _summaryRow(l10n.locale.languageCode == 'fi' ? 'Yhteensä (sis. ALV)' : 'Total (incl. VAT)', '${total.toStringAsFixed(2)} €', textPrimary, textSecondary, bold: true),
+                          Row(children: [
+                            Icon(_pinned ? Icons.check_circle_rounded : Icons.info_outline_rounded,
+                                size: 18, color: _pinned ? AppTheme.success : AppTheme.secondaryText(context)),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                _pinned
+                                    ? tr(context, 'Pinned on the map: exact fee and live tracking', 'Merkitty kartalle: tarkka hinta ja live-seuranta')
+                                    : tr(context, 'Pin it on the map for the exact fee and live tracking', 'Merkitse kartalle tarkkaa hintaa ja live-seurantaa varten'),
+                                style: TextStyle(fontSize: 12.5, color: AppTheme.secondaryText(context)),
+                              ),
+                            ),
+                            TextButton(onPressed: () => _pickAddress(storeId), child: Text(tr(context, 'Map', 'Kartta'))),
+                          ]),
                         ],
                       ),
-
-                      if (_errorMessage != null) ...[
-                        const SizedBox(height: 16),
-                        Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFEF2F2),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: const Color(0xFFFECACA)),
-                          ),
-                          child: Row(children: [
-                            const Icon(Icons.error_outline_rounded, color: Color(0xFFD93025), size: 20),
-                            const SizedBox(width: 10),
-                            Expanded(child: Text(_errorMessage!, style: const TextStyle(color: Color(0xFFB91C1C), fontSize: 13, fontWeight: FontWeight.w600))),
-                          ]),
-                        ),
-                      ],
-
-                      const SizedBox(height: 100),
-                    ],
-                  ),
-                ),
-
-                // Master 1-Swipe & Google Pay Action Zone (Bottom 35% Thumb Zone)
-                Container(
-                  padding: const EdgeInsets.fromLTRB(18, 14, 18, 28),
-                  decoration: BoxDecoration(
-                    color: cardBg,
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-                    border: Border(top: BorderSide(color: borderColor, width: 1)),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.05),
-                        blurRadius: 18,
-                        offset: const Offset(0, -4),
+                      const SizedBox(height: 14),
+                      _section(
+                        cart.storeName ?? tr(context, 'Your bag', 'Ostoskassi'),
+                        [for (final item in cart.items) _itemRow(cart, item)],
                       ),
+                      const SizedBox(height: 14),
+                      _section(
+                        tr(context, 'Tip your courier', 'Tippi kuriirille'),
+                        [
+                          Text(tr(context, 'Optional. The whole tip goes to the courier.', 'Vapaaehtoinen. Koko tippi menee kuriirille.'),
+                              style: TextStyle(fontSize: 13, color: AppTheme.secondaryText(context))),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [for (final t in _tips) _tipChip(t)],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      _section(
+                        tr(context, 'Summary', 'Yhteenveto'),
+                        [
+                          _summaryRow(tr(context, 'Items', 'Tuotteet'), euro(context, subtotalCents)),
+                          const SizedBox(height: 8),
+                          _summaryRow(
+                            tr(context, 'Delivery', 'Toimitus'),
+                            feeCents == null ? tr(context, 'calculating…', 'lasketaan…') : euro(context, feeCents),
+                          ),
+                          if (_tipCents > 0) ...[
+                            const SizedBox(height: 8),
+                            _summaryRow(tr(context, 'Courier tip', 'Tippi kuriirille'), euro(context, _tipCents)),
+                          ],
+                          const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Divider()),
+                          _summaryRow(tr(context, 'Total (VAT incl.)', 'Yhteensä (sis. ALV)'), euro(context, totalCents), bold: true),
+                          const SizedBox(height: 6),
+                          Text(
+                            tr(context, 'The final price is calculated by Malvoya and shown again in the payment sheet before you pay.',
+                                'Lopullisen hinnan laskee Malvoya, ja se näytetään vielä maksuikkunassa ennen maksua.'),
+                            style: TextStyle(fontSize: 12, color: AppTheme.secondaryText(context)),
+                          ),
+                        ],
+                      ),
+                      if (_errorMessage != null) ...[
+                        const SizedBox(height: 14),
+                        _notice(Icons.error_outline_rounded, _errorMessage!, error: true),
+                      ],
                     ],
                   ),
-                  child: _loading
-                      ? const Center(child: SizedBox(width: 32, height: 32, child: CircularProgressIndicator(strokeWidth: 2.5, color: AppTheme.primary)))
-                      : Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // Sticky Checkout Slider in Thumb Zone
-                            SwipeToPaySlider(
-                              total: total,
-                              label: 'Slide to Pay • €${total.toStringAsFixed(2)}',
-                              isLoading: _loading,
-                              isDark: isDark,
-                              onConfirmed: () async {
-                                await _placeOrder(cart);
-                              },
-                            ),
-
-                            const SizedBox(height: 10),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.shield_outlined, size: 14, color: textSecondary),
-                                const SizedBox(width: 5),
-                                Text(
-                                  'Encrypted via Stripe / Adyen PCI-DSS Level 1 • 256-Bit SSL Security',
-                                  style: TextStyle(fontSize: 10, color: textSecondary, fontWeight: FontWeight.w500),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
                 ),
+                _payBar(cart, totalCents, enabled: closed == null && feeCents != null),
               ],
             ),
     );
   }
 
-  Widget _buildPaymentMethodSelector({
-    required Color cardBg,
-    required Color borderColor,
-    required Color inputBg,
-    required Color textPrimary,
-    required Color textSecondary,
-    required bool isDark,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '💳 ${AppLocalizations.of(context).translate('paymentMethods')}',
-          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: textPrimary),
-        ),
-        const SizedBox(height: 10),
-        _paymentOptionTile(
-          id: 'stripe',
-          title: 'Card, Apple Pay, Google Pay or bank',
-          subtitle: 'Choose in the secure Stripe payment sheet',
-          icon: Icons.lock_rounded,
-          iconColor: const Color(0xFF6D2E8C),
-          cardBg: cardBg,
-          borderColor: borderColor,
-          textPrimary: textPrimary,
-          textSecondary: textSecondary,
-          isDark: isDark,
-        ),
-        const SizedBox(height: 10),
-        Text(
-          'Malvoya never sees or stores your card or bank details. Your bank may ask you to confirm the payment (3-D Secure).',
-          style: TextStyle(color: textSecondary, fontSize: 12, height: 1.35),
-        ),
-      ],
-    );
-  }
-
-  Widget _paymentOptionTile({
-    required String id,
-    required String title,
-    required String subtitle,
-    required IconData icon,
-    required Color iconColor,
-    String? badge,
-    required Color cardBg,
-    required Color borderColor,
-    required Color textPrimary,
-    required Color textSecondary,
-    required bool isDark,
-  }) {
-    final isSelected = _selectedPaymentMethod == id;
-    return GestureDetector(
-      onTap: () => HapticFeedback.lightImpact(),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: isSelected ? AppTheme.primary.withValues(alpha: isDark ? 0.25 : 0.08) : cardBg,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: isSelected ? AppTheme.primary : borderColor,
-            width: isSelected ? 1.8 : 1.0,
-          ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: iconColor.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: iconColor, size: 22),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(title, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textPrimary)),
-                      if (badge != null) ...[
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF248A52),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(badge, style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w800)),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(subtitle, style: TextStyle(fontSize: 11, color: textSecondary)),
-                ],
-              ),
-            ),
-            Icon(
-              isSelected ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
-              color: isSelected ? AppTheme.primary : (isDark ? Colors.white30 : Colors.grey.shade400),
-              size: 20,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildEmptyCart(Color textPrimary, Color textSecondary) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.shopping_bag_outlined, size: 80, color: textSecondary.withValues(alpha: 0.5)),
-            const SizedBox(height: 16),
-            Text('Your cart is empty', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: textPrimary)),
-            const SizedBox(height: 8),
-            Text('Discover boutique pieces to get started', style: TextStyle(color: textSecondary)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSection({
-    required String title,
-    required List<Widget> children,
-    required Color cardBg,
-    required Color borderColor,
-    required Color textPrimary,
-  }) {
+  Widget _payBar(CartService cart, int totalCents, {required bool enabled}) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: EdgeInsets.fromLTRB(16, 14, 16, 14 + MediaQuery.of(context).viewPadding.bottom),
       decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: borderColor, width: 1.2),
+        color: AppTheme.cardBackground(context),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 20, offset: const Offset(0, -4))],
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(title, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: textPrimary, letterSpacing: -0.2)),
-          const SizedBox(height: 14),
-          ...children,
+          SizedBox(
+            width: double.infinity,
+            height: 56,
+            child: FilledButton(
+              onPressed: _paying || !enabled ? null : () => _placeOrder(cart),
+              child: _paying
+                  ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                  : Text('${tr(context, 'Pay', 'Maksa')} ${euro(context, totalCents)}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.lock_outline_rounded, size: 14, color: AppTheme.secondaryText(context)),
+              const SizedBox(width: 5),
+              Flexible(
+                child: Text(
+                  tr(context, 'Card, Google Pay or bank in Stripe’s secure payment sheet. Malvoya never sees your card.',
+                      'Kortti, Google Pay tai pankki Stripen suojatussa maksuikkunassa. Malvoya ei näe korttiasi.'),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 11.5, color: AppTheme.secondaryText(context)),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
 
-  Widget _summaryRow(String label, String value, Color textPrimary, Color textSecondary, {bool bold = false}) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            color: bold ? textPrimary : textSecondary,
-            fontWeight: bold ? FontWeight.w800 : FontWeight.w500,
-            fontSize: bold ? 15 : 13,
+  Widget _tipChip(int cents) {
+    final selected = _tipCents == cents;
+    final label = cents == 0 ? tr(context, 'No tip', 'Ei tippiä') : euro(context, cents);
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      excludeSemantics: true,
+      child: GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          setState(() => _tipCents = cents);
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          height: 44,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? AppTheme.sunshine : AppTheme.cardBackground(context),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: selected ? AppTheme.sunshine : AppTheme.cardBorder(context), width: 1.5),
           ),
+          child: Text(label,
+              style: TextStyle(fontWeight: FontWeight.w800, color: selected ? AppTheme.ink : AppTheme.primaryText(context))),
         ),
-        Text(
-          value,
-          style: TextStyle(
-            fontWeight: bold ? FontWeight.w900 : FontWeight.w600,
-            fontSize: bold ? 17 : 13,
-            color: bold ? AppTheme.primary : textPrimary,
-          ),
-        ),
-      ],
+      ),
     );
   }
+
+  Widget _itemRow(CartService cart, CartItem item) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          Container(
+            width: 52,
+            height: 60,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: AppTheme.pastel(context, AppTheme.clay, AppTheme.clayInk),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: item.imageUrl != null
+                ? Image.network(item.imageUrl!, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.checkroom_outlined, color: AppTheme.clayInk))
+                : const Icon(Icons.checkroom_outlined, color: AppTheme.clayInk),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(item.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
+                Text(
+                  [if (item.variantLabel != null) item.variantLabel, euro(context, (item.price * 100).round())].join(' · '),
+                  style: TextStyle(color: AppTheme.secondaryText(context), fontSize: 12.5),
+                ),
+              ],
+            ),
+          ),
+          _QuantityControl(
+            quantity: item.quantity,
+            onDecrement: () => cart.changeQuantity(item, item.quantity - 1),
+            onIncrement: () => cart.changeQuantity(item, item.quantity + 1),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _emptyCart() => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 88,
+                height: 88,
+                decoration: BoxDecoration(color: AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine), shape: BoxShape.circle),
+                child: const Icon(Icons.shopping_bag_outlined, size: 40, color: Color(0xFF8A5A00)),
+              ),
+              const SizedBox(height: 16),
+              Text(tr(context, 'Your bag is empty', 'Ostoskassisi on tyhjä'), style: AppTheme.display(context, size: 21)),
+              const SizedBox(height: 6),
+              Text(tr(context, 'Find something you love from stores near you.', 'Löydä jotain ihanaa läheisistä kaupoista.'),
+                  textAlign: TextAlign.center, style: TextStyle(color: AppTheme.secondaryText(context))),
+            ],
+          ),
+        ),
+      );
+
+  Widget _notice(IconData icon, String text, {bool error = false}) => Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: error ? const Color(0xFFFEF2F2) : AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine),
+          borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+        ),
+        child: Row(children: [
+          Icon(icon, color: error ? const Color(0xFFD93025) : const Color(0xFF8A5A00), size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(text,
+                style: TextStyle(
+                  color: error ? const Color(0xFFB91C1C) : AppTheme.primaryText(context),
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  height: 1.35,
+                )),
+          ),
+        ]),
+      );
+
+  Widget _section(String title, List<Widget> children) => Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: AppTheme.cardBackground(context),
+          borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+          border: Border.all(color: AppTheme.cardBorder(context)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: AppTheme.display(context, size: 18)),
+            const SizedBox(height: 12),
+            ...children,
+          ],
+        ),
+      );
+
+  Widget _summaryRow(String label, String value, {bool bold = false}) => Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label,
+              style: TextStyle(
+                color: bold ? AppTheme.primaryText(context) : AppTheme.secondaryText(context),
+                fontWeight: bold ? FontWeight.w800 : FontWeight.w500,
+                fontSize: bold ? 16 : 14,
+              )),
+          Text(value,
+              style: TextStyle(
+                color: AppTheme.primaryText(context),
+                fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
+                fontSize: bold ? 18 : 14,
+              )),
+        ],
+      );
 }
 
 class _QuantityControl extends StatelessWidget {
   final int quantity;
-  final Color textPrimary;
   final VoidCallback onDecrement;
   final VoidCallback onIncrement;
-  const _QuantityControl({
-    required this.quantity,
-    required this.textPrimary,
-    required this.onDecrement,
-    required this.onIncrement,
-  });
+  const _QuantityControl({required this.quantity, required this.onDecrement, required this.onIncrement});
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        _btn(Icons.remove_rounded, onDecrement),
-        SizedBox(
-          width: 28,
-          child: Text(
-            '$quantity',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary),
+    return Container(
+      decoration: BoxDecoration(color: AppTheme.inputBackground(context), borderRadius: BorderRadius.circular(20)),
+      child: Row(
+        children: [
+          _btn(context, Icons.remove_rounded, tr(context, 'Fewer', 'Vähemmän'), onDecrement),
+          SizedBox(
+            width: 24,
+            child: Text('$quantity', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w800, color: AppTheme.primaryText(context))),
           ),
-        ),
-        _btn(Icons.add_rounded, onIncrement),
-      ],
-    );
-  }
-
-  Widget _btn(IconData icon, VoidCallback cb) {
-    return GestureDetector(
-      onTap: cb,
-      child: Container(
-        width: 28, height: 28,
-        decoration: BoxDecoration(
-          color: AppTheme.primaryLight,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Icon(icon, size: 16, color: AppTheme.primary),
+          _btn(context, Icons.add_rounded, tr(context, 'More', 'Lisää'), onIncrement),
+        ],
       ),
     );
   }
-}
 
-class SwipeToPaySlider extends StatefulWidget {
-  final double total;
-  final String label;
-  final Future<void> Function() onConfirmed;
-  final bool isDark;
-  final bool isLoading;
-
-  const SwipeToPaySlider({
-    super.key,
-    required this.total,
-    required this.label,
-    required this.onConfirmed,
-    required this.isDark,
-    this.isLoading = false,
-  });
-
-  @override
-  State<SwipeToPaySlider> createState() => _SwipeToPaySliderState();
-}
-
-class _SwipeToPaySliderState extends State<SwipeToPaySlider> with SingleTickerProviderStateMixin {
-  double _dragPosition = 0.0;
-  bool _confirmed = false;
-  late AnimationController _springController;
-  late Animation<double> _springAnimation;
-  double _lastHapticStep = 0.0;
-
-  @override
-  void initState() {
-    super.initState();
-    _springController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
-    );
-    _springController.addListener(() {
-      setState(() {
-        _dragPosition = _springAnimation.value;
-      });
-    });
-  }
-
-  @override
-  void dispose() {
-    _springController.dispose();
-    super.dispose();
-  }
-
-  void _onDragUpdate(DragUpdateDetails details, double maxDrag) {
-    if (_confirmed || widget.isLoading) return;
-    setState(() {
-      _dragPosition = (_dragPosition + details.delta.dx).clamp(0.0, maxDrag);
-      final progress = maxDrag > 0 ? _dragPosition / maxDrag : 0.0;
-      if ((progress - _lastHapticStep).abs() >= 0.2) {
-        _lastHapticStep = progress;
-        HapticFeedback.selectionClick();
-      }
-    });
-  }
-
-  void _onDragEnd(DragEndDetails details, double maxDrag) async {
-    if (_confirmed || widget.isLoading) return;
-    final progress = maxDrag > 0 ? _dragPosition / maxDrag : 0.0;
-    if (progress >= 0.82) {
-      setState(() {
-        _dragPosition = maxDrag;
-        _confirmed = true;
-      });
-      HapticFeedback.heavyImpact();
-      await widget.onConfirmed();
-      if (mounted) {
-        setState(() {
-          _confirmed = false;
-          _dragPosition = 0.0;
-        });
-      }
-    } else {
-      _springAnimation = Tween<double>(begin: _dragPosition, end: 0.0).animate(
-        CurvedAnimation(parent: _springController, curve: Curves.easeOutBack),
+  Widget _btn(BuildContext context, IconData icon, String label, VoidCallback cb) => IconButton(
+        tooltip: label,
+        onPressed: cb,
+        visualDensity: VisualDensity.compact,
+        icon: Icon(icon, size: 18, color: AppTheme.primaryText(context)),
       );
-      _springController.forward(from: 0.0);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    const height = 58.0;
-    const handleSize = 50.0;
-    const padding = 4.0;
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final maxDrag = constraints.maxWidth - handleSize - (padding * 2);
-        final progress = maxDrag > 0 ? (_dragPosition / maxDrag).clamp(0.0, 1.0) : 0.0;
-
-        return Container(
-          height: height,
-          decoration: BoxDecoration(
-            color: widget.isDark ? const Color(0xFF2A2331) : const Color(0xFFF1EFF8),
-            borderRadius: BorderRadius.circular(height / 2),
-            border: Border.all(
-              color: AppTheme.primary.withValues(alpha: widget.isDark ? 0.4 : 0.25),
-              width: 1.5,
-            ),
-          ),
-          child: Stack(
-            alignment: Alignment.centerLeft,
-            children: [
-              // Dynamic progress fill
-              Container(
-                width: (_dragPosition + handleSize + padding).clamp(height, constraints.maxWidth),
-                height: height,
-                decoration: BoxDecoration(
-                  gradient: AppTheme.primaryGradient,
-                  borderRadius: BorderRadius.circular(height / 2),
-                ),
-              ),
-
-              // Centered label (fading during drag)
-              Center(
-                child: Opacity(
-                  opacity: (1.0 - progress * 1.6).clamp(0.0, 1.0),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        _confirmed ? 'Authorizing Payment...' : widget.label,
-                        style: TextStyle(
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w800,
-                          color: widget.isDark ? Colors.white : AppTheme.textPrimary,
-                          letterSpacing: 0.2,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Icon(
-                        Icons.chevron_right_rounded,
-                        size: 20,
-                        color: widget.isDark ? Colors.white70 : AppTheme.textSecondary,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // Draggable Handle
-              Positioned(
-                left: padding + _dragPosition,
-                child: GestureDetector(
-                  onHorizontalDragUpdate: (d) => _onDragUpdate(d, maxDrag),
-                  onHorizontalDragEnd: (d) => _onDragEnd(d, maxDrag),
-                  child: Container(
-                    width: handleSize,
-                    height: handleSize,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppTheme.primary.withValues(alpha: 0.45),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Center(
-                      child: widget.isLoading || _confirmed
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.5,
-                                color: AppTheme.primary,
-                              ),
-                            )
-                          : const Icon(
-                              Icons.arrow_forward_rounded,
-                              color: AppTheme.primary,
-                              size: 24,
-                            ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
 }

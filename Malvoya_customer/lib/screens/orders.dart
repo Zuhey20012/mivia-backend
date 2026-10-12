@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
+import '../core/reorder.dart';
 import '../core/strings.dart';
 import '../services/socket_service.dart';
 import 'order_detail.dart';
@@ -165,7 +166,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: AppTheme.cardBackground(context),
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(AppTheme.radiusLg - 2),
           border: Border.all(color: AppTheme.cardBorder(context)),
         ),
         child: Row(
@@ -176,7 +177,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 width: 56,
                 height: 68,
                 child: images.isEmpty
-                    ? Container(color: AppTheme.primaryLight, child: const Icon(Icons.checkroom_rounded, color: AppTheme.primary))
+                    ? Container(color: AppTheme.pastel(context, AppTheme.clay, AppTheme.clayInk), child: const Icon(Icons.checkroom_outlined, color: AppTheme.clayInk))
                     : CachedNetworkImage(imageUrl: images.first, fit: BoxFit.cover),
               ),
             ),
@@ -193,11 +194,21 @@ class _OrdersScreenState extends State<OrdersScreen> {
                     style: TextStyle(fontSize: 13, color: AppTheme.secondaryText(context)),
                   ),
                   const SizedBox(height: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)),
-                    child: Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color)),
-                  ),
+                  Row(children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                      decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12)),
+                      child: Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color)),
+                    ),
+                    const Spacer(),
+                    if (o['status'] == 'DELIVERED')
+                      TextButton.icon(
+                        style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8)),
+                        onPressed: () => reorder(context, Map<String, dynamic>.from(o)),
+                        icon: const Icon(Icons.replay_rounded, size: 18),
+                        label: Text(tr(context, 'Again', 'Uudelleen')),
+                      ),
+                  ]),
                 ],
               ),
             ),

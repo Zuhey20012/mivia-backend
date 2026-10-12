@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +11,7 @@ import '../core/strings.dart';
 import '../core/google_link_tile.dart';
 import '../core/delete_account_tile.dart';
 import '../services/socket_service.dart';
+import '../core/push_service.dart';
 import 'chatbot.dart';
 import 'drops_manager.dart';
 import 'payouts_screen.dart';
@@ -26,7 +28,7 @@ class VendorDashboard extends StatefulWidget {
   State<VendorDashboard> createState() => _VendorDashboardState();
 }
 
-class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProviderStateMixin {
+class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final TabController _tabs = TabController(length: 4, vsync: this)..addListener(() => setState(() {}));
   final _dropsKey = GlobalKey<DropsManagerState>();
 
@@ -45,10 +47,23 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       _load();
     });
     VendorSocketService().addListener(_onSocket);
+    WidgetsBinding.instance.addObserver(this);
+    // Safety net if the live connection drops: look for new orders every 30 s while open
+    _poll = Timer.periodic(const Duration(seconds: 30), (_) => _loadOrders());
+  }
+
+  Timer? _poll;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _loadOrders();
   }
 
   @override
   void dispose() {
+    _poll?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    PushService.instance.stopRinging();
     VendorSocketService().removeListener(_onSocket);
     _tabs.dispose();
     super.dispose();
@@ -138,6 +153,9 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     final res = await _api.get('/orders');
     if (!mounted || !res.ok) return;
     setState(() => _orders = ((res.data['orders'] as List?) ?? []).map((o) => Map<String, dynamic>.from(o)).toList());
+    // Ring while any paid order is waiting for an answer; stop as soon as none is
+    final waiting = _orders.where((o) => o['status'] == 'PENDING' && o['paymentStatus'] == 'SUCCEEDED').length;
+    PushService.instance.ringNewOrders(waiting);
   }
 
   Future<void> _setStatus(Map<String, dynamic> order, String status) async {

@@ -1,4 +1,4 @@
-// End-to-end test for API v2.4 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
+// End-to-end test for API v2.5 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
 const { execSync } = require("child_process");
 const crypto = require("crypto");
 const { io } = require("socket.io-client");
@@ -196,6 +196,15 @@ async function register(name, role, extra = {}) {
   const loserTok = acc1.status === 200 ? c2.accessToken : c1.accessToken;
   check("courier picks up", (await call("PATCH", `/orders/${orderId}/status`, { status: "SHIPPED" }, winner.tok)).status === 200);
   check("accepted and picked-up times recorded", sql(`select "pickedUpAt" is not null and "acceptedAt" is not null from "Order" where id=${orderId}`) === "t");
+  const winnerSock = acc1.status === 200 ? c1Sock : c2Sock;
+  winnerSock.emit("courier:update_location", { orderId, lat: 60.2, lng: 24.9 });
+  await sleep(400);
+  check("no arriving notice while the courier is still far away", sql(`select "arrivingNotifiedAt" is null from "Order" where id=${orderId}`) === "t");
+  winnerSock.emit("courier:update_location", { orderId, lat: 60.1801, lng: 24.9502 });
+  await sleep(600);
+  winnerSock.emit("courier:update_location", { orderId, lat: 60.1802, lng: 24.9501 });
+  await sleep(600);
+  check("customer is told the courier is arriving, once", sql(`select "arrivingNotifiedAt" is not null from "Order" where id=${orderId}`) === "t" && custSock.events.filter((e) => e.ev === "order:status" && e.data.arriving === true).length === 1, custSock.events.filter((e) => e.ev === "order:status").map((e) => e.data));
 
   console.log("\n— Handover and proof of delivery");
   check("courier cannot skip the handover step", (await call("PATCH", `/orders/${orderId}/status`, { status: "DELIVERED" }, winner.tok)).status === 409);
@@ -531,6 +540,15 @@ async function register(name, role, extra = {}) {
   check("watchdog: with no courier at all the order is refunded", row(noCourierId, `status || '|' || "paymentStatus" || '|' || "cancelReason"`) === "CANCELLED|REFUNDED|No courier was available");
   check("store acceptance records when it happened", sql(`select "confirmedAt" is not null from "Order" where id=${orderId}`) === "t");
 
+  console.log("\n— Tips and app updates");
+  const tipped = await call("POST", "/orders", { ...orderBody, tipCents: 200 }, otherCust.accessToken);
+  const to = tipped.body.order;
+  check("a tip is added to the total and paid to the courier in full", tipped.status === 201 && to.tipCents === 200 && to.totalCents === 5000 + to.deliveryFeeCents + 200 && to.courierFeeCents === to.deliveryFeeCents + 200 && to.commissionCents === 500, to);
+  check("tips are capped at 20 €", (await call("POST", "/orders", { ...orderBody, tipCents: 5000 }, otherCust.accessToken)).status === 400);
+  const cfg = await call("GET", "/app-config?app=customer&build=5");
+  check("apps learn whether their build is still supported", cfg.status === 200 && cfg.body.updateRequired === false && cfg.body.maintenance?.active === false && cfg.body.storeUrl.includes("com.malvoya.customer"), cfg.body);
+  check("app config rejects unknown apps", (await call("GET", "/app-config?app=evil")).status === 400);
+
   console.log("\n— Launch alerts and system status");
   check("launch alert needs a location", (await call("PUT", "/me/launch-alert", { area: "Tampere" }, otherCust.accessToken)).status === 400);
   check("launch alert needs a signed-in user", (await call("PUT", "/me/launch-alert", { latitude: 61.4978, longitude: 23.761 })).status === 401);
@@ -559,7 +577,7 @@ async function register(name, role, extra = {}) {
   check("huge search input rejected", (await call("GET", `/products/search?q=${"a".repeat(200)}`)).status === 400);
   const cors = await fetch(`${API}/stores`, { headers: { Origin: "https://evil.example" } });
   check("CORS does not allow unknown origins", !cors.headers.get("access-control-allow-origin"));
-  check("health reports v2.4.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.4.0");
+  check("health reports v2.5.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.5.0");
 
   [vendorSock, custSock, otherSock, c1Sock, c2Sock].forEach((s) => s.close());
   console.log(`\n${pass} passed, ${fail} failed`);

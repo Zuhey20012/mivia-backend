@@ -15,6 +15,7 @@ type Status = {
   marketplace: Record<string, number>;
   ordersInFlight: { waitingForStore: number; waitingForCourier: number };
   timers: Record<string, number>;
+  apps?: Record<string, { minBuild: number; maintenance: { active: boolean; message: string | null } }>;
   backgroundJobs: { name: string; lastRunAt: string | null }[];
 };
 type Demand = { totalWaiting: number; demand: { latitude: number; longitude: number; waiting: number; areas: string[] }[] };
@@ -137,6 +138,26 @@ export default function System() {
                 ))}
               </div>
             </div>
+            {status.apps && (
+              <div className="apple-card">
+                <p className="font-semibold mb-1">App versions and maintenance</p>
+                <p className="text-gray-400 text-xs mb-3">Set MIN_BUILD_CUSTOMER / MIN_BUILD_STORE / MIN_BUILD_COURIER on Render to make older builds ask for an update, and MAINTENANCE_MESSAGE to pause all apps with a message.</p>
+                <div className="space-y-2">
+                  {Object.entries(status.apps).map(([app, c]) => (
+                    <div key={app} className="flex items-center justify-between text-sm">
+                      <span className="capitalize">{app} app</span>
+                      <span className="text-gray-500">{c.minBuild > 0 ? `builds below ${c.minBuild} must update` : 'all builds allowed'}</span>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between text-sm">
+                    <span>Maintenance</span>
+                    <span className={Object.values(status.apps)[0]?.maintenance.active ? 'text-amber-600 font-medium' : 'text-gray-500'}>
+                      {Object.values(status.apps)[0]?.maintenance.active ? `on: “${Object.values(status.apps)[0]?.maintenance.message}”` : 'off'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="apple-card">
               <p className="font-semibold mb-3">Background jobs</p>
               <div className="space-y-2">

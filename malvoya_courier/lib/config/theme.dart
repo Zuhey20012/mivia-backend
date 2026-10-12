@@ -1,4 +1,3 @@
-import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
 /// Malvoya Courier theme: "Birch Market" in Lingon red.
@@ -49,9 +48,11 @@ class AppTheme {
     return ThemeData(
       useMaterial3: true,
       fontFamily: bodyFont,
-      pageTransitionsTheme: const PageTransitionsTheme(builders: {
-        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-        TargetPlatform.android: PredictiveBackPageTransitionsBuilder(),
+      // Flutter's defaults (the iOS slide on iOS) plus Android's predictive-back animation;
+      // works on Flutter versions before and after CupertinoPageTransitionsBuilder moved.
+      pageTransitionsTheme: PageTransitionsTheme(builders: {
+        ...const PageTransitionsTheme().builders,
+        TargetPlatform.android: const PredictiveBackPageTransitionsBuilder(),
       }),
       splashFactory: InkSparkle.splashFactory,
       primaryColor: primary,
