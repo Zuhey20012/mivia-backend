@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/theme.dart';
 import '../core/delivery_location.dart';
+import '../core/strings.dart';
 import 'map_address_picker.dart';
 
 class LocationSelectorModal extends StatefulWidget {
@@ -30,57 +31,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
   final _postalCtrl = TextEditingController();
   final _cityCtrl = TextEditingController(text: 'Helsinki');
   final _buzzerCtrl = TextEditingController();
-  final _citySearchCtrl = TextEditingController();
-  String _citySearchQuery = '';
 
-  final List<Map<String, dynamic>> _cities = [
-    // Finland - Capital Region
-    {'name': 'Helsinki', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Service area', 'active': true},
-    {'name': 'Espoo', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Service area', 'active': true},
-    {'name': 'Vantaa', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Service area', 'active': true},
-    {'name': 'Kauniainen', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Service area', 'active': true},
-    // Finland - Key Metros
-    {'name': 'Tampere', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
-    {'name': 'Turku', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
-    {'name': 'Oulu', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
-    {'name': 'Jyväskylä', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
-    {'name': 'Kuopio', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
-    {'name': 'Lahti', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
-    {'name': 'Pori', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
-    {'name': 'Kouvola', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
-    {'name': 'Joensuu', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
-    {'name': 'Lappeenranta', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
-    {'name': 'Hämeenlinna', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
-    {'name': 'Vaasa', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
-    {'name': 'Seinäjoki', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
-    {'name': 'Rovaniemi', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
-    {'name': 'Mikkeli', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
-    {'name': 'Porvoo', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
-    {'name': 'Kotka', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
-    {'name': 'Kokkola', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
-    {'name': 'Hyvinkää', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
-    {'name': 'Järvenpää', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
-    {'name': 'Lohja', 'country': 'Finland', 'flag': '🇫🇮', 'status': 'Available', 'active': true},
-    // Sweden
-    {'name': 'Stockholm', 'country': 'Sweden', 'flag': '🇸🇪', 'status': 'Nordic Hub', 'active': true},
-    {'name': 'Göteborg', 'country': 'Sweden', 'flag': '🇸🇪', 'status': 'Available', 'active': true},
-    {'name': 'Malmö', 'country': 'Sweden', 'flag': '🇸🇪', 'status': 'Available', 'active': true},
-    {'name': 'Uppsala', 'country': 'Sweden', 'flag': '🇸🇪', 'status': 'Available', 'active': true},
-    {'name': 'Lund', 'country': 'Sweden', 'flag': '🇸🇪', 'status': 'Available', 'active': true},
-    {'name': 'Linköping', 'country': 'Sweden', 'flag': '🇸🇪', 'status': 'Available', 'active': true},
-    // Norway
-    {'name': 'Oslo', 'country': 'Norway', 'flag': '🇳🇴', 'status': 'Nordic Hub', 'active': true},
-    {'name': 'Bergen', 'country': 'Norway', 'flag': '🇳🇴', 'status': 'Available', 'active': true},
-    {'name': 'Trondheim', 'country': 'Norway', 'flag': '🇳🇴', 'status': 'Available', 'active': true},
-    {'name': 'Stavanger', 'country': 'Norway', 'flag': '🇳🇴', 'status': 'Available', 'active': true},
-    // Denmark
-    {'name': 'Copenhagen', 'country': 'Denmark', 'flag': '🇩🇰', 'status': 'Nordic Hub', 'active': true},
-    {'name': 'Aarhus', 'country': 'Denmark', 'flag': '🇩🇰', 'status': 'Available', 'active': true},
-    {'name': 'Odense', 'country': 'Denmark', 'flag': '🇩🇰', 'status': 'Available', 'active': true},
-    // Iceland & Baltics
-    {'name': 'Reykjavík', 'country': 'Iceland', 'flag': '🇮🇸', 'status': 'Available', 'active': true},
-    {'name': 'Tallinn', 'country': 'Estonia', 'flag': '🇪🇪', 'status': 'Available', 'active': true},
-  ];
 
   @override
   void initState() {
@@ -119,7 +70,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
 
   Future<void> _saveNewManualAddress() async {
     if (_streetCtrl.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter street name.')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr(context, 'Please enter the street.', 'Kirjoita katuosoite.'))));
       return;
     }
     HapticFeedback.mediumImpact();
@@ -144,7 +95,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('📍 Delivery address updated: $addressText'),
+          content: Text(tr(context, 'Delivery address: $addressText', 'Toimitusosoite: $addressText')),
           backgroundColor: const Color(0xFF248A52),
           behavior: SnackBarBehavior.floating,
         ),
@@ -197,8 +148,8 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Choose Delivery Location', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textPrimary)),
-                      Text('Fast courier radar: 38+ cities in Finland & Scandinavia', style: TextStyle(fontSize: 12, color: textSecondary)),
+                      Text(tr(context, 'Choose delivery address', 'Valitse toimitusosoite'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textPrimary)),
+                      Text(tr(context, 'Pin your address for the exact delivery fee', 'Merkitse osoitteesi tarkkaa toimitusmaksua varten'), style: TextStyle(fontSize: 12, color: textSecondary)),
                     ],
                   ),
                 ),
@@ -245,7 +196,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                       Navigator.pop(context);
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text('📍 Delivery pin set: ${result.fullAddress}'),
+                          content: Text(tr(context, 'Delivery address: ${result.fullAddress}', 'Toimitusosoite: ${result.fullAddress}')),
                           backgroundColor: const Color(0xFF248A52),
                           behavior: SnackBarBehavior.floating,
                         ),
@@ -329,7 +280,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                             Navigator.pop(context);
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                content: Text('📍 Live GPS pin saved: ${res.fullAddress}'),
+                                content: Text(tr(context, 'Delivery address: ${res.fullAddress}', 'Toimitusosoite: ${res.fullAddress}')),
                                 backgroundColor: const Color(0xFF248A52),
                                 behavior: SnackBarBehavior.floating,
                               ),
@@ -345,12 +296,12 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                               BoxShadow(color: AppTheme.primary.withValues(alpha: 0.25), blurRadius: 10, offset: const Offset(0, 3)),
                             ],
                           ),
-                          child: const Row(
+                          child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.my_location_rounded, color: Colors.white, size: 18),
-                              SizedBox(width: 8),
-                              Text('Share GPS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
+                              const Icon(Icons.my_location_rounded, color: Colors.white, size: 18),
+                              const SizedBox(width: 8),
+                              Text(tr(context, 'Use my location', 'Käytä sijaintiani'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
                             ],
                           ),
                         ),
@@ -372,7 +323,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                             children: [
                               Icon(_showManualForm ? Icons.expand_less_rounded : Icons.edit_location_alt_rounded, color: AppTheme.primary, size: 18),
                               const SizedBox(width: 8),
-                              const Text('Enter Manually', style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w800, fontSize: 13)),
+                              Text(tr(context, 'Type it in', 'Kirjoita osoite'), style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w800, fontSize: 13)),
                             ],
                           ),
                         ),
@@ -394,7 +345,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Street Address *', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textPrimary)),
+                        Text(tr(context, 'Street address *', 'Katuosoite *'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textPrimary)),
                         const SizedBox(height: 6),
                         TextField(
                           controller: _streetCtrl,
@@ -417,7 +368,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text('Apt / Door', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textPrimary)),
+                                  Text(tr(context, 'Apartment', 'Asunto'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textPrimary)),
                                   const SizedBox(height: 6),
                                   TextField(
                                     controller: _aptCtrl,
@@ -441,7 +392,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text('Postal Code', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textPrimary)),
+                                  Text(tr(context, 'Postcode', 'Postinumero'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textPrimary)),
                                   const SizedBox(height: 6),
                                   TextField(
                                     controller: _postalCtrl,
@@ -464,7 +415,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                           ],
                         ),
                         const SizedBox(height: 10),
-                        Text('Door Buzzer Code (Optional)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textPrimary)),
+                        Text(tr(context, 'Door code (optional)', 'Ovikoodi (valinnainen)'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textPrimary)),
                         const SizedBox(height: 6),
                         TextField(
                           controller: _buzzerCtrl,
@@ -490,7 +441,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                               padding: const EdgeInsets.symmetric(vertical: 14),
                             ),
                             onPressed: _saveNewManualAddress,
-                            child: const Text('Save & Select Location', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                            child: Text(tr(context, 'Save and use this address', 'Tallenna ja käytä tätä osoitetta'), style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                           ),
                         ),
                       ],
@@ -501,7 +452,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                 const SizedBox(height: 20),
 
                 // Saved Addresses Section
-                Text('ALL SAVED ADDRESSES', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: textSecondary, letterSpacing: 0.8)),
+                Text(tr(context, 'SAVED ADDRESSES', 'TALLENNETUT OSOITTEET'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: textSecondary, letterSpacing: 0.8)),
                 const SizedBox(height: 8),
 
                 if (_loadingAddresses)
@@ -520,7 +471,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            'No saved delivery addresses yet. Tap "Enter Manually" or "Share GPS" above.',
+                            tr(context, 'No saved addresses yet. Type one in or use your location above.', 'Ei vielä tallennettuja osoitteita. Kirjoita osoite tai käytä sijaintiasi yllä.'),
                             style: TextStyle(fontSize: 12, color: textSecondary),
                           ),
                         ),
@@ -562,153 +513,6 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                     );
                   }),
 
-                const SizedBox(height: 24),
-
-                // Browse Malvoya Cities Section with Search Filter
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'BROWSE SCANDINAVIAN CITIES',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: textSecondary, letterSpacing: 0.8),
-                    ),
-                    Text(
-                      '38+ Nordic Cities',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: textSecondary),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-
-                // Real-time City Search Filter Box
-                Container(
-                  height: 44,
-                  margin: const EdgeInsets.only(bottom: 12),
-                  decoration: BoxDecoration(
-                    color: inputBg,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: cardBorder),
-                  ),
-                  child: TextField(
-                    controller: _citySearchCtrl,
-                    style: TextStyle(fontSize: 13, color: textPrimary),
-                    onChanged: (v) => setState(() => _citySearchQuery = v.trim().toLowerCase()),
-                    decoration: InputDecoration(
-                      hintText: 'Search city (Helsinki, Oulu, Tampere, Stockholm...)',
-                      hintStyle: TextStyle(fontSize: 12, color: textSecondary),
-                      prefixIcon: const Icon(Icons.search_rounded, color: AppTheme.primary, size: 18),
-                      suffixIcon: _citySearchQuery.isNotEmpty
-                          ? IconButton(
-                              icon: const Icon(Icons.clear_rounded, size: 16),
-                              onPressed: () {
-                                _citySearchCtrl.clear();
-                                setState(() => _citySearchQuery = '');
-                              },
-                            )
-                          : null,
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 11),
-                    ),
-                  ),
-                ),
-
-                () {
-                  final filteredCities = _cities.where((c) {
-                    if (_citySearchQuery.isEmpty) return true;
-                    final name = (c['name'] as String).toLowerCase();
-                    final country = (c['country'] as String).toLowerCase();
-                    return name.contains(_citySearchQuery) || country.contains(_citySearchQuery);
-                  }).toList();
-
-                  if (filteredCities.isEmpty) {
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      child: Center(
-                        child: Text(
-                          'No matching cities found for "$_citySearchQuery"',
-                          style: TextStyle(fontSize: 12, color: textSecondary),
-                        ),
-                      ),
-                    );
-                  }
-
-                  return GridView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 3,
-                      childAspectRatio: 1.15,
-                      crossAxisSpacing: 10,
-                      mainAxisSpacing: 10,
-                    ),
-                    itemCount: filteredCities.length,
-                    itemBuilder: (_, i) {
-                      final city = filteredCities[i];
-                      final isActive = city['active'] as bool;
-                      final isCurrent = widget.currentLocation.toLowerCase().contains((city['name'] as String).toLowerCase());
-
-                      return GestureDetector(
-                        onTap: () {
-                          HapticFeedback.lightImpact();
-                          final locName = '${city['name']}, ${city['country']}';
-                          widget.onLocationSelected?.call(locName);
-                          DeliveryLocation.instance.set(locName);
-                          Navigator.pop(context);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('📍 Delivery area updated: $locName'),
-                              backgroundColor: const Color(0xFF248A52),
-                              behavior: SnackBarBehavior.floating,
-                            ),
-                          );
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: isCurrent
-                                ? AppTheme.primary.withValues(alpha: 0.12)
-                                : (isActive ? cardBg : inputBg),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: isCurrent
-                                  ? AppTheme.primary
-                                  : (isActive ? cardBorder : cardBorder.withValues(alpha: 0.5)),
-                              width: isCurrent ? 1.8 : 1,
-                            ),
-                          ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(city['flag'] as String, style: const TextStyle(fontSize: 20)),
-                              const SizedBox(height: 3),
-                              Text(
-                                city['name'] as String,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: isCurrent ? AppTheme.primary : textPrimary,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                city['status'] as String,
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w700,
-                                  color: isCurrent
-                                      ? AppTheme.primary
-                                      : (isActive ? const Color(0xFF248A52) : textSecondary),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  );
-                }(),
               ],
             ),
           ),

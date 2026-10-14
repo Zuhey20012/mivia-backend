@@ -59,7 +59,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
       _showEmailSupportModal(context, l10n);
       return;
     }
-    _ctrl.text = query.replaceFirst(RegExp(r'^[^ws]+s*'), '');
+    _ctrl.text = query;
     _sendMessage(l10n);
   }
 
@@ -93,7 +93,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
             'text': l10n.translate('botResponseDelivery'),
             'time': l10n.translate('justNow'),
           });
-        } else if (text.contains('size') || text.contains('koko') || text.contains('sovitt') || text.contains('fit') || text.contains('measure') || text.contains('mitat') || text.contains('clothes') || text.contains('vaatte')) {
+        } else if (text.contains('size') || text.contains('koko') || text.contains('koot') || text.contains('sovitt') || text.contains('fit') || text.contains('measure') || text.contains('mitat') || text.contains('clothes') || text.contains('vaatte')) {
           _messages.add({
             'sender': 'bot',
             'text': l10n.translate('botResponseSizing'),
@@ -251,7 +251,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                   controller: subjectCtrl,
                   style: TextStyle(color: textPrimary, fontSize: 14),
                   decoration: InputDecoration(
-                    hintText: 'e.g. Question regarding order #MLV-8942',
+                    hintText: tr(context, 'e.g. Question about order #123', 'esim. Kysymys tilauksesta #123'),
                     hintStyle: TextStyle(color: textSecondary),
                     filled: true,
                     fillColor: inputBg,
@@ -302,6 +302,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                         'app': 'customer',
                         'topic': '$selectedCategory: ${subjectCtrl.text.trim()}',
                         'message': messageCtrl.text.trim(),
+                        if (!auth.isAuthenticated && emailCtrl.text.trim().isNotEmpty) 'email': emailCtrl.text.trim(),
                       });
                       if (!mounted) return;
                       if (res.ok) Navigator.pop(ctx);

@@ -14,7 +14,7 @@ class TermsLegalScreen extends StatelessWidget {
       ('terms', Icons.gavel_rounded, tr(context, 'Terms of Service', 'Käyttöehdot'), tr(context, 'Buying, delivery, returns and complaints', 'Ostaminen, toimitus, palautukset ja valitukset')),
       ('privacy', Icons.privacy_tip_outlined, tr(context, 'Privacy Policy', 'Tietosuojaseloste'), tr(context, 'What data we use and your rights', 'Mitä tietoja käytämme ja oikeutesi')),
       ('sellers', Icons.storefront_outlined, tr(context, 'Seller Terms', 'Myyjän ehdot'), tr(context, 'Rules for stores on Malvoya', 'Säännöt Malvoyan kaupoille')),
-      ('couriers', Icons.pedal_bike_rounded, tr(context, 'Courier Agreement', 'Lähettisopimus'), tr(context, 'Terms for independent couriers', 'Ehdot itsenäisille lähettäjille')),
+      ('couriers', Icons.pedal_bike_rounded, tr(context, 'Courier Agreement', 'Lähettisopimus'), tr(context, 'Terms for independent couriers', 'Ehdot itsenäisille läheteille')),
     ];
     return Scaffold(
       appBar: AppBar(title: Text(tr(context, 'Legal', 'Juridiset tiedot'))),

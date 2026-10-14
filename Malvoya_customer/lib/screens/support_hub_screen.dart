@@ -6,10 +6,11 @@ import '../config/theme.dart';
 import '../l10n.dart';
 import '../locale_provider.dart';
 import 'chatbot.dart';
-import '../local_notification_service.dart';
 import '../auth_service.dart';
 import '../core/api_client.dart';
 
+/// Contact: messages are stored by the server (admin panel → Support) and answered by email.
+/// There is no phone line, live chat or SMS channel, so none is offered here.
 class SupportHubScreen extends StatefulWidget {
   const SupportHubScreen({super.key});
 
@@ -17,98 +18,103 @@ class SupportHubScreen extends StatefulWidget {
   State<SupportHubScreen> createState() => _SupportHubScreenState();
 }
 
+class _Topic {
+  final String id;
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String subtitle;
+  final List<String> examples;
+  const _Topic(this.id, this.icon, this.color, this.title, this.subtitle, this.examples);
+}
+
 class _SupportHubScreenState extends State<SupportHubScreen> {
   String _searchQuery = '';
   final TextEditingController _searchCtrl = TextEditingController();
 
-  final List<Map<String, dynamic>> _topics = [
-    {
-      'id': 'orders',
-      'title': 'Order Questions',
-      'subtitle': 'Delivery tracking, courier arrival, item status & missing items',
-      'icon': Icons.inventory_2_outlined,
-      'color': const Color(0xFF6D2E8C),
-      'examples': ['Where is my courier?', 'Change delivery address', 'Missing item in order'],
-    },
-    {
-      'id': 'account',
-      'title': 'Account Management',
-      'subtitle': 'Email change, phone verification, transaction PIN & GDPR privacy',
-      'icon': Icons.manage_accounts_outlined,
-      'color': const Color(0xFF3B82F6),
-      'examples': ['Change phone number', 'Reset 4-digit PIN', 'GDPR Article 17 erasure'],
-    },
-    {
-      'id': 'payments',
-      'title': 'Payments & Credits',
-      'subtitle': 'Billing questions, Stripe card charges, SEPA refunds & receipts',
-      'icon': Icons.credit_card_outlined,
-      'color': const Color(0xFF248A52),
-      'examples': ['Card declined assistance', 'SEPA refund status', 'Download VAT receipt'],
-    },
-    {
-      'id': 'future',
-      'title': 'Malvoya in the Future & Drops',
-      'subtitle': 'Roadmap, Nordic city launches, creator program & drop invitations',
-      'icon': Icons.rocket_launch_outlined,
-      'color': const Color(0xFF9B5DB8),
-      'examples': ['Upcoming city launches', 'Exclusive drops access', 'Creator program criteria'],
-    },
-    {
-      'id': 'benefits',
-      'title': 'Malvoya Advantages & Returns',
-      'subtitle': 'Zero video spam drops, verified local boutiques & 14-day statutory returns',
-      'icon': Icons.verified_outlined,
-      'color': const Color(0xFFE08A00),
-      'examples': ['Finnish 14-day return rights', 'Express local courier speeds', 'How stores are verified'],
-    },
-    {
-      'id': 'partner',
-      'title': 'Partner with Us',
-      'subtitle': 'Merchant storefront onboarding, artisan registration & courier fleet',
-      'icon': Icons.handshake_outlined,
-      'color': const Color(0xFF6366F1),
-      'examples': ['Apply as boutique merchant', 'Courier onboarding requirements', 'Platform fee structure'],
-    },
-    {
-      'id': 'chats',
-      'title': 'My Chats & Active Tickets',
-      'subtitle': 'Conversation history with support agents and ticket resolution tracking',
-      'icon': Icons.chat_bubble_outline_rounded,
-      'color': const Color(0xFF8E4FAE),
-      'examples': ['Ticket #MLV-9428', 'Chat with Malvoya Concierge', 'View closed cases'],
-    },
-  ];
-
-  String _getTopicTitle(AppLocalizations l10n, Map<String, dynamic> topic) {
-    switch (topic['id']) {
-      case 'orders': return l10n.translate('supportOrderQuestions');
-      case 'account': return l10n.translate('supportAccountMgmt');
-      case 'payments': return l10n.translate('supportPaymentsCredits');
-      case 'future': return l10n.translate('supportFutureRoadmap');
-      case 'benefits': return l10n.translate('supportAdvantagesReturns');
-      case 'partner': return l10n.translate('supportPartnerWithUs');
-      case 'chats': return l10n.translate('supportMyChats');
-      default: return topic['title'] as String;
-    }
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
   }
 
-  String _getTopicSubtitle(AppLocalizations l10n, Map<String, dynamic> topic) {
-    switch (topic['id']) {
-      case 'orders': return l10n.translate('supportOrderQuestionsSub');
-      case 'account': return l10n.translate('supportAccountMgmtSub');
-      case 'payments': return l10n.translate('supportPaymentsCreditsSub');
-      case 'future': return l10n.translate('supportFutureRoadmapSub');
-      case 'benefits': return l10n.translate('supportAdvantagesReturnsSub');
-      case 'partner': return l10n.translate('supportPartnerWithUsSub');
-      case 'chats': return l10n.translate('supportMyChatsSub');
-      default: return topic['subtitle'] as String;
-    }
-  }
+  List<_Topic> _topics(BuildContext context) => [
+        _Topic(
+          'orders',
+          Icons.inventory_2_outlined,
+          const Color(0xFF6D2E8C),
+          tr(context, 'Orders and delivery', 'Tilaukset ja toimitus'),
+          tr(context, 'Where your order is, a missing or wrong item', 'Missä tilauksesi on, puuttuva tai väärä tuote'),
+          [
+            tr(context, 'Where is my order?', 'Missä tilaukseni on?'),
+            tr(context, 'An item is missing', 'Tuote puuttuu'),
+            tr(context, 'I got the wrong item', 'Sain väärän tuotteen'),
+          ],
+        ),
+        _Topic(
+          'returns',
+          Icons.assignment_return_outlined,
+          const Color(0xFFE08A00),
+          tr(context, 'Returns and refunds', 'Palautukset ja hyvitykset'),
+          tr(context, '14-day withdrawal for purchases from business sellers, refund status',
+              '14 päivän peruuttamisoikeus yritysmyyjiltä ostettaessa, hyvityksen tila'),
+          [
+            tr(context, 'When will I get my refund?', 'Milloin saan hyvityksen?'),
+            tr(context, 'The item is faulty', 'Tuote on viallinen'),
+            tr(context, 'Returning to a private seller', 'Palautus yksityismyyjälle'),
+          ],
+        ),
+        _Topic(
+          'payments',
+          Icons.credit_card_outlined,
+          const Color(0xFF248A52),
+          tr(context, 'Payments', 'Maksut'),
+          tr(context, 'Charges, declined payments and receipts', 'Veloitukset, hylätyt maksut ja kuitit'),
+          [
+            tr(context, 'My payment was declined', 'Maksuni hylättiin'),
+            tr(context, 'I was charged twice', 'Minua veloitettiin kahdesti'),
+            tr(context, 'I need a receipt', 'Tarvitsen kuitin'),
+          ],
+        ),
+        _Topic(
+          'account',
+          Icons.manage_accounts_outlined,
+          const Color(0xFF3B82F6),
+          tr(context, 'Account and privacy', 'Tili ja tietosuoja'),
+          tr(context, 'Signing in, your details and your data', 'Kirjautuminen, tietosi ja henkilötietosi'),
+          [
+            tr(context, 'I cannot sign in', 'En pääse kirjautumaan'),
+            tr(context, 'Change my phone number', 'Puhelinnumeroni vaihto'),
+            tr(context, 'A question about my data', 'Kysymys tiedoistani'),
+          ],
+        ),
+        _Topic(
+          'partner',
+          Icons.handshake_outlined,
+          const Color(0xFF6366F1),
+          tr(context, 'Selling or delivering', 'Myyminen tai toimittaminen'),
+          tr(context, 'Opening a store or becoming a courier', 'Kaupan avaaminen tai lähetiksi ryhtyminen'),
+          [
+            tr(context, 'How do I open a store?', 'Miten avaan kaupan?'),
+            tr(context, 'How do I become a courier?', 'Miten minusta tulee lähetti?'),
+          ],
+        ),
+        _Topic(
+          'other',
+          Icons.chat_bubble_outline_rounded,
+          const Color(0xFF8E4FAE),
+          tr(context, 'Something else', 'Jokin muu'),
+          tr(context, 'Feedback, ideas or anything else', 'Palaute, ideat tai muu asia'),
+          [
+            tr(context, 'Feedback about the app', 'Palautetta sovelluksesta'),
+          ],
+        ),
+      ];
 
-  void _openTicketSheet(Map<String, dynamic> topic) {
+  void _openMessageSheet(_Topic topic) {
     HapticFeedback.lightImpact();
     final l10n = AppLocalizations.of(context);
+    final auth = Provider.of<AuthService>(context, listen: false);
     final messageCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
 
@@ -117,168 +123,141 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
     final textSecondary = AppTheme.secondaryText(context);
     final inputBg = AppTheme.inputBackground(context);
     final cardBorder = AppTheme.cardBorder(context);
-    final topicTitle = _getTopicTitle(l10n, topic);
+    bool sending = false;
 
     showModalBottomSheet(
       showDragHandle: false,
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        decoration: BoxDecoration(
-          color: cardBg,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-          border: Border.all(color: cardBorder),
-        ),
-        padding: EdgeInsets.fromLTRB(24, 16, 24, MediaQuery.of(context).viewInsets.bottom + 24),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 44,
-                  height: 5,
-                  decoration: BoxDecoration(color: Colors.grey.shade400, borderRadius: BorderRadius.circular(3)),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => Container(
+          decoration: BoxDecoration(
+            color: cardBg,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+            border: Border.all(color: cardBorder),
+          ),
+          padding: EdgeInsets.fromLTRB(24, 16, 24, MediaQuery.of(ctx).viewInsets.bottom + 24),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 44,
+                    height: 5,
+                    decoration: BoxDecoration(color: Colors.grey.shade400, borderRadius: BorderRadius.circular(3)),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 18),
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: (topic['color'] as Color).withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Icon(topic['icon'] as IconData, color: topic['color'] as Color, size: 26),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(topicTitle, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: textPrimary)),
-                        Text('${l10n.translate("orderNum")}: MLV-${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}', style: TextStyle(fontSize: 12, color: textSecondary)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              Text(l10n.translate('commonInquiries'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: textSecondary)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 6,
-                children: (topic['examples'] as List<String>).map((example) {
-                  return GestureDetector(
-                    onTap: () {
-                      messageCtrl.text = example;
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: inputBg,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: cardBorder),
+                        color: topic.color.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(16),
                       ),
-                      child: Text(example, style: const TextStyle(fontSize: 11, color: AppTheme.primary, fontWeight: FontWeight.w600)),
+                      child: Icon(topic.icon, color: topic.color, size: 26),
                     ),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 18),
-              Text(l10n.translate('describeYourRequest'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textPrimary)),
-              const SizedBox(height: 6),
-              TextField(
-                controller: messageCtrl,
-                maxLines: 3,
-                style: TextStyle(color: textPrimary, fontSize: 14),
-                decoration: InputDecoration(
-                  hintText: l10n.translate('inquiryHint'),
-                  hintStyle: TextStyle(color: textSecondary),
-                  filled: true,
-                  fillColor: inputBg,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                    const SizedBox(width: 14),
+                    Expanded(child: Text(topic.title, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: textPrimary))),
+                  ],
                 ),
-              ),
-              const SizedBox(height: 14),
-              Text(l10n.translate('yourReplyEmail'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textPrimary)),
-              const SizedBox(height: 6),
-              TextField(
-                controller: emailCtrl,
-                style: TextStyle(color: textPrimary, fontSize: 14),
-                decoration: InputDecoration(
-                  hintText: 'name@example.com',
-                  hintStyle: TextStyle(color: textSecondary),
-                  filled: true,
-                  fillColor: inputBg,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
-                ),
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: topic['color'] as Color,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  ),
-                  onPressed: () async {
-                    if (messageCtrl.text.trim().isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(l10n.translate('pleaseDescribeInquiry'))),
-                      );
-                      return;
-                    }
-                    final auth = Provider.of<AuthService>(context, listen: false);
-                    final res = await ApiClient(auth).post('/support', {
-                      'app': 'customer',
-                      'topic': topicTitle,
-                      'message': messageCtrl.text.trim(),
-                      if (!auth.isAuthenticated && emailCtrl.text.trim().isNotEmpty) 'email': emailCtrl.text.trim(),
-                    });
-                    if (!mounted) return;
-                    if (res.ok) Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      behavior: SnackBarBehavior.floating,
-                      content: Text(res.ok
-                          ? tr(context, 'Sent (#${res.data['id']}). We will reply to ${res.data['replyTo']}.', 'Lähetetty (#${res.data['id']}). Vastaamme osoitteeseen ${res.data['replyTo']}.')
-                          : res.error!),
-                    ));
-                  },
-                  child: Text(l10n.translate('submitSupportRequest'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        side: BorderSide(color: const Color(0xFF3B82F6).withValues(alpha: 0.4)),
+                const SizedBox(height: 20),
+                Text(l10n.translate('commonInquiries'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: textSecondary)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: topic.examples.map((example) {
+                    return GestureDetector(
+                      onTap: () => messageCtrl.text = example,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: inputBg,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: cardBorder),
+                        ),
+                        child: Text(example, style: const TextStyle(fontSize: 11, color: AppTheme.primary, fontWeight: FontWeight.w600)),
                       ),
-                      onPressed: () {
-                        final desc = messageCtrl.text.trim();
-                        LocalNotificationService.openEmailApp(
-                          email: 'support@malvoya.com',
-                          subject: 'Support Request: $topicTitle',
-                          body: 'Topic: $topicTitle\n\nInquiry:\n${desc.isNotEmpty ? desc : "I require concierge assistance regarding this service."}',
-                        );
-                      },
-                      icon: const Icon(Icons.email_outlined, size: 16, color: Color(0xFF3B82F6)),
-                      label: Text(l10n.translate('sendViaEmail'), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF3B82F6))),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 18),
+                Text(l10n.translate('describeYourRequest'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textPrimary)),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: messageCtrl,
+                  maxLines: 4,
+                  style: TextStyle(color: textPrimary, fontSize: 14),
+                  decoration: InputDecoration(
+                    hintText: l10n.translate('inquiryHint'),
+                    hintStyle: TextStyle(color: textSecondary),
+                    filled: true,
+                    fillColor: inputBg,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                  ),
+                ),
+                // Signed-in customers get the reply at their account email; guests tell us where
+                if (!auth.isAuthenticated) ...[
+                  const SizedBox(height: 14),
+                  Text(l10n.translate('yourReplyEmail'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textPrimary)),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: emailCtrl,
+                    keyboardType: TextInputType.emailAddress,
+                    style: TextStyle(color: textPrimary, fontSize: 14),
+                    decoration: InputDecoration(
+                      hintText: 'name@example.com',
+                      hintStyle: TextStyle(color: textSecondary),
+                      filled: true,
+                      fillColor: inputBg,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
                     ),
                   ),
                 ],
-              ),
-            ],
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: FilledButton(
+                    onPressed: sending
+                        ? null
+                        : () async {
+                            if (messageCtrl.text.trim().isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text(l10n.translate('pleaseDescribeInquiry'))),
+                              );
+                              return;
+                            }
+                            setSheet(() => sending = true);
+                            final res = await ApiClient(auth).post('/support', {
+                              'app': 'customer',
+                              'topic': topic.title,
+                              'message': messageCtrl.text.trim(),
+                              if (!auth.isAuthenticated && emailCtrl.text.trim().isNotEmpty) 'email': emailCtrl.text.trim(),
+                            });
+                            if (!mounted) return;
+                            if (ctx.mounted) setSheet(() => sending = false);
+                            if (res.ok && ctx.mounted) Navigator.pop(ctx);
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                              behavior: SnackBarBehavior.floating,
+                              content: Text(res.ok
+                                  ? tr(context, 'Sent (#${res.data['id']}). We will reply to ${res.data['replyTo']}.',
+                                      'Lähetetty (#${res.data['id']}). Vastaamme osoitteeseen ${res.data['replyTo']}.')
+                                  : res.error!),
+                            ));
+                          },
+                    child: sending
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : Text(l10n.translate('submitSupportRequest'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -296,11 +275,9 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
         final inputBg = AppTheme.inputBackground(context);
         final cardBorder = AppTheme.cardBorder(context);
 
-        final filteredTopics = _topics.where((t) {
-          final title = _getTopicTitle(l10n, t).toLowerCase();
-          final subtitle = _getTopicSubtitle(l10n, t).toLowerCase();
-          final query = _searchQuery.toLowerCase();
-          return title.contains(query) || subtitle.contains(query);
+        final query = _searchQuery.toLowerCase();
+        final filteredTopics = _topics(context).where((t) {
+          return t.title.toLowerCase().contains(query) || t.subtitle.toLowerCase().contains(query);
         }).toList();
 
         return Scaffold(
@@ -320,24 +297,16 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
           body: ListView(
             physics: const BouncingScrollPhysics(),
             children: [
-              // Banner
               Container(
                 padding: const EdgeInsets.all(20),
                 color: cardBg,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      l10n.translate('howCanWeAssist'),
-                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: textPrimary),
-                    ),
+                    Text(l10n.translate('howCanWeAssist'), style: AppTheme.display(context, size: 22)),
                     const SizedBox(height: 4),
-                    Text(
-                      l10n.translate('howCanWeAssistSub'),
-                      style: TextStyle(fontSize: 13, color: textSecondary),
-                    ),
+                    Text(l10n.translate('howCanWeAssistSub'), style: TextStyle(fontSize: 13, color: textSecondary)),
                     const SizedBox(height: 16),
-                    // Search Bar
                     TextField(
                       controller: _searchCtrl,
                       style: TextStyle(color: textPrimary, fontSize: 14),
@@ -366,144 +335,44 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
 
               const SizedBox(height: 12),
 
-              // Help assistant (automatic answers, not AI)
+              // Help assistant (ready-made answers, not a person and not AI)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: GestureDetector(
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChatbotScreen())),
-                  child: Container(
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      gradient: AppTheme.primaryGradient,
-                      borderRadius: BorderRadius.circular(22),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppTheme.primary.withValues(alpha: 0.25),
-                          blurRadius: 14,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: const BoxDecoration(
-                            color: Colors.white,
-                            shape: BoxShape.circle,
+                child: Material(
+                  color: AppTheme.primary,
+                  borderRadius: BorderRadius.circular(22),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(22),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChatbotScreen())),
+                    child: Padding(
+                      padding: const EdgeInsets.all(18),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                            child: const Icon(Icons.help_outline_rounded, color: AppTheme.primary, size: 26),
                           ),
-                          child: const Icon(Icons.support_agent_rounded, color: AppTheme.primary, size: 26),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                tr(context, 'Help assistant', 'Apuri'),
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                tr(context, 'Automatic answers about orders, returns and sizes', 'Automaattiset vastaukset tilauksista, palautuksista ja koosta'),
-                                style: const TextStyle(color: Colors.white70, fontSize: 12),
-                              ),
-                            ],
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(tr(context, 'Help assistant', 'Apuri'),
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
+                                const SizedBox(height: 2),
+                                Text(
+                                  tr(context, 'Ready-made answers about orders, returns and sizes', 'Valmiit vastaukset tilauksista, palautuksista ja koosta'),
+                                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                        const Icon(Icons.chevron_right_rounded, color: Colors.white, size: 26),
-                      ],
+                          const Icon(Icons.chevron_right_rounded, color: Colors.white, size: 26),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ),
-
-              const SizedBox(height: 14),
-
-              // Direct Channels (AI, Email & SMS)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: InkWell(
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChatbotScreen())),
-                        borderRadius: BorderRadius.circular(16),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-                          decoration: BoxDecoration(
-                            color: cardBg,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: cardBorder),
-                          ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(Icons.smart_toy_outlined, color: Color(0xFF248A52), size: 22),
-                              const SizedBox(height: 6),
-                              Text(l10n.translate('aiSupport'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: textPrimary)),
-                              Text(l10n.translate('aiSupportSub'), style: TextStyle(fontSize: 10, color: textSecondary)),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: InkWell(
-                        onTap: () => LocalNotificationService.openEmailApp(
-                          email: 'support@malvoya.com',
-                          subject: 'Customer Concierge Request',
-                          body: 'Hello Malvoya Support Team,\n\nI need assistance with my customer account / order.',
-                        ),
-                        borderRadius: BorderRadius.circular(16),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-                          decoration: BoxDecoration(
-                            color: cardBg,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: cardBorder),
-                          ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(Icons.email_outlined, color: Color(0xFF3B82F6), size: 22),
-                              const SizedBox(height: 6),
-                              Text(l10n.translate('emailConcierge'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: textPrimary)),
-                              Text(l10n.translate('emailConciergeSub'), style: TextStyle(fontSize: 10, color: textSecondary)),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: InkWell(
-                        onTap: () => LocalNotificationService.openSmsApp(
-                          phone: '',
-                          body: 'Malvoya Concierge: Customer priority inquiry regarding order / boutique dispatch.',
-                        ),
-                        borderRadius: BorderRadius.circular(16),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-                          decoration: BoxDecoration(
-                            color: cardBg,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: cardBorder),
-                          ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(Icons.sms_rounded, color: AppTheme.primary, size: 22),
-                              const SizedBox(height: 6),
-                              Text(l10n.translate('smsConcierge'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: textPrimary)),
-                              Text(l10n.translate('smsConciergeSub'), style: TextStyle(fontSize: 10, color: textSecondary)),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
                 ),
               ),
 
@@ -512,13 +381,12 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Text(
-                  '${l10n.translate("allTopicsHeader")} (${filteredTopics.length})',
+                  l10n.translate('allTopicsHeader'),
                   style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: textSecondary, letterSpacing: 0.8),
                 ),
               ),
               const SizedBox(height: 8),
 
-              // Topic Cards
               ...filteredTopics.map((topic) {
                 return Container(
                   margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -533,31 +401,23 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
                       width: 48,
                       height: 48,
                       decoration: BoxDecoration(
-                        color: (topic['color'] as Color).withValues(alpha: 0.12),
+                        color: topic.color.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(16),
                       ),
-                      child: Icon(topic['icon'] as IconData, color: topic['color'] as Color, size: 24),
+                      child: Icon(topic.icon, color: topic.color, size: 24),
                     ),
-                    title: Text(
-                      _getTopicTitle(l10n, topic),
-                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: textPrimary),
-                    ),
+                    title: Text(topic.title, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: textPrimary)),
                     subtitle: Padding(
                       padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        _getTopicSubtitle(l10n, topic),
-                        style: TextStyle(fontSize: 12, color: textSecondary, height: 1.3),
-                      ),
+                      child: Text(topic.subtitle, style: TextStyle(fontSize: 12, color: textSecondary, height: 1.3)),
                     ),
                     trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
-                    onTap: () => _openTicketSheet(topic),
+                    onTap: () => _openMessageSheet(topic),
                   ),
                 );
               }),
 
-              const SizedBox(height: 20),
-
-              const SizedBox(height: 36),
+              const SizedBox(height: 56),
             ],
           ),
         );

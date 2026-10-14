@@ -117,7 +117,7 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(live
             ? tr(context, 'Your drop is live!', 'Julkaisusi on julki!')
-            : tr(context, 'Posted! The video is being prepared and goes live in about a minute.', 'Julkaistu! Videota valmistellaan, ja se näkyy noin minuutin kuluttua.')),
+            : tr(context, 'Posted! The video is being prepared. It usually goes live within a few minutes; you can see its status under Drops.', 'Julkaistu! Videota valmistellaan. Se näkyy yleensä muutaman minuutin kuluessa; näet tilan Julkaisut-välilehdellä.')),
       ));
       Navigator.pop(context, true);
     } catch (e) {

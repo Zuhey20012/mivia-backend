@@ -1,4 +1,4 @@
-// End-to-end test for API v2.6 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
+// End-to-end test for API v2.7 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
 const { execSync, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -177,7 +177,8 @@ async function register(name, role, extra = {}) {
   const realOrder = await call("POST", "/orders", { storeId, deliveryAddress: "Aleksanterinkatu 5, Helsinki", deliveryLat: 60.18, deliveryLng: 24.95, items: [{ productId, quantity: 1 }] }, tokenA);
   check("order creates a PaymentIntent and returns a client secret", realOrder.status === 201 && !!realOrder.body.clientSecret, realOrder.body);
   const ro = realOrder.body.order;
-  check("courier pay and ETA are set on the order", sql(`select ("courierFeeCents" = "deliveryFeeCents") and "etaMinutes" > 0 from "Order" where id=${ro?.id}`) === "t");
+  // Courier pay is separate from the customer fee: 1.24 km straight = 1.6 km route → 4.50 + 1.76 € = 6.26 €, raised to the 6.50 € minimum
+  check("courier pay (formula, with minimum) and ETA are set on the order", sql(`select "courierFeeCents" = 650 and ("courierPay"->>'topUpCents')::int = 24 and ("courierPay"->>'distanceKm')::float = 1.6 and "etaMinutes" > 0 from "Order" where id=${ro?.id}`) === "t", sql(`select "courierFeeCents" || ' ' || coalesce("courierPay"::text, '') from "Order" where id=${ro?.id}`));
   check("charged delivery fee equals the advertised fee", ro?.deliveryFeeCents === listedFee, { charged: ro?.deliveryFeeCents, listed: listedFee });
   check("cannot order more than stock", (await call("POST", "/orders", { storeId, deliveryAddress: "Aleksanterinkatu 5, Helsinki", items: [{ productId, quantity: 5 }] }, tokenA)).status === 400);
   check("customer cancels before the store accepts; stock returns", (await call("POST", `/orders/${ro.id}/cancel`, null, tokenA)).status === 200 && sql(`select "stockQuantity" from "Product" where id=${productId}`) === "2");
@@ -572,7 +573,7 @@ async function register(name, role, extra = {}) {
   console.log("\n— Tips and app updates");
   const tipped = await call("POST", "/orders", { ...orderBody, tipCents: 200 }, otherCust.accessToken);
   const to = tipped.body.order;
-  check("a tip is added to the total and paid to the courier in full", tipped.status === 201 && to.tipCents === 200 && to.totalCents === 5000 + to.deliveryFeeCents + 200 && to.courierFeeCents === to.deliveryFeeCents + 200 && to.commissionCents === 500, to);
+  check("a tip is added to the total and paid to the courier in full", tipped.status === 201 && to.tipCents === 200 && to.totalCents === 5000 + to.deliveryFeeCents + 200 && to.courierFeeCents === 650 + 200 && to.courierPay?.tipCents === 200 && to.commissionCents === 500, to);
   check("tips are capped at 20 €", (await call("POST", "/orders", { ...orderBody, tipCents: 5000 }, otherCust.accessToken)).status === 400);
   const cfg = await call("GET", "/app-config?app=customer&build=5");
   check("apps learn whether their build is still supported", cfg.status === 200 && cfg.body.updateRequired === false && cfg.body.maintenance?.active === false && cfg.body.storeUrl.includes("com.malvoya.customer"), cfg.body);
@@ -593,7 +594,7 @@ async function register(name, role, extra = {}) {
   }));
 
   const sysDefault = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.6.0", sysDefault.pricing);
+  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.7.0", sysDefault.pricing);
   const stockBeforeQuote = stockOf(productId);
   const ordersBeforeQuote = sql(`select count(*) from "Order" where "userId"=${otherCust.user.id}`);
   const q0 = await quote(quoteBody, otherCust.accessToken);
@@ -626,7 +627,7 @@ async function register(name, role, extra = {}) {
   const oTen = await order({ ...quoteBody, promoCode: `TEN-${uniq}` }, pirjo.accessToken);
   const ot = oTen.body.order;
   check("an order with a code charges the quoted price", oTen.status === 201 && sameMoney(qTen, ot) && ot.promoCodeId === ten.body.promoCode.id && ot.promoCode?.code === `TEN-${uniq}`, oTen.body);
-  check("Malvoya pays the discount: store and courier pay are not reduced", ot?.commissionCents === 500 && ot?.sellerPayoutCents === 4500 && ot?.courierFeeCents === fee + 150, ot);
+  check("Malvoya pays the discount: store and courier pay are not reduced", ot?.commissionCents === 500 && ot?.sellerPayoutCents === 4500 && ot?.courierFeeCents === 650 + 150, ot);
   check("an unpaid order does not use the code up", sql(`select count(*) from "PromoRedemption" where "promoCodeId"=${ten.body.promoCode.id}`) === "0");
   check("an unknown code is reported, the quote still works", (await quote({ ...quoteBody, promoCode: "NOPE-NOPE" }, pirjo.accessToken)).body.quote?.promoError?.includes("not valid"));
 
@@ -689,13 +690,177 @@ async function register(name, role, extra = {}) {
   const capped = engine.calcCheckoutPricing({ subtotalCents: 20000, commissionRate: 0.1, deliveryFeeCents: 190, promo: { kind: "PERCENT", value: 50, maxDiscountCents: 1500 }, config: zeroFees, courierFeeShare: 1 });
   check("a percentage code respects its maximum discount", capped.discountCents === 1500 && capped.totalCents === 20000 + 190 - 1500, capped);
 
-  console.log("\n— Fees switched on (second API instance with fee env vars)");
-  const feeUp = await startFeeApi({ SERVICE_FEE_PERCENT: "5", SERVICE_FEE_MIN_CENTS: "49", SERVICE_FEE_MAX_CENTS: "300", SMALL_ORDER_THRESHOLD_CENTS: "6000", SMALL_ORDER_FEE_CENTS: "150" });
+  console.log("\n— Transparent courier pay (formula)");
+  const cpEngine = require(path.join(__dirname, "..", "..", "dist", "utils", "courierPay.js"));
+  const payCfg = { mode: "formula", baseCents: 450, perKmCents: 110, minCents: 650, roadFactor: 1.3, approachFreeKm: 2, approachPerKmCents: 50, waitFreeMinutes: 5, waitPerMinCents: 20, waitMaxCents: 400, feeShare: 1 };
+  const payAt = (km, extra = {}) => cpEngine.calcCourierPay({ straightKm: km, deliveryFeeCents: 0, config: payCfg, ...extra });
+  check("pay formula at known distances: 1 km → 6.50 € minimum, 3 km → 8.79 €, 6 km → 13.08 €", payAt(1).distanceKm === 1.3 && payAt(1).topUpCents === 57 && payAt(1).totalCents === 650 && payAt(3).distanceKm === 3.9 && payAt(3).distanceCents === 429 && payAt(3).totalCents === 879 && payAt(6).totalCents === 1308, [1, 3, 6].map((k) => payAt(k).totalCents));
+  check("waiting pay: first 5 min free, then 0.20 €/min, capped at 4 €", payAt(3, { waitMinutes: 5 }).waitCents === 0 && payAt(3, { waitMinutes: 12 }).waitCents === 140 && payAt(3, { waitMinutes: 90 }).waitCents === 400);
+  check("ride to the shop beyond 2 km is paid; tips are added in full", payAt(3, { approachStraightKm: 4 }).approachKm === 5.2 && payAt(3, { approachStraightKm: 4 }).approachCents === 160 && payAt(3, { approachStraightKm: 1 }).approachCents === 0 && payAt(3, { tipCents: 300 }).totalCents === 1179);
+  // A later settings change (here: free waiting cut to 0 and a lower rate) must not touch a job already priced
+  const cheaperCfg = { ...payCfg, waitFreeMinutes: 0, waitPerMinCents: 5, approachPerKmCents: 10 };
+  const priced = payAt(3);
+  const waitedLater = cpEngine.withWaiting(priced, 12, cheaperCfg);
+  const rodeLater = cpEngine.withApproach(priced, 4, cheaperCfg);
+  check("a job keeps the pay rates it was offered with, even if settings change later", waitedLater.waitCents === 140 && rodeLater.approachCents === 160, [waitedLater.waitCents, rodeLater.approachCents]);
+  const payRule = payAt(1).summary;
+  check("the pay rule is one sentence in English and Finnish", payRule.en === "Every delivery pays 4.50 € plus 1.10 € per km from shop to customer (at least 6.50 €), plus 0.50 €/km for the ride to the shop beyond 2 km, plus 0.20 €/min for waiting at the shop after 5 minutes, and you keep 100 % of tips." && payRule.fi.startsWith("Jokainen toimitus maksaa 4,50 €") && payRule.fi.includes("Juomarahat ovat 100 % sinun"), payRule);
+  const sysPay = (await call("GET", "/admin/system", null, adminToken)).body.pricing;
+  const payEx = (k) => sysPay?.courierPay?.examples?.find((e) => e.straightKm === k);
+  check("system status shows courier pay settings and the delivery margin on 1/3/6 km jobs", sysPay?.courierPay?.mode === "formula" && sysPay.courierPay.baseCents === 450 && sysPay.courierPay.summary?.en === payRule.en && sysPay.deliveryFee?.baseCents === 190 && payEx(1)?.customerFeeCents === 190 && payEx(1)?.courierPayCents === 650 && payEx(1)?.marginCents === -460 && payEx(3)?.customerFeeCents === 265 && payEx(3)?.courierPayCents === 879 && payEx(6)?.customerFeeCents === 415 && payEx(6)?.courierPayCents === 1308, sysPay);
+
+  const farRes = await call("POST", "/orders", { storeId, deliveryAddress: "Kauppakatu 1, Helsinki", deliveryLat: 60.2, deliveryLng: 24.98, items: [{ productId, quantity: 1 }], tipCents: 100 }, otherCust.accessToken);
+  const far = farRes.body.order;
+  check("a 4 km order: the customer pays 3.15 € delivery; courier pay 4.50 € + 5.2 km × 1.10 € + tip", farRes.status === 201 && far.deliveryFeeCents === 315 && far.courierPay?.distanceKm === 5.2 && far.courierPay.distanceCents === 572 && far.courierPay.topUpCents === 0 && far.courierFeeCents === 1022 + 100 && far.totalCents === 5000 + 315 + 100, far);
+  await payOrder(far);
+  await call("POST", "/courier/status", { isOnline: true, latitude: 60.171, longitude: 24.941 }, c1.accessToken);
+  await call("POST", "/courier/status", { isOnline: true, latitude: 60.2, longitude: 24.9 }, c2.accessToken);
+  c1Sock.events.length = 0;
+  c2Sock.events.length = 0;
+  check("store accepts the 4 km order", (await call("PATCH", `/orders/${far.id}/status`, { status: "CONFIRMED" }, vendor.accessToken)).status === 200);
+  await sleep(600);
+  const farOffer1 = c1Sock.events.find((e) => e.ev === "courier:dispatch_offer" && e.data.orderId === far.id)?.data;
+  const farOffer2 = c2Sock.events.find((e) => e.ev === "courier:dispatch_offer" && e.data.orderId === far.id)?.data;
+  check("offers show the pay breakdown and explanation before accepting (courier at the shop: no ride pay)", farOffer1?.courierPay?.totalCents === 1122 && farOffer1.courierFeeCents === 1122 && farOffer1.courierPay.approachCents === 0 && farOffer1.courierPay.waitCents === 0 && farOffer1.courierPay.explanation?.en.includes("5.2 km × 1.10 €/km") && farOffer1.courierPay.explanation?.fi.includes("5,2 km × 1,10 €/km"), farOffer1?.courierPay);
+  check("a courier 4 km from the shop sees the ride to the shop in their offer", farOffer2?.courierPay?.approachKm === 5.2 && farOffer2.courierPay.approachCents === 160 && farOffer2.courierPay.totalCents === 1282 && farOffer2.courierFeeCents === 1282, farOffer2?.courierPay);
+  const farJob = (await call("GET", "/orders/available", null, c2.accessToken)).body.orders?.find((o) => o.id === far.id);
+  check("the job list shows the same breakdown, the pay rule and the waiting policy", farJob?.courierPay?.totalCents === 1282 && farJob.courierFeeCents === 1282 && farJob.courierPay.summary?.en === payRule.en && /5 min/.test(farJob.courierPay.waitPolicy?.en || "") && !("deliveryAddress" in farJob), farJob);
+  const farAcc = await call("PATCH", `/orders/${far.id}/assign-courier`, null, c2.accessToken);
+  check("on acceptance the ride to the shop is fixed from the courier's position", farAcc.status === 200 && sql(`select "courierFeeCents" from "Order" where id=${far.id}`) === "1282", farAcc.body);
+  check("only the assigned courier can check in at the shop", (await call("POST", `/orders/${far.id}/arrived-at-store`, null, c1.accessToken)).status === 404);
+  const arrived1 = await call("POST", `/orders/${far.id}/arrived-at-store`, null, c2.accessToken);
+  const arrived2 = await call("POST", `/orders/${far.id}/arrived-at-store`, null, c2.accessToken);
+  check("the courier checks in at the shop (idempotent)", arrived1.status === 200 && !!arrived1.body.order?.courierArrivedAt && arrived2.status === 200 && arrived2.body.order?.courierArrivedAt === arrived1.body.order.courierArrivedAt, [arrived1.body, arrived2.body]);
+  sql(`update "Order" set "courierArrivedAt" = now() - interval '12 minutes' where id=${far.id}`);
+  check("pickup after waiting at the shop", (await call("PATCH", `/orders/${far.id}/status`, { status: "SHIPPED" }, c2.accessToken)).status === 200);
+  const farMine = (await call("GET", "/orders/courier/mine", null, c2.accessToken)).body.orders?.find((o) => o.id === far.id);
+  check("waiting beyond 5 min is added at pickup: 12 min → 7 × 0.20 € = 1.40 €", farMine?.courierPay?.waitMinutes === 12 && farMine.courierPay.waitCents === 140 && farMine.courierPay.totalCents === 1422 && farMine.courierFeeCents === 1422 && !!farMine.courierArrivedAt && farMine.courierPay.explanation.en.includes("waiting 12 min = 1.40 €"), farMine?.courierPay);
+  check("checking in after pickup is refused", (await call("POST", `/orders/${far.id}/arrived-at-store`, null, c2.accessToken)).status === 409);
+  const farDone = await call("POST", `/orders/${far.id}/deliver`, { method: "IN_PERSON" }, c2.accessToken);
+  await sleep(800);
+  check("the courier payout is exactly the explained total", farDone.status === 200 && sql(`select "amountCents" from "Payout" where "orderId"=${far.id} and party='COURIER'`) === "1422");
+
+  console.log("\n— Catalogue import: Shopify feed");
+  let shopPrice = "49.90", shopStock = 3;
+  const shopFeed = () => [
+    {
+      id: 1001, title: "Linen Dress", product_type: "Dresses", tags: "summer, linen",
+      body_html: "<p>Soft <b>linen</b> &amp; cotton</p><script>alert(1)</script>",
+      options: [{ name: "Koko", position: 1 }, { name: "Väri", position: 2 }],
+      variants: [
+        { id: 1, option1: "S", option2: "Musta", price: shopPrice, inventory_quantity: shopStock, barcode: "6412345678901" },
+        { id: 2, option1: "M", option2: "Musta", price: (Number(shopPrice) + 3).toFixed(2), inventory_quantity: 0 },
+      ],
+      images: [{ src: "https://cdn.shopify.test/files/dress1.jpg?v=1", position: 1 }, { src: "//cdn.shopify.test/files/dress2.jpg", position: 2 }],
+    },
+    {
+      id: 1002, title: "Leather Boots", product_type: "", tags: ["vintage"],
+      variants: [{ id: 3, title: "Default Title", option1: "Default Title", price: "89.00", available: true }],
+      images: [{ src: "https://cdn.shopify.test/files/boots.jpg", position: 1 }],
+    },
+    { id: 1003, title: "", variants: [{ id: 4, price: "5.00" }] },
+    { id: 1004, title: "No photo bag", product_type: "Bags", variants: [{ id: 5, option1: "Default Title", price: "20", inventory_quantity: 2 }], images: [] },
+  ];
+  const shopSrv = require("http").createServer((req, res) => {
+    const u = new URL(req.url, "http://localhost");
+    if (u.pathname !== "/products.json") { res.writeHead(404); return res.end(); }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ products: Number(u.searchParams.get("page") || 1) === 1 ? shopFeed() : [] }));
+  });
+  await new Promise((r) => shopSrv.listen(12223, r));
+  const importer = await register("Ilona", "VENDOR");
+  const impStore = (await call("POST", "/stores", { name: `Ilona Imports ${uniq}`, category: "APPAREL", sellerType: "PRIVATE", latitude: 60.17, longitude: 24.94 }, importer.accessToken)).body.store;
+  await call("PATCH", `/admin/vendors/${impStore.id}/approve`, null, adminToken);
+  const waitJob = async (id, tok = importer.accessToken) => {
+    for (let i = 0; i < 120; i++) {
+      const j = (await call("GET", `/products/import/${id}`, null, tok)).body?.job;
+      if (j && (j.status === "DONE" || j.status === "FAILED")) return j;
+      await sleep(250);
+    }
+    return null;
+  };
+  const ownList = async () => (await call("GET", `/stores/${impStore.id}/products?limit=50`, null, importer.accessToken)).body.products;
+  const shopImport = (body, tok = importer.accessToken) => call("POST", "/products/import/shopify", body, tok);
+  check("import needs the store's rights confirmation (literally true)", (await shopImport({ shopUrl: "http://localhost:12223" })).status === 400 && (await shopImport({ shopUrl: "http://localhost:12223", rightsConfirmed: "yes" })).status === 400);
+  check("customers cannot import", (await shopImport({ shopUrl: "http://localhost:12223", rightsConfirmed: true }, otherCust.accessToken)).status === 403);
+  const ssrf = [];
+  for (const u of ["http://127.0.0.1:5432", "https://localhost", "https://169.254.169.254/latest/meta-data", "https://10.0.0.5", "https://[::1]", "https://shop.internal", "https://user:pw@example.com", "http://example.com", "https://example.com:8443", "localhost:4555", "file:///etc/passwd"]) {
+    ssrf.push((await shopImport({ shopUrl: u, rightsConfirmed: true })).status);
+  }
+  check("internal addresses, IPs, ports, credentials and plain http are refused (SSRF guard)", ssrf.every((s) => s === 400), ssrf);
+  const sj = await shopImport({ shopUrl: "http://localhost:12223/collections/all", rightsConfirmed: true });
+  check("Shopify import starts in the background (202)", sj.status === 202 && sj.body.job?.status === "QUEUED" && sj.body.job.source === "SHOPIFY" && Array.isArray(sj.body.job.errors), sj.body);
+  const job1 = await waitJob(sj.body.job?.id);
+  check("the job finishes with counts: 4 found, 3 created, 1 skipped", job1?.status === "DONE" && job1.total === 4 && job1.created === 3 && job1.updated === 0 && job1.skipped === 1 && !!job1.finishedAt, job1);
+  check("problems are listed per item: a missing name (error), missing stock levels (warning)", job1?.errors.some((e) => e.level === "error" && /name/i.test(e.message)) && job1.errors.some((e) => e.level === "warning" && /stock/i.test(e.message) && e.item === "Leather Boots"), job1?.errors);
+  let own = await ownList();
+  const dress = own.find((p) => p.externalId === "1001");
+  const boots = own.find((p) => p.externalId === "1002");
+  check("imported products are hidden drafts linked to the job", own.length === 3 && own.every((p) => p.isAvailable === false && p.importJobId === sj.body.job.id && p.externalSource === "SHOPIFY"), own.map((p) => [p.name, p.isAvailable]));
+  check("Shopify mapping: name, plain-text description, category, price, size/colour options with price differences, GTIN", dress?.name === "Linen Dress" && dress.description === "Soft linen & cotton" && dress.category === "Clothing" && dress.salePriceCents === 4990 && dress.variants.length === 2 && dress.variants[0].size === "S" && dress.variants[0].color === "Musta" && dress.variants[1].priceAdjustCents === 300 && dress.variants[0].stock === 3 && dress.stockQuantity === 3 && dress.gtin === "6412345678901", dress);
+  check("a vintage tag and no stock levels: Good condition, stock 1, category from the title", boots?.condition === "GOOD" && boots.isSecondHand === true && boots.stockQuantity === 1 && boots.category === "Shoes" && boots.variants.length === 0, boots);
+  check("photos are copied into the store's own Cloudinary folder; products never hold remote URLs", own.every((p) => p.images.every((u) => u.startsWith(`https://res.cloudinary.com/testcloud/image/upload/c_limit,w_1200,q_auto,f_auto/malvoya/products/s${impStore.id}/imp-`))) && dress?.images.length === 2 && !JSON.stringify(own).includes("shopify.test"), own.map((p) => p.images));
+  const uploads1 = await (await fetch("http://localhost:12222/__uploads")).json();
+  check("the copies are signed server-side uploads of the shop's photo URLs", uploads1.some((u) => u.file === "https://cdn.shopify.test/files/dress1.jpg?v=1") && uploads1.some((u) => u.file === "https://cdn.shopify.test/files/dress2.jpg") && uploads1.every((u) => u.public_id.startsWith(`malvoya/products/s${impStore.id}/imp-`)), uploads1);
+  check("imported prices start the 30-day price history", sql(`select count(*) from "PriceChange" where "productId"=${dress?.id}`) === "1");
+  check("drafts are not public", (await call("GET", `/stores/${impStore.id}/products`)).body.products.length === 0 && !(await call("GET", `/products/search?q=${encodeURIComponent("Linen Dress")}`)).body.products.some((p) => p.id === dress?.id));
+  const pub1 = await call("POST", `/products/import/${sj.body.job.id}/publish`, null, importer.accessToken);
+  const publicNow = (await call("GET", `/stores/${impStore.id}/products`)).body.products.map((p) => p.id).sort();
+  check("publishing shows the drafts with a photo and a price, not the one without a photo", pub1.status === 200 && pub1.body.published === 2 && publicNow.join() === [dress?.id, boots?.id].sort().join(), [pub1.body, publicNow]);
+  shopPrice = "44.90";
+  shopStock = 5;
+  const sj2 = await shopImport({ shopUrl: "http://localhost:12223", rightsConfirmed: true });
+  const job2 = await waitJob(sj2.body.job?.id);
+  own = await ownList();
+  const dress2 = own.find((p) => p.externalId === "1001");
+  check("re-importing updates price and stock instead of duplicating", job2?.status === "DONE" && job2.created === 0 && job2.updated === 3 && own.length === 3 && dress2?.salePriceCents === 4490 && dress2.variants.length === 2 && dress2.variants[0].stock === 5 && dress2.variants[0].id === dress?.variants[0].id, [job2, dress2]);
+  check("the new price joins the price history; published products stay published", sql(`select count(*) from "PriceChange" where "productId"=${dress?.id}`) === "2" && dress2?.isAvailable === true);
+  check("photos already copied are not uploaded again", (await (await fetch("http://localhost:12222/__uploads")).json()).length === uploads1.length && dress2?.images.join() === dress?.images.join());
+  check("publishing the re-import changes nothing that is already public", (await call("POST", `/products/import/${sj2.body.job?.id}/publish`, null, importer.accessToken)).body.published === 0);
+  check("another store cannot see or publish the import", (await call("GET", `/products/import/${sj.body.job.id}`, null, vendor.accessToken)).status === 404 && (await call("POST", `/products/import/${sj.body.job.id}/publish`, null, vendor.accessToken)).status === 404);
+  const impJobs = await call("GET", "/products/import", null, importer.accessToken);
+  check("the store lists its recent imports, newest first", impJobs.status === 200 && impJobs.body.jobs?.length === 2 && impJobs.body.jobs[0].id === sj2.body.job?.id, impJobs.body);
+  shopSrv.close();
+
+  console.log("\n— Catalogue import: CSV");
+  const csvText = [
+    "name;description;category;price;size;colour;stock;image_urls;condition;gtin;external_id",
+    'Wool sweater;"Warm ""merino"" wool";Neuleet;59,90;S;Grey;2;https://img.example.com/a.jpg|https://img.example.com/b.jpg;new;;SW-1',
+    "Wool sweater;Warm;Neuleet;62,90;M;Grey;1;;new;;SW-1",
+    "Silk scarf;;Accessories;19.5;;;;https://img.example.com/s.jpg;LIKE_NEW;40123455;",
+    "Bad price;;;abc;;;;;;;",
+    "Broken condition;;;10;;;;;mint;;",
+    "Cap;;Hats;15;;;;http://insecure.example.com/c.jpg;;;CAP-1",
+  ].join("\r\n");
+  const csvImport = (body, tok = importer.accessToken) => call("POST", "/products/import/csv", body, tok);
+  check("CSV import needs the rights confirmation", (await csvImport({ csv: csvText })).status === 400);
+  check("a CSV without a price column is refused", (await csvImport({ csv: "name;stock\nX;1", rightsConfirmed: true })).status === 400);
+  check("a CSV over 1 MB is refused with 413", (await csvImport({ csv: "name,price\n" + "x".repeat(1_100_000), rightsConfirmed: true })).status === 413);
+  const hugeCsv = await csvImport({ csv: "x".repeat(2_000_000), rightsConfirmed: true });
+  check("a body over the route's own limit gets a readable 413; other routes keep 100 kB", hugeCsv.status === 413 && /1 MB/.test(hugeCsv.body?.error || "") && (await call("POST", "/support", { app: "customer", topic: "x", message: "y".repeat(200_000) }, otherCust.accessToken)).status === 413, hugeCsv.body);
+  const cj = await csvImport({ csv: csvText, rightsConfirmed: true });
+  check("CSV import starts (202)", cj.status === 202 && cj.body.job?.source === "CSV", cj.body);
+  const cjob = await waitJob(cj.body.job?.id);
+  check("CSV: rows with the same external_id become one product; bad rows are reported, not fatal", cjob?.status === "DONE" && cjob.total === 5 && cjob.created === 3 && cjob.skipped === 2 && cjob.errors.some((e) => e.item === "row 5" && /price/.test(e.message)) && cjob.errors.some((e) => e.item === "row 6" && /condition/.test(e.message)) && cjob.errors.some((e) => e.level === "warning" && /https/.test(e.message)), cjob);
+  own = await ownList();
+  const sweater = own.find((p) => p.externalId === "id:SW-1");
+  const scarf = own.find((p) => p.name === "Silk scarf");
+  const cap = own.find((p) => p.externalId === "id:CAP-1");
+  check("CSV mapping: options with price differences, quoted text, comma decimals, category mapping", sweater?.salePriceCents === 5990 && sweater.variants.length === 2 && sweater.variants[1].priceAdjustCents === 300 && sweater.stockQuantity === 3 && sweater.description === 'Warm "merino" wool' && sweater.category === "Clothing" && sweater.images.length === 2 && sweater.isAvailable === false, sweater);
+  check("CSV: dot decimals, condition and GTIN; an http photo is skipped", scarf?.salePriceCents === 1950 && scarf.condition === "LIKE_NEW" && scarf.gtin === "40123455" && scarf.category === "Accessories" && cap?.images.length === 0 && cap.category === "Accessories", [scarf, cap]);
+  const cj2 = await csvImport({ csv: csvText, rightsConfirmed: true });
+  const cjob2 = await waitJob(cj2.body.job?.id);
+  check("re-importing the same CSV updates, never duplicates", cjob2?.created === 0 && cjob2.updated === 3 && (await ownList()).length === 6, cjob2);
+  check("publishing the CSV import shows only the products with a photo", (await call("POST", `/products/import/${cj2.body.job?.id}/publish`, null, importer.accessToken)).body.published === 2);
+
+  console.log("\n— Fees switched on (second API instance with fee env vars, old courier pay rule, no Cloudinary)");
+  const feeUp = await startFeeApi({ SERVICE_FEE_PERCENT: "5", SERVICE_FEE_MIN_CENTS: "49", SERVICE_FEE_MAX_CENTS: "300", SMALL_ORDER_THRESHOLD_CENTS: "6000", SMALL_ORDER_FEE_CENTS: "150", COURIER_PAY_MODE: "fee_share", CLOUDINARY_CLOUD_NAME: "" });
   check("API starts with fee settings", feeUp);
   const qF = (await quote({ ...quoteBody, tipCents: 0 }, otherCust.accessToken, FEE_API)).body.quote;
   check("service fee (5 %) and small-order fee are added below the threshold", qF?.serviceFeeCents === 250 && qF.smallOrderFeeCents === 150 && qF.smallOrderThresholdCents === 6000 && qF.totalCents === 5000 + fee + 250 + 150, qF);
   const oF = await order({ ...quoteBody, tipCents: 0 }, otherCust.accessToken, FEE_API);
-  check("the order with fees charges exactly the quoted price; fees are Malvoya's, not the store's", oF.status === 201 && sameMoney(qF, oF.body.order) && oF.body.order.commissionCents === 500 && oF.body.order.sellerPayoutCents === 4500 && oF.body.order.courierFeeCents === fee, oF.body);
+  check("the order with fees charges exactly the quoted price; fees are Malvoya's, not the store's", oF.status === 201 && sameMoney(qF, oF.body.order) && oF.body.order.commissionCents === 500 && oF.body.order.sellerPayoutCents === 4500, oF.body);
+  check("fee_share mode still works: the courier gets the delivery fee (plus tip), with a breakdown", oF.body.order?.courierFeeCents === fee && oF.body.order?.courierPay?.mode === "fee_share" && oF.body.order.courierPay.baseCents === fee, oF.body.order?.courierPay);
   const qF2 = (await quote({ ...quoteBody, tipCents: 0, items: [{ productId, quantity: 2 }] }, otherCust.accessToken, FEE_API)).body.quote;
   check("service fee is capped at its maximum; no small-order fee above the threshold", qF2?.serviceFeeCents === 300 && qF2.smallOrderFeeCents === 0, qF2);
   const qF3 = (await quote({ ...quoteBody, tipCents: 0, items: [{ productId: socks.id, quantity: 1 }] }, otherCust.accessToken, FEE_API)).body.quote;
@@ -705,12 +870,15 @@ async function register(name, role, extra = {}) {
   const sysF = (await callAt(FEE_API, "GET", "/admin/system", null, adminToken)).body;
   check("system status shows the fee settings in use", sysF.pricing?.serviceFeePercent === 5 && sysF.pricing?.serviceFeeMaxCents === 300 && sysF.pricing?.smallOrderFeeCents === 150, sysF.pricing);
   check("paying an order with fees works (the webhook checks the exact amount)", (await payOrder(oF.body.order)).status === 200 && sql(`select "paymentStatus" from "Order" where id=${oF.body.order.id}`) === "SUCCEEDED");
+  const noMedia = await callAt(FEE_API, "POST", "/products/import/csv", { csv: csvText, rightsConfirmed: true }, importer.accessToken);
+  check("without Cloudinary the import is switched off (503), like uploads", noMedia.status === 503 && (await callAt(FEE_API, "POST", "/products/import/shopify", { shopUrl: "http://localhost:12223", rightsConfirmed: true }, importer.accessToken)).status === 503, noMedia.body);
   feeApi.kill();
   feeApi = null;
 
   const rev = (await call("GET", "/admin/stats", null, adminToken)).body.stats;
   check("admin stats show Malvoya's revenue", rev.serviceFeeCents >= 250 && rev.smallOrderFeeCents >= 150 && rev.discountCents >= 200 && rev.commissionCents > 0 && rev.netPlatformRevenueCents === rev.commissionCents + rev.serviceFeeCents + rev.smallOrderFeeCents + rev.deliveryMarginCents - rev.discountCents, rev);
-  check("tips are not counted as Malvoya's delivery margin", rev.deliveryMarginCents === 0, rev.deliveryMarginCents);
+  const marginSql = Number(sql(`select coalesce(sum("deliveryFeeCents" - ("courierFeeCents" - "tipCents")), 0) from "Order" where "paymentStatus" = 'SUCCEEDED' and status <> 'CANCELLED'`));
+  check("delivery margin = delivery fees − courier pay without tips (may be negative)", rev.deliveryMarginCents === marginSql, [rev.deliveryMarginCents, marginSql]);
 
   console.log("\n— Launch alerts and system status");
   check("launch alert needs a location", (await call("PUT", "/me/launch-alert", { area: "Tampere" }, otherCust.accessToken)).status === 400);
@@ -740,7 +908,7 @@ async function register(name, role, extra = {}) {
   check("huge search input rejected", (await call("GET", `/products/search?q=${"a".repeat(200)}`)).status === 400);
   const cors = await fetch(`${API}/stores`, { headers: { Origin: "https://evil.example" } });
   check("CORS does not allow unknown origins", !cors.headers.get("access-control-allow-origin"));
-  check("health reports v2.6.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.6.0");
+  check("health reports v2.7.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.7.0");
 
   [vendorSock, custSock, otherSock, c1Sock, c2Sock].forEach((s) => s.close());
   console.log(`\n${pass} passed, ${fail} failed`);

@@ -80,18 +80,11 @@ class _LoginScreenState extends State<LoginScreen> {
         }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.shield_outlined, color: Colors.white, size: 20),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text('🔐 Google Security Alert: Sign-in verified for $email. Security alert dispatched to your Google Account email.'),
-                ),
-              ],
-            ),
-            backgroundColor: const Color(0xFF17131C),
+            content: Text(email.isEmpty
+                ? tr(context, 'Signed in with Google', 'Kirjauduttu Googlella')
+                : tr(context, 'Signed in with Google as $email', 'Kirjauduttu Googlella: $email')),
             behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 4),
+            duration: const Duration(seconds: 3),
           ),
         );
       }
@@ -728,7 +721,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final currentLangKey = Provider.of<LocaleProvider>(context).locale.languageCode;
-    final currentLangLabel = AppLocalizations.languages[currentLangKey] ?? '🇬🇧 English';
+    final currentLangLabel = AppLocalizations.languages[currentLangKey] ?? 'English';
     final cardBg = AppTheme.cardBackground(context);
     final cardBorder = AppTheme.cardBorder(context);
     final textPrimary = AppTheme.primaryText(context);

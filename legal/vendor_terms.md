@@ -20,6 +20,8 @@
 
 The Seller is responsible for accurate descriptions, prices including VAT, product safety and the legality of the items. Malvoya may remove unlawful listings, and will tell the Seller why.
 
+The Seller may import listings from their own online shop or a CSV file. Before each import the Seller confirms that they may use the photos and texts (for example their own material or material the brand has authorised). Photos are copied into Malvoya's storage for the Seller's store, and imported listings stay hidden until the Seller has checked and published them.
+
 ## 4. Orders
 
 - Orders are shown to the Seller only after the customer's payment is confirmed.

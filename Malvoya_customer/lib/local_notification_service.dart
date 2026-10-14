@@ -22,7 +22,7 @@ class LocalNotificationService {
       const AndroidNotificationChannel channel = AndroidNotificationChannel(
         'malvoya_dispatch',
         'Malvoya Orders & Dispatch Alerts',
-        description: 'Instant status alerts for orders, SMS notifications, and receipts',
+        description: 'Updates about your orders',
         importance: Importance.max,
         playSound: true,
         enableVibration: true,
@@ -49,7 +49,7 @@ class LocalNotificationService {
       const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
         'malvoya_dispatch',
         'Malvoya Orders & Dispatch Alerts',
-        channelDescription: 'Instant status alerts for orders, SMS notifications, and receipts',
+        channelDescription: 'Updates about your orders',
         importance: Importance.max,
         priority: Priority.high,
         showWhen: true,

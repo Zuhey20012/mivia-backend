@@ -16,6 +16,7 @@ import '../services/socket_service.dart';
 import '../core/push_service.dart';
 import 'chatbot.dart';
 import 'drops_manager.dart';
+import 'import_products_screen.dart';
 import 'payouts_screen.dart';
 import 'product_editor.dart';
 import 'returns_manager.dart';
@@ -102,7 +103,10 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       _error = res.ok ? null : res.error;
       if (res.ok) _store = Map<String, dynamic>.from(res.data['store']);
     });
-    if (res.ok) _loadNormalPrep();
+    if (res.ok) {
+      _loadNormalPrep();
+      _loadImports();
+    }
     await _loadOrders();
   }
 
@@ -310,6 +314,11 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     if (saved == true) _load();
   }
 
+  Future<void> _importProducts() async {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => ImportProductsScreen(storeApproved: _store?['isVerified'] == true)));
+    if (mounted) _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final newOrders = _orders.where((o) => o['status'] == 'PENDING').length;
@@ -337,7 +346,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
-                  _store?['isVerified'] == true ? tr(context, 'Live — customers can order', 'Julkaistu — asiakkaat voivat tilata') : tr(context, 'In review — not visible yet', 'Tarkistuksessa — ei vielä näkyvissä'),
+                  _store?['isVerified'] == true ? tr(context, 'Approved — visible to shoppers', 'Hyväksytty — näkyy asiakkaille') : tr(context, 'In review — not visible yet', 'Tarkistuksessa — ei vielä näkyvissä'),
                   style: TextStyle(fontSize: 11.5, color: _store?['isVerified'] == true ? AppTheme.primary : const Color(0xFF8A5A00), fontWeight: FontWeight.w700),
                 ),
               ),
@@ -366,8 +375,25 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
         ),
       ),
       floatingActionButton: switch (_tabs.index) {
-        1 => FloatingActionButton.extended(onPressed: () => _editProduct(), icon: const Icon(Icons.add_rounded), label: Text(tr(context, 'Product', 'Tuote'))),
-        2 => FloatingActionButton.extended(onPressed: () => _dropsKey.currentState?.create(), icon: const Icon(Icons.videocam_rounded), label: Text(tr(context, 'New drop', 'Uusi julkaisu'))),
+        1 => Row(mainAxisSize: MainAxisSize.min, children: [
+            FloatingActionButton.extended(
+              heroTag: 'import-products',
+              onPressed: _importProducts,
+              backgroundColor: Colors.white,
+              foregroundColor: AppTheme.primary,
+              elevation: 2,
+              icon: const Icon(Icons.upload_file_rounded),
+              label: Text(tr(context, 'Import', 'Tuo')),
+            ),
+            const SizedBox(width: 10),
+            FloatingActionButton.extended(
+              heroTag: 'add-product',
+              onPressed: () => _editProduct(),
+              icon: const Icon(Icons.add_rounded),
+              label: Text(tr(context, 'Product', 'Tuote')),
+            ),
+          ]),
+        2 => FloatingActionButton.extended(heroTag: 'new-drop', onPressed: () => _dropsKey.currentState?.create(), icon: const Icon(Icons.videocam_rounded), label: Text(tr(context, 'New drop', 'Uusi julkaisu'))),
         _ => null,
       },
       body: _loading
@@ -403,7 +429,8 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
               padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
               child: Text(
                 _store?['isVerified'] == true
-                    ? tr(context, 'No orders yet. New orders appear here the moment they are paid, with a sound and a notification.', 'Ei vielä tilauksia. Uudet tilaukset näkyvät täällä heti maksun jälkeen.')
+                    ? tr(context, 'No orders yet. New orders appear here as soon as they are paid, with a sound and a notification. Malvoya is just starting, so the first orders may take a while.',
+                        'Ei vielä tilauksia. Uudet tilaukset näkyvät täällä heti maksun jälkeen äänimerkin ja ilmoituksen kera. Malvoya on vasta aloittamassa, joten ensimmäisiä tilauksia voi joutua odottamaan.')
                     : tr(context, 'Your store is in review. Add products and drops meanwhile — they go live when you are approved.', 'Kauppasi on tarkistuksessa. Lisää sillä välin tuotteita ja julkaisuja — ne julkaistaan hyväksynnän jälkeen.'),
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: AppTheme.textSecondary, height: 1.45, fontSize: 15),
@@ -576,6 +603,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     if (stored == null || _savingProducts.contains(id)) return;
     HapticFeedback.selectionClick();
     final before = stored['isAvailable'] != false;
+    final wasDraft = _isDraft(p);
     setState(() {
       stored['isAvailable'] = value;
       _savingProducts.add(id);
@@ -590,6 +618,8 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     messenger.showSnackBar(SnackBar(
       content: Text(!res.ok
           ? (res.error ?? tr(context, 'Could not change it', 'Muutos epäonnistui'))
+          : value && wasDraft
+              ? tr(context, '${p['name']} is published', '${p['name']} on julkaistu')
           : value
               ? tr(context, '${p['name']} is available again', '${p['name']} on taas saatavilla')
               : tr(context, '${p['name']} is sold out and hidden from shoppers', '${p['name']} on loppu ja piilotettu asiakkailta')),
@@ -597,11 +627,33 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     ));
   }
 
+  /// Ids of the product imports the store has published (null = not known, e.g. older server).
+  Set<String>? _publishedImports;
+
+  Future<void> _loadImports() async {
+    final res = await _api.get('/products/import');
+    if (!mounted) return;
+    final jobs = res.ok ? ((res.data['jobs'] as List?) ?? []).whereType<Map>() : null;
+    setState(() => _publishedImports = jobs?.where((j) => j['publishedAt'] != null).map((j) => '${j['id']}').toSet());
+  }
+
+  /// An imported product that has not been published. Imports arrive hidden (isAvailable=false)
+  /// with importJobId set. A hidden product from a published import is still a draft while it lacks
+  /// a photo or a price (publishing skips those); otherwise the store switched it off itself.
+  bool _isDraft(Map p) {
+    if (p['isAvailable'] != false || p['importJobId'] == null) return false;
+    final published = _publishedImports;
+    if (published == null || !published.contains('${p['importJobId']}')) return true;
+    return p['salePriceCents'] == null || ((p['images'] as List?) ?? const []).isEmpty;
+  }
+
   Widget _productsTab() {
     final products = ((_store?['products'] as List?) ?? []).map((p) => Map<String, dynamic>.from(p)).toList();
     if (products.isEmpty) {
       return Center(
-        child: Padding(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.only(bottom: 80),
+          child: Padding(
           padding: const EdgeInsets.all(32),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             const Icon(Icons.checkroom_rounded, size: 56, color: AppTheme.textSecondary),
@@ -609,7 +661,26 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             Text(tr(context, 'Add your first product with photos, price and sizes.', 'Lisää ensimmäinen tuotteesi kuvineen, hintoineen ja kokoineen.'), textAlign: TextAlign.center),
             const SizedBox(height: 16),
             FilledButton.icon(onPressed: () => _editProduct(), icon: const Icon(Icons.add_rounded), label: Text(tr(context, 'Add product', 'Lisää tuote'))),
+            const SizedBox(height: 28),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
+              child: Column(children: [
+                Text(
+                  tr(context, 'Have a Shopify shop or a spreadsheet? Import everything at once.', 'Onko sinulla Shopify-kauppa tai taulukko? Tuo kaikki kerralla.'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF6A4500), height: 1.35),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: _importProducts,
+                  icon: const Icon(Icons.upload_file_rounded),
+                  label: Text(tr(context, 'Import products', 'Tuo tuotteita')),
+                ),
+              ]),
+            ),
           ]),
+          ),
         ),
       );
     }
@@ -625,6 +696,8 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           final variants = (p['variants'] as List?) ?? [];
           final stock = variants.isEmpty ? (asInt(p['stockQuantity']) ?? 0) : variants.fold<int>(0, (s, v) => s + (asInt(v['stock']) ?? 0));
           final available = p['isAvailable'] != false;
+          final draft = _isDraft(p);
+          final noPrice = p['salePriceCents'] == null;
           final saving = _savingProducts.contains(p['id']);
           return InkWell(
             onTap: () => _editProduct(p),
@@ -647,8 +720,17 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    if (draft)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(8)),
+                        child: Text(tr(context, 'Draft — not published yet', 'Luonnos — ei vielä julkaistu'),
+                            style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: Color(0xFF6A4500))),
+                      ),
                     Text(p['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w700)),
-                    Text(euro(context, p['salePriceCents']), style: const TextStyle(fontWeight: FontWeight.w600)),
+                    Text(noPrice ? tr(context, 'No price yet', 'Ei vielä hintaa') : euro(context, p['salePriceCents']),
+                        style: TextStyle(fontWeight: FontWeight.w600, color: noPrice ? AppTheme.accent : AppTheme.textPrimary)),
                     Text(
                       [
                         stock == 0 ? tr(context, 'Out of stock', 'Ei varastossa') : '$stock ${tr(context, 'in stock', 'varastossa')}',
@@ -667,8 +749,12 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                     child: Switch(value: available, onChanged: saving ? null : (v) => _setProductAvailable(p, v)),
                   ),
                   Text(
-                    available ? tr(context, 'Available', 'Saatavilla') : tr(context, 'Sold out', 'Loppu'),
-                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: available ? AppTheme.primary : AppTheme.accent),
+                    available
+                        ? tr(context, 'Available', 'Saatavilla')
+                        : draft
+                            ? tr(context, 'Hidden', 'Piilossa')
+                            : tr(context, 'Sold out', 'Loppu'),
+                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: available ? AppTheme.primary : draft ? const Color(0xFF6A4500) : AppTheme.accent),
                   ),
                 ]),
               ]),
@@ -684,7 +770,9 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
   Widget _storeTab() {
     final paid = _orders.where((o) => o['paymentStatus'] == 'SUCCEEDED' && o['status'] != 'CANCELLED').toList();
     final weekAgo = DateTime.now().subtract(const Duration(days: 7));
-    final weekSales = paid.where((o) => (DateTime.tryParse('${o['createdAt']}') ?? DateTime(2000)).isAfter(weekAgo)).fold<int>(0, (s, o) => s + (asInt(o['subtotalCents']) ?? 0));
+    // Both numbers cover the same 7 days (the order list is limited to the latest 200 orders)
+    final week = paid.where((o) => (DateTime.tryParse('${o['createdAt']}') ?? DateTime(2000)).isAfter(weekAgo)).toList();
+    final weekSales = week.fold<int>(0, (s, o) => s + (asInt(o['subtotalCents']) ?? 0));
     final reviews = asInt(_store?['totalReviews']) ?? 0;
     Widget tile(IconData icon, String title, String subtitle, VoidCallback onTap) => ListTile(
           leading: CircleAvatar(backgroundColor: AppTheme.primaryLight, child: Icon(icon, color: AppTheme.primary)),
@@ -699,7 +787,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
         Row(children: [
           _stat(tr(context, 'Sales, 7 days', 'Myynti, 7 pv'), euro(context, weekSales)),
           const SizedBox(width: 10),
-          _stat(tr(context, 'Orders', 'Tilaukset'), '${paid.length}'),
+          _stat(tr(context, 'Orders, 7 days', 'Tilaukset, 7 pv'), '${week.length}'),
           const SizedBox(width: 10),
           _stat(tr(context, 'Rating', 'Arvio'), reviews > 0 ? '★ ${_store?['rating']}' : '—'),
         ]),
@@ -707,8 +795,9 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
         Container(
           decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppTheme.divider)),
           child: Column(children: [
-            tile(Icons.account_balance_outlined, tr(context, 'Payouts', 'Tilitykset'), tr(context, 'Get paid through Stripe', 'Tilitykset Stripen kautta'),
-                () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PayoutsScreen()))),
+            tile(Icons.account_balance_outlined, tr(context, 'Payouts', 'Tilitykset'),
+                tr(context, 'Through Stripe · commission ${commissionText(_store?['commissionRate'] as num?)}', 'Stripen kautta · provisio ${commissionText(_store?['commissionRate'] as num?)}'),
+                () => Navigator.push(context, MaterialPageRoute(builder: (_) => PayoutsScreen(commissionRate: _store?['commissionRate'] as num?)))),
             const Divider(height: 1),
             tile(Icons.assignment_return_outlined, tr(context, 'Returns', 'Palautukset'), tr(context, 'Approve and refund returns', 'Hyväksy ja hyvitä palautukset'),
                 () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ReturnsManager()))),
@@ -731,7 +820,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             const GoogleLinkTile(leading: CircleAvatar(backgroundColor: AppTheme.primaryLight, child: Icon(Icons.link_rounded, color: AppTheme.primary))),
             const Divider(height: 1),
             tile(Icons.help_outline_rounded, tr(context, 'Help', 'Apua'), tr(context, 'Answers for sellers', 'Vastauksia myyjille'),
-                () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChatbotScreen()))),
+                () => Navigator.push(context, MaterialPageRoute(builder: (_) => ChatbotScreen(commissionRate: _store?['commissionRate'] as num?)))),
             const Divider(height: 1),
             tile(Icons.gavel_rounded, tr(context, 'Seller terms and privacy', 'Myyjän ehdot ja tietosuoja'), tr(context, 'The rules you agreed to', 'Hyväksymäsi säännöt'), () => openLegal('sellers')),
             const Divider(height: 1),

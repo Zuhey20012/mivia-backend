@@ -6,8 +6,10 @@ import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/constants.dart';
 import '../config/theme.dart';
+import '../core/strings.dart';
 
-/// Returns under the 14-day right of withdrawal (Kuluttajansuojalaki 6 luku).
+/// Returns. Purchases from business sellers have the 14-day right of withdrawal (Kuluttajansuojalaki
+/// 6 luku); purchases from private sellers do not, but a request can still be sent to the seller.
 /// Everything shown here comes from the server; nothing is stored only on the phone.
 class ReturnsScreen extends StatefulWidget {
   const ReturnsScreen({super.key});
@@ -16,22 +18,22 @@ class ReturnsScreen extends StatefulWidget {
   State<ReturnsScreen> createState() => _ReturnsScreenState();
 }
 
-const _reasons = <String, String>{
-  'CHANGED_MIND': 'Muutin mieleni / Changed my mind',
-  'WRONG_ITEM': 'Väärä tuote / Wrong item',
-  'DAMAGED_ON_ARRIVAL': 'Saapui vaurioituneena / Arrived damaged',
-  'NOT_AS_DESCRIBED': 'Ei vastaa kuvausta / Not as described',
-  'OTHER': 'Muu syy / Other',
-};
+Map<String, String> _reasons(BuildContext context) => {
+      'CHANGED_MIND': tr(context, 'Changed my mind', 'Muutin mieleni'),
+      'WRONG_ITEM': tr(context, 'Wrong item', 'Väärä tuote'),
+      'DAMAGED_ON_ARRIVAL': tr(context, 'Arrived damaged', 'Saapui vaurioituneena'),
+      'NOT_AS_DESCRIBED': tr(context, 'Not as described', 'Ei vastaa kuvausta'),
+      'OTHER': tr(context, 'Other', 'Muu syy'),
+    };
 
-const _statusLabels = <String, String>{
-  'REQUESTED': 'Pyydetty / Requested',
-  'APPROVED': 'Hyväksytty / Approved',
-  'IN_TRANSIT': 'Matkalla / On its way back',
-  'RECEIVED': 'Vastaanotettu / Received by store',
-  'REFUNDED': 'Hyvitetty / Refunded',
-  'REJECTED': 'Hylätty / Rejected',
-};
+Map<String, String> _statusLabels(BuildContext context) => {
+      'REQUESTED': tr(context, 'Requested', 'Pyydetty'),
+      'APPROVED': tr(context, 'Approved', 'Hyväksytty'),
+      'IN_TRANSIT': tr(context, 'On its way back', 'Matkalla takaisin'),
+      'RECEIVED': tr(context, 'Received by the store', 'Kauppa vastaanotti'),
+      'REFUNDED': tr(context, 'Refunded', 'Hyvitetty'),
+      'REJECTED': tr(context, 'Rejected', 'Hylätty'),
+    };
 
 class _ReturnsScreenState extends State<ReturnsScreen> {
   List<dynamic> _returns = [];
@@ -41,7 +43,8 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
+    // After the first frame: the messages are localised, which needs the context
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
   Map<String, String> _headers(AuthService auth) => {
@@ -52,7 +55,7 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
   Future<void> _load() async {
     final auth = Provider.of<AuthService>(context, listen: false);
     if (!auth.isAuthenticated) {
-      setState(() { _loading = false; _error = 'Kirjaudu sisään nähdäksesi palautukset. Sign in to see your returns.'; });
+      setState(() { _loading = false; _error = tr(context, 'Sign in to see your returns.', 'Kirjaudu sisään nähdäksesi palautukset.'); });
       return;
     }
     setState(() { _loading = true; _error = null; });
@@ -64,10 +67,10 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
       if (res.statusCode == 200) {
         setState(() => _returns = jsonDecode(res.body)['returns'] ?? []);
       } else {
-        setState(() => _error = 'Palautuksia ei voitu ladata. Could not load returns.');
+        setState(() => _error = tr(context, 'Could not load returns.', 'Palautuksia ei voitu ladata.'));
       }
     } catch (_) {
-      if (mounted) setState(() => _error = 'Ei yhteyttä. No connection.');
+      if (mounted) setState(() => _error = tr(context, 'No connection.', 'Ei yhteyttä.'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -116,28 +119,27 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
         builder: (ctx, setSheet) => Padding(
           padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.of(ctx).viewInsets.bottom + 24),
           child: orders.isEmpty
-              ? const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 24),
+              ? Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
                   child: Text(
-                    'Sinulla ei ole palautettavia tilauksia. Tuotteen voi palauttaa 14 päivän kuluessa toimituksesta.\n\n'
-                    'You have no orders that can be returned. Items can be returned within 14 days of delivery.',
-                    style: TextStyle(fontSize: 15, height: 1.4),
+                    tr(context, 'You have no delivered orders from the last 14 days. Return requests can be sent within 14 days of delivery.',
+                        'Sinulla ei ole viimeisen 14 päivän aikana toimitettuja tilauksia. Palautuspyynnön voi lähettää 14 päivän kuluessa toimituksesta.'),
+                    style: const TextStyle(fontSize: 15, height: 1.4),
                   ),
                 )
               : Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Text('Aloita palautus / Start a return',
-                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: -0.3)),
+                    Text(tr(context, 'Start a return', 'Aloita palautus'), style: AppTheme.display(context, size: 20)),
                     const SizedBox(height: 16),
                     DropdownButtonFormField<int>(
                       initialValue: selectedOrder,
-                      decoration: const InputDecoration(labelText: 'Tilaus / Order'),
+                      decoration: InputDecoration(labelText: tr(context, 'Order', 'Tilaus')),
                       items: orders
                           .map((o) => DropdownMenuItem<int>(
                                 value: o['id'] as int,
-                                child: Text('#${o['id']} • ${o['store']?['name'] ?? ''} • €${((o['totalCents'] ?? 0) / 100).toStringAsFixed(2)}'),
+                                child: Text('#${o['id']} • ${o['store']?['name'] ?? ''} • ${euro(context, o['totalCents'])}'),
                               ))
                           .toList(),
                       onChanged: (v) => setSheet(() => selectedOrder = v),
@@ -145,8 +147,8 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
                       initialValue: reason,
-                      decoration: const InputDecoration(labelText: 'Syy / Reason'),
-                      items: _reasons.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
+                      decoration: InputDecoration(labelText: tr(context, 'Reason', 'Syy')),
+                      items: _reasons(context).entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
                       onChanged: (v) => setSheet(() => reason = v ?? reason),
                     ),
                     const SizedBox(height: 12),
@@ -154,12 +156,13 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                       controller: noteCtrl,
                       maxLength: 500,
                       maxLines: 3,
-                      decoration: const InputDecoration(labelText: 'Lisätiedot (valinnainen) / Details (optional)'),
+                      decoration: InputDecoration(labelText: tr(context, 'Details (optional)', 'Lisätiedot (valinnainen)')),
                     ),
-                    const Text(
-                      'Peruuttamisoikeus: sinun ei tarvitse kertoa syytä. Hyvitys tehdään alkuperäiselle maksutavalle 14 päivän kuluessa.\n'
-                      'Right of withdrawal: no reason is required. The refund goes to your original payment method within 14 days.',
-                      style: TextStyle(fontSize: 12, height: 1.4, color: Colors.grey),
+                    Text(
+                      tr(context,
+                          'From a business seller: no reason is needed. The refund goes to your original payment method within 14 days, but it may wait until the item is back with the seller. From a private seller: there is no legal right of withdrawal, so the seller decides.',
+                          'Yritysmyyjältä: syytä ei tarvitse kertoa. Hyvitys tehdään alkuperäiselle maksutavalle 14 päivän kuluessa, mutta se voi odottaa, kunnes tuote on palannut myyjälle. Yksityismyyjältä: lakisääteistä peruuttamisoikeutta ei ole, joten myyjä päättää.'),
+                      style: TextStyle(fontSize: 12, height: 1.4, color: AppTheme.secondaryText(context)),
                     ),
                     if (sheetError != null) ...[
                       const SizedBox(height: 10),
@@ -190,22 +193,22 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                                     if (ctx.mounted) Navigator.pop(ctx);
                                     _load();
                                     if (mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                                        content: Text('Palautuspyyntö lähetetty. Return request sent.'),
+                                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                        content: Text(tr(context, 'Return request sent to the store.', 'Palautuspyyntö lähetetty kaupalle.')),
                                       ));
                                     }
                                   } else {
-                                    String msg = 'Palautusta ei voitu luoda. Could not create the return.';
+                                    String msg = tr(context, 'Could not create the return.', 'Palautusta ei voitu luoda.');
                                     try { msg = jsonDecode(res.body)['error'] ?? msg; } catch (_) {}
                                     setSheet(() { submitting = false; sheetError = msg; });
                                   }
                                 } catch (_) {
-                                  setSheet(() { submitting = false; sheetError = 'Ei yhteyttä. No connection.'; });
+                                  setSheet(() { submitting = false; sheetError = tr(context, 'No connection.', 'Ei yhteyttä.'); });
                                 }
                               },
                         child: submitting
                             ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                            : const Text('Lähetä palautuspyyntö / Send return request'),
+                            : Text(tr(context, 'Send return request', 'Lähetä palautuspyyntö')),
                       ),
                     ),
                   ],
@@ -223,13 +226,13 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
     final secondary = isDark ? const Color(0xFF98989D) : const Color(0xFF6E6E73);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Palautukset / Returns')),
+      appBar: AppBar(title: Text(tr(context, 'Returns', 'Palautukset'))),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _startReturn,
         backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
         icon: const Icon(Icons.undo_rounded),
-        label: const Text('Aloita palautus'),
+        label: Text(tr(context, 'Start a return', 'Aloita palautus')),
       ),
       body: RefreshIndicator.adaptive(
         onRefresh: _load,
@@ -240,8 +243,13 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(color: cardColor, borderRadius: BorderRadius.circular(16)),
               child: Text(
-                'Voit palauttaa tuotteen 14 päivän kuluessa siitä, kun olet vastaanottanut sen.\n'
-                'You can return an item within 14 days of receiving it.',
+                tr(context,
+                    'Bought from a business seller? You can withdraw from the purchase within 14 days of receiving it, without giving a reason (Consumer Protection Act, chapter 6). A faulty item is also covered by the seller\'s liability for defects.\n\n'
+                        'Bought from a private seller? The legal right of withdrawal does not apply, but you can still send a return request and the seller decides. Each store page says which kind of seller it is.\n\n'
+                        'Unless the seller has agreed otherwise, you pay the cost of sending the item back.',
+                    'Ostitko yritysmyyjältä? Voit perua oston 14 päivän kuluessa tuotteen vastaanottamisesta syytä kertomatta (kuluttajansuojalaki, 6 luku). Viallisesta tuotteesta myyjä vastaa lisäksi virhevastuun perusteella.\n\n'
+                        'Ostitko yksityismyyjältä? Lakisääteinen peruuttamisoikeus ei koske ostoa, mutta voit silti lähettää palautuspyynnön ja myyjä päättää. Jokaisella kauppasivulla kerrotaan, millainen myyjä on kyseessä.\n\n'
+                        'Ellei myyjä ole toisin sopinut, maksat tuotteen palautuskulut.'),
                 style: TextStyle(fontSize: 14, height: 1.4, color: secondary),
               ),
             ),
@@ -260,7 +268,7 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                   children: [
                     Icon(Icons.inventory_2_outlined, size: 48, color: secondary),
                     const SizedBox(height: 12),
-                    Text('Ei palautuksia / No returns yet', style: TextStyle(color: secondary, fontSize: 15)),
+                    Text(tr(context, 'No returns yet', 'Ei palautuksia'), style: TextStyle(color: secondary, fontSize: 15)),
                   ],
                 ),
               )
@@ -279,7 +287,7 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                         children: [
                           Expanded(
                             child: Text(
-                              'Tilaus / Order #${r['orderId'] ?? '-'} • ${r['order']?['store']?['name'] ?? ''}',
+                              '${tr(context, 'Order', 'Tilaus')} #${r['orderId'] ?? '-'} • ${r['order']?['store']?['name'] ?? ''}',
                               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
                             ),
                           ),
@@ -290,15 +298,15 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                                   .withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(20),
                             ),
-                            child: Text(_statusLabels[status]?.split(' / ').last ?? status, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                            child: Text(_statusLabels(context)[status] ?? status, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                           ),
                         ],
                       ),
                       const SizedBox(height: 6),
-                      Text(_reasons[r['reason']] ?? r['reason'].toString(), style: TextStyle(color: secondary, fontSize: 13)),
+                      Text(_reasons(context)[r['reason']] ?? r['reason'].toString(), style: TextStyle(color: secondary, fontSize: 13)),
                       if (refunded != null && status == 'REFUNDED') ...[
                         const SizedBox(height: 6),
-                        Text('Hyvitetty / Refunded €${(refunded / 100).toStringAsFixed(2)}',
+                        Text('${tr(context, 'Refunded', 'Hyvitetty')} ${euro(context, refunded)}',
                             style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                       ],
                     ],

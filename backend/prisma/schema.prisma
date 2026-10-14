@@ -217,12 +217,13 @@ model Store {
   rating       Float @default(0)
   totalReviews Int   @default(0)
 
-  products  Product[]
-  orders    Order[]
-  drops     Drop[]
-  reviews   Review[]
-  payouts   Payout[]
-  followers StoreFollow[]
+  products   Product[]
+  orders     Order[]
+  drops      Drop[]
+  reviews    Review[]
+  payouts    Payout[]
+  followers  StoreFollow[]
+  importJobs ImportJob[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -260,6 +261,13 @@ model Product {
   stockQuantity Int     @default(1)
   isAvailable   Boolean @default(true)
 
+  // Catalogue import (Shopify feed or CSV): re-importing the same item updates it instead of duplicating it
+  externalSource String? // "SHOPIFY" | "CSV"
+  externalId     String? // id in the source (Shopify product id, CSV external_id or name)
+  gtin           String? // EAN/GTIN barcode, 8–14 digits
+  importJobId    Int? // the import that last created or updated it (publish works per job)
+  importJob      ImportJob? @relation(fields: [importJobId], references: [id], onDelete: SetNull)
+
   // Flags
   isEcoFriendly Boolean @default(false)
   isHandmade    Boolean @default(false)
@@ -278,7 +286,9 @@ model Product {
   updatedAt DateTime @updatedAt
 
   // Query-path indexes (Postgres does not index foreign keys automatically)
+  @@unique([storeId, externalSource, externalId])
   @@index([storeId, isAvailable])
+  @@index([importJobId])
 }
 
 // Every sale price a product has had. A "was" price may only be shown when it is the lowest
@@ -363,16 +373,20 @@ model Order {
   paidAt                DateTime?
   refundedCents         Int           @default(0)
 
-  courierFeeCents Int @default(0) // what the courier earns for this delivery, tip included
-  tipCents        Int @default(0) // optional tip chosen at checkout; goes to the courier in full
+  courierFeeCents Int   @default(0) // what the courier earns for this delivery, tip and waiting included (= courierPay.totalCents)
+  tipCents        Int   @default(0) // optional tip chosen at checkout; goes to the courier in full
+  // How courierFeeCents was computed (utils/courierPay.ts): { mode, baseCents, distanceKm, distanceCents, waitMinutes,
+  // waitCents, tipCents, totalCents, formula, explanation: { en, fi } }. Null on orders made before 2.7.
+  courierPay      Json?
 
   // Lifecycle timestamps
-  confirmedAt  DateTime? // store accepted the order
-  acceptedAt   DateTime? // courier accepted the job
-  pickedUpAt   DateTime?
-  deliveredAt  DateTime? // start of the 14-day withdrawal period (Kuluttajansuojalaki 6:14)
-  cancelledAt  DateTime?
-  cancelReason String?
+  confirmedAt      DateTime? // store accepted the order
+  acceptedAt       DateTime? // courier accepted the job
+  courierArrivedAt DateTime? // courier checked in at the shop (starts the paid waiting clock)
+  pickedUpAt       DateTime?
+  deliveredAt      DateTime? // start of the 14-day withdrawal period (Kuluttajansuojalaki 6:14)
+  cancelledAt      DateTime?
+  cancelReason     String?
 
   // Delivery
   deliveryAddress String?
@@ -881,4 +895,44 @@ model PromoRedemption {
 
   @@index([promoCodeId, userId])
   @@index([userId])
+}
+
+// ─────────────────────────────────────────────
+// CATALOGUE IMPORT (Shopify public feed or CSV), run in-process; products arrive as hidden drafts
+// ─────────────────────────────────────────────
+
+enum ImportSource {
+  SHOPIFY
+  CSV
+}
+
+enum ImportStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+}
+
+model ImportJob {
+  id                Int          @id @default(autoincrement())
+  storeId           Int
+  store             Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  source            ImportSource
+  status            ImportStatus @default(QUEUED)
+  sourceRef         String? // the Shopify shop domain; null for CSV
+  total             Int          @default(0) // products found in the source
+  created           Int          @default(0)
+  updated           Int          @default(0)
+  skipped           Int          @default(0)
+  errors            Json         @default("[]") // [{ item, message, level: "error" | "warning" }], at most 200
+  rightsConfirmedAt DateTime // the store confirmed it may use these photos and texts
+  publishedAt       DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt // progress heartbeat: a job without progress for 15 min is marked FAILED
+  finishedAt        DateTime?
+
+  products Product[]
+
+  @@index([storeId, createdAt])
+  @@index([status, updatedAt])
 }

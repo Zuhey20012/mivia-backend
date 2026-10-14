@@ -58,8 +58,10 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
       text: widget.product?['salePriceCents'] != null ? ((widget.product!['salePriceCents'] as num) / 100).toStringAsFixed(2).replaceAll('.', ',') : '');
   late final _stock = TextEditingController(text: '${widget.product?['stockQuantity'] ?? 1}');
 
-  late String _category = productCategories.contains(widget.product?['category']) ? widget.product!['category'] : 'Clothing';
-  late String _condition = widget.product?['condition'] ?? 'NEW';
+  // Imported products may bring their own category, sizes and colours: keep them selectable
+  late String _category = '${widget.product?['category'] ?? ''}'.trim().isEmpty ? 'Clothing' : '${widget.product!['category']}'.trim();
+  late final List<String> _categories = [...productCategories, if (!productCategories.contains(_category)) _category];
+  late String _condition = const ['NEW', 'LIKE_NEW', 'GOOD', 'FAIR', 'POOR'].contains(widget.product?['condition']) ? widget.product!['condition'] : 'NEW';
   late bool _secondHand = widget.product?['isSecondHand'] == true;
   late bool _eco = widget.product?['isEcoFriendly'] == true;
   late bool _handmade = widget.product?['isHandmade'] == true;
@@ -284,7 +286,10 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
               ),
             ),
             const SizedBox(height: 6),
-            Text(tr(context, 'Good light and a plain background sell best. The first photo is the cover.', 'Hyvä valo ja yksinkertainen tausta myyvät parhaiten. Ensimmäinen kuva on kansikuva.'),
+            Text(
+                tr(context,
+                    'Good light and a plain background show the item clearly. The first photo is the cover. Use your own photos, or ones the brand allows you to use.',
+                    'Hyvä valo ja yksinkertainen tausta näyttävät tuotteen selkeästi. Ensimmäinen kuva on kansikuva. Käytä omia kuviasi tai kuvia, joiden käyttöön brändi on antanut luvan.'),
                 style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
             const SizedBox(height: 20),
             _label(tr(context, 'Videos', 'Videot')),
@@ -344,7 +349,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
             DropdownButtonFormField<String>(
               value: _category,
               decoration: InputDecoration(labelText: tr(context, 'Category', 'Kategoria')),
-              items: productCategories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+              items: _categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
               onChanged: (v) => setState(() => _category = v!),
             ),
             const SizedBox(height: 12),
@@ -392,7 +397,10 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
                 value: _available,
                 onChanged: (v) => setState(() => _available = v),
                 title: Text(tr(context, 'Visible in the store', 'Näkyy kaupassa')),
-                subtitle: Text(tr(context, 'Turn off to hide it without deleting.', 'Piilota poistamatta.')),
+                subtitle: Text(widget.product?['importJobId'] != null && widget.product?['isAvailable'] == false
+                    ? tr(context, 'Imported products stay hidden until you switch this on. Check the photos, price and stock first.',
+                        'Tuodut tuotteet pysyvät piilossa, kunnes kytket tämän päälle. Tarkista ensin kuvat, hinta ja varastosaldo.')
+                    : tr(context, 'Turn off to hide it without deleting.', 'Piilota poistamatta.')),
               ),
             ],
             if (_error != null)
@@ -509,7 +517,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
                 decoration: InputDecoration(labelText: tr(context, 'Size', 'Koko'), isDense: true),
                 items: [
                   DropdownMenuItem(value: null, child: Text(tr(context, 'None', 'Ei'))),
-                  ...productSizes.map((s) => DropdownMenuItem(value: s, child: Text(s))),
+                  ...{...productSizes, if (o.size != null) o.size!}.map((s) => DropdownMenuItem(value: s, child: Text(s))),
                 ],
                 onChanged: (v) => setState(() => o.size = v),
               ),
@@ -522,7 +530,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
                 decoration: InputDecoration(labelText: tr(context, 'Colour', 'Väri'), isDense: true),
                 items: [
                   DropdownMenuItem(value: null, child: Text(tr(context, 'None', 'Ei'))),
-                  ...productColors.map((c) => DropdownMenuItem(value: c, child: Text(c))),
+                  ...{...productColors, if (o.color != null) o.color!}.map((c) => DropdownMenuItem(value: c, child: Text(c))),
                 ],
                 onChanged: (v) => setState(() => o.color = v),
               ),

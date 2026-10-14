@@ -206,7 +206,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 16),
                   const Text('Select Language / Valitse kieli', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 4),
-                  const Text('European Union & Universal Languages (25 languages)', style: TextStyle(fontSize: 13, color: Colors.grey)),
+                  const Text('English and Finnish / Englanti ja suomi', style: TextStyle(fontSize: 13, color: Colors.grey)),
                   const SizedBox(height: 12),
                   const Divider(height: 1),
                   Expanded(
@@ -246,7 +246,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final currentLangKey = Provider.of<LocaleProvider>(context).locale.languageCode;
-    final currentLangLabel = AppLocalizations.languages[currentLangKey] ?? '🇬🇧 English';
+    final currentLangLabel = AppLocalizations.languages[currentLangKey] ?? 'English';
 
     return Scaffold(
       backgroundColor: Colors.white,

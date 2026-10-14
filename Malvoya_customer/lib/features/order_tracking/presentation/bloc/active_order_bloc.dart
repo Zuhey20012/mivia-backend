@@ -112,21 +112,21 @@ class ActiveOrderBloc extends Bloc<ActiveOrderEvent, ActiveOrderState> {
         emit(OrderProgressState(
           order: order,
           progressPercent: 0.15,
-          stepDescription: 'Waiting for atelier confirmation',
+          stepDescription: 'Waiting for the store to accept',
         ));
         break;
       case OrderStatus.confirmed:
         emit(OrderProgressState(
           order: order,
           progressPercent: 0.35,
-          stepDescription: 'Atelier confirmed your order',
+          stepDescription: 'The store accepted your order',
         ));
         break;
       case OrderStatus.preparing:
         emit(OrderProgressState(
           order: order,
           progressPercent: 0.55,
-          stepDescription: 'Atelier is preparing garments on cedar hangers',
+          stepDescription: 'The store is packing your order',
         ));
         break;
       case OrderStatus.courierAssigned:
@@ -140,7 +140,7 @@ class ActiveOrderBloc extends Bloc<ActiveOrderEvent, ActiveOrderState> {
         emit(OrderProgressState(
           order: order,
           progressPercent: 0.88,
-          stepDescription: 'Courier is in transit to your doorstep',
+          stepDescription: 'Your courier is on the way',
         ));
         break;
       case OrderStatus.delivered:

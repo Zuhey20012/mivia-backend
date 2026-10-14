@@ -6,11 +6,8 @@ class LocaleProvider extends ChangeNotifier {
 
   Locale get locale => _locale;
 
-  static const List<String> supportedCodes = [
-    'en', 'fi', 'sv', 'de', 'fr', 'nl', 'it', 'es', 'pt', 'pl',
-    'ro', 'cs', 'hu', 'el', 'da', 'sk', 'bg', 'hr', 'no',
-    'ru', 'tr', 'uk', 'ar', 'zh', 'hi',
-  ];
+  /// The app is written in Finnish and English only.
+  static const List<String> supportedCodes = ['fi', 'en'];
 
   LocaleProvider() {
     _loadLocale();

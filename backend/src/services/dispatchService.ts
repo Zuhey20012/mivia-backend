@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { haversineKm } from "../utils/distance";
 import { emitToAllCouriers, emitToCourier } from "../lib/socket";
 import { pushToUsers } from "../lib/push";
+import { presentCourierPay } from "../utils/courierPay";
 
 const logger = pino({ name: "dispatch" });
 
@@ -39,8 +40,11 @@ export async function offerOrderToCouriers(orderId: number) {
     deliveryAreaLat: approximate(order.deliveryLat),
     deliveryAreaLng: approximate(order.deliveryLng),
     deliveryFeeCents: order.deliveryFeeCents,
-    courierFeeCents: order.courierFeeCents, // tip included
+    courierFeeCents: order.courierFeeCents, // tip included; = courierPay.totalCents
     tipCents: order.tipCents,
+    // Before the courier accepts (Platform Work Directive). Ride to the shop: estimated per nearby courier,
+    // fixed on acceptance; waiting at the shop is added at pickup.
+    courierPay: presentCourierPay(order),
     createdAt: order.createdAt,
   };
 
@@ -61,7 +65,13 @@ export async function offerOrderToCouriers(orderId: number) {
       : [];
 
   if (nearby.length) {
-    for (const c of nearby) emitToCourier(c.id, "courier:dispatch_offer", { ...offer, pickupDistanceKm: Number(c.km.toFixed(2)) });
+    for (const c of nearby) {
+      // This courier's ride to the shop is part of their pay estimate (fixed when they accept)
+      const courierPay = presentCourierPay(order, { approachStraightKm: c.km });
+      emitToCourier(c.id, "courier:dispatch_offer", {
+        ...offer, courierPay, courierFeeCents: courierPay.totalCents, pickupDistanceKm: Number(c.km.toFixed(2)),
+      });
+    }
   } else {
     emitToAllCouriers("courier:dispatch_offer", offer);
   }

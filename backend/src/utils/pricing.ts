@@ -1,14 +1,15 @@
-import { env, PricingConfig } from "../config/env";
+import { env, PricingConfig, DeliveryFeeConfig } from "../config/env";
 
 /**
  * Delivery fee shown in the store list AND charged at checkout — they must always match
  * (Kuluttajansuojalaki 2:8: the advertised total price must include all fees).
  * Unknown distance falls back to the flat fee.
  */
-export function deliveryFeeForDistance(distanceKm: number | null): number {
+export function deliveryFeeForDistance(distanceKm: number | null, cfg: DeliveryFeeConfig = env.deliveryFee): number {
   if (distanceKm === null || !Number.isFinite(distanceKm)) return env.deliveryFeeCents;
-  if (distanceKm <= 1.5) return 190;
-  return Math.min(690, 190 + Math.round((distanceKm - 1.5) * 50));
+  if (distanceKm <= cfg.baseKm) return cfg.baseCents;
+  const fee = cfg.baseCents + Math.round((distanceKm - cfg.baseKm) * cfg.perKmCents);
+  return cfg.maxCents > 0 ? Math.min(cfg.maxCents, fee) : fee;
 }
 
 /** Stripe will not charge less than 0,50 € in EUR, so a discount never takes the total below this. */
@@ -64,10 +65,12 @@ export function calcCheckoutPricing(input: {
   tipCents?: number;
   promo?: PromoTerms | null;
   config?: PricingConfig;
+  /** Courier pay for the job without the tip (utils/courierPay.ts). Default: the delivery fee × courierFeeShare. */
+  courierPayCents?: number;
   courierFeeShare?: number;
 }): CheckoutPricing {
   const cfg = input.config ?? env.pricing;
-  const share = input.courierFeeShare ?? env.courierFeeShare;
+  const share = input.courierFeeShare ?? env.courierPay.feeShare;
   const { subtotalCents, deliveryFeeCents } = input;
   const tipCents = input.tipCents ?? 0;
   const commissionCents = Math.round(subtotalCents * input.commissionRate);
@@ -88,7 +91,7 @@ export function calcCheckoutPricing(input: {
     discountCents,
     tipCents,
     totalCents: gross - discountCents,
-    courierFeeCents: Math.round(deliveryFeeCents * share) + tipCents,
+    courierFeeCents: (input.courierPayCents ?? Math.round(deliveryFeeCents * share)) + tipCents,
   };
 }
 

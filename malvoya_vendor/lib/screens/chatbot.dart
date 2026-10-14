@@ -8,7 +8,9 @@ import '../core/strings.dart';
 
 /// Help for sellers: straight answers, the seller terms, and a way to reach the Malvoya team.
 class ChatbotScreen extends StatefulWidget {
-  const ChatbotScreen({super.key});
+  /// The store's commission (fraction of the item price); null = default 10 %.
+  final num? commissionRate;
+  const ChatbotScreen({super.key, this.commissionRate});
 
   @override
   State<ChatbotScreen> createState() => _ChatbotScreenState();
@@ -49,13 +51,21 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final commission = commissionText(widget.commissionRate);
     final faq = [
       (tr(context, 'When does my store go live?', 'Milloin kauppani julkaistaan?'),
           tr(context, 'After our team has checked your details (Y-tunnus for businesses). You can add products and drops meanwhile.', 'Kun tiimimme on tarkistanut tietosi (yrityksiltä Y-tunnus). Voit lisätä tuotteita ja julkaisuja sillä välin.')),
       (tr(context, 'When am I paid?', 'Milloin saan rahat?'),
-          tr(context, '15 days after delivery, when the 14-day return window has passed, to your Stripe account (Store → Payouts). Malvoya keeps the commission agreed in the seller terms.', '15 päivää toimituksen jälkeen, kun 14 päivän palautusaika on päättynyt, Stripe-tilillesi (Kauppa → Tilitykset). Malvoya pidättää myyjän ehdoissa sovitun provision.')),
+          tr(context, '15 days after delivery, when the 14-day return window has passed, to your Stripe account (Store → Payouts). Stripe then pays it into your bank account.', '15 päivää toimituksen jälkeen, kun 14 päivän palautusaika on päättynyt, Stripe-tilillesi (Kauppa → Tilitykset). Stripe maksaa sen sitten pankkitilillesi.')),
+      (tr(context, 'What does Malvoya charge?', 'Mitä Malvoya veloittaa?'),
+          tr(context, 'A commission of $commission of the item price on each delivered sale; the delivery fee and tips are not part of it. There is no monthly fee. If an item is refunded before you are paid, your payout is reduced and the commission on it is not charged.',
+              'Provision, $commission tuotteiden hinnasta, jokaisesta toimitetusta myynnistä; toimitusmaksu ja tipit eivät kuulu siihen. Kuukausimaksua ei ole. Jos tuote hyvitetään ennen tilitystä, tilitys pienenee eikä siitä veloiteta provisiota.')),
+      (tr(context, 'How many shoppers does Malvoya have?', 'Kuinka paljon Malvoyalla on asiakkaita?'),
+          tr(context, 'Malvoya is just starting in Finland and has very few shoppers and couriers so far. We cannot promise a number of orders yet. We will tell you honestly how it grows.',
+              'Malvoya on vasta aloittamassa Suomessa, ja asiakkaita ja kuriireja on toistaiseksi hyvin vähän. Emme voi vielä luvata tiettyä määrää tilauksia. Kerromme rehellisesti, miten palvelu kasvaa.')),
       (tr(context, 'How do orders work?', 'Miten tilaukset toimivat?'),
-          tr(context, 'You only see paid orders. Accept or decline, pack it, tap "Packed". A courier picks it up. Declined orders are refunded automatically.', 'Näet vain maksetut tilaukset. Hyväksy tai hylkää, pakkaa ja paina "Pakattu". Kuriiri noutaa tilauksen. Hylätyt tilaukset hyvitetään automaattisesti.')),
+          tr(context, 'You only see paid orders. Accept or decline within 10 minutes, pack it, tap "Packed". Malvoya offers the delivery to nearby couriers; if no courier takes it within 45 minutes, the order is cancelled and refunded. Declined and unanswered orders are refunded automatically.',
+              'Näet vain maksetut tilaukset. Hyväksy tai hylkää 10 minuutin kuluessa, pakkaa ja paina "Pakattu". Malvoya tarjoaa toimitusta lähellä oleville kuriireille; jos kukaan ei ota sitä 45 minuutissa, tilaus perutaan ja hyvitetään. Hylätyt ja vastaamattomat tilaukset hyvitetään automaattisesti.')),
       (tr(context, 'How are drops shown?', 'Miten julkaisut näytetään?'),
           tr(context, 'In the Drops feed by how new they are, how people respond, how close your store is to the customer and your rating. Nobody can buy a better position.', 'Drops-syötteessä uutuuden, reaktioiden, etäisyyden ja arvosanasi perusteella. Parempaa sijoitusta ei voi ostaa.')),
       (tr(context, 'How do returns work?', 'Miten palautukset toimivat?'),

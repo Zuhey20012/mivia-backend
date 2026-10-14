@@ -5,6 +5,7 @@ import '../auth_service.dart';
 import '../config/theme.dart';
 import '../l10n.dart';
 import '../locale_provider.dart';
+import '../core/strings.dart';
 import 'register.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -38,7 +39,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _handleLogin() async {
     if (_emailCtrl.text.trim().isEmpty || _passCtrl.text.isEmpty) {
-      setState(() => _error = 'Please enter your email and password.');
+      setState(() => _error = tr(context, 'Please enter your email or phone number and your password.', 'Anna sähköpostiosoitteesi tai puhelinnumerosi ja salasanasi.'));
       return;
     }
     setState(() { _loading = true; _error = null; });
@@ -88,19 +89,19 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
               const SizedBox(height: 20),
-              const Text('Phone Sign-In / Kirjaudu puhelimella', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              Text(tr(context, 'Sign in with your phone', 'Kirjaudu puhelimella'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              const Text("Sign in directly using your mobile number", style: TextStyle(color: Colors.grey)),
+              Text(tr(context, 'We send a sign-in code to your mobile number by text message.', 'Lähetämme kirjautumiskoodin tekstiviestillä matkapuhelinnumeroosi.'), style: const TextStyle(color: Colors.grey)),
               const SizedBox(height: 20),
               if (!codeSent) ...[
                 TextField(
                   controller: phoneCtrl,
                   keyboardType: TextInputType.phone,
                   autofocus: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Phone Number',
+                  decoration: InputDecoration(
+                    labelText: tr(context, 'Phone number', 'Puhelinnumero'),
                     hintText: '+358 40 1234567',
-                    prefixIcon: Icon(Icons.phone_outlined),
+                    prefixIcon: const Icon(Icons.phone_outlined),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -110,7 +111,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     onPressed: _loading ? null : () async {
                       final phone = phoneCtrl.text.trim();
                       if (phone.isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter your phone number')));
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr(context, 'Please enter your phone number', 'Anna puhelinnumerosi'))));
                         return;
                       }
                       setModalState(() => _loading = true);
@@ -134,7 +135,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     },
                     child: _loading 
                         ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : const Text('Send Code'),
+                        : Text(tr(context, 'Send code', 'Lähetä koodi')),
                   ),
                 ),
               ] else ...[
@@ -142,10 +143,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   controller: codeCtrl,
                   keyboardType: TextInputType.number,
                   autofocus: true,
-                  decoration: const InputDecoration(
-                    labelText: '6-digit Code',
+                  decoration: InputDecoration(
+                    labelText: tr(context, '6-digit code', '6-numeroinen koodi'),
                     hintText: '123456',
-                    prefixIcon: Icon(Icons.password_outlined),
+                    prefixIcon: const Icon(Icons.password_outlined),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -167,7 +168,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     },
                     child: _loading 
                         ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : const Text('Verify & Sign In'),
+                        : Text(tr(context, 'Verify and sign in', 'Vahvista ja kirjaudu')),
                   ),
                 ),
               ],
@@ -205,8 +206,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 16),
                   const Text('Select Language / Valitse kieli', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 4),
-                  const Text('European Union & Universal Languages (25 languages)', style: TextStyle(fontSize: 13, color: Colors.grey)),
                   const SizedBox(height: 12),
                   const Divider(height: 1),
                   Expanded(
@@ -246,7 +245,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final currentLangKey = Provider.of<LocaleProvider>(context).locale.languageCode;
-    final currentLangLabel = AppLocalizations.languages[currentLangKey] ?? '🇬🇧 English';
+    final currentLangLabel = AppLocalizations.languages[currentLangKey] ?? 'English';
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -276,7 +275,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         const Icon(Icons.language_rounded, size: 16, color: AppTheme.primary),
                         const SizedBox(width: 6),
                         Text(
-                          currentLangLabel.split(' ').first,
+                          currentLangLabel,
                           style: const TextStyle(fontSize: 14),
                         ),
                         const SizedBox(width: 4),
@@ -317,7 +316,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 autocorrect: false,
                 enableSuggestions: false,
                 decoration: InputDecoration(
-                  labelText: '${l10n.translate('email')} / Phone',
+                  labelText: l10n.translate('email'),
                   prefixIcon: const Icon(Icons.mail_outline_rounded),
                 ),
               ),
@@ -367,7 +366,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: _loading
                     ? const Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5)))
                     : ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
                         onPressed: _handleLogin,
                         child: Text(l10n.translate('login')),
                       ),
@@ -381,7 +379,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   Expanded(child: Divider(color: Colors.grey.shade300)),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text('or', style: TextStyle(color: Colors.grey.shade500, fontSize: 13, fontWeight: FontWeight.w500)),
+                    child: Text(tr(context, 'or', 'tai'), style: TextStyle(color: Colors.grey.shade500, fontSize: 13, fontWeight: FontWeight.w500)),
                   ),
                   Expanded(child: Divider(color: Colors.grey.shade300)),
                 ],
@@ -398,12 +396,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   backgroundColor: Colors.white,
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.g_mobiledata_rounded, size: 24, color: Colors.black87),
-                    SizedBox(width: 8),
-                    Text('Continue with Google', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black87, fontSize: 15)),
+                    const Icon(Icons.g_mobiledata_rounded, size: 24, color: Colors.black87),
+                    const SizedBox(width: 8),
+                    Text(tr(context, 'Continue with Google', 'Jatka Googlella'), style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.black87, fontSize: 15)),
                   ],
                 ),
               ),
@@ -419,12 +417,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   backgroundColor: Colors.white,
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.phone_iphone_rounded, size: 20, color: Colors.black87),
-                    SizedBox(width: 8),
-                    Text('Continue with Phone Number', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black87, fontSize: 15)),
+                    const Icon(Icons.phone_iphone_rounded, size: 20, color: Colors.black87),
+                    const SizedBox(width: 8),
+                    Text(tr(context, 'Continue with phone number', 'Jatka puhelinnumerolla'), style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.black87, fontSize: 15)),
                   ],
                 ),
               ),
@@ -439,12 +437,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   },
                   child: Text.rich(
                     TextSpan(
-                      text: "New vendor? ",
+                      text: tr(context, 'New seller? ', 'Uusi myyjä? '),
                       style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
-                      children: const [
+                      children: [
                         TextSpan(
-                          text: 'Register here',
-                          style: TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.bold),
+                          text: tr(context, 'Create an account', 'Luo tili'),
+                          style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),

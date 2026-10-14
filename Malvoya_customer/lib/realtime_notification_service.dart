@@ -36,7 +36,7 @@ class RealtimeNotificationService {
     await _recordNotification(
       type: 'ORDER_PLACED',
       title: 'Tilaus #$orderId / Order #$orderId',
-      message: 'Payment of €${total.toStringAsFixed(2)} submitted. You will get a confirmation email once the payment is confirmed.',
+      message: 'Payment of €${total.toStringAsFixed(2)} submitted. The order is confirmed once the payment is confirmed; follow it in Orders.',
     );
   }
 

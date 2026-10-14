@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
+import '../core/legal_links.dart';
+import '../core/strings.dart';
 import '../l10n.dart';
 import '../locale_provider.dart';
 import '../realtime_notification_service.dart';
@@ -44,7 +46,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       setState(() => _error = l10n.translate('fillAllFields'));
       return;
     }
-    if (_passCtrl.text.length < 6) {
+    if (_passCtrl.text.length < 8) {
       setState(() => _error = l10n.translate('passTooShort'));
       return;
     }
@@ -154,7 +156,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final currentLangKey = Provider.of<LocaleProvider>(context).locale.languageCode;
-    final currentLangLabel = AppLocalizations.languages[currentLangKey] ?? '🇬🇧 English';
+    final currentLangLabel = AppLocalizations.languages[currentLangKey] ?? 'English';
     final textPrimary = AppTheme.primaryText(context);
     final textSecondary = AppTheme.secondaryText(context);
     final cardBg = AppTheme.cardBackground(context);
@@ -333,7 +335,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         onChanged: (v) {
                           setState(() {
                             _agreeToTerms = v ?? false;
-                            if (_agreeToTerms && _error != null && _error!.contains('Terms')) {
+                            if (_agreeToTerms && _error == AppLocalizations.of(context).translate('acceptTermsPrompt')) {
                               _error = null;
                             }
                           });
@@ -346,7 +348,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         onTap: () {
                           setState(() {
                             _agreeToTerms = !_agreeToTerms;
-                            if (_agreeToTerms && _error != null && _error!.contains('Terms')) {
+                            if (_agreeToTerms && _error == AppLocalizations.of(context).translate('acceptTermsPrompt')) {
                               _error = null;
                             }
                           });
@@ -366,7 +368,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
               ),
 
-              const SizedBox(height: 24),
+              // The documents being accepted, readable before accepting
+              Wrap(
+                spacing: 4,
+                children: [
+                  TextButton(onPressed: () => openLegal('terms'), child: Text(tr(context, 'Terms of Service', 'Käyttöehdot'))),
+                  TextButton(onPressed: () => openLegal('privacy'), child: Text(tr(context, 'Privacy Policy', 'Tietosuojaseloste'))),
+                ],
+              ),
+
+              const SizedBox(height: 16),
 
               // Sign Up Button
               SizedBox(

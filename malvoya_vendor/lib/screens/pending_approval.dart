@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
+import '../core/strings.dart';
 import 'vendor_dashboard.dart';
 
 /// Shown right after a vendor registers. Explains the review process; business and payout
@@ -12,17 +13,17 @@ class PendingApprovalScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final auth = Provider.of<AuthService>(context);
-    final name = auth.currentUser?.name ?? 'there';
+    final name = auth.currentUser?.name;
 
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Spacer(),
+              const SizedBox(height: 12),
               Container(
                 width: 88,
                 height: 88,
@@ -32,23 +33,32 @@ class PendingApprovalScreen extends StatelessWidget {
               ),
               const SizedBox(height: 28),
               Text(
-                'Welcome, $name',
+                name == null || name.isEmpty ? tr(context, 'Welcome', 'Tervetuloa') : tr(context, 'Welcome, $name', 'Tervetuloa, $name'),
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w700, letterSpacing: -0.5, color: AppTheme.textPrimary),
+                style: AppTheme.display(size: 28),
               ),
               const SizedBox(height: 10),
-              const Text(
-                'Set up your store now. It becomes visible to customers once our team has reviewed it.',
+              Text(
+                tr(context, 'Set up your store now. Shoppers can see it once our team has reviewed it.',
+                    'Perusta kauppasi nyt. Asiakkaat näkevät sen, kun tiimimme on tarkistanut sen.'),
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16, height: 1.4, color: AppTheme.textSecondary),
+                style: const TextStyle(fontSize: 16, height: 1.4, color: AppTheme.textSecondary),
               ),
               const SizedBox(height: 32),
-              _step(Icons.edit_note_rounded, 'Create your store', 'Name, category, address and your first products.'),
-              _step(Icons.verified_user_outlined, 'Review',
-                  'We check your business details (Y-tunnus or identity for private sellers) and contact you if we need anything.'),
-              _step(Icons.account_balance_outlined, 'Payouts',
-                  'Set up payouts in Store → Payouts. Stripe collects your bank and identity details on its own secure pages.'),
-              const Spacer(),
+              _step(Icons.edit_note_rounded, tr(context, 'Create your store', 'Perusta kauppasi'),
+                  tr(context, 'Name, category, address and your first products.', 'Nimi, kategoria, osoite ja ensimmäiset tuotteesi.')),
+              _step(Icons.verified_user_outlined, tr(context, 'Review', 'Tarkistus'),
+                  tr(context, 'We check your store details (the Y-tunnus for businesses) and contact you if we need anything.',
+                      'Tarkistamme kauppasi tiedot (yrityksiltä Y-tunnuksen) ja otamme yhteyttä, jos tarvitsemme jotain.')),
+              _step(Icons.account_balance_outlined, tr(context, 'Payouts and fees', 'Tilitykset ja maksut'),
+                  tr(context,
+                      'Set up payouts in Store → Payouts; Stripe checks your identity and bank details on its own pages. Malvoya keeps a commission on each sale (10 % unless agreed otherwise) and pays the rest 15 days after delivery.',
+                      'Ota tilitykset käyttöön kohdassa Kauppa → Tilitykset; Stripe tarkistaa henkilöllisyytesi ja pankkitietosi omilla sivuillaan. Malvoya pidättää jokaisesta myynnistä provision (10 %, ellei toisin sovita) ja tilittää loput 15 päivää toimituksen jälkeen.')),
+              _step(Icons.info_outline_rounded, tr(context, 'Good to know', 'Hyvä tietää'),
+                  tr(context,
+                      'Malvoya is just starting in Finland. There are very few shoppers and couriers so far, so orders may be rare at first. We will not promise sales we cannot guarantee.',
+                      'Malvoya on vasta aloittamassa Suomessa. Asiakkaita ja kuriireja on toistaiseksi hyvin vähän, joten tilauksia voi aluksi tulla harvoin. Emme lupaa myyntiä, jota emme voi taata.')),
+              const SizedBox(height: 24),
               SizedBox(
                 height: 52,
                 child: ElevatedButton(
@@ -56,13 +66,13 @@ class PendingApprovalScreen extends StatelessWidget {
                     context,
                     MaterialPageRoute(builder: (_) => const VendorDashboard()),
                   ),
-                  child: const Text('Set up my store'),
+                  child: Text(tr(context, 'Set up my store', 'Perusta kauppani')),
                 ),
               ),
               const SizedBox(height: 12),
               TextButton(
                 onPressed: () => auth.logout(),
-                child: const Text('Sign out', style: TextStyle(color: AppTheme.textSecondary)),
+                child: Text(tr(context, 'Sign out', 'Kirjaudu ulos'), style: const TextStyle(color: AppTheme.textSecondary)),
               ),
             ],
           ),

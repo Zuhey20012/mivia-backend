@@ -155,7 +155,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       const SizedBox(height: 8),
       PriceTag(pricing: p['pricing'] as Map<String, dynamic>?, size: 20, showReferenceLabel: true),
       const SizedBox(height: 4),
-      Text(tr(context, 'Price includes VAT', 'Hinta sisältää ALV:n'), style: TextStyle(fontSize: 12, color: muted)),
+      Text(tr(context, 'Price includes VAT where the seller is VAT-registered', 'Hinta sisältää ALV:n, jos myyjä on arvonlisäverovelvollinen'), style: TextStyle(fontSize: 12, color: muted)),
       if (chips.isNotEmpty) ...[
         const SizedBox(height: 14),
         Wrap(

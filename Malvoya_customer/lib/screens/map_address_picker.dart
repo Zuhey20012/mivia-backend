@@ -6,6 +6,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
 import '../config/theme.dart';
+import '../core/strings.dart';
 import '../local_notification_service.dart';
 
 
@@ -110,7 +111,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
         'https://nominatim.openstreetmap.org/reverse?format=json&lat=${point.latitude}&lon=${point.longitude}&zoom=18&addressdetails=1',
       );
       final res = await http.get(url, headers: {
-        'User-Agent': 'MalvoyaConsumerApp/1.0 (support@malvoya.com)',
+        'User-Agent': 'MalvoyaConsumerApp/1.0',
         'Accept': 'application/json',
       }).timeout(const Duration(seconds: 6));
 
@@ -165,7 +166,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
         'https://nominatim.openstreetmap.org/search?format=json&q=${Uri.encodeComponent(query)}&limit=1&addressdetails=1',
       );
       final res = await http.get(url, headers: {
-        'User-Agent': 'MalvoyaConsumerApp/1.0 (support@malvoya.com)',
+        'User-Agent': 'MalvoyaConsumerApp/1.0',
         'Accept': 'application/json',
       }).timeout(const Duration(seconds: 6));
 
@@ -400,7 +401,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Open in Native 3D Google Maps / Street View
+                // Open the spot in the phone's maps app
                 GestureDetector(
                   onTap: () {
                     HapticFeedback.lightImpact();
@@ -425,7 +426,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                       children: [
                         const Icon(Icons.travel_explore_rounded, color: AppTheme.primary, size: 16),
                         const SizedBox(width: 5),
-                        Text('3D View', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: textPrimary)),
+                        Text(tr(context, 'Open in Maps', 'Avaa kartat'), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: textPrimary)),
                       ],
                     ),
                   ),
@@ -556,16 +557,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                         ),
                       ),
                       if (_isGeocoding)
-                        const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                      else
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF248A52).withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Text('GOOGLE MAPS LIVE', style: TextStyle(color: Color(0xFF248A52), fontSize: 9, fontWeight: FontWeight.w900)),
-                        ),
+                        const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
                     ],
                   ),
                   const SizedBox(height: 12),

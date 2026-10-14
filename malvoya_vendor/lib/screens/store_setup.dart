@@ -230,7 +230,7 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                   if (_verified)
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
-                      child: Text(tr(context, 'To change this after approval, contact sellers@malvoya.com.', 'Muuttaaksesi tätä hyväksynnän jälkeen ota yhteyttä: sellers@malvoya.com.'),
+                      child: Text(tr(context, 'To change this after approval, write to the Malvoya team in Store → Help.', 'Muuttaaksesi tätä hyväksynnän jälkeen kirjoita Malvoyan tiimille kohdassa Kauppa → Apua.'),
                           style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
                     ),
                   if (_sellerType == 'BUSINESS')

@@ -17,7 +17,7 @@ async function present<T extends Parameters<typeof presentProduct>[0]>(products:
 }
 
 /** Photos must be uploads into this store's own folder (when uploads are switched on). */
-function assertOwnImages(images: string[] | undefined, storeId: number) {
+export function assertOwnImages(images: string[] | undefined, storeId: number) {
   if (!images?.length || !mediaConfigured()) return;
   const bad = images.find((url) => !isOwnImageUrl(url, `malvoya/products/s${storeId}/`));
   if (bad) throw new ApiError("Add photos with the app's photo picker", 400);
@@ -138,15 +138,27 @@ async function storeForOwner(ownerId: number) {
 export async function createProduct(ownerId: number, data: any) {
   const store = await storeForOwner(ownerId);
   assertOwnImages(data.images, store.id);
+  const created = await createProductRecord(store.id, data);
+  const [presented] = await present([created], { owner: true });
+  return presented;
+}
+
+/**
+ * The one way a product is created (the app and the catalogue import): options, stock = sum of option
+ * stock, and the first sale price recorded in PriceChange (Omnibus history). `data` is createProductSchema
+ * output; `extra` carries import bookkeeping (externalSource, externalId, gtin, importJobId).
+ * The caller checks the images first.
+ */
+export async function createProductRecord(storeId: number, data: any, extra: Partial<Prisma.ProductUncheckedCreateInput> = {}) {
   const { variants, ...productData } = data as { variants: VariantInput[] } & Record<string, any>;
-  const clean = variants.map(({ id, ...v }) => v);
+  const clean = (variants ?? []).map(({ id, ...v }) => v);
   // With options, the product's stock is the sum of its options' stock
   const stockQuantity = clean.length ? clean.reduce((s, v) => s + v.stock, 0) : productData.stockQuantity;
 
-  const created = await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     const product = await tx.product.create({
       data: {
-        ...productData, stockQuantity, storeId: store.id,
+        ...productData, ...extra, stockQuantity, storeId,
         tags: (productData.tags ?? []).map((t: string) => t.toLowerCase()),
         variants: clean.length ? { createMany: { data: clean } } : undefined,
       } as Prisma.ProductUncheckedCreateInput,
@@ -155,8 +167,6 @@ export async function createProduct(ownerId: number, data: any) {
     await recordPrice(tx, product.id, product.salePriceCents);
     return product;
   });
-  const [presented] = await present([created], { owner: true });
-  return presented;
 }
 
 export async function updateProduct(id: number, ownerId: number, data: any) {
@@ -164,11 +174,26 @@ export async function updateProduct(id: number, ownerId: number, data: any) {
   if (!product) throw new ApiError("Product not found", 404);
   if (product.store.ownerId !== ownerId) throw new ApiError("Forbidden", 403);
   assertOwnImages(data.images, product.storeId);
+  const updated = await applyProductUpdate(product, data);
+  const [presented] = await present([updated], { owner: true });
+  return presented;
+}
 
+/**
+ * The one way a product is changed (the app and re-imports): options are matched by id (unknown ids are
+ * refused), removed options are deleted, or kept with no stock when they were ordered, and a new sale
+ * price is recorded in PriceChange (Omnibus history). The caller checks ownership and images first.
+ */
+export async function applyProductUpdate(
+  product: { id: number; salePriceCents: number | null; variants: { id: number }[] },
+  data: any,
+  extra: Prisma.ProductUncheckedUpdateInput = {},
+) {
+  const id = product.id;
   const { variants, ...productData } = data as { variants?: VariantInput[] } & Record<string, any>;
   if (productData.tags) productData.tags = productData.tags.map((t: string) => t.toLowerCase());
 
-  const updated = await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     if (variants) {
       const keep = new Set<number>();
       for (const v of variants) {
@@ -193,14 +218,12 @@ export async function updateProduct(id: number, ownerId: number, data: any) {
       if (all.length) productData.stockQuantity = all.reduce((s, v) => s + v.stock, 0);
     }
 
-    const next = await tx.product.update({ where: { id }, data: productData, include: productInclude });
+    const next = await tx.product.update({ where: { id }, data: { ...productData, ...extra }, include: productInclude });
     if (productData.salePriceCents !== undefined && productData.salePriceCents !== product.salePriceCents) {
       await recordPrice(tx, id, productData.salePriceCents);
     }
     return next;
   });
-  const [presented] = await present([updated], { owner: true });
-  return presented;
 }
 
 export async function deleteProduct(id: number, ownerId: number) {

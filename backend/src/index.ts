@@ -31,6 +31,8 @@ import { integrationStatus } from "./modules/admin/system";
 import payoutsRoutes  from "./modules/payouts/payouts.routes";
 import legalRoutes    from "./modules/legal/legal.routes";
 import supportRoutes  from "./modules/support/support.routes";
+import importRoutes, { csvBodyParser } from "./modules/imports/imports.routes";
+import { failStaleImports } from "./modules/imports/imports.service";
 import { startScheduler, stopScheduler } from "./services/scheduler";
 
 const logger = pino({ level: env.logLevel });
@@ -71,11 +73,13 @@ app.use(compression());
 app.use("/api/v1", paymentsRoutes);
 app.use("/api/v1", mediaRoutes);
 
+// CSV catalogue import: up to 1 MB of CSV text, so this one route gets its own larger body limit
+app.use("/api/v1/products/import/csv", ...csvBodyParser);
 app.use(express.json({ limit: "100kb" }));
 app.use(globalLimiter);
 
 // Liveness: the process is up. Readiness: it can also reach the database.
-app.get("/health", (_req, res) => res.json({ ok: true, status: "healthy", version: "2.6.0" }));
+app.get("/health", (_req, res) => res.json({ ok: true, status: "healthy", version: "2.7.0" }));
 app.get("/health/ready", async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
@@ -88,6 +92,7 @@ app.get("/health/ready", async (_req, res) => {
 // API routes. Courier routes come before orders so /orders/available etc. are matched first.
 app.use("/api/v1/auth",   authRoutes);
 app.use("/api/v1/stores", storesRoutes);
+app.use("/api/v1",        importRoutes); // /products/import/* (before /products/:id routes)
 app.use("/api/v1",        productsRoutes);
 app.use("/api/v1",        courierRoutes);
 app.use("/api/v1",        ordersRoutes);
@@ -107,11 +112,13 @@ app.use(errorHandler);
 server.keepAliveTimeout = 65_000; // longer than typical load-balancer idle timeouts
 server.headersTimeout = 66_000;
 server.listen(env.port, () => {
-  logger.info(`Malvoya API v2.6 listening on port ${env.port} (${env.nodeEnv})`);
+  logger.info(`Malvoya API v2.7 listening on port ${env.port} (${env.nodeEnv})`);
   // Yes/no per integration (never secrets), so the deploy log shows at a glance what is switched on
   const on = integrationStatus();
   logger.info({ integrations: Object.fromEntries(Object.entries(on).map(([k, v]) => [k, "mode" in v ? v.mode : v.configured ? "on" : "off"])) }, "Integrations");
   if (process.env.DISABLE_SCHEDULER !== "true") startScheduler();
+  // Imports interrupted by a restart: marked FAILED once they have made no progress for 15 minutes
+  failStaleImports().catch(() => {});
 });
 
 // Zero-downtime deploys: stop taking new work, let in-flight requests finish, then exit.

@@ -17,6 +17,7 @@ import { Actor, getCourierForUser, getOrderRelation } from "./access";
 import { storeAvailability } from "../../utils/openingHours";
 import { ApiError } from "../../lib/errors";
 import { checkPromo } from "../promos/promos.service";
+import { calcCourierPay, courierPayOf, presentCourierPay, withApproach, withWaiting } from "../../utils/courierPay";
 
 const logger = pino({ name: "orders" });
 
@@ -120,14 +121,19 @@ function priceCheckout(
   promo: PromoCode | null,
 ) {
   const distanceKm = deliveryDistanceKm(store, input.deliveryLat, input.deliveryLng);
+  const deliveryFeeCents = deliveryFeeForDistance(distanceKm);
+  const tipCents = input.tipCents ?? 0;
+  // Courier pay is computed on its own (per-job formula), not from what the customer pays for delivery
+  const courierPay = calcCourierPay({ straightKm: distanceKm, deliveryFeeCents, tipCents });
   const pricing = calcCheckoutPricing({
     subtotalCents,
     commissionRate: store.commissionRate,
-    deliveryFeeCents: deliveryFeeForDistance(distanceKm),
-    tipCents: input.tipCents ?? 0,
+    deliveryFeeCents,
+    tipCents,
     promo,
+    courierPayCents: courierPay.totalCents - tipCents,
   });
-  return { pricing, distanceKm };
+  return { pricing, distanceKm, courierPay };
 }
 
 /** Checks a promo code for this checkout; turns "cannot be used" into an OrderError with the user-readable reason. */
@@ -187,7 +193,7 @@ export async function createOrder(userId: number, input: CheckoutInput & { deliv
     const { subtotalCents, lines } = await priceItems(tx, store.id, input.items, true);
     // A code that cannot be used is refused (409), so the customer never pays a different price than quoted.
     const promo = await promoForCheckout(tx, input.promoCode, userId, subtotalCents);
-    const { pricing, distanceKm } = priceCheckout(store, input, subtotalCents, promo);
+    const { pricing, distanceKm, courierPay } = priceCheckout(store, input, subtotalCents, promo);
     const etaMinutes = distanceKm === null ? null : estimateDelivery(distanceKm, store.prepMinutes).etaMinutes;
 
     return tx.order.create({
@@ -199,6 +205,7 @@ export async function createOrder(userId: number, input: CheckoutInput & { deliv
         deliveryLng: input.deliveryLng,
         notes: input.notes,
         ...pricing, // includes tipCents and courierFeeCents (the tip goes to the courier in full, no commission)
+        courierPay: courierPay as unknown as Prisma.InputJsonValue, // the breakdown behind courierFeeCents
         promoCodeId: promo?.id ?? null,
         etaMinutes,
         items: { createMany: { data: lines } },
@@ -434,6 +441,7 @@ export async function updateOrderStatus(orderId: number, actor: Actor, next: Ord
       },
     });
     if (res.count === 0) throw new OrderError("The order changed in the meantime, please refresh", 409);
+    if (next === "SHIPPED") await addWaitingPay(tx, orderId);
     if (next === "DELIVERED" && order.courierId) {
       await tx.courier.updateMany({ where: { id: order.courierId, currentOrderId: orderId }, data: { currentOrderId: null } });
     }
@@ -442,6 +450,79 @@ export async function updateOrderStatus(orderId: number, actor: Actor, next: Ord
 
   afterStatusChange(updated, order.user.email, next);
   return updated;
+}
+
+/** Straight-line km from a courier's last known position to the order's shop, or null when either is unknown. */
+function approachStraightKm(
+  courier: { latitude: number | null; longitude: number | null },
+  store: { latitude: number | null; longitude: number | null },
+) {
+  if (courier.latitude === null || courier.longitude === null || store.latitude === null || store.longitude === null) return null;
+  return haversineKm(courier.latitude, courier.longitude, store.latitude, store.longitude);
+}
+
+/**
+ * On acceptance: the ride to the shop (courier's last known position → shop, × road factor) beyond the
+ * free km is added to the courier's pay (formula mode).
+ */
+async function addApproachPay(tx: Prisma.TransactionClient, orderId: number, courier: { latitude: number | null; longitude: number | null }) {
+  const o = await tx.order.findUniqueOrThrow({
+    where: { id: orderId },
+    select: {
+      courierPay: true, courierFeeCents: true, tipCents: true, deliveryFeeCents: true,
+      store: { select: { latitude: true, longitude: true } },
+    },
+  });
+  if (o.courierPay === null) return;
+  const pay = courierPayOf(o);
+  if (pay.mode !== "formula") return;
+  const next = withApproach(pay, approachStraightKm(courier, o.store));
+  await tx.order.update({
+    where: { id: orderId },
+    data: { courierPay: next as unknown as Prisma.InputJsonValue, courierFeeCents: next.totalCents },
+  });
+}
+
+/**
+ * At pickup: waiting at the shop = pickedUpAt − courierArrivedAt (set by POST /orders/:id/arrived-at-store).
+ * Whole minutes beyond the free ones are added to the courier's pay (formula mode, capped).
+ */
+async function addWaitingPay(tx: Prisma.TransactionClient, orderId: number) {
+  const o = await tx.order.findUniqueOrThrow({
+    where: { id: orderId },
+    select: { courierArrivedAt: true, pickedUpAt: true, courierPay: true, courierFeeCents: true, tipCents: true, deliveryFeeCents: true },
+  });
+  if (!o.courierArrivedAt || !o.pickedUpAt || o.courierPay === null) return;
+  const pay = courierPayOf(o);
+  if (pay.mode !== "formula") return;
+  const waitMinutes = Math.floor(Math.max(0, o.pickedUpAt.getTime() - o.courierArrivedAt.getTime()) / 60_000);
+  const next = withWaiting(pay, waitMinutes);
+  await tx.order.update({
+    where: { id: orderId },
+    data: { courierPay: next as unknown as Prisma.InputJsonValue, courierFeeCents: next.totalCents },
+  });
+}
+
+/**
+ * The assigned courier says they are at the shop: starts the waiting clock. Set once; repeating it
+ * changes nothing. Only before pickup (CONFIRMED or PROCESSING).
+ */
+export async function markArrivedAtStore(orderId: number, userId: number) {
+  const courier = await requireApprovedCourier(userId);
+  const order = await prisma.order.findUnique({ where: { id: orderId } });
+  if (!order || order.courierId !== courier.id) throw new OrderError("Order not found", 404);
+  if (order.status !== "CONFIRMED" && order.status !== "PROCESSING") {
+    throw new OrderError("You can only check in at the shop before pickup", 409);
+  }
+  const res = await prisma.order.updateMany({
+    where: { id: orderId, courierId: courier.id, courierArrivedAt: null, status: { in: ["CONFIRMED", "PROCESSING"] } },
+    data: { courierArrivedAt: new Date() },
+  });
+  const updated = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+  if (res.count > 0) {
+    emitToStore(updated.storeId, "order:status", { orderId, status: updated.status, courierArrivedAt: updated.courierArrivedAt });
+  }
+  return { ...updated, courierPay: presentCourierPay(updated) };
 }
 
 const STATUS_PUSH: Partial<Record<OrderStatus, (o: { id: number; etaMinutes: number | null }) => { title: string; body: string }>> = {
@@ -586,7 +667,7 @@ export async function requireApprovedCourier(userId: number) {
 
 /** Paid, store-accepted, unassigned orders. Customer address is withheld until the courier accepts. */
 export async function listAvailableOrders(userId: number) {
-  await requireApprovedCourier(userId);
+  const courier = await requireApprovedCourier(userId);
   const orders = await prisma.order.findMany({
     where: { courierId: null, paymentStatus: "SUCCEEDED", status: { in: ["CONFIRMED", "PROCESSING"] } },
     include: {
@@ -596,24 +677,30 @@ export async function listAvailableOrders(userId: number) {
     orderBy: { createdAt: "asc" },
     take: 30,
   });
-  return orders.map((o) => ({
-    id: o.id,
-    status: o.status,
-    store: o.store,
-    itemCount: o.items.reduce((sum, i) => sum + i.quantity, 0),
-    deliveryFeeCents: o.deliveryFeeCents,
-    courierFeeCents: o.courierFeeCents, // tip included
-    tipCents: o.tipCents,
-    deliveryAreaLat: o.deliveryLat === null ? null : Math.round(o.deliveryLat * 100) / 100,
-    deliveryAreaLng: o.deliveryLng === null ? null : Math.round(o.deliveryLng * 100) / 100,
-    createdAt: o.createdAt,
-  }));
+  return orders.map((o) => {
+    // Expected pay for this courier before any waiting, explained in fi/en; the ride to the shop is
+    // estimated from the courier's last known position and fixed when they accept.
+    const courierPay = presentCourierPay(o, { approachStraightKm: approachStraightKm(courier, o.store) });
+    return {
+      id: o.id,
+      status: o.status,
+      store: o.store,
+      itemCount: o.items.reduce((sum, i) => sum + i.quantity, 0),
+      deliveryFeeCents: o.deliveryFeeCents,
+      courierFeeCents: courierPay.totalCents, // tip included; = courierPay.totalCents
+      tipCents: o.tipCents,
+      courierPay,
+      deliveryAreaLat: o.deliveryLat === null ? null : Math.round(o.deliveryLat * 100) / 100,
+      deliveryAreaLng: o.deliveryLng === null ? null : Math.round(o.deliveryLng * 100) / 100,
+      createdAt: o.createdAt,
+    };
+  });
 }
 
 export async function listCourierOrders(userId: number) {
   const courier = await getCourierForUser(userId);
   if (!courier) return [];
-  return prisma.order.findMany({
+  const orders = await prisma.order.findMany({
     where: { courierId: courier.id },
     include: {
       store: { select: { id: true, name: true, address: true, latitude: true, longitude: true, phone: true } },
@@ -623,6 +710,8 @@ export async function listCourierOrders(userId: number) {
     orderBy: { updatedAt: "desc" },
     take: 100,
   });
+  // courierArrivedAt is a plain column; courierPay is the final breakdown (waiting is added at pickup)
+  return orders.map((o) => ({ ...o, courierPay: presentCourierPay(o) }));
 }
 
 /** First courier to accept wins; the conditional update makes double assignment impossible. */
@@ -638,6 +727,7 @@ export async function acceptOrder(orderId: number, userId: number) {
     });
     if (res.count === 0) throw new OrderError("This delivery is no longer available", 409);
     await tx.courier.update({ where: { id: courier.id }, data: { currentOrderId: orderId } });
+    await addApproachPay(tx, orderId, courier);
     return tx.order.findUniqueOrThrow({ where: { id: orderId } });
   });
 

@@ -166,19 +166,8 @@ class CourierWelcomeScreen extends StatelessWidget {
                       width: double.infinity,
                       padding: const EdgeInsets.all(22),
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFFC2412D), Color(0xFFFF8E53), Color(0xFF9E3222)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
+                        color: AppTheme.primary,
                         borderRadius: BorderRadius.circular(24),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFFC2412D).withValues(alpha: 0.35),
-                            blurRadius: 20,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -192,8 +181,6 @@ class CourierWelcomeScreen extends StatelessWidget {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Text('⚡️', style: TextStyle(fontSize: 12)),
-                                const SizedBox(width: 4),
                                 Text(
                                   l10n.translate('courierBadge'),
                                   style: const TextStyle(
@@ -237,7 +224,7 @@ class CourierWelcomeScreen extends StatelessWidget {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.payments_rounded, color: Colors.amberAccent, size: 18),
+                                const Icon(Icons.payments_rounded, color: AppTheme.sunshine, size: 18),
                                 const SizedBox(width: 8),
                                 Text(
                                   l10n.translate('courierRate'),
@@ -254,9 +241,29 @@ class CourierWelcomeScreen extends StatelessWidget {
                       ),
                     ),
 
+                    const SizedBox(height: 16),
+
+                    // Honest note: there are few stores and customers yet
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(16)),
+                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        const Icon(Icons.info_outline_rounded, color: Color(0xFF6A4500), size: 22),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text(l10n.translate('earlyTitle'), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF6A4500))),
+                            const SizedBox(height: 3),
+                            Text(l10n.translate('earlyDesc'), style: const TextStyle(fontSize: 12.5, color: Color(0xFF6A4500), height: 1.35)),
+                          ]),
+                        ),
+                      ]),
+                    ),
+
                     const SizedBox(height: 24),
 
-                    // Malvoya Value Pillars
+                    // How delivering with Malvoya works
                     Text(
                       l10n.translate('whyDeliver'),
                       style: const TextStyle(
@@ -282,7 +289,7 @@ class CourierWelcomeScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 10),
                     _buildPillarCard(
-                      icon: Icons.bolt_rounded,
+                      icon: Icons.storefront_rounded,
                       iconColor: const Color(0xFFFF9F1C),
                       title: l10n.translate('perkRetail'),
                       description: l10n.translate('perkRetailDesc'),
@@ -293,6 +300,13 @@ class CourierWelcomeScreen extends StatelessWidget {
                       iconColor: const Color(0xFF0077B6),
                       title: l10n.translate('perkVehicle'),
                       description: l10n.translate('perkVehicleDesc'),
+                    ),
+                    const SizedBox(height: 10),
+                    _buildPillarCard(
+                      icon: Icons.badge_outlined,
+                      iconColor: AppTheme.primary,
+                      title: l10n.translate('perkEntrepreneur'),
+                      description: l10n.translate('perkEntrepreneurDesc'),
                     ),
 
                     const SizedBox(height: 20),

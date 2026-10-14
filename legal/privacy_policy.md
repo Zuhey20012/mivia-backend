@@ -19,7 +19,7 @@ Malvoya is a marketplace. Stores that sell through Malvoya are independent selle
 | Delivery address, delivery location and order notes | Deliver your order | Contract (6(1)(b)) |
 | Orders, prices, refunds and returns | Sale, returns and bookkeeping | Contract; legal obligation under the Accounting Act (6(1)(c)) |
 | Payment status and Stripe payment reference | Confirm payment and issue refunds. **We never receive or store card or bank account numbers**; Stripe processes them. | Contract; legal obligation |
-| Courier location, only while the courier is online | Show the courier's position to the customer and store of an active order; offer jobs to nearby couriers | Contract with the courier (6(1)(b)) |
+| Courier location, only while the courier is online | Show the courier's position to the customer and store of an active order; offer jobs to nearby couriers; calculate pay for the ride to the store when a job is accepted (only the distance is stored) | Contract with the courier (6(1)(b)) |
 | Store business details (for sellers) | Verify sellers; tax reporting on marketplace sellers (DAC7) | Contract; legal obligation |
 | Drops you like, views of drops (counted once per day; for signed-out viewers we keep only a one-way scrambled form of the IP address, which changes every day — nothing is stored on your phone for this), favourites and reviews | Show likes and favourites, rank the Drops feed, show verified reviews | Contract (6(1)(b)); legitimate interest (6(1)(f)) |
 | Delivery photo and the courier's position at handover, when the order is left at the door | Proof of delivery | Contract; legitimate interest |

@@ -12,14 +12,12 @@ import '../l10n.dart';
 import '../locale_provider.dart';
 import '../auth_service.dart';
 import '../local_notification_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'address_management_screen.dart';
+import 'support_hub_screen.dart';
 
-/**
- * Malvoya GDPR & Data Protection Sovereignty Hub
- * Full European statutory compliance (Regulation EU 2016/679)
- * Supports dynamic 25-language translation, self-service Article 15 JSON archives,
- * and Article 17 irreversible erasure.
- */
+/// Privacy: download your data (GDPR art. 15), correct it, ask about it, and delete the account
+/// (art. 17; the server anonymises the user and keeps order records for the Accounting Act).
 
 class PrivacyGdprScreen extends StatefulWidget {
   const PrivacyGdprScreen({super.key});
@@ -68,7 +66,7 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
     // Show on-device notification
     await LocalNotificationService.showNotification(
       id: 301,
-      title: '📁 ${l10n.translate('gdprArchiveReady')}',
+      title: l10n.translate('gdprArchiveReady'),
       body: l10n.translate('gdprArchiveSub'),
     );
 
@@ -161,8 +159,8 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                         final email = auth.currentUser?.email ?? '';
                         LocalNotificationService.openEmailApp(
                           email: email,
-                          subject: 'Malvoya GDPR Personal Data Export Archive',
-                          body: 'Attached is your official GDPR Article 15 personal data record:\n\n$prettyJson',
+                          subject: tr(context, 'My Malvoya data', 'Malvoya-tietoni'),
+                          body: prettyJson,
                         );
                         Navigator.pop(ctx);
                       },
@@ -423,30 +421,24 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                       children: [
                         ListTile(
                           leading: const Icon(Icons.contact_mail_outlined, color: Color(0xFF3B82F6)),
-                          title: Text(l10n.translate('contactDpo'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
-                          subtitle: Text('dpo@malvoya.com • Helsinki, Finland', style: TextStyle(fontSize: 12, color: textSecondary)),
+                          title: Text(tr(context, 'Ask Malvoya about your data', 'Kysy Malvoyalta tiedoistasi'),
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
+                          subtitle: Text(tr(context, 'Send a message under "Account and privacy". We reply by email.',
+                                  'Lähetä viesti aiheella "Tili ja tietosuoja". Vastaamme sähköpostitse.'),
+                              style: TextStyle(fontSize: 12, color: textSecondary)),
                           trailing: const Icon(Icons.arrow_forward_rounded, color: Colors.grey, size: 18),
-                          onTap: () {
-                            LocalNotificationService.openEmailApp(
-                              email: 'dpo@malvoya.com',
-                              subject: 'GDPR Data Subject Request - Malvoya Customer Account',
-                              body: 'Hello DPO,\n\nI am contacting you regarding my rights under the GDPR for my account (${auth.currentUser?.email}).',
-                            );
-                          },
+                          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SupportHubScreen())),
                         ),
                         Divider(height: 1, indent: 56, color: dividerColor),
                         ListTile(
                           leading: const Icon(Icons.shield_outlined, color: Color(0xFF248A52)),
-                          title: Text(l10n.translate('privacyDeskInquiries'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
-                          subtitle: Text('privacy@malvoya.com • ${l10n.translate("promptGdprResponse")}', style: TextStyle(fontSize: 12, color: textSecondary)),
-                          trailing: const Icon(Icons.arrow_forward_rounded, color: Colors.grey, size: 18),
-                          onTap: () {
-                            LocalNotificationService.openEmailApp(
-                              email: 'privacy@malvoya.com',
-                              subject: 'GDPR Privacy Inquiry - Malvoya Customer Account',
-                              body: 'Hello Malvoya Privacy Team,\n\nI am contacting you regarding data privacy for my account (${auth.currentUser?.email}).',
-                            );
-                          },
+                          title: Text(tr(context, 'Data Protection Ombudsman', 'Tietosuojavaltuutettu'),
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
+                          subtitle: Text(tr(context, 'You can also complain to the Finnish supervisory authority (tietosuoja.fi).',
+                                  'Voit myös tehdä valituksen valvovalle viranomaiselle (tietosuoja.fi).'),
+                              style: TextStyle(fontSize: 12, color: textSecondary)),
+                          trailing: const Icon(Icons.open_in_new_rounded, color: Colors.grey, size: 18),
+                          onTap: () => launchUrl(Uri.parse('https://tietosuoja.fi'), mode: LaunchMode.externalApplication),
                         ),
                       ],
                     ),

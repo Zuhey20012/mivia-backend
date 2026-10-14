@@ -53,6 +53,14 @@ router.patch("/orders/:id(\\d+)/assign-courier", ...courierOnly, async (req: Aut
   } catch (e) { sendOrderError(res, e); }
 });
 
+// The assigned courier is at the shop: starts the waiting clock (waiting pay is added at pickup). Idempotent.
+router.post("/orders/:id(\\d+)/arrived-at-store", ...courierOnly, async (req: AuthRequest, res: Response) => {
+  try {
+    const order = await ordersService.markArrivedAtStore(Number(req.params.id), req.user!.id);
+    res.json({ ok: true, order });
+  } catch (e) { sendOrderError(res, e); }
+});
+
 // ─── Online / offline + location ────────────────────────────────────────────
 // The app sends null coordinates when GPS is not available yet
 const statusSchema = z.object({

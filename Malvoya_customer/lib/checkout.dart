@@ -497,7 +497,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
         _summaryRow(tr(context, 'Courier tip', 'Tippi kuriirille'), money('tipCents')),
       ],
       const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Divider()),
-      _summaryRow(tr(context, 'Total (VAT incl.)', 'Yhteensä (sis. ALV)'), money('totalCents'), bold: true),
+      _summaryRow(tr(context, 'Total', 'Yhteensä'), money('totalCents'), bold: true),
       const SizedBox(height: 6),
       Text(
         _legacy
@@ -634,8 +634,8 @@ class _CheckoutPageState extends State<CheckoutPage> {
               const SizedBox(width: 5),
               Flexible(
                 child: Text(
-                  tr(context, 'Card, Google Pay or bank in Stripe’s secure payment sheet. Malvoya never sees your card.',
-                      'Kortti, Google Pay tai pankki Stripen suojatussa maksuikkunassa. Malvoya ei näe korttiasi.'),
+                  tr(context, 'You pay in Stripe’s secure payment sheet. Malvoya never sees your card details.',
+                      'Maksat Stripen suojatussa maksuikkunassa. Malvoya ei näe korttitietojasi.'),
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 11.5, color: AppTheme.secondaryText(context)),
                 ),

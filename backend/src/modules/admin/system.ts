@@ -5,10 +5,41 @@ import { mediaConfigured } from "../../lib/cloudinary";
 import { pushConfigured } from "../../lib/push";
 import { sendError } from "../../lib/errors";
 import { storeAvailability } from "../../utils/openingHours";
-import { MIN_CHARGE_CENTS } from "../../utils/pricing";
+import { MIN_CHARGE_CENTS, deliveryFeeForDistance } from "../../utils/pricing";
+import { approachPayFor, calcCourierPay, payRuleSummary, routeKm, waitPayFor } from "../../utils/courierPay";
 import { appConfigSummary } from "../appConfig/appConfig.routes";
 
 const startedAt = new Date();
+
+/**
+ * Courier pay settings and what Malvoya keeps on example jobs (customer delivery fee − courier pay, tips
+ * excluded). Courier pay is set separately from the customer price, so the margin can be negative.
+ * Examples are straight-line shop → customer distances, with no ride-to-shop pay, waiting or tip.
+ */
+export function courierPaySummary() {
+  const cfg = env.courierPay;
+  const examples = [1, 3, 6].map((straightKm) => {
+    const customerFeeCents = deliveryFeeForDistance(straightKm);
+    const pay = calcCourierPay({ straightKm, deliveryFeeCents: customerFeeCents });
+    return {
+      straightKm,
+      routeKm: pay.distanceKm,
+      customerFeeCents,
+      courierPayCents: pay.totalCents,
+      marginCents: customerFeeCents - pay.totalCents,
+      explanation: pay.explanation,
+    };
+  });
+  const formula = cfg.mode === "formula";
+  return {
+    ...cfg,
+    summary: payRuleSummary(cfg),
+    // Extra pay on top of the examples
+    waitExample: { minutes: 10, cents: formula ? waitPayFor(10, cfg) : 0 },
+    approachExample: { straightKm: 4, routeKm: routeKm(4, cfg), cents: formula ? approachPayFor(routeKm(4, cfg), cfg) : 0 },
+    examples,
+  };
+}
 
 /** What is switched on. Only yes/no and test/live — never a key or a secret. */
 export function integrationStatus() {
@@ -77,7 +108,7 @@ export async function getSystemStatus(_req: Request, res: Response) {
 
     res.json({
       ok: true,
-      version: "2.6.0",
+      version: "2.7.0",
       region: "frankfurt",
       startedAt,
       readyForOrders: blockers.length === 0,
@@ -94,8 +125,12 @@ export async function getSystemStatus(_req: Request, res: Response) {
       // Fee levers (0 = off). Changed with env vars on Render; promo codes live under /admin/promo-codes.
       pricing: {
         ...env.pricing,
-        courierFeeShare: env.courierFeeShare,
+        courierFeeShare: env.courierPay.feeShare, // used only when courierPay.mode = "fee_share"
         minChargeCents: MIN_CHARGE_CENTS,
+        // Courier pay per job (COURIER_PAY_* env vars) and the delivery margin on example jobs
+        courierPay: courierPaySummary(),
+        // Customer delivery fee by distance (DELIVERY_FEE_* env vars); flat fee when the distance is unknown
+        deliveryFee: { ...env.deliveryFee, unknownDistanceCents: env.deliveryFeeCents },
       },
       apps: appConfigSummary(),
       backgroundJobs: jobs.map((j) => ({ name: j.name, lastRunAt: j.lastRunAt })),

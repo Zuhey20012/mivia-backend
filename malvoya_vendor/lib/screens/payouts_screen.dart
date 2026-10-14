@@ -9,7 +9,9 @@ import '../core/strings.dart';
 /// Payouts through Stripe. Stripe collects identity and bank details on its own pages, so
 /// none of it passes through this app.
 class PayoutsScreen extends StatefulWidget {
-  const PayoutsScreen({super.key});
+  /// The store's commission (fraction of the item price) from /stores/my; null = default 10 %.
+  final num? commissionRate;
+  const PayoutsScreen({super.key, this.commissionRate});
 
   @override
   State<PayoutsScreen> createState() => _PayoutsScreenState();
@@ -108,8 +110,8 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
                         const SizedBox(height: 8),
                         Text(
                           tr(context,
-                              'Stripe pays sales into your bank account. Sales are paid 15 days after delivery, when the 14-day return window has passed. Stripe checks your identity (EU anti-money-laundering rules).',
-                              'Stripe maksaa myynnit pankkitilillesi. Myynnit tilitetään 15 päivää toimituksen jälkeen, kun 14 päivän palautusaika on päättynyt. Stripe tarkistaa henkilöllisyytesi (EU:n rahanpesulainsäädäntö).'),
+                              'Malvoya sends each sale to your Stripe account 15 days after delivery, when the 14-day return window has passed, and Stripe pays it into your bank account. Malvoya keeps a commission of ${commissionText(widget.commissionRate)} of the item price (not of the delivery fee); refunds are deducted. Stripe checks your identity (EU anti-money-laundering rules).',
+                              'Malvoya siirtää jokaisen myynnin Stripe-tilillesi 15 päivää toimituksen jälkeen, kun 14 päivän palautusaika on päättynyt, ja Stripe maksaa sen pankkitilillesi. Malvoya pidättää provisiona ${commissionText(widget.commissionRate)} tuotteiden hinnasta (ei toimitusmaksusta); hyvitykset vähennetään. Stripe tarkistaa henkilöllisyytesi (EU:n rahanpesulainsäädäntö).'),
                           style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4),
                         ),
                         if (!enabled && (asInt(_status?['requirementsDue']) ?? 0) > 0)
@@ -134,7 +136,7 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
                   if (_summary != null) ...[
                     const SizedBox(height: 16),
                     Row(children: [
-                      _stat(tr(context, 'Paid out', 'Maksettu'), _summary!['paidCents']),
+                      _stat(tr(context, 'Sent to Stripe', 'Siirretty Stripeen'), _summary!['paidCents']),
                       const SizedBox(width: 10),
                       _stat(tr(context, 'Coming', 'Tulossa'), (asInt(_summary!['scheduledCents']) ?? 0) + (asInt(_summary!['waitingForAccountCents']) ?? 0)),
                     ]),
@@ -161,11 +163,11 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
   Widget _row(Map<String, dynamic> p) {
     final release = DateTime.tryParse('${p['releaseAt']}')?.toLocal();
     final label = switch (p['status']) {
-      'PAID' => tr(context, 'Paid', 'Maksettu'),
+      'PAID' => tr(context, 'Sent to your Stripe account', 'Siirretty Stripe-tilillesi'),
       'SCHEDULED' => release != null ? tr(context, 'Pays on ${release.day}.${release.month}.', 'Maksetaan ${release.day}.${release.month}.') : tr(context, 'Scheduled', 'Ajastettu'),
       'WAITING_FOR_ACCOUNT' => tr(context, 'Waiting for payout setup', 'Odottaa tilitysten käyttöönottoa'),
       'CANCELLED' => tr(context, 'Cancelled (refunded)', 'Peruttu (hyvitetty)'),
-      _ => tr(context, 'Failed — we will retry', 'Epäonnistui — yritämme uudelleen'),
+      _ => tr(context, 'Failed — the Malvoya team will look into it', 'Epäonnistui — Malvoyan tiimi selvittää asian'),
     };
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 4),

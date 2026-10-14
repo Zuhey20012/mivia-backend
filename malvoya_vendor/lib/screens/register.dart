@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
+import '../core/strings.dart';
 import 'pending_approval.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -29,7 +30,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   Future<void> _handleRegister() async {
     if (_nameCtrl.text.trim().isEmpty || _emailCtrl.text.trim().isEmpty || _passCtrl.text.isEmpty) {
-      setState(() => _error = 'Please fill out all fields.');
+      setState(() => _error = tr(context, 'Please fill in all fields.', 'Täytä kaikki kentät.'));
       return;
     }
     setState(() { _loading = true; _error = null; });
@@ -69,18 +70,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: 20),
-              const Text('Become a Vendor', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: AppTheme.textPrimary, letterSpacing: -0.5)),
+              Text(tr(context, 'Sell on Malvoya', 'Myy Malvoyassa'), style: AppTheme.display(size: 28)),
               const SizedBox(height: 6),
-              const Text('Join Malvoya and start selling your products locally.', style: TextStyle(fontSize: 15, color: AppTheme.textSecondary, height: 1.5)),
+              Text(
+                tr(context,
+                    'Create an account, then set up your store. Our team reviews every store before shoppers can see it. Malvoya is just starting in Finland, so we cannot promise a number of shoppers or orders yet.',
+                    'Luo tili ja perusta sitten kauppasi. Tiimimme tarkistaa jokaisen kaupan ennen kuin asiakkaat näkevät sen. Malvoya on vasta aloittamassa Suomessa, joten emme voi vielä luvata tiettyä määrää asiakkaita tai tilauksia.'),
+                style: const TextStyle(fontSize: 15, color: AppTheme.textSecondary, height: 1.5),
+              ),
               const SizedBox(height: 36),
 
               TextField(
                 controller: _nameCtrl,
                 textCapitalization: TextCapitalization.words,
                 textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
-                  labelText: 'Full name',
-                  prefixIcon: Icon(Icons.person_outline_rounded),
+                decoration: InputDecoration(
+                  labelText: tr(context, 'Full name', 'Koko nimi'),
+                  prefixIcon: const Icon(Icons.person_outline_rounded),
                 ),
               ),
               const SizedBox(height: 14),
@@ -89,9 +95,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 controller: _emailCtrl,
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
-                  labelText: 'Email address',
-                  prefixIcon: Icon(Icons.mail_outline_rounded),
+                decoration: InputDecoration(
+                  labelText: tr(context, 'Email address', 'Sähköpostiosoite'),
+                  prefixIcon: const Icon(Icons.mail_outline_rounded),
                 ),
               ),
               const SizedBox(height: 14),
@@ -102,7 +108,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 textInputAction: TextInputAction.done,
                 onSubmitted: (_) => _handleRegister(),
                 decoration: InputDecoration(
-                  labelText: 'Password',
+                  labelText: tr(context, 'Password', 'Salasana'),
                   prefixIcon: const Icon(Icons.lock_outline_rounded),
                   suffixIcon: IconButton(
                     icon: Icon(_obscurePass ? Icons.visibility_off_outlined : Icons.visibility_outlined),
@@ -136,7 +142,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ? const Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5)))
                     : ElevatedButton(
                         onPressed: _handleRegister,
-                        child: const Text('Apply Now'),
+                        child: Text(tr(context, 'Create account', 'Luo tili')),
                       ),
               ),
               const SizedBox(height: 24),

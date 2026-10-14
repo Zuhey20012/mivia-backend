@@ -108,8 +108,8 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
                         const SizedBox(height: 8),
                         Text(
                           tr(context,
-                              'Stripe pays your delivery earnings into your bank account right after each delivery. Stripe checks your identity (EU anti-money-laundering rules). You handle your own taxes as a light entrepreneur or through your company.',
-                              'Stripe maksaa toimituspalkkiot pankkitilillesi heti jokaisen toimituksen jälkeen. Stripe tarkistaa henkilöllisyytesi (EU:n rahanpesulainsäädäntö). Hoidat verosi itse kevytyrittäjänä tai yrityksesi kautta.'),
+                              'The pay for each delivery is sent to your Stripe account right after the handover, and Stripe moves it to your bank on your payout schedule. Stripe checks your identity and bank account on its own pages (EU anti-money-laundering rules). As an independent entrepreneur you handle your own taxes and insurance, through your Y-tunnus or a light-entrepreneur service.',
+                              'Jokaisen toimituksen palkkio lähetetään Stripe-tilillesi heti luovutuksen jälkeen, ja Stripe siirtää sen pankkitilillesi maksuaikataulusi mukaan. Stripe tarkistaa henkilöllisyytesi ja pankkitilisi omilla sivuillaan (EU:n rahanpesulainsäädäntö). Itsenäisenä yrittäjänä hoidat itse verosi ja vakuutuksesi Y-tunnuksella tai laskutuspalvelun kautta.'),
                           style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4),
                         ),
                         if (!enabled && (asInt(_status?['requirementsDue']) ?? 0) > 0)

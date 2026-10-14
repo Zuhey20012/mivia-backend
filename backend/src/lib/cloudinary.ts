@@ -159,3 +159,28 @@ export async function destroyResource(publicId: string, resourceType: ResourceTy
     signal: AbortSignal.timeout(10_000),
   });
 }
+
+/**
+ * Server-side upload of a remote image into our own account (catalogue import): Cloudinary fetches the
+ * URL itself, so our server never downloads it. Signed with the secret; `overwrite=false` makes a repeated
+ * import of the same photo return the existing upload instead of a copy.
+ */
+export async function uploadRemoteImage(remoteUrl: string, publicId: string): Promise<{ publicId: string; version: number }> {
+  const params: Record<string, string | number> = {
+    public_id: publicId,
+    timestamp: Math.floor(Date.now() / 1000),
+    overwrite: "false",
+    allowed_formats: "jpg,jpeg,png,webp,gif,avif",
+  };
+  const body = new URLSearchParams({
+    ...Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])),
+    file: remoteUrl,
+    api_key: apiKey,
+    signature: signParams(params),
+  });
+  const res = await fetch(`${API_BASE}/v1_1/${cloudName}/image/upload`, { method: "POST", body, signal: AbortSignal.timeout(30_000) });
+  const json = (await res.json().catch(() => ({}))) as { public_id?: string; version?: number; error?: { message?: string } };
+  if (!res.ok || !json.public_id) throw new Error(json.error?.message || `upload failed (${res.status})`);
+  if (json.public_id !== publicId) throw new Error("upload stored under an unexpected name");
+  return { publicId: json.public_id, version: Number(json.version) || 0 };
+}

@@ -17,6 +17,24 @@ type Status = {
   timers: Record<string, number>;
   apps?: Record<string, { minBuild: number; maintenance: { active: boolean; message: string | null } }>;
   backgroundJobs: { name: string; lastRunAt: string | null }[];
+  pricing?: Pricing;
+};
+type PayExample = {
+  straightKm: number; routeKm: number | null; customerFeeCents: number; courierPayCents: number; marginCents: number;
+  explanation: { en: string; fi: string };
+};
+type Pricing = {
+  serviceFeePercent: number; serviceFeeMinCents: number; serviceFeeMaxCents: number;
+  smallOrderThresholdCents: number; smallOrderFeeCents: number; minChargeCents: number;
+  deliveryFee?: { baseCents: number; baseKm: number; perKmCents: number; maxCents: number; unknownDistanceCents: number };
+  courierPay?: {
+    mode: "formula" | "fee_share"; baseCents: number; perKmCents: number; minCents: number; roadFactor: number;
+    approachFreeKm: number; approachPerKmCents: number; waitFreeMinutes: number; waitPerMinCents: number; waitMaxCents: number;
+    feeShare: number; summary: { en: string; fi: string };
+    waitExample: { minutes: number; cents: number };
+    approachExample: { straightKm: number; routeKm: number | null; cents: number };
+    examples: PayExample[];
+  };
 };
 type Demand = { totalWaiting: number; demand: { latitude: number; longitude: number; waiting: number; areas: string[] }[] };
 
@@ -43,6 +61,8 @@ const TIMERS: Record<string, string> = {
   courierDelayNotice: 'Customer is told about a courier delay after',
   courierSearch: 'Order without a courier is refunded after',
 };
+
+const euro = (cents: number) => `${(cents / 100).toFixed(2).replace(".", ",")} €`;
 
 function ago(iso: string | null) {
   if (!iso) return 'never';
@@ -169,6 +189,10 @@ export default function System() {
             </div>
           </div>
 
+          {status.pricing?.courierPay && (
+            <CourierPayCard pricing={status.pricing} />
+          )}
+
           <div className="apple-card">
             <p className="font-semibold mb-1">Where customers are waiting</p>
             <p className="text-gray-400 text-xs mb-3">People who tapped "Notify me" because no store delivers to them yet. Recruit stores and couriers here first.</p>
@@ -186,5 +210,75 @@ export default function System() {
         </div>
       )}
     </Layout>
+  );
+}
+
+/** Courier pay settings and the delivery margin (customer delivery fee − courier pay, tips excluded) on example jobs. */
+function CourierPayCard({ pricing }: { pricing: Pricing }) {
+  const pay = pricing.courierPay!;
+  const fee = pricing.deliveryFee;
+  const rows: [string, string][] = pay.mode === "formula"
+    ? [
+        ["Base per delivery (pickup + drop-off)", euro(pay.baseCents)],
+        ["Per km, shop → customer", `${euro(pay.perKmCents)} × straight line × ${pay.roadFactor}`],
+        ["Minimum (base + distance)", euro(pay.minCents)],
+        ["Ride to the shop", `${euro(pay.approachPerKmCents)}/km beyond ${pay.approachFreeKm} km`],
+        ["Waiting at the shop", `${euro(pay.waitPerMinCents)}/min after ${pay.waitFreeMinutes} min, max ${euro(pay.waitMaxCents)}`],
+        ["Tips", "100 % to the courier"],
+      ]
+    : [["Share of the customer delivery fee", `${Math.round(pay.feeShare * 100)} %`], ["Tips", "100 % to the courier"]];
+  return (
+    <div className="apple-card">
+      <p className="font-semibold mb-1">Delivery fees and courier pay</p>
+      <p className="text-gray-400 text-xs mb-3">
+        Courier pay is set separately from what the customer pays (COURIER_PAY_* and DELIVERY_FEE_* on Render).
+        Couriers see this rule and the breakdown of every job before they accept.
+      </p>
+      <p className="text-sm mb-1">{pay.summary.en}</p>
+      <p className="text-sm text-gray-500 mb-4">{pay.summary.fi}</p>
+      <div className="grid md:grid-cols-2 gap-6">
+        <div className="space-y-2">
+          <p className="text-xs uppercase tracking-wide text-gray-400">Courier pay ({pay.mode === "formula" ? "formula" : "share of the fee"})</p>
+          {rows.map(([k, v]) => (
+            <div key={k} className="flex items-center justify-between text-sm gap-4"><span>{k}</span><span className="font-semibold text-right">{v}</span></div>
+          ))}
+        </div>
+        {fee && (
+          <div className="space-y-2">
+            <p className="text-xs uppercase tracking-wide text-gray-400">Customer delivery fee</p>
+            <div className="flex items-center justify-between text-sm"><span>First {fee.baseKm} km</span><span className="font-semibold">{euro(fee.baseCents)}</span></div>
+            <div className="flex items-center justify-between text-sm"><span>Each further km</span><span className="font-semibold">{euro(fee.perKmCents)}</span></div>
+            <div className="flex items-center justify-between text-sm"><span>Maximum</span><span className="font-semibold">{fee.maxCents > 0 ? euro(fee.maxCents) : "no cap"}</span></div>
+            <div className="flex items-center justify-between text-sm"><span>Address without coordinates</span><span className="font-semibold">{euro(fee.unknownDistanceCents)}</span></div>
+          </div>
+        )}
+      </div>
+      <div className="mt-5 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-gray-400 text-xs uppercase tracking-wide">
+              <th className="py-2 pr-4 font-medium">Example job</th>
+              <th className="py-2 pr-4 font-medium text-right">Customer pays</th>
+              <th className="py-2 pr-4 font-medium text-right">Courier gets</th>
+              <th className="py-2 font-medium text-right">Malvoya keeps</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pay.examples.map((e) => (
+              <tr key={e.straightKm} className="border-t border-gray-100" title={e.explanation.en}>
+                <td className="py-2 pr-4">{e.straightKm} km straight line{e.routeKm !== null ? ` (${e.routeKm} km route)` : ""}</td>
+                <td className="py-2 pr-4 text-right">{euro(e.customerFeeCents)}</td>
+                <td className="py-2 pr-4 text-right">{euro(e.courierPayCents)}</td>
+                <td className={`py-2 text-right font-semibold ${e.marginCents < 0 ? "text-red-600" : "text-green-600"}`}>{euro(e.marginCents)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="text-gray-400 text-xs mt-2">
+          Without tips, waiting or ride-to-shop pay. A courier kept {pay.waitExample.minutes} min at the shop gets {euro(pay.waitExample.cents)} more;
+          a ride of {pay.approachExample.routeKm ?? "?"} km to the shop adds {euro(pay.approachExample.cents)}. A negative margin means Malvoya pays the difference.
+        </p>
+      </div>
+    </div>
   );
 }

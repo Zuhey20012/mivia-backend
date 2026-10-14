@@ -113,11 +113,13 @@ export function presentProduct<T extends ProductWithVariants>(product: T, info: 
     ...(opts.owner ? { stock: v.stock, sku: v.sku ?? null, priceAdjustCents: v.priceAdjustCents } : {}),
   }));
   const inStock = product.isAvailable && (variants.length ? variants.some((v) => v.inStock) : product.stockQuantity > 0);
-  const { stockQuantity, videos: videoRows, ...rest } = product;
+  // Import bookkeeping is only for the store itself
+  const { stockQuantity, videos: videoRows, importJobId, externalSource, externalId, ...rest } =
+    product as T & { importJobId?: number | null; externalSource?: string | null; externalId?: string | null };
   const videos = (videoRows ?? []).filter((v) => opts.owner || v.status === "READY").map((v) => presentVideo(v, opts));
   return {
     ...rest,
-    ...(opts.owner ? { stockQuantity } : {}),
+    ...(opts.owner ? { stockQuantity, importJobId, externalSource, externalId } : {}),
     variants,
     videos,
     inStock,

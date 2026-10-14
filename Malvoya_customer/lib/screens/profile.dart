@@ -19,12 +19,7 @@ import '../config/theme.dart';
 import '../theme_provider.dart';
 import 'notification_center_drawer.dart';
 
-/**
- * Malvoya Luxury Profile & Operational Account Hub
- * Features dynamic 25-language localization, authentic provider-based verification badge,
- * Try-at-Home concierge fitting, dedicated Google Pay 1-Tap toggle switch,
- * and GDPR Article 17 self-service.
- */
+/// Profile: orders, favourites, addresses, language, appearance, privacy and help.
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -208,56 +203,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  void _confirmDeleteAccount(BuildContext context, AuthService auth) {
-    HapticFeedback.heavyImpact();
-    final l10n = AppLocalizations.of(context);
-    final cardBg = AppTheme.cardBackground(context);
-    final textPrimary = AppTheme.primaryText(context);
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: cardBg,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: Row(
-          children: [
-            const Icon(Icons.delete_outline_rounded, color: Color(0xFFD93025), size: 24),
-            const SizedBox(width: 8),
-            Text(l10n.translate('confirmDelete'), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: textPrimary)),
-          ],
-        ),
-        content: Text(
-          l10n.translate('deleteAccountSimpleMsg'),
-          style: const TextStyle(fontSize: 14, height: 1.4),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(l10n.translate('cancel')),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFD93025),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            onPressed: () async {
-              Navigator.pop(ctx);
-              await auth.logout();
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(l10n.translate('deleteAccountSimpleMsg')),
-                    backgroundColor: const Color(0xFF55226E),
-                  ),
-                );
-              }
-            },
-            child: Text(l10n.translate('confirmDelete'), style: const TextStyle(fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
+  /// Account deletion happens on the Privacy screen, which really deletes the account on the
+  /// server (signing out alone must never look like a deletion).
+  void _openAccountDeletion(BuildContext context) {
+    HapticFeedback.mediumImpact();
+    _nav(context, const PrivacyGdprScreen());
   }
 
   void _confirmLogout(BuildContext context, AuthService auth) {
@@ -446,19 +396,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final textSecondary = AppTheme.secondaryText(context);
         final dividerColor = AppTheme.subtleDivider(context);
 
-        final userName = auth.currentUser?.name ?? 'Valued Customer';
-        final userEmail = auth.currentUser?.email ?? '';
+        final userName = auth.currentUser?.name ?? (auth.isAuthenticated ? '' : tr(context, 'Guest', 'Vieras'));
+        final rawEmail = auth.currentUser?.email ?? '';
+        // Phone-only accounts carry a placeholder email that is never shown
+        final userEmail = rawEmail.endsWith('@phone.malvoya.app') ? '' : rawEmail;
         final userInitial = userName.isNotEmpty ? userName[0].toUpperCase() : 'M';
-        final currentLangName = AppLocalizations.languages[localeProvider.locale.languageCode] ?? '🇬🇧 English';
-
-        // Authentic registration verification badge (NO GOLD VIP)
-        final isGoogle = userEmail.contains('@gmail.com');
-        final isPhone = userEmail.contains('@phone.malvoya') || RegExp(r'^[+0-9]').hasMatch(userEmail);
-        final String verificationBadgeText = isGoogle
-            ? l10n.translate('googleVerified')
-            : isPhone
-                ? l10n.translate('phoneVerified')
-                : l10n.translate('verifiedMember');
+        final currentLangName = AppLocalizations.languages[localeProvider.locale.languageCode] ?? 'English';
 
         return Scaffold(
           backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -487,61 +430,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 color: cardBg,
                 child: Row(
                   children: [
-                    Stack(
-                      alignment: Alignment.bottomRight,
-                      children: [
-                        CircleAvatar(
-                          radius: 32,
-                          backgroundColor: AppTheme.primary,
-                          child: Text(
-                            userInitial,
-                            style: const TextStyle(fontSize: 26, color: Colors.white, fontWeight: FontWeight.w900),
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.all(3),
-                          decoration: const BoxDecoration(color: Color(0xFF248A52), shape: BoxShape.circle),
-                          child: const Icon(Icons.check, color: Colors.white, size: 12),
-                        ),
-                      ],
+                    CircleAvatar(
+                      radius: 32,
+                      backgroundColor: AppTheme.primary,
+                      child: Text(
+                        userInitial,
+                        style: const TextStyle(fontSize: 26, color: Colors.white, fontWeight: FontWeight.w900),
+                      ),
                     ),
                     const SizedBox(width: 14),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  userName,
-                                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: textPrimary),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              // Authentic Verification Badge (Replaced Gold VIP)
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF248A52).withValues(alpha: 0.14),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: const Color(0xFF248A52).withValues(alpha: 0.4), width: 0.8),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.verified_rounded, color: Color(0xFF248A52), size: 12),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      verificationBadgeText,
-                                      style: const TextStyle(color: Color(0xFF248A52), fontSize: 10, fontWeight: FontWeight.w800),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
+                          Text(
+                            userName,
+                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: textPrimary),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                           const SizedBox(height: 3),
                           Text(
@@ -603,8 +509,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       context: context,
                       icon: Icons.language_rounded,
                       iconColor: const Color(0xFF55226E),
-                      title: currentLangName.split(' ').first,
-                      subtitle: currentLangName.replaceFirst(currentLangName.split(' ').first, '').trim(),
+                      title: l10n.translate('language'),
+                      subtitle: currentLangName,
                       onTap: () => _showLanguageBottomSheet(context),
                     ),
                   ],
@@ -745,7 +651,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         l10n.translate('deleteAccountGdpr'),
                         style: const TextStyle(color: Color(0xFFB3261E), fontSize: 12, fontWeight: FontWeight.w800),
                       ),
-                      onPressed: () => _confirmDeleteAccount(context, auth),
+                      onPressed: () => _openAccountDeletion(context),
                     ),
                   ],
                 ),

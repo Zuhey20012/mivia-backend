@@ -7,6 +7,7 @@ import { checkProcessingDrops } from "../modules/drops/drops.service";
 import { checkProcessingProductVideos } from "../modules/products/productVideos";
 import { purgeOldDeliveryProofs } from "../modules/orders/orders.service";
 import { runOrderWatchdog } from "./orderWatchdog";
+import { failStaleImports } from "../modules/imports/imports.service";
 
 const logger = pino({ name: "scheduler" });
 
@@ -18,6 +19,7 @@ const jobs: Job[] = [
   { name: "drop-processing", everyMs: 2 * 60_000, enabled: mediaConfigured, run: checkProcessingDrops },
   { name: "product-video-processing", everyMs: 2 * 60_000, enabled: mediaConfigured, run: checkProcessingProductVideos },
   { name: "delivery-proof-purge", everyMs: 6 * 60 * 60_000, enabled: mediaConfigured, run: purgeOldDeliveryProofs },
+  { name: "import-watchdog", everyMs: 5 * 60_000, enabled: () => true, run: failStaleImports },
   {
     name: "expired-sign-in-codes", everyMs: 60 * 60_000, enabled: () => true,
     run: () => prisma.otpCode.deleteMany({ where: { expiresAt: { lt: new Date() } } }),

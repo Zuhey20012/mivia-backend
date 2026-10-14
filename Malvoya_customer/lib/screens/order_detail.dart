@@ -177,8 +177,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
     }
     if (status == 'SHIPPED' && _courier != null && home != null) {
       final meters = const Distance().as(LengthUnit.Meter, _courier!, home);
-      final minutes = (meters / 250).ceil() + 2; // cycling ~15 km/h plus handover
-      return tr(context, 'Arriving in about $minutes min', 'Perillä noin $minutes min kuluttua');
+      // The courier's live distance (straight line), not a promised arrival time
+      final km = (meters / 1000).toStringAsFixed(1);
+      return tr(context, 'Your courier is $km km away', 'Kuriiri on ${km.replaceAll('.', ',')} km:n päässä');
     }
     final eta = asInt(o['etaMinutes']);
     final paid = _time('paidAt') ?? _time('createdAt');
@@ -675,7 +676,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
             -(asInt(o['discountCents']) ?? 0),
           ),
         if ((asInt(o['tipCents']) ?? 0) > 0) line(tr(context, 'Courier tip', 'Tippi kuriirille'), o['tipCents']),
-        line(tr(context, 'Total (VAT incl.)', 'Yhteensä (sis. ALV)'), o['totalCents'], bold: true),
+        line(tr(context, 'Total', 'Yhteensä'), o['totalCents'], bold: true),
         if ((asInt(o['refundedCents']) ?? 0) > 0) line(tr(context, 'Refunded', 'Hyvitetty'), o['refundedCents']),
       ],
     ));

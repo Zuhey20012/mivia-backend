@@ -36,6 +36,11 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
   Map<String, dynamic>? _earnings;
   final List<Map<String, dynamic>> _chat = [];
   bool _loading = true;
+  // Pay breakdowns that came with live offers, by order id (used if the job list has none yet)
+  final Map<int, Map<String, dynamic>> _offerPay = {};
+  // Which pay breakdowns are open ("job-12", "active-12")
+  final Set<String> _openPay = {};
+  bool _arriving = false;
 
   AuthService get _auth => Provider.of<AuthService>(context, listen: false);
   ApiClient get _api => ApiClient(_auth);
@@ -50,7 +55,9 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
   void initState() {
     super.initState();
     final socket = CourierSocketService();
-    socket.onDispatchOffer = (_) {
+    socket.onDispatchOffer = (offer) {
+      final id = asInt(offer['orderId'] ?? offer['id']);
+      if (id != null && offer['courierPay'] is Map) _offerPay[id] = Map<String, dynamic>.from(offer['courierPay']);
       HapticFeedback.heavyImpact();
       _loadJobs();
     };
@@ -183,6 +190,133 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     if (!mounted) return;
     if (!res.ok) _snack(res.error!);
     _loadMine();
+  }
+
+  /// Records that the courier is at the shop, so waiting beyond the free minutes is paid at pickup.
+  Future<void> _arrivedAtStore(Map<String, dynamic> o) async {
+    HapticFeedback.mediumImpact();
+    setState(() => _arriving = true);
+    final res = await _api.post('/orders/${o['id']}/arrived-at-store');
+    if (!mounted) return;
+    setState(() => _arriving = false);
+    if (!res.ok) return _snack(res.error!);
+    await _loadMine();
+  }
+
+  // ── Courier pay ─────────────────────────────────────────────────────────
+  // The server sends `courierPay` with each job and delivery. Older servers only send
+  // courierFeeCents (tip included), so everything below falls back to that.
+
+  Map<String, dynamic>? _payOf(Map o) {
+    final p = o['courierPay'];
+    if (p is Map) return Map<String, dynamic>.from(p);
+    final id = asInt(o['id']);
+    return id == null ? null : _offerPay[id];
+  }
+
+  int? _payTotal(Map o) => asInt(_payOf(o)?['totalCents']) ?? asInt(o['courierFeeCents']);
+
+  String _payText(Map o) {
+    final t = _payTotal(o);
+    return t == null ? '–' : euro(context, t);
+  }
+
+  /// The server's one-line explanation of how the pay is worked out, in the app language.
+  String? _payExplanation(Map<String, dynamic>? pay) {
+    final e = pay?['explanation'];
+    String? text;
+    if (e is Map) {
+      text = '${(isFinnish(context) ? e['fi'] : e['en']) ?? e['en'] ?? e['fi'] ?? ''}';
+    } else if (e is String) {
+      text = e;
+    }
+    text = text?.trim();
+    return (text == null || text.isEmpty) ? null : text;
+  }
+
+  /// Free waiting minutes at the shop, if the server states them.
+  int? _freeWaitMinutes(Map<String, dynamic>? pay) {
+    final direct = asInt(pay?['freeWaitMinutes']);
+    if (direct != null) return direct;
+    final e = pay?['explanation'];
+    final en = e is Map ? '${e['en'] ?? ''}' : '${e ?? ''}';
+    final m = RegExp(r'(\d+)\s*(?:free\s+)?min', caseSensitive: false).firstMatch(en);
+    return m == null ? null : int.tryParse(m.group(1)!);
+  }
+
+  String _km(num km) {
+    final s = km.toStringAsFixed(1);
+    return isFinnish(context) ? s.replaceAll('.', ',') : s;
+  }
+
+  /// Line-by-line pay: base, distance, waiting, tip and total, then the explanation.
+  Widget _payBreakdown(Map o, Map<String, dynamic> pay, {required bool showWaiting}) {
+    final base = asInt(pay['baseCents']) ?? 0;
+    final km = pay['distanceKm'] is num ? pay['distanceKm'] as num : num.tryParse('${pay['distanceKm'] ?? ''}');
+    final dist = asInt(pay['distanceCents']) ?? 0;
+    final wait = asInt(pay['waitCents']) ?? 0;
+    final tip = asInt(pay['tipCents']) ?? asInt(o['tipCents']) ?? 0;
+    final total = asInt(pay['totalCents']) ?? asInt(o['courierFeeCents']) ?? 0;
+    final other = total - base - dist - wait - tip;
+
+    String distLabel = tr(context, 'Distance', 'Matka');
+    if (km != null && km > 0) {
+      final rate = (dist / km).round();
+      final exactRate = rate > 0 && (rate * km).round() == dist;
+      distLabel = exactRate
+          ? '$distLabel ${_km(km)} km × ${euro(context, rate)}/km'
+          : '$distLabel ${_km(km)} km';
+    }
+
+    Widget line(String label, int cents, {bool bold = false}) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 3),
+          child: Row(children: [
+            Expanded(child: Text(label, style: TextStyle(fontSize: 13.5, fontWeight: bold ? FontWeight.w800 : FontWeight.w500, color: bold ? AppTheme.textPrimary : AppTheme.textSecondary))),
+            Text(euro(context, cents), style: TextStyle(fontSize: 13.5, fontWeight: bold ? FontWeight.w800 : FontWeight.w600)),
+          ]),
+        );
+    final explanation = _payExplanation(pay);
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+      decoration: BoxDecoration(color: AppTheme.sand, borderRadius: BorderRadius.circular(14)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        line(tr(context, 'Base (pickup + drop-off)', 'Perusmaksu (nouto + luovutus)'), base),
+        if (dist != 0 || (km != null && km > 0)) line(distLabel, dist),
+        if (showWaiting && wait > 0) line(tr(context, 'Waiting at the shop', 'Odotus kaupassa'), wait),
+        if (tip > 0) line(tr(context, 'Tip (all of it is yours)', 'Tippi (koko summa sinulle)'), tip),
+        if (other != 0) line(tr(context, 'Other adjustment', 'Muu tasaus'), other),
+        const Divider(height: 14),
+        line(tr(context, 'Total', 'Yhteensä'), total, bold: true),
+        if (explanation != null) ...[
+          const SizedBox(height: 6),
+          Text(explanation, style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary, height: 1.4)),
+        ],
+      ]),
+    );
+  }
+
+  /// A "How is this calculated?" toggle with the breakdown underneath. Nothing if the server sent no breakdown.
+  Widget _payToggle(String key, Map o, {required bool showWaiting}) {
+    final pay = _payOf(o);
+    if (pay == null) return const SizedBox.shrink();
+    final open = _openPay.contains(key);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => setState(() => open ? _openPay.remove(key) : _openPay.add(key)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text(open ? tr(context, 'Hide pay breakdown', 'Piilota palkkion erittely') : tr(context, 'How is this pay calculated?', 'Miten palkkio lasketaan?'),
+                style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w700, fontSize: 13.5)),
+            Icon(open ? Icons.expand_less_rounded : Icons.expand_more_rounded, size: 20, color: AppTheme.primary),
+          ]),
+        ),
+      ),
+      if (open) _payBreakdown(o, pay, showWaiting: showWaiting),
+    ]);
   }
 
   Future<Position?> _here() async {
@@ -321,15 +455,16 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
   void _howJobsWork() {
     showModalBottomSheet(
       context: context,
-      builder: (_) => Padding(
+      isScrollControlled: true,
+      builder: (_) => SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(tr(context, 'How jobs are offered', 'Miten keikat tarjotaan'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
           const SizedBox(height: 12),
           Text(
             tr(context,
-                'When a store accepts an order, it is offered to online couriers within 7.5 km of the store, nearest first. If nobody is that close, every online courier sees it. You choose which jobs to take — declining or ignoring a job never affects you. The pay shown is what you earn for the job. No automated system rates or deactivates you; account decisions are made by a person and explained to you.',
-                'Kun kauppa hyväksyy tilauksen, se tarjotaan linjoilla oleville kuriireille 7,5 km:n säteellä kaupasta, lähin ensin. Jos kukaan ei ole niin lähellä, kaikki linjoilla olevat näkevät sen. Valitset itse keikkasi — kieltäytyminen tai ohittaminen ei vaikuta sinuun. Näytetty palkkio on se, mitä ansaitset. Mikään automaatti ei arvioi tai sulje tiliäsi; päätökset tekee ihminen ja perustelee ne sinulle.'),
+                'When a store accepts an order, it is offered to online couriers within 7.5 km of the store, nearest first. If nobody is that close, every online courier sees it. Distance to the store is the only factor: ratings, acceptance rates and declines are not used. You choose which jobs to take — declining or ignoring a job never affects you.\n\nEach offer shows your pay before you accept, with a breakdown. If you wait at the shop beyond the free minutes, waiting pay is added when you pick up. Tips go to you in full.\n\nMalvoya is just starting, so there may be few jobs or none at first. No number of jobs or level of earnings is promised. You deliver as an independent entrepreneur and may also work for other platforms.\n\nNo automated system rates or deactivates you; account decisions are made by a person and explained to you.',
+                'Kun kauppa hyväksyy tilauksen, se tarjotaan linjoilla oleville läheteille 7,5 km:n säteellä kaupasta, lähin ensin. Jos kukaan ei ole niin lähellä, kaikki linjoilla olevat näkevät sen. Ainoa peruste on etäisyys kauppaan: arvioita, hyväksymisprosenttia tai hylkäyksiä ei käytetä. Valitset itse keikkasi — kieltäytyminen tai ohittaminen ei vaikuta sinuun.\n\nJokainen tarjous näyttää palkkiosi erittelyineen ennen kuin hyväksyt. Jos odotat kaupassa ilmaisten minuuttien jälkeen, odotuksesta maksetaan noudon yhteydessä. Tipit saat kokonaan.\n\nMalvoya on vasta aloittamassa, joten keikkoja voi aluksi olla vähän tai ei lainkaan. Keikkojen määrää tai ansioita ei luvata. Toimitat itsenäisenä yrittäjänä ja voit tehdä keikkoja myös muille alustoille.\n\nMikään automaatti ei arvioi tai sulje tiliäsi; päätökset tekee ihminen ja perustelee ne sinulle.'),
             style: const TextStyle(height: 1.45, color: AppTheme.textSecondary),
           ),
           const SizedBox(height: 12),
@@ -432,7 +567,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     return RefreshIndicator(
       onRefresh: _loadJobs,
       child: _jobs.isEmpty
-          ? ListView(children: [_empty(Icons.hourglass_empty_rounded, tr(context, 'No jobs right now. You get a notification when one comes in.', 'Ei keikkoja juuri nyt. Saat ilmoituksen, kun uusi tulee.'))])
+          ? ListView(children: [_empty(Icons.hourglass_empty_rounded, tr(context, 'No jobs right now. Malvoya is just starting, so jobs may be rare at first. While you are online, you get a notification when one comes in.', 'Ei keikkoja juuri nyt. Malvoya on vasta aloittamassa, joten keikkoja voi aluksi olla harvoin. Kun olet linjoilla, saat ilmoituksen uudesta keikasta.'))])
           : ListView(
               padding: const EdgeInsets.all(16),
               children: _jobs.map((j) {
@@ -451,13 +586,13 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
                   decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(AppTheme.radiusLg), border: Border.all(color: AppTheme.divider)),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Row(children: [
-                      Text(euro(context, j['courierFeeCents'] ?? j['deliveryFeeCents']), style: AppTheme.display(size: 32)),
-                      if ((asInt(j['tipCents']) ?? 0) > 0)
+                      Text(_payText(j), style: AppTheme.display(size: 32)),
+                      if ((asInt(_payOf(j)?['tipCents']) ?? asInt(j['tipCents']) ?? 0) > 0)
                         Container(
                           margin: const EdgeInsets.only(left: 8),
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                           decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(12)),
-                          child: Text('${tr(context, 'incl. tip', 'sis. tipin')} ${euro(context, j['tipCents'])}',
+                          child: Text('${tr(context, 'incl. tip', 'sis. tipin')} ${euro(context, asInt(_payOf(j)?['tipCents']) ?? asInt(j['tipCents']))}',
                               style: const TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w800, fontSize: 12.5)),
                         ),
                       const Spacer(),
@@ -468,7 +603,9 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
                             style: const TextStyle(color: Color(0xFF8A5A00), fontWeight: FontWeight.w800, fontSize: 12.5)),
                       ),
                     ]),
-                    const SizedBox(height: 12),
+                    Text(tr(context, 'Your pay for this job', 'Palkkiosi tästä keikasta'), style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
+                    _payToggle('job-${j['id']}', j, showWaiting: false),
+                    const SizedBox(height: 8),
                     Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
@@ -588,8 +725,9 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     return RefreshIndicator(
       onRefresh: _loadMine,
       child: ListView(padding: const EdgeInsets.all(16), children: [
-        Text('${tr(context, 'Order', 'Tilaus')} #${o['id']} · ${euro(context, o['courierFeeCents'] ?? o['deliveryFeeCents'])}', style: const TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
-        const SizedBox(height: 10),
+        Text('${tr(context, 'Order', 'Tilaus')} #${o['id']} · ${tr(context, 'your pay', 'palkkiosi')} ${_payText(o)}', style: const TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
+        _payToggle('active-${o['id']}', o, showWaiting: true),
+        const SizedBox(height: 6),
         step(1, '${tr(context, 'Pick up at', 'Nouda')} ${s['name'] ?? ''}', pickedUp, !pickedUp, [
           if (s['address'] != null) Text(s['address']),
           const SizedBox(height: 6),
@@ -614,6 +752,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
             ],
           ]),
           const SizedBox(height: 10),
+          ..._arrivalSection(o),
           SizedBox(width: double.infinity, height: 56, child: FilledButton(onPressed: () => _pickedUp(o), child: Text(tr(context, 'I have the order', 'Tilaus on mukanani')))),
         ]),
         step(2, '${tr(context, 'Deliver to', 'Toimita')} ${customer.isEmpty ? tr(context, 'the customer', 'asiakkaalle') : customer}', false, pickedUp, [
@@ -645,6 +784,57 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     );
   }
 
+  /// "I'm at the shop": records the arrival time on the server, so waiting beyond the free minutes
+  /// is paid at pickup. Shown only when the server supports it (the order carries `courierArrivedAt`).
+  List<Widget> _arrivalSection(Map<String, dynamic> o) {
+    if (!o.containsKey('courierArrivedAt')) return const [];
+    final pay = _payOf(o);
+    final free = _freeWaitMinutes(pay);
+    final arrived = DateTime.tryParse('${o['courierArrivedAt'] ?? ''}')?.toLocal();
+    final rule = free != null
+        ? tr(context, 'Waiting at the shop beyond $free free minutes is paid, and added to your pay when you pick up the order.',
+            'Kaupassa odottaminen $free ilmaisen minuutin jälkeen maksetaan, ja se lisätään palkkioosi, kun noudat tilauksen.')
+        : tr(context, 'Waiting at the shop beyond the free minutes is paid, and added to your pay when you pick up the order.',
+            'Kaupassa odottaminen ilmaisten minuuttien jälkeen maksetaan, ja se lisätään palkkioosi, kun noudat tilauksen.');
+    if (arrived != null) {
+      final hhmm = '${arrived.hour.toString().padLeft(2, '0')}.${arrived.minute.toString().padLeft(2, '0')}';
+      return [
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(14)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.storefront_rounded, size: 18, color: Color(0xFF6A4500)),
+              const SizedBox(width: 6),
+              Expanded(child: Text(tr(context, 'Arrival at the shop recorded at $hhmm', 'Saapuminen kauppaan kirjattu klo $hhmm'),
+                  style: const TextStyle(color: Color(0xFF6A4500), fontWeight: FontWeight.w700))),
+            ]),
+            const SizedBox(height: 4),
+            Text(rule, style: const TextStyle(color: Color(0xFF6A4500), fontSize: 12.5, height: 1.4)),
+          ]),
+        ),
+      ];
+    }
+    return [
+      SizedBox(
+        width: double.infinity,
+        child: OutlinedButton.icon(
+          onPressed: _arriving ? null : () => _arrivedAtStore(o),
+          icon: _arriving
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.storefront_outlined),
+          label: Text(tr(context, "I'm at the shop", 'Olen kaupalla')),
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(4, 6, 4, 10),
+        child: Text(rule, style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary, height: 1.4)),
+      ),
+    ];
+  }
+
   Widget _earningsTab() {
     final summary = (_earnings?['summary'] as Map?) ?? {};
     final delivered = _mine.where((o) => o['status'] == 'DELIVERED').toList();
@@ -656,7 +846,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
       return d != null && d.year == now.year && d.month == now.month && d.day == now.day;
     }).toList();
     int sum(Iterable<Map> list, String key) => list.fold<int>(0, (s, o) => s + (asInt(o[key]) ?? 0));
-    final todayCents = sum(today, 'courierFeeCents'); // the courier's pay already includes the tip
+    final todayCents = today.fold<int>(0, (s, o) => s + (_payTotal(o) ?? 0)); // the pay already includes the tip
     final todayTips = sum(today, 'tipCents');
     final weekTips = sum(delivered.where((o) => deliveredAt(o)?.isAfter(weekAgo) ?? false), 'tipCents');
 
@@ -696,7 +886,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
         Row(children: [
           stat(tr(context, 'Paid this week', 'Maksettu tällä viikolla'), euro(context, summary['paidThisWeekCents'])),
           const SizedBox(width: 10),
-          stat(tr(context, 'Waiting', 'Odottaa'), euro(context, (asInt(summary['scheduledCents']) ?? 0) + waitingForAccount)),
+          stat(tr(context, 'Not yet paid out', 'Odottaa tilitystä'), euro(context, (asInt(summary['scheduledCents']) ?? 0) + waitingForAccount)),
         ]),
         const SizedBox(height: 10),
         Row(children: [
@@ -746,17 +936,39 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
         ),
         const SizedBox(height: 16),
         Text(tr(context, 'Recent deliveries', 'Viimeisimmät toimitukset'), style: AppTheme.display(size: 18)),
-        for (final o in delivered.take(30))
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text('${o['store']?['name'] ?? ''} · #${o['id']}'),
-            subtitle: Text([
-              _when(o['deliveredAt']),
-              if ((asInt(o['tipCents']) ?? 0) > 0) '${tr(context, 'incl. tip', 'sis. tipin')} ${euro(context, o['tipCents'])}',
-            ].join(' · ')),
-            trailing: Text(euro(context, o['courierFeeCents']), style: const TextStyle(fontWeight: FontWeight.w700)),
+        if (delivered.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(tr(context, 'No deliveries yet.', 'Ei vielä toimituksia.'), style: const TextStyle(color: AppTheme.textSecondary)),
           ),
+        for (final o in delivered.take(30)) _deliveryRow(o),
       ]),
+    );
+  }
+
+  /// One delivery in Earnings; tapping it shows the pay breakdown, waiting pay included.
+  Widget _deliveryRow(Map<String, dynamic> o) {
+    final pay = _payOf(o);
+    final wait = asInt(pay?['waitCents']) ?? 0;
+    final tip = asInt(pay?['tipCents']) ?? asInt(o['tipCents']) ?? 0;
+    final subtitle = Text([
+      _when(o['deliveredAt']),
+      if (tip > 0) '${tr(context, 'incl. tip', 'sis. tipin')} ${euro(context, tip)}',
+      if (wait > 0) '${tr(context, 'incl. waiting', 'sis. odotuksen')} ${euro(context, wait)}',
+    ].join(' · '));
+    final title = Text('${o['store']?['name'] ?? ''} · #${o['id']}');
+    final amount = Text(_payText(o), style: const TextStyle(fontWeight: FontWeight.w700));
+    if (pay == null) return ListTile(contentPadding: EdgeInsets.zero, title: title, subtitle: subtitle, trailing: amount);
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: const EdgeInsets.only(bottom: 8),
+        title: title,
+        subtitle: subtitle,
+        trailing: Row(mainAxisSize: MainAxisSize.min, children: [amount, const Icon(Icons.expand_more_rounded, color: AppTheme.textSecondary)]),
+        children: [_payBreakdown(o, pay, showWaiting: true)],
+      ),
     );
   }
 
