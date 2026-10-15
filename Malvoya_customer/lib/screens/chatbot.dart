@@ -315,7 +315,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                             }));
                         _scrollToBottom();
                       } else {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.error!)));
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.errorText(context)!)));
                       }
                     },
                   ),

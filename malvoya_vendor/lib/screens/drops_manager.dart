@@ -66,7 +66,7 @@ class DropsManagerState extends State<DropsManager> {
     HapticFeedback.mediumImpact();
     final res = await ApiClient(Provider.of<AuthService>(context, listen: false)).delete('/drops/${d['id']}');
     if (!mounted) return;
-    if (!res.ok) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.error!)));
+    if (!res.ok) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.errorMessage)));
     load();
   }
 

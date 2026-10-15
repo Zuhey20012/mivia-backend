@@ -13,7 +13,10 @@
 - Business sellers provide their company name, Y-tunnus, address and VAT status.
 - Private individuals selling their own used items provide their name, address and date of birth.
 - Customers are shown whether each store is a **business** or a **private seller**, as marketplace law requires.
-- For DAC7, Malvoya collects each seller's tax identification details and reports sellers who exceed the thresholds to the Finnish Tax Administration each year.
+- **Tax details (DAC7).** EU law (Council Directive (EU) 2021/514, "DAC7") requires Malvoya to collect, check and report each seller's details to the Finnish Tax Administration once a year, by 31 January for the previous year. The Seller gives them in the store app (Store → Tax details):
+  - business sellers: legal name, business ID (Y-tunnus), VAT number if registered, and registered address with country;
+  - private sellers: legal name, date of birth, tax identification number (for Finnish residents the personal identity code, henkilötunnus) and home address with country.
+- Malvoya reports, per seller, these details, the number of sales in the year, and per quarter the amounts paid or credited to the Seller (sales less refunds and Malvoya's commission) and the commission Malvoya withheld. Sellers with fewer than 30 sales and at most 2 000 € in the year are not reported. Malvoya keeps the details and report data for 10 years after the year concerned, also if the Seller closes their store or deletes their account. The tax identification number is stored encrypted and shown to the Seller only in part; only Malvoya's administrators can see it in full, for the report. The Seller keeps the details up to date. Malvoya may withhold payouts or suspend a store whose details are missing or wrong after two reminders, as the directive requires.
 - A store becomes visible to customers only after Malvoya has reviewed these details.
 
 ## 3. Listings
@@ -27,6 +30,7 @@ The Seller may import listings from their own online shop or a CSV file. Before 
 - Orders are shown to the Seller only after the customer's payment is confirmed.
 - The Seller accepts or declines each order. Declined orders are refunded to the customer automatically.
 - Accepted orders are prepared promptly for courier pickup.
+- **Scheduled delivery.** A customer may book a delivery slot (for example 17:00–19:00 today or tomorrow) that starts while the store is open. The Seller accepts the order as usual (within 10 minutes of payment) and has it ready by the start of the slot; couriers are offered the job shortly before then (the Seller's preparation time plus 15 minutes). Any discount on the delivery fee for a scheduled slot is paid by Malvoya and does not change the Seller's payout.
 - **Reserve & collect.** If the customer chose to collect the order from the store, the Seller marks the order ready in the app once it is packed. The Seller hands the order over only after entering the customer's 6-digit pickup code in the app; the code is shown to the customer only. Five wrong codes lock the handover for 15 minutes. A correct code completes the order; it counts as delivered, which starts the customer's withdrawal period and the payout schedule in section 6. An order that is not collected within [72] hours of being marked ready is cancelled and refunded to the customer, and the Seller puts the items back on sale. The Seller keeps reserved items safe until they are collected or the order is cancelled.
 
 ## 5. Returns
@@ -37,7 +41,7 @@ Business sellers must honour the customer's 14-day right of withdrawal and defec
 
 - Commission: [X] % of the item price (excluding the delivery fee), unless agreed otherwise in writing.
 - Payouts are made through Stripe Connect to the Seller's own Stripe account, 15 days after delivery (after the 14-day return window), with refunds and commission deducted. Stripe verifies the Seller's identity and bank account on its own pages.
-- Malvoya provides a statement for each payout.
+- Malvoya provides a monthly statement in the store app listing each order delivered or collected in the month with its sales, refunds, commission and payout, and the month's totals (it can be printed). The statement is a summary for the Seller's records, not a VAT invoice. Discounts from Malvoya's promo and invite codes are paid by Malvoya and do not reduce the Seller's sales or payout.
 
 ## 6a. Drops, photos and videos
 

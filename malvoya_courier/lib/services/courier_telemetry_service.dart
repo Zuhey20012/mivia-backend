@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import '../config/constants.dart';
+import '../core/server_messages.dart';
 import 'socket_service.dart';
 
 /// Shares the courier's position while they are online, and only then.
@@ -26,15 +27,15 @@ class CourierTelemetryService extends ChangeNotifier {
   bool get isBroadcasting => _positions != null;
   Position? get lastPosition => _last;
 
-  /// Returns false when location is off or permission was refused.
+  /// Returns false when location is off or permission is missing. It never asks for permission
+  /// itself: the dashboard asks only right after the location disclosure (`LocationDisclosure`).
   Future<bool> start({required String accessToken, int? orderId}) async {
     _token = accessToken;
     _orderId = orderId;
     if (_positions != null) return true;
     if (!await Geolocator.isLocationServiceEnabled()) return false;
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) permission = await Geolocator.requestPermission();
-    if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) return false;
+    final permission = await Geolocator.checkPermission();
+    if (permission != LocationPermission.whileInUse && permission != LocationPermission.always) return false;
 
     // Android: a visible foreground service keeps the position flowing while the phone is in a
     // pocket, and shows the courier at all times that their location is being shared.
@@ -43,10 +44,12 @@ class CourierTelemetryService extends ChangeNotifier {
             accuracy: LocationAccuracy.high,
             distanceFilter: 10,
             intervalDuration: const Duration(seconds: 5),
-            foregroundNotificationConfig: const ForegroundNotificationConfig(
-              notificationTitle: 'Malvoya Courier is online',
-              notificationText: 'Your location is shared while you are online. Go offline to stop.',
-              notificationIcon: AndroidResource(name: 'launcher_icon', defType: 'mipmap'),
+            // In the app language at the moment sharing starts
+            foregroundNotificationConfig: ForegroundNotificationConfig(
+              notificationTitle: ServerMessages.pick('Malvoya Courier is online', 'Malvoya Courier on linjoilla'),
+              notificationText: ServerMessages.pick('Your location is shared while you are online. Go offline to stop.',
+                  'Sijaintisi jaetaan, kun olet linjoilla. Lopeta poistumalla linjoilta.'),
+              notificationIcon: const AndroidResource(name: 'launcher_icon', defType: 'mipmap'),
               enableWakeLock: true,
               setOngoing: true,
             ),

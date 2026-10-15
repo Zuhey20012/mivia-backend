@@ -14,6 +14,8 @@ class AppTheme {
   static const Color primaryLight = Color(0xFFFBEAE6);
   static const Color accent = Color(0xFF6D2E8C);
   static const Color success = Color(0xFF248A52);
+  /// Darker green for white text on green (≈6.5:1 contrast), e.g. the online bar.
+  static const Color successDark = Color(0xFF1B6B40);
   static const Color warning = Color(0xFFE08A00);
   static const Color primaryColor = primary;
 

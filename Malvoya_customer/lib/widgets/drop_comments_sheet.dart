@@ -99,7 +99,7 @@ class _DropCommentsState extends State<_DropComments> {
       HapticFeedback.lightImpact();
       if (_scroll.hasClients) _scroll.animateTo(0, duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
     } else {
-      _snack(res.error!);
+      _snack(res.errorText(context)!);
     }
   }
 
@@ -112,7 +112,7 @@ class _DropCommentsState extends State<_DropComments> {
         _setCount(_count - 1);
       });
     } else {
-      _snack(res.error!);
+      _snack(res.errorText(context)!);
     }
   }
 
@@ -129,7 +129,7 @@ class _DropCommentsState extends State<_DropComments> {
     );
     if (reason == null || !mounted) return;
     final res = await _api.post('$_base/${c['id']}/report', {'reason': reason});
-    if (mounted) _snack(res.ok ? tr(context, 'Thanks — we will review it.', 'Kiitos — tarkistamme sen.') : res.error!);
+    if (mounted) _snack(res.ok ? tr(context, 'Thanks — we will review it.', 'Kiitos — tarkistamme sen.') : res.errorText(context)!);
   }
 
   void _snack(String text) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text), behavior: SnackBarBehavior.floating));

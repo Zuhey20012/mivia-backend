@@ -12,7 +12,9 @@ import 'orders.dart';
 import 'profile.dart';
 import '../checkout.dart';
 import '../l10n.dart';
-import '../locale_provider.dart';
+
+/// Lets the main screen notice when a screen pushed over it (checkout, an order, a store) closes.
+final mainRouteObserver = RouteObserver<ModalRoute<void>>();
 
 /// Five tabs: Home, Search, Drops (shoppable videos), Orders and Profile, in a floating pill bar.
 /// A floating bag bar appears whenever the bag has items (hidden on Drops, which has its own buy
@@ -23,58 +25,82 @@ class MainNavigation extends StatefulWidget {
   State<MainNavigation> createState() => _MainNavigationState();
 }
 
-class _MainNavigationState extends State<MainNavigation> {
+class _MainNavigationState extends State<MainNavigation> with RouteAware {
+  static const _homeTab = 0;
   static const _dropsTab = 2;
   int _index = 0;
-  late PageController _pageController;
+
+  /// Tabs are built the first time they are opened and then kept alive (scroll position, search,
+  /// loaded lists), so switching back is instant.
+  final Set<int> _opened = {0};
+
+  /// Tells Home it is visible again, so it refreshes the active order.
+  final _homeVisible = ValueNotifier<int>(0);
 
   @override
   void initState() {
     super.initState();
-    _pageController = PageController(initialPage: _index);
     // Links to a drop, store or invite open once the main screen is up
     DeepLinks.instance.attach();
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route != null) mainRouteObserver.subscribe(this, route);
+  }
+
+  /// Back on the main screen (e.g. after paying): Home checks the active order again.
+  @override
+  void didPopNext() {
+    if (_index == _homeTab) _homeVisible.value++;
+  }
+
+  @override
   void dispose() {
+    mainRouteObserver.unsubscribe(this);
     DeepLinks.instance.detach();
-    _pageController.dispose();
+    _homeVisible.dispose();
     super.dispose();
   }
 
   void _go(int index) {
     if (index == _index) return;
     HapticFeedback.selectionClick();
-    setState(() => _index = index);
-    _pageController.jumpToPage(index);
+    setState(() {
+      _index = index;
+      _opened.add(index);
+    });
+    if (index == _homeTab) _homeVisible.value++;
   }
 
-  List<Widget> _buildScreens(String langCode) => [
-        HomeScreen(key: ValueKey('home_$langCode'), onOpenDrops: () => _go(_dropsTab)),
-        SearchScreen(key: ValueKey('search_$langCode'), isTab: true),
-        DropsFeedScreen(key: ValueKey('drop_$langCode'), isActive: _index == _dropsTab),
-        OrdersScreen(key: ValueKey('orders_$langCode')),
-        ProfileScreen(key: ValueKey('profile_$langCode')),
-      ];
+  Widget _screen(int i) {
+    if (!_opened.contains(i)) return const SizedBox.shrink();
+    return switch (i) {
+      0 => HomeScreen(onOpenDrops: () => _go(_dropsTab), visible: _homeVisible),
+      1 => const SearchScreen(isTab: true),
+      // The feed pauses its video whenever another tab is showing
+      2 => DropsFeedScreen(isActive: _index == _dropsTab),
+      3 => const OrdersScreen(),
+      _ => const ProfileScreen(),
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<LocaleProvider>(
-      builder: (context, localeProvider, _) {
-        final l10n = AppLocalizations.of(context);
-        final isDark = Theme.of(context).brightness == Brightness.dark;
-
+    final l10n = AppLocalizations.of(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Builder(
+      builder: (context) {
         return Scaffold(
           extendBody: true,
           body: Stack(
             children: [
-              PageView(
-                controller: _pageController,
-                // Swiping sideways would fight the vertical Drops feed, so tabs change by tapping
-                physics: const NeverScrollableScrollPhysics(),
-                onPageChanged: (i) => setState(() => _index = i),
-                children: _buildScreens(localeProvider.locale.languageCode),
+              IndexedStack(
+                index: _index,
+                // Hidden tabs keep their state but stop their animations
+                children: [for (var i = 0; i < 5; i++) TickerMode(enabled: i == _index, child: _screen(i))],
               ),
               if (_index != _dropsTab)
                 // With extendBody the body's bottom padding already includes the tab bar.

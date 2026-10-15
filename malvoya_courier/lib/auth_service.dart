@@ -8,8 +8,12 @@ import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'config/constants.dart';
 import 'core/api_client.dart';
+import 'core/server_messages.dart';
 
 const _secureStorage = FlutterSecureStorage();
+
+/// Messages from this file follow the app language (no BuildContext here).
+String _t(String en, String fi) => ServerMessages.pick(en, fi);
 
 /// The account role this app is for. Other roles are refused at sign-in.
 const String kAppRole = 'COURIER';
@@ -86,7 +90,7 @@ class AuthService extends ChangeNotifier {
   Future<String?> _applySession(Map<String, dynamic> data) async {
     final user = User.fromJson(data['user']);
     if (user.role != kAppRole) {
-      return 'This account is not a courier account. Please use the matching Malvoya app.';
+      return _t('This account is not a courier account. Please use the matching Malvoya app.', 'Tämä ei ole lähettitili. Käytä oikeaa Malvoya-sovellusta.');
     }
     _currentUser = user;
     _accessToken = data['accessToken'];
@@ -143,9 +147,9 @@ class AuthService extends ChangeNotifier {
   String _errorFrom(http.Response res, String fallback) {
     try {
       final body = jsonDecode(res.body);
-      if (body['error'] is String) return body['error'];
+      if (body['error'] is String) return ServerMessages.localize(body['error']);
       final fieldErrors = body['errors']?['fieldErrors'] as Map<String, dynamic>?;
-      if (fieldErrors != null && fieldErrors.isNotEmpty) return (fieldErrors.values.first as List).first.toString();
+      if (fieldErrors != null && fieldErrors.isNotEmpty) return ServerMessages.localize((fieldErrors.values.first as List).first.toString());
     } catch (_) {}
     return fallback;
   }
@@ -160,23 +164,30 @@ class AuthService extends ChangeNotifier {
               body: jsonEncode({'email': emailOrPhone.trim(), 'password': password}))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
-      return _errorFrom(res, 'Invalid email or password.');
+      return _errorFrom(res, _t('Invalid email or password.', 'Sähköposti tai salasana on väärin.'));
     } catch (_) {
-      return 'Could not connect. Please check your internet connection.';
+      return _t('Could not connect. Please check your internet connection.', 'Yhteyttä ei saatu. Tarkista nettiyhteys.');
     }
   }
 
-  Future<String?> register(String name, String email, String password, [String? _]) async {
+  /// Creates a courier account. [acceptTerms] records that the courier accepted the courier agreement.
+  Future<String?> register(String name, String email, String password, {required bool acceptTerms}) async {
     try {
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/register'),
               headers: {'Content-Type': 'application/json'},
-              body: jsonEncode({'name': name.trim(), 'email': email.trim(), 'password': password, 'role': kAppRole}))
+              body: jsonEncode({
+                'name': name.trim(),
+                'email': email.trim(),
+                'password': password,
+                'role': kAppRole,
+                if (acceptTerms) 'acceptTerms': true,
+              }))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 201) return await _applySession(jsonDecode(res.body));
-      return _errorFrom(res, 'Registration failed. Please try again.');
+      return _errorFrom(res, _t('Registration failed. Please try again.', 'Rekisteröinti epäonnistui. Yritä uudelleen.'));
     } catch (_) {
-      return 'Could not connect. Please check your internet connection.';
+      return _t('Could not connect. Please check your internet connection.', 'Yhteyttä ei saatu. Tarkista nettiyhteys.');
     }
   }
 
@@ -185,17 +196,17 @@ class AuthService extends ChangeNotifier {
   Future<String?> loginWithGoogle() async {
     try {
       final googleUser = await GoogleSignIn().signIn();
-      if (googleUser == null) return 'Google sign-in cancelled';
+      if (googleUser == null) return _t('Google sign-in cancelled', 'Google-kirjautuminen peruttiin');
       final idToken = (await googleUser.authentication).idToken;
-      if (idToken == null) return 'Google did not return a sign-in token';
+      if (idToken == null) return _t('Google did not return a sign-in token', 'Google ei palauttanut kirjautumistunnistetta');
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/google'),
               headers: {'Content-Type': 'application/json'}, body: jsonEncode({'idToken': idToken, 'role': kAppRole}))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
-      return _errorFrom(res, 'Google sign-in failed.');
+      return _errorFrom(res, _t('Google sign-in failed.', 'Google-kirjautuminen epäonnistui.'));
     } catch (_) {
-      return 'Google sign-in failed. Please check your internet connection.';
+      return _t('Google sign-in failed. Please check your internet connection.', 'Google-kirjautuminen epäonnistui. Tarkista nettiyhteys.');
     }
   }
 
@@ -210,15 +221,15 @@ class AuthService extends ChangeNotifier {
       // Show the account picker even if Google was used before, so the right account gets linked
       await google.signOut();
       final googleUser = await google.signIn();
-      if (googleUser == null) return 'Google sign-in cancelled';
+      if (googleUser == null) return _t('Google sign-in cancelled', 'Google-kirjautuminen peruttiin');
       final idToken = (await googleUser.authentication).idToken;
-      if (idToken == null) return 'Google did not return a sign-in token';
+      if (idToken == null) return _t('Google did not return a sign-in token', 'Google ei palauttanut kirjautumistunnistetta');
       final res = await ApiClient(this).post('/auth/google/link', {'idToken': idToken});
       if (!res.ok) return res.error;
       await _setGoogleLinked(true);
       return null;
     } catch (_) {
-      return 'Google sign-in failed. Please check your internet connection.';
+      return _t('Google sign-in failed. Please check your internet connection.', 'Google-kirjautuminen epäonnistui. Tarkista nettiyhteys.');
     }
   }
 
@@ -265,7 +276,7 @@ class AuthService extends ChangeNotifier {
             onError(err);
           }
         },
-        verificationFailed: (e) => onError(e.message ?? 'Phone verification failed'),
+        verificationFailed: (e) => onError(e.message ?? _t('Phone verification failed', 'Puhelinnumeron vahvistus epäonnistui')),
         codeSent: (verificationId, _) {
           _verificationId = verificationId;
           onCodeSent(verificationId);
@@ -273,12 +284,12 @@ class AuthService extends ChangeNotifier {
         codeAutoRetrievalTimeout: (verificationId) => _verificationId = verificationId,
       );
     } catch (e) {
-      onError('Could not send the verification code. Please try again.');
+      onError(_t('Could not send the verification code. Please try again.', 'Vahvistuskoodia ei voitu lähettää. Yritä uudelleen.'));
     }
   }
 
   Future<String?> signInWithSmsCode(String smsCode) async {
-    if (_verificationId == null) return 'Request a new code first';
+    if (_verificationId == null) return _t('Request a new code first', 'Pyydä ensin uusi koodi');
     final credential = fb_auth.PhoneAuthProvider.credential(verificationId: _verificationId!, smsCode: smsCode.trim());
     return _signInWithCredential(credential);
   }
@@ -287,18 +298,20 @@ class AuthService extends ChangeNotifier {
     try {
       final result = await _firebaseAuth.signInWithCredential(credential);
       final firebaseToken = await result.user?.getIdToken();
-      if (firebaseToken == null) return 'Phone verification failed';
+      if (firebaseToken == null) return _t('Phone verification failed', 'Puhelinnumeron vahvistus epäonnistui');
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/phone'),
               headers: {'Content-Type': 'application/json'},
               body: jsonEncode({'firebaseToken': firebaseToken, 'role': kAppRole}))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
-      return _errorFrom(res, 'Phone sign-in failed.');
+      return _errorFrom(res, _t('Phone sign-in failed.', 'Puhelinkirjautuminen epäonnistui.'));
     } on fb_auth.FirebaseAuthException catch (e) {
-      return e.code == 'invalid-verification-code' ? 'The code is incorrect.' : (e.message ?? 'Phone verification failed');
+      return e.code == 'invalid-verification-code'
+          ? _t('The code is incorrect.', 'Koodi on väärin.')
+          : (e.message ?? _t('Phone verification failed', 'Puhelinnumeron vahvistus epäonnistui'));
     } catch (_) {
-      return 'Could not connect. Please check your internet connection.';
+      return _t('Could not connect. Please check your internet connection.', 'Yhteyttä ei saatu. Tarkista nettiyhteys.');
     }
   }
 

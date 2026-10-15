@@ -8,6 +8,7 @@ import '../config/theme.dart';
 import '../core/api_client.dart';
 import '../core/delivery_location.dart';
 import '../core/strings.dart';
+import '../l10n.dart';
 import '../widgets/product_tile.dart';
 import '../widgets/skeleton.dart';
 import 'store_detail.dart';
@@ -38,6 +39,11 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
   String? _size;
   String? _condition;
   late bool _secondHand = widget.secondHand;
+  late String? _category = widget.category;
+  late bool _eco = widget.eco;
+
+  /// Numbers every search, so an older, slower answer never replaces a newer one.
+  int _request = 0;
   int? _minPrice;
   int? _maxPrice;
 
@@ -49,7 +55,8 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
   bool _loadingMore = false;
   String? _error;
 
-  static const _sizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'One Size'];
+  // The API has no list of sizes in use, so the common clothing and shoe sizes are offered
+  static const _sizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', 'One Size'];
 
   @override
   void initState() {
@@ -70,11 +77,11 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
 
   Map<String, String> get _params => {
         if (_query.text.trim().isNotEmpty) 'q': _query.text.trim(),
-        if (widget.category != null) 'category': widget.category!,
+        if (_category != null) 'category': _category!,
         if (_size != null) 'size': _size!,
         if (_condition != null) 'condition': _condition!,
         if (_secondHand) 'secondHand': 'true',
-        if (widget.eco) 'eco': 'true',
+        if (_eco) 'eco': 'true',
         if (_minPrice != null) 'minPrice': '$_minPrice',
         if (_maxPrice != null) 'maxPrice': '$_maxPrice',
         'sort': _sort,
@@ -82,8 +89,10 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
       };
 
   Future<void> _search() async {
+    final request = ++_request;
     setState(() {
       _loading = true;
+      _loadingMore = false;
       _error = null;
       _page = 1;
     });
@@ -94,7 +103,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
         if (_query.text.trim().isNotEmpty) 'search': _query.text.trim(),
         ...DeliveryLocation.instance.query,
       });
-      if (!mounted) return;
+      if (!mounted || request != _request) return;
       setState(() {
         _loading = false;
         _stores = res.ok ? ((res.data['stores'] as List?) ?? []).map((s) => Map<String, dynamic>.from(s)).toList() : [];
@@ -103,7 +112,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
       return;
     }
     final res = await api.get('/products/search', query: {..._params, 'page': '1'});
-    if (!mounted) return;
+    if (!mounted || request != _request) return;
     setState(() {
       _loading = false;
       _items.clear();
@@ -119,8 +128,10 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
   Future<void> _loadMore() async {
     if (_storesTab || _loading || _loadingMore || _items.length >= _total) return;
     _loadingMore = true;
+    final request = _request;
     final res = await ApiClient(Provider.of<AuthService>(context, listen: false)).get('/products/search', query: {..._params, 'page': '${_page + 1}'});
-    if (!mounted) return;
+    // A new search started meanwhile: this page belongs to the old one
+    if (!mounted || request != _request) return;
     setState(() {
       _loadingMore = false;
       if (res.ok) {
@@ -148,7 +159,9 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
           textInputAction: TextInputAction.search,
           onSubmitted: (_) => _search(),
           decoration: InputDecoration(
-            hintText: widget.title ?? tr(context, 'Search items and stores', 'Hae tuotteita ja kauppoja'),
+            hintText: (_category != null || (widget.secondHand && _secondHand) || (widget.eco && _eco)) && widget.title != null
+                ? widget.title
+                : tr(context, 'Search items and stores', 'Hae tuotteita ja kauppoja'),
             prefixIcon: const Icon(Icons.search_rounded),
             suffixIcon: _query.text.isEmpty
                 ? null
@@ -204,7 +217,8 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
   }
 
   Widget _filters() {
-    Widget chip(String label, bool active, VoidCallback onTap) => Padding(
+    // Active filters can be removed with their × (the chip itself still opens the choice)
+    Widget chip(String label, bool active, VoidCallback onTap, {VoidCallback? onRemove}) => Padding(
           padding: const EdgeInsets.only(right: 8),
           child: FilterChip(
             label: Text(label),
@@ -214,6 +228,14 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
               HapticFeedback.selectionClick();
               onTap();
             },
+            deleteButtonTooltipMessage: tr(context, 'Remove filter', 'Poista suodatin'),
+            onDeleted: active && onRemove != null
+                ? () {
+                    HapticFeedback.selectionClick();
+                    setState(onRemove);
+                    _search();
+                  }
+                : null,
           ),
         );
     final sortLabel = {
@@ -227,18 +249,32 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
       children: [
-        chip(sortLabel[_sort]!, _sort != 'relevance', () => _pick(sortLabel.keys.toList(), sortLabel, _sort, (v) => _sort = v ?? 'relevance', allowClear: false)),
+        if (_category != null)
+          chip(AppLocalizations.of(context).translateCategory(_category!), true, () => _clear(() => _category = null), onRemove: () => _category = null),
+        if (_eco) chip(tr(context, 'Eco-friendly', 'Ekologinen'), true, () => _clear(() => _eco = false), onRemove: () => _eco = false),
+        chip(sortLabel[_sort]!, _sort != 'relevance', () => _pick(sortLabel.keys.toList(), sortLabel, _sort, (v) => _sort = v ?? 'relevance', allowClear: false),
+            onRemove: () => _sort = 'relevance'),
         chip(_size == null ? tr(context, 'Size', 'Koko') : '${tr(context, 'Size', 'Koko')} $_size', _size != null,
-            () => _pick(_sizes, {for (final s in _sizes) s: s}, _size, (v) => _size = v)),
-        chip(_priceLabel(), _minPrice != null || _maxPrice != null, _pickPrice),
+            () => _pick(_sizes, {for (final s in _sizes) s: s == 'One Size' ? tr(context, 'One size', 'Yksi koko') : s}, _size, (v) => _size = v),
+            onRemove: () => _size = null),
+        chip(_priceLabel(), _minPrice != null || _maxPrice != null, _pickPrice, onRemove: () {
+          _minPrice = null;
+          _maxPrice = null;
+        }),
         chip(tr(context, 'Second hand', 'Käytetty'), _secondHand, () {
           setState(() => _secondHand = !_secondHand);
           _search();
-        }),
+        }, onRemove: () => _secondHand = false),
         chip(_condition == null ? tr(context, 'Condition', 'Kunto') : _conditionLabel(_condition!), _condition != null,
-            () => _pick(['NEW', 'LIKE_NEW', 'GOOD', 'FAIR'], {for (final c in ['NEW', 'LIKE_NEW', 'GOOD', 'FAIR']) c: _conditionLabel(c)}, _condition, (v) => _condition = v)),
+            () => _pick(['NEW', 'LIKE_NEW', 'GOOD', 'FAIR'], {for (final c in ['NEW', 'LIKE_NEW', 'GOOD', 'FAIR']) c: _conditionLabel(c)}, _condition, (v) => _condition = v),
+            onRemove: () => _condition = null),
       ],
     );
+  }
+
+  void _clear(VoidCallback change) {
+    setState(change);
+    _search();
   }
 
   String _conditionLabel(String c) => {

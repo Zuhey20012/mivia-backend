@@ -22,8 +22,10 @@ import 'payouts_screen.dart';
 import 'pickup_code_sheet.dart';
 import 'product_editor.dart';
 import 'returns_manager.dart';
+import 'statements_screen.dart';
 import 'store_setup.dart';
 import 'opening_hours_screen.dart';
+import 'tax_info_screen.dart';
 
 /// The store owner's home: incoming orders, products, drops and the store itself.
 class VendorDashboard extends StatefulWidget {
@@ -52,6 +54,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     WidgetsBinding.instance.addPostFrameCallback((_) {
       VendorSocketService().connect(Provider.of<AuthService>(context, listen: false).accessToken ?? '');
       _load();
+      PushService.instance.refreshPermission();
     });
     VendorSocketService().addListener(_onSocket);
     WidgetsBinding.instance.addObserver(this);
@@ -75,7 +78,12 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _loadOrders();
+    if (state == AppLifecycleState.resumed) {
+      _loadOrders();
+      _loadReturns();
+      // Back from the phone's settings: hide the red bar once notifications are on
+      PushService.instance.refreshPermission();
+    }
   }
 
   @override
@@ -87,6 +95,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     PushService.instance.stopRinging();
     VendorSocketService().removeListener(_onSocket);
     _tabs.dispose();
+    _productSearch.dispose();
     super.dispose();
   }
 
@@ -98,20 +107,131 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
   Future<void> _load() async {
     final res = await _api.get('/stores/my');
     if (!mounted) return;
+    final auth = Provider.of<AuthService>(context, listen: false);
     if (res.status == 404) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const StoreSetupScreen()));
+      // No store (e.g. removed by an admin): the app's home shows the store setup instead
+      auth.updateStore(null);
       return;
     }
     setState(() {
       _loading = false;
       _error = res.ok ? null : res.error;
-      if (res.ok) _store = Map<String, dynamic>.from(res.data['store']);
+      if (res.ok && res.data['store'] is Map) _store = Map<String, dynamic>.from(res.data['store']);
     });
-    if (res.ok) {
+    if (res.ok && _store != null) {
+      auth.updateStore(_store);
       _loadNormalPrep();
       _loadImports();
+      _loadReturns();
     }
     await _loadOrders();
+  }
+
+  // ── Open returns (badge on the Store tab) ───────────────────────────────
+  // Returns have no push of their own yet, so the count is refreshed on load, on resume and with
+  // pull to refresh.
+
+  static const _openReturnStatuses = {'REQUESTED', 'APPROVED', 'IN_TRANSIT', 'RECEIVED'};
+  int _openReturns = 0;
+
+  Future<void> _loadReturns() async {
+    final res = await _api.get('/returns');
+    if (!mounted || !res.ok) return;
+    final open = ((res.data['returns'] as List?) ?? const []).whereType<Map>().where((r) => _openReturnStatuses.contains(r['status'])).length;
+    if (open != _openReturns) setState(() => _openReturns = open);
+  }
+
+  Widget _countBadge(int n) => Container(
+        constraints: const BoxConstraints(minWidth: 20),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(10)),
+        child: Text('$n', textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, color: AppTheme.textPrimary, fontWeight: FontWeight.w800)),
+      );
+
+  // ── Notifications off: the store would miss new orders ─────────────────
+
+  bool _enablingPush = false;
+
+  Future<void> _turnOnNotifications() async {
+    HapticFeedback.selectionClick();
+    setState(() => _enablingPush = true);
+    final ok = await PushService.instance.enableNotifications();
+    if (!mounted) return;
+    setState(() => _enablingPush = false);
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(tr(context, 'Open your phone\'s Settings → Apps → Malvoya Store → Notifications and switch them on.',
+            'Avaa puhelimen Asetukset → Sovellukset → Malvoya Store → Ilmoitukset ja kytke ne päälle.')),
+        duration: const Duration(seconds: 6),
+      ));
+    }
+  }
+
+  Widget _notificationsOffBar() => ValueListenableBuilder<bool?>(
+        valueListenable: PushService.instance.notificationsAllowed,
+        builder: (context, allowed, _) {
+          if (allowed != false) return const SizedBox.shrink();
+          return Container(
+            margin: const EdgeInsets.only(bottom: 14),
+            padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+            decoration: BoxDecoration(color: const Color(0xFFD93025), borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
+            child: Row(children: [
+              const Icon(Icons.notifications_off_rounded, color: Colors.white),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(tr(context, 'Notifications are off — you will miss orders.', 'Ilmoitukset ovat pois päältä — menetät tilauksia.'),
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, height: 1.3)),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: const Color(0xFFD93025),
+                  minimumSize: const Size(64, 48),
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                ),
+                onPressed: _enablingPush ? null : _turnOnNotifications,
+                child: Text(tr(context, 'Turn on', 'Ota käyttöön')),
+              ),
+            ]),
+          );
+        },
+      );
+
+  // ── Tax information (DAC7) ──────────────────────────────────────────────
+
+  Future<void> _openTaxInfo() async {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => const TaxInfoScreen()));
+    if (mounted) _load();
+  }
+
+  /// Shown only when the server says the tax details are missing (older servers do not send the flag).
+  Widget _taxInfoBanner() {
+    if (_store?['taxInfoComplete'] != false) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      decoration: BoxDecoration(color: AppTheme.lilac, borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+        onTap: _openTaxInfo,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+          child: Row(children: [
+            const Icon(Icons.receipt_long_outlined, color: AppTheme.malva),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(tr(context, 'Add your tax information', 'Lisää verotietosi'), style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.textPrimary)),
+                const SizedBox(height: 2),
+                Text(tr(context, 'EU law (DAC7) requires it from every seller. It takes about two minutes.', 'EU-laki (DAC7) edellyttää sitä jokaiselta myyjältä. Se vie noin kaksi minuuttia.'),
+                    style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary, height: 1.35)),
+              ]),
+            ),
+            const Icon(Icons.chevron_right_rounded, color: AppTheme.textSecondary),
+          ]),
+        ),
+      ),
+    );
   }
 
   bool _switching = false;
@@ -308,7 +428,11 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           content: Text(tr(context, 'The customer gets a full refund automatically.', 'Asiakas saa automaattisesti täyden hyvityksen.')),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(context, 'Back', 'Takaisin'))),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(tr(context, 'Decline', 'Hylkää'))),
+            OutlinedButton(
+              style: OutlinedButton.styleFrom(foregroundColor: _red, side: const BorderSide(color: _red, width: 1.5), minimumSize: const Size(64, 48)),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(tr(context, 'Decline', 'Hylkää')),
+            ),
           ],
         ),
       );
@@ -317,7 +441,73 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     HapticFeedback.mediumImpact();
     final res = await _api.patch('/orders/${order['id']}/status', {'status': status});
     if (!mounted) return;
-    if (!res.ok) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.error!)));
+    if (!res.ok) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.errorMessage)));
+    _loadOrders();
+  }
+
+  static const _red = Color(0xFFD93025);
+
+  // ── "Can't fulfil": cancel an accepted order with a full refund ─────────
+  // The API lets the store cancel CONFIRMED and PROCESSING orders (not once the courier has it);
+  // cancelOrderInternal restocks and refunds the whole payment.
+
+  bool _canCancelAccepted(Map<String, dynamic> o) => ['CONFIRMED', 'PROCESSING'].contains(o['status']) && !_isCollected(o);
+
+  Future<void> _cancelAccepted(Map<String, dynamic> o) async {
+    final reasons = {
+      'DAMAGED': tr(context, 'Item damaged', 'Tuote on vaurioitunut'),
+      'OUT_OF_STOCK': tr(context, 'Out of stock', 'Tuote on loppu'),
+      'OTHER': tr(context, 'Other', 'Muu syy'),
+    };
+    final reason = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 4),
+            child: Text(tr(ctx, 'Why can\'t you fulfil order #${o['id']}?', 'Miksi et voi toimittaa tilausta #${o['id']}?'), style: AppTheme.display(size: 19)),
+          ),
+          for (final e in reasons.entries)
+            ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+              minTileHeight: 56,
+              title: Text(e.value, style: const TextStyle(fontWeight: FontWeight.w600)),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => Navigator.pop(ctx, e.key),
+            ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+    if (reason == null || !mounted) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.warning_amber_rounded, color: _red, size: 32),
+        title: Text(tr(ctx, 'Cancel order #${o['id']}?', 'Perutaanko tilaus #${o['id']}?')),
+        content: Text(tr(ctx,
+            'The customer is refunded in full automatically, and the items go back into your stock. This cannot be undone.',
+            'Asiakkaalle palautetaan koko summa automaattisesti, ja tuotteet palautetaan varastoosi. Tätä ei voi perua.')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(ctx, 'Keep the order', 'Pidä tilaus'))),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: _red, foregroundColor: Colors.white, minimumSize: const Size(64, 48)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(tr(ctx, 'Cancel and refund', 'Peru ja palauta rahat')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    HapticFeedback.mediumImpact();
+    // `reason` is sent for the server's records; servers that do not store it yet ignore it
+    final res = await _api.patch('/orders/${o['id']}/status', {'status': 'CANCELLED', 'reason': reason});
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(res.ok
+          ? tr(context, 'Order #${o['id']} cancelled. The customer gets a full refund.', 'Tilaus #${o['id']} peruttu. Asiakas saa täyden hyvityksen.')
+          : res.errorMessage),
+    ));
     _loadOrders();
   }
 
@@ -382,7 +572,15 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             ])),
             Tab(text: tr(context, 'Products', 'Tuotteet')),
             Tab(text: tr(context, 'Drops', 'Julkaisut')),
-            Tab(text: tr(context, 'Store', 'Kauppa')),
+            Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Text(tr(context, 'Store', 'Kauppa')),
+              if (_openReturns > 0 || _store?['taxInfoComplete'] == false) ...[
+                const SizedBox(width: 6),
+                _openReturns > 0
+                    ? Semantics(label: tr(context, '$_openReturns open returns', '$_openReturns avointa palautusta'), child: _countBadge(_openReturns))
+                    : const CircleAvatar(radius: 4, backgroundColor: AppTheme.sunshine),
+              ],
+            ])),
           ],
         ),
       ),
@@ -440,12 +638,14 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     final active = _orders.where((o) => ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED'].contains(o['status'])).toList();
     final done = _orders.where((o) => !active.contains(o)).take(30).toList();
     return RefreshIndicator(
-      onRefresh: _loadOrders,
+      onRefresh: () => Future.wait([_loadOrders(), _loadReturns(), PushService.instance.refreshPermission()]),
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
         children: [
+          _notificationsOffBar(),
           _availabilityCard(),
+          _taxInfoBanner(),
           // First load: placeholders, or what went wrong. Later failures keep the list and show a strip.
           if (!_ordersLoaded && _ordersError != null) ErrorState(message: _ordersError, onRetry: _retryOrders, top: 24),
           if (!_ordersLoaded && _ordersError == null) ...[for (var i = 0; i < 3; i++) SkeletonCard(lines: 4, button: i == 0)],
@@ -461,7 +661,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             ),
           for (final o in active) _orderCard(o),
           if (done.isNotEmpty) Padding(padding: const EdgeInsets.fromLTRB(4, 16, 4, 8), child: Text(tr(context, 'Earlier', 'Aiemmat'), style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.textSecondary))),
-          for (final o in done) _orderCard(o),
+          for (final o in done) _orderCard(o, earlier: true),
         ],
       ),
     );
@@ -631,12 +831,35 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     _loadOrders();
   }
 
-  Widget _orderCard(Map<String, dynamic> o) {
+  /// The courier checked in at the shop (POST /orders/:id/arrived-at-store) and waits for this order.
+  Widget _courierAtCounter(Map<String, dynamic> o, DateTime since) => Container(
+        margin: const EdgeInsets.only(top: 10),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(14)),
+        child: Row(children: [
+          const Icon(Icons.directions_bike_rounded, color: AppTheme.textPrimary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              tr(context, 'Courier at the counter since ${_hhmm(since)}', 'Lähetti tiskillä klo ${_hhmm(since)}'),
+              style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.textPrimary),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // The number the courier asks for
+          Text('#${o['id']}', style: AppTheme.display(size: 26)),
+        ]),
+      );
+
+  String _hhmm(DateTime d) => '${d.hour.toString().padLeft(2, '0')}.${d.minute.toString().padLeft(2, '0')}';
+
+  Widget _orderCard(Map<String, dynamic> o, {bool earlier = false}) {
     final status = o['status'];
     final items = (o['items'] as List?) ?? [];
     final created = DateTime.tryParse('${o['createdAt']}')?.toLocal();
     final pickup = _isPickup(o);
     final collectedAt = DateTime.tryParse('${o['collectedAt'] ?? o['deliveredAt'] ?? ''}')?.toLocal();
+    final courierArrived = DateTime.tryParse('${o['courierArrivedAt'] ?? ''}')?.toLocal();
     // Status as a soft pill: new orders are sunny so they stand out, active ones green, finished grey
     final (label, bg, fg) = switch (status) {
       'PENDING' => (tr(context, 'New — accept or decline', 'Uusi — hyväksy tai hylkää'), AppTheme.sunshine, AppTheme.textPrimary),
@@ -665,10 +888,38 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(children: [
-            Text('#${o['id']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
-            if (created != null) Text('  ${created.hour.toString().padLeft(2, '0')}.${created.minute.toString().padLeft(2, '0')}', style: const TextStyle(color: AppTheme.textSecondary)),
+            // Large, so it is easy to match with the courier's or customer's order number
+            Text('#${o['id']}', style: AppTheme.display(size: 24)),
+            if (created != null)
+              Flexible(
+                child: Text(
+                  '  ${earlier ? '${created.day}.${created.month}.${created.year == DateTime.now().year ? '' : created.year} ${_hhmm(created)}' : _when(created)}',
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: AppTheme.textSecondary),
+                ),
+              ),
             const Spacer(),
             Text(euro(context, o['subtotalCents']), style: const TextStyle(fontWeight: FontWeight.w800)),
+            if (_canCancelAccepted(o))
+              PopupMenuButton<String>(
+                tooltip: tr(context, 'More', 'Lisää'),
+                icon: const Icon(Icons.more_vert_rounded),
+                onSelected: (_) => _cancelAccepted(o),
+                itemBuilder: (ctx) => [
+                  PopupMenuItem(
+                    value: 'cancel',
+                    height: 52,
+                    child: Row(children: [
+                      const Icon(Icons.cancel_outlined, color: _red),
+                      const SizedBox(width: 10),
+                      Flexible(
+                        child: Text(tr(ctx, 'Can\'t fulfil — cancel and refund', 'En voi toimittaa — peru ja palauta rahat'),
+                            style: const TextStyle(color: _red, fontWeight: FontWeight.w700)),
+                      ),
+                    ]),
+                  ),
+                ],
+              ),
           ]),
           const SizedBox(height: 8),
           Wrap(spacing: 6, runSpacing: 6, children: [
@@ -680,6 +931,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             ),
           ]),
           if (_isWaiting(o)) _waitingNote(o),
+          if (courierArrived != null && !pickup && ['CONFIRMED', 'PROCESSING'].contains(status)) _courierAtCounter(o, courierArrived),
           const Divider(height: 20),
           for (final i in items) _itemLine(i as Map),
           if ((asInt(o['tipCents']) ?? 0) > 0)
@@ -692,7 +944,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                     style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
               ]),
             ),
-          if (o['courier'] != null && ['CONFIRMED', 'PROCESSING'].contains(status))
+          if (o['courier'] != null && courierArrived == null && ['CONFIRMED', 'PROCESSING'].contains(status))
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text('${tr(context, 'Courier', 'Kuriiri')} ${(o['courier']['name'] ?? '').toString().split(' ').first} ${tr(context, 'is on the way to you', 'on matkalla luoksesi')}',
@@ -701,7 +953,13 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           if (status == 'PENDING') ...[
             const SizedBox(height: 12),
             Row(children: [
-              Expanded(child: OutlinedButton(onPressed: () => _setStatus(o, 'CANCELLED'), child: Text(tr(context, 'Decline', 'Hylkää')))),
+              Expanded(
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(foregroundColor: _red, side: const BorderSide(color: _red, width: 1.5)),
+                  onPressed: () => _setStatus(o, 'CANCELLED'),
+                  child: Text(tr(context, 'Decline', 'Hylkää')),
+                ),
+              ),
               const SizedBox(width: 10),
               Expanded(flex: 2, child: FilledButton(onPressed: () => _setStatus(o, 'CONFIRMED'), child: Text(tr(context, 'Accept', 'Hyväksy')))),
             ]),
@@ -791,9 +1049,75 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     return p['salePriceCents'] == null || ((p['images'] as List?) ?? const []).isEmpty;
   }
 
+  // Search and filters work on the list /stores/my returns (all of the store's products; paging would need
+  // a paged product endpoint for owners).
+  final _productSearch = TextEditingController();
+  String _productFilter = 'all';
+
+  int _stockOf(Map p) {
+    final variants = (p['variants'] as List?) ?? const [];
+    return variants.isEmpty ? (asInt(p['stockQuantity']) ?? 0) : variants.whereType<Map>().fold<int>(0, (s, v) => s + (asInt(v['stock']) ?? 0));
+  }
+
+  bool _matchesFilter(Map<String, dynamic> p) {
+    final q = _productSearch.text.trim().toLowerCase();
+    if (q.isNotEmpty && !'${p['name'] ?? ''}'.toLowerCase().contains(q)) return false;
+    return switch (_productFilter) {
+      'visible' => p['isAvailable'] != false,
+      'drafts' => _isDraft(p),
+      'soldout' => !_isDraft(p) && (p['isAvailable'] == false || _stockOf(p) == 0),
+      _ => true,
+    };
+  }
+
+  Widget _productFilters(int shown, int total) {
+    final filters = {
+      'all': tr(context, 'All', 'Kaikki'),
+      'visible': tr(context, 'Visible', 'Näkyvillä'),
+      'drafts': tr(context, 'Drafts', 'Luonnokset'),
+      'soldout': tr(context, 'Sold out', 'Loppuneet'),
+    };
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      TextField(
+        controller: _productSearch,
+        textInputAction: TextInputAction.search,
+        onChanged: (_) => setState(() {}),
+        decoration: InputDecoration(
+          hintText: tr(context, 'Search your products', 'Hae tuotteistasi'),
+          prefixIcon: const Icon(Icons.search_rounded),
+          suffixIcon: _productSearch.text.isEmpty
+              ? null
+              : IconButton(
+                  tooltip: tr(context, 'Clear', 'Tyhjennä'),
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => setState(_productSearch.clear),
+                ),
+        ),
+      ),
+      const SizedBox(height: 10),
+      Wrap(spacing: 8, runSpacing: 4, children: [
+        for (final f in filters.entries)
+          ChoiceChip(
+            label: Text(f.value),
+            selected: _productFilter == f.key,
+            showCheckmark: false,
+            materialTapTargetSize: MaterialTapTargetSize.padded,
+            onSelected: (_) => setState(() => _productFilter = f.key),
+          ),
+      ]),
+      if (shown != total)
+        Padding(
+          padding: const EdgeInsets.only(top: 6, left: 4),
+          child: Text(tr(context, '$shown of $total products', '$shown/$total tuotetta'), style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary)),
+        ),
+      const SizedBox(height: 6),
+    ]);
+  }
+
   Widget _productsTab() {
-    final products = ((_store?['products'] as List?) ?? []).map((p) => Map<String, dynamic>.from(p)).toList();
-    if (products.isEmpty) {
+    final all = ((_store?['products'] as List?) ?? []).whereType<Map>().map((p) => Map<String, dynamic>.from(p)).toList();
+    final products = all.where(_matchesFilter).toList();
+    if (all.isEmpty) {
       // Pull to refresh works here too (e.g. after importing on another phone)
       return RefreshIndicator(
         onRefresh: _load,
@@ -836,13 +1160,20 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       child: ListView.separated(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-        itemCount: products.length,
+        itemCount: products.length + 1 + (products.isEmpty ? 1 : 0),
         separatorBuilder: (_, __) => const SizedBox(height: 10),
-        itemBuilder: (_, i) {
-          final p = products[i];
-          final images = (p['images'] as List?)?.cast<String>() ?? const [];
+        itemBuilder: (_, index) {
+          if (index == 0) return _productFilters(products.length, all.length);
+          if (products.isEmpty) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 32),
+              child: Text(tr(context, 'No products match.', 'Ei osuvia tuotteita.'), textAlign: TextAlign.center, style: const TextStyle(color: AppTheme.textSecondary)),
+            );
+          }
+          final p = products[index - 1];
+          final images = ((p['images'] as List?) ?? const []).map((e) => '$e').toList();
           final variants = (p['variants'] as List?) ?? [];
-          final stock = variants.isEmpty ? (asInt(p['stockQuantity']) ?? 0) : variants.fold<int>(0, (s, v) => s + (asInt(v['stock']) ?? 0));
+          final stock = _stockOf(p);
           final available = p['isAvailable'] != false;
           final draft = _isDraft(p);
           final noPrice = p['salePriceCents'] == null;
@@ -922,14 +1253,19 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     final week = paid.where((o) => (DateTime.tryParse('${o['createdAt']}') ?? DateTime(2000)).isAfter(weekAgo)).toList();
     final weekSales = week.fold<int>(0, (s, o) => s + (asInt(o['subtotalCents']) ?? 0));
     final reviews = asInt(_store?['totalReviews']) ?? 0;
-    Widget tile(IconData icon, String title, String subtitle, VoidCallback onTap) => ListTile(
+    Widget tile(IconData icon, String title, String subtitle, VoidCallback onTap, {Widget? badge}) => ListTile(
           leading: CircleAvatar(backgroundColor: AppTheme.primaryLight, child: Icon(icon, color: AppTheme.primary)),
           title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
           subtitle: Text(subtitle),
-          trailing: const Icon(Icons.chevron_right_rounded),
+          trailing: badge == null
+              ? const Icon(Icons.chevron_right_rounded)
+              : Row(mainAxisSize: MainAxisSize.min, children: [badge, const Icon(Icons.chevron_right_rounded)]),
           onTap: onTap,
         );
-    return ListView(
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       children: [
         Row(children: [
@@ -947,8 +1283,32 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                 tr(context, 'Through Stripe · commission ${commissionText(_store?['commissionRate'] as num?)}', 'Stripen kautta · provisio ${commissionText(_store?['commissionRate'] as num?)}'),
                 () => Navigator.push(context, MaterialPageRoute(builder: (_) => PayoutsScreen(commissionRate: _store?['commissionRate'] as num?)))),
             const Divider(height: 1),
-            tile(Icons.assignment_return_outlined, tr(context, 'Returns', 'Palautukset'), tr(context, 'Approve and refund returns', 'Hyväksy ja hyvitä palautukset'),
-                () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ReturnsManager()))),
+            tile(
+              Icons.assignment_return_outlined,
+              tr(context, 'Returns', 'Palautukset'),
+              _openReturns > 0
+                  ? tr(context, '$_openReturns open — answer them in the app', '$_openReturns avointa — käsittele ne sovelluksessa')
+                  : tr(context, 'Approve and refund returns', 'Hyväksy ja hyvitä palautukset'),
+              () async {
+                await Navigator.push(context, MaterialPageRoute(builder: (_) => const ReturnsManager()));
+                if (mounted) _loadReturns();
+              },
+              badge: _openReturns > 0 ? _countBadge(_openReturns) : null,
+            ),
+            const Divider(height: 1),
+            tile(Icons.calendar_month_outlined, tr(context, 'Monthly statements', 'Kuukausiraportit'),
+                tr(context, 'Sales, commission, refunds and payouts per month', 'Myynti, provisio, hyvitykset ja tilitykset kuukausittain'),
+                () => Navigator.push(context, MaterialPageRoute(builder: (_) => const StatementsScreen()))),
+            const Divider(height: 1),
+            tile(
+              Icons.receipt_long_outlined,
+              tr(context, 'Tax information', 'Verotiedot'),
+              _store?['taxInfoComplete'] == false
+                  ? tr(context, 'Missing — required by EU law (DAC7)', 'Puuttuu — EU-laki (DAC7) edellyttää')
+                  : tr(context, 'Reported to the Finnish Tax Administration (DAC7)', 'Ilmoitetaan Verohallinnolle (DAC7)'),
+              _openTaxInfo,
+              badge: _store?['taxInfoComplete'] == false ? const CircleAvatar(radius: 5, backgroundColor: AppTheme.sunshine) : null,
+            ),
             const Divider(height: 1),
             tile(Icons.schedule_rounded, tr(context, 'Opening hours', 'Aukioloajat'),
                 _store?['openingHours'] == null ? tr(context, 'Not set — open whenever orders are on', 'Ei asetettu — auki aina, kun tilaukset ovat päällä') : tr(context, 'Closed automatically outside them', 'Suljettu automaattisesti niiden ulkopuolella'),
@@ -985,6 +1345,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           label: Text(tr(context, 'Sign out', 'Kirjaudu ulos')),
         ),
       ],
+    ),
     );
   }
 

@@ -5,7 +5,14 @@ Three apps, one developer account:
 - `com.malvoya.vendor` — "Malvoya Store"
 - `com.malvoya.courier` — "Malvoya Courier"
 
-Build number rule: every upload needs a higher `+N` in `pubspec.yaml` (`1.2.0+4` is the current build).
+Build number rule: every upload needs a higher `+N` in `pubspec.yaml` (`1.6.0+8` is the current build).
+
+## Detailed guides (updated 2026-10-15)
+
+- **[Release checklist](play-store-release-checklist.md)**: account type, blockers to fix first, App content forms, upload, Play App Signing and `ANDROID_APP_SHA256`, internal → closed → production, review times, common rejection reasons.
+- **[Data safety answers](play-data-safety.md)**: per-app answers, deletion paths, the missing web deletion page (with draft text), and mismatches between the code and the privacy policy. **Replaces section 4 below.**
+- **[Permissions and declarations](play-permissions.md)**: every permission in the merged manifests, the disclosure text that exists, the missing courier location dialog, and the foreground-service declaration text. **Replaces the location bullet in section 5.**
+- **[Store listing copy](play-store-listing.md)**: titles, short and full descriptions (English and Finnish, character-counted), screenshot plans and feature graphic briefs. **Replaces section 3 below.**
 
 ## 1. Before the first upload
 
@@ -25,7 +32,7 @@ Build number rule: every upload needs a higher `+N` in `pubspec.yaml` (`1.2.0+4`
 2. **Firebase App Distribution**: upload the `.apk` files for testers outside Play.
 3. **Closed testing**: new personal developer accounts must run a closed test with at least 12 testers for 14 days before production access.
 
-## 3. Store listing — suggested copy
+## 3. Store listing — suggested copy (superseded: see [play-store-listing.md](play-store-listing.md))
 
 **Malvoya:** *Local fashion, delivered today.*
 Shop independent boutiques, vintage and second-hand stores near you. Secure payment, live courier tracking, 14-day returns.
@@ -41,7 +48,9 @@ Assets per app:
 - 1024 × 500 feature graphic
 - at least 2 phone screenshots
 
-## 4. Data safety form (must match the privacy policy)
+## 4. Data safety form (superseded: see [play-data-safety.md](play-data-safety.md))
+
+> Out of date. In Play's terms, card details typed into Stripe's PaymentSheet count as **collected** "User payment info". The store app also collects messages, files (CSV import) and business details. Use the new doc.
 
 | Data type | Customer | Store | Courier | Purpose | Shared with |
 |---|---|---|---|---|---|
@@ -63,7 +72,7 @@ Assets per app:
 
 - **Content rating:** shopping. Stores post public videos and photos (drops) and customers post reviews: answer **yes** to user-generated content, with reporting in the app and human moderation (admin panel → Moderation). Chat is 1:1, tied to an order and not stored.
 - **Target audience:** 18+.
-- **Location permission** (courier): no background-location permission. While online, the app runs a **foreground service of type location** with a permanent notification. Play Console → App content → *Foreground service permissions*: declare `FOREGROUND_SERVICE_LOCATION` with the use case "navigation / delivery tracking while the courier is online" and a short video of going online, the notification appearing, and going offline.
+- **Location permission** (courier): no background-location permission. While online, the app runs a **foreground service of type location** with a permanent notification. Play Console → App content → *Foreground service permissions*: declare `FOREGROUND_SERVICE_LOCATION`. The text to paste, the use case and the video script are in [play-permissions.md](play-permissions.md). Add the location disclosure dialog to the courier app first.
 - **Camera/photos:** the store and courier apps use the system photo picker and camera app (no camera or storage permission declared).
 - **Financial features:** none (payments are handled by Stripe).
-- **Account deletion URL:** required by Play, e.g. `https://malvoya.com/delete-account`, describing the in-app option.
+- **Account deletion URL:** required by Play. **Do not use `malvoya.com`**: we don't control that domain. Add `https://malvoya-api-eu.onrender.com/legal/delete-account` instead. See [play-data-safety.md](play-data-safety.md#web-deletion-page-required-does-not-exist).

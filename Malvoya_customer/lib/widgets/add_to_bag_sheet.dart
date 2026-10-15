@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../cart.dart';
+import '../checkout.dart';
 import '../config/theme.dart';
 import '../core/strings.dart';
 import '../models.dart';
@@ -11,16 +12,85 @@ import 'price_tag.dart';
 String variantLabel(Map v) => [v['size'], v['color']].where((x) => x != null && '$x'.isNotEmpty).join(' · ');
 
 /// Choose a size/colour and add the product to the bag. Returns true when something was added.
+/// A product without sizes or colours is added straight away (no sheet).
 Future<bool> showAddToBagSheet(BuildContext context, Map<String, dynamic> product, {Map<String, dynamic>? store}) async {
   HapticFeedback.selectionClick();
+  final shop = store ?? (product['store'] as Map?)?.cast<String, dynamic>();
+  final variants = product['variants'];
+  // Only when the payload says so: a product sent without its options still gets the sheet
+  if (variants is List && variants.isEmpty && product['inStock'] != false && asInt(product['id']) != null) {
+    return addProductToBag(context, product, store: shop);
+  }
   final added = await showModalBottomSheet<bool>(
     showDragHandle: false,
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (_) => _AddToBagSheet(product: product, store: store ?? (product['store'] as Map?)?.cast<String, dynamic>()),
+    builder: (_) => _AddToBagSheet(product: product, store: shop),
   );
   return added == true;
+}
+
+/// One order comes from one store: asks before a bag from another store is replaced.
+/// Returns null when the customer keeps their bag, otherwise whether the bag must be cleared.
+Future<bool?> confirmBagStore(BuildContext context, int? storeId) async {
+  final cart = Provider.of<CartService>(context, listen: false);
+  if (cart.canAddDirectly(storeId)) return false;
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(tr(context, 'Start a new bag?', 'Aloitetaanko uusi ostoskassi?')),
+      content: Text(tr(
+        context,
+        'Your bag has items from ${cart.storeName ?? 'another store'}. One order comes from one store, so starting a new bag removes them.',
+        'Kassissasi on tuotteita kaupasta ${cart.storeName ?? 'toinen kauppa'}. Yksi tilaus tulee yhdestä kaupasta, joten uusi kassi poistaa ne.',
+      )),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(context, 'Keep my bag', 'Pidä kassi'))),
+        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(tr(context, 'New bag', 'Uusi kassi'))),
+      ],
+    ),
+  );
+  return ok == true ? true : null;
+}
+
+/// Adds a product (and the chosen option) to the bag, asking first if the bag is from another store.
+Future<bool> addProductToBag(BuildContext context, Map<String, dynamic> product, {Map<String, dynamic>? store, Map<String, dynamic>? variant}) async {
+  final storeId = asInt(store?['id'] ?? product['storeId'] ?? product['store']?['id']);
+  final clear = await confirmBagStore(context, storeId);
+  if (clear == null || !context.mounted) return false;
+  final price = asInt(variant?['priceCents']) ?? asInt(product['pricing']?['priceCents']) ?? 0;
+  final images = (product['images'] as List?)?.cast<String>() ?? const [];
+  HapticFeedback.mediumImpact();
+  Provider.of<CartService>(context, listen: false).add(
+    CartItem(
+      productId: asInt(product['id'])!,
+      variantId: asInt(variant?['id']),
+      storeId: storeId,
+      storeName: (store?['name'] ?? product['store']?['name'] ?? '').toString(),
+      name: '${product['name'] ?? ''}',
+      variantLabel: variant == null ? null : variantLabel(variant),
+      imageUrl: images.isNotEmpty ? images.first : null,
+      price: price / 100.0,
+    ),
+    forceClear: clear,
+  );
+  return true;
+}
+
+/// "Added to your bag" with a shortcut to the bag.
+void showAddedToBag(BuildContext context) {
+  final messenger = ScaffoldMessenger.of(context);
+  final navigator = Navigator.of(context);
+  messenger.hideCurrentSnackBar();
+  messenger.showSnackBar(SnackBar(
+    content: Text(tr(context, 'Added to your bag', 'Lisätty ostoskassiin')),
+    behavior: SnackBarBehavior.floating,
+    action: SnackBarAction(
+      label: tr(context, 'View bag', 'Näytä ostoskassi'),
+      onPressed: () => navigator.push(MaterialPageRoute(builder: (_) => const CheckoutPage())),
+    ),
+  ));
 }
 
 class _AddToBagSheet extends StatefulWidget {
@@ -52,54 +122,9 @@ class _AddToBagSheetState extends State<_AddToBagSheet> {
     if (inStock.length == 1) _variantId = asInt(inStock.first['id']);
   }
 
-  void _add() {
-    final cart = Provider.of<CartService>(context, listen: false);
-    final storeId = asInt(widget.store?['id'] ?? widget.product['storeId']);
-    final storeName = (widget.store?['name'] ?? '').toString();
-    final chosen = _selected;
-    final price = asInt(chosen?['priceCents']) ?? asInt(widget.product['pricing']?['priceCents']) ?? 0;
-    final images = (widget.product['images'] as List?)?.cast<String>() ?? const [];
-
-    void doAdd({bool clear = false}) {
-      HapticFeedback.mediumImpact();
-      cart.add(
-        CartItem(
-          productId: asInt(widget.product['id'])!,
-          variantId: asInt(chosen?['id']),
-          storeId: storeId,
-          storeName: storeName,
-          name: widget.product['name'] ?? '',
-          variantLabel: chosen == null ? null : variantLabel(chosen),
-          imageUrl: images.isNotEmpty ? images.first : null,
-          price: price / 100.0,
-        ),
-        forceClear: clear,
-      );
-      Navigator.pop(context, true);
-    }
-
-    if (cart.canAddDirectly(storeId)) return doAdd();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(tr(context, 'Start a new bag?', 'Aloitetaanko uusi ostoskassi?')),
-        content: Text(tr(
-          context,
-          'Your bag has items from ${cart.storeName ?? 'another store'}. One order comes from one store, so starting a new bag removes them.',
-          'Kassissasi on tuotteita kaupasta ${cart.storeName ?? 'toinen kauppa'}. Yksi tilaus tulee yhdestä kaupasta, joten uusi kassi poistaa ne.',
-        )),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr(context, 'Keep my bag', 'Pidä kassi'))),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              doAdd(clear: true);
-            },
-            child: Text(tr(context, 'New bag', 'Uusi kassi')),
-          ),
-        ],
-      ),
-    );
+  Future<void> _add() async {
+    final added = await addProductToBag(context, widget.product, store: widget.store, variant: _selected);
+    if (added && mounted) Navigator.pop(context, true);
   }
 
   @override

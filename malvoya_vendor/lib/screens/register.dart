@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/strings.dart';
-import 'pending_approval.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -42,12 +41,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
       'VENDOR',
     );
 
-    if (mounted) {
-      if (err != null) {
-        setState(() { _error = err; _loading = false; });
-      } else {
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const PendingApprovalScreen()));
-      }
+    // On success the app's home switches to the welcome screen by itself and closes this one
+    if (mounted && err != null) {
+      setState(() { _error = err; _loading = false; });
     }
   }
 

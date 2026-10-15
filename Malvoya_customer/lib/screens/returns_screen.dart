@@ -40,6 +40,10 @@ Map<String, String> _statusLabels(BuildContext context) => {
 
 class _ReturnsScreenState extends State<ReturnsScreen> {
   List<Map<String, dynamic>> _returns = [];
+
+  /// The store of each order with an approved return (name, address, phone from the order), for
+  /// "how to send it back".
+  Map<int, Map<String, dynamic>> _stores = {};
   bool _loading = true;
   String? _error;
 
@@ -78,6 +82,22 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
         _error = res.errorText(context) ?? tr(context, 'Could not load returns.', 'Palautuksia ei voitu ladata.');
       }
     });
+    if (res.ok) _loadReturnStores();
+  }
+
+  /// Where approved returns go back to: the store's details as the order shows them.
+  Future<void> _loadReturnStores() async {
+    final ids = _returns.where((r) => r['status'] == 'APPROVED').map((r) => asInt(r['orderId'])).whereType<int>().toSet();
+    if (ids.isEmpty) return;
+    final stores = <int, Map<String, dynamic>>{};
+    for (final id in ids.take(5)) {
+      final res = await _api.get('/orders/$id');
+      if (!mounted) return;
+      final order = res.data['order'];
+      final store = res.ok && order is Map ? order['store'] : null;
+      if (store is Map) stores[id] = Map<String, dynamic>.from(store);
+    }
+    if (mounted && stores.isNotEmpty) setState(() => _stores = stores);
   }
 
   // ── What can still be returned ──────────────────────────────────────────
@@ -489,6 +509,61 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
     );
   }
 
+  /// After approval: send or bring the items back to the store, using the store's own details.
+  Widget _nextSteps(Map<String, dynamic> r) {
+    final store = _stores[asInt(r['orderId'])] ?? (r['order']?['store'] is Map ? Map<String, dynamic>.from(r['order']['store']) : const {});
+    final name = '${store['name'] ?? ''}'.trim();
+    final address = '${store['address'] ?? ''}'.trim();
+    final phone = '${store['phone'] ?? ''}'.trim();
+    final storeEn = name.isEmpty ? 'the store' : name;
+    final storeFi = name.isEmpty ? 'kauppaan' : 'kauppaan $name';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine),
+        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(tr(context, 'Next: send the items back', 'Seuraavaksi: palauta tuotteet'),
+              style: TextStyle(fontWeight: FontWeight.w800, color: AppTheme.primaryText(context))),
+          const SizedBox(height: 6),
+          Text(
+            tr(context, 'The store approved your return. Bring or send the items back to $storeEn. The store refunds you once it has received them.',
+                'Kauppa hyväksyi palautuksesi. Tuo tai lähetä tuotteet takaisin $storeFi. Kauppa maksaa hyvityksen, kun se on vastaanottanut tuotteet.'),
+            style: TextStyle(fontSize: 13, height: 1.4, color: AppTheme.primaryText(context)),
+          ),
+          if (address.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(Icons.storefront_rounded, size: 16, color: AppTheme.primaryText(context)),
+              const SizedBox(width: 6),
+              Expanded(child: SelectableText(address, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.primaryText(context)))),
+            ]),
+          ],
+          if (phone.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(Icons.phone_outlined, size: 16, color: AppTheme.primaryText(context)),
+              const SizedBox(width: 6),
+              Expanded(child: SelectableText(phone, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.primaryText(context)))),
+            ]),
+          ],
+          if (address.isEmpty && phone.isEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              tr(context, 'The store’s address is not shown here. Ask Malvoya support (Profile → Help) how to send it back.',
+                  'Kaupan osoite ei näy tässä. Kysy Malvoyan tuelta (Profiili → Apua), miten palautat tuotteet.'),
+              style: TextStyle(fontSize: 12.5, height: 1.35, color: AppTheme.primaryText(context)),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _returnCard(Map<String, dynamic> r, Color cardColor, Color secondary) {
     final status = r['status']?.toString() ?? 'REQUESTED';
     final refunded = asInt(r['refundCents']);
@@ -524,6 +599,12 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
           ),
           const SizedBox(height: 6),
           Text(_reasons(context)[r['reason']] ?? '${r['reason'] ?? ''}', style: TextStyle(color: secondary, fontSize: 13)),
+          if ('${r['conditionNote'] ?? ''}'.trim().isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('${tr(context, 'Note', 'Huomautus')}: ${'${r['conditionNote']}'.trim()}',
+                  style: TextStyle(fontSize: 13, color: AppTheme.primaryText(context), height: 1.35)),
+            ),
           if (lines.isNotEmpty) ...[
             const SizedBox(height: 8),
             for (final l in lines)
@@ -547,6 +628,10 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
             const SizedBox(height: 6),
             Text('${tr(context, 'Expected refund', 'Odotettu hyvitys')} ${euro(context, expected)}',
                 style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppTheme.primaryText(context))),
+          ],
+          if (status == 'APPROVED') ...[
+            const SizedBox(height: 12),
+            _nextSteps(r),
           ],
         ],
       ),

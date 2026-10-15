@@ -15,6 +15,7 @@ import '../core/network_status.dart';
 import '../core/media_sound.dart';
 import '../core/report_reasons.dart';
 import '../core/strings.dart';
+import '../core/sign_in.dart';
 import '../widgets/add_to_bag_sheet.dart';
 import '../widgets/drop_comments_sheet.dart';
 import '../widgets/price_tag.dart';
@@ -52,6 +53,9 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   bool _loadingMore = false;
   bool _hasMore = true;
   String? _error;
+
+  /// "Following" while signed out: the feed needs an account, so it asks to sign in.
+  bool _needsSignIn = false;
   int _index = 0;
   bool get _muted => !MediaSound.instance.on;
   bool _paused = false;
@@ -131,16 +135,26 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   // ── Data ────────────────────────────────────────────────────────────────
 
   Future<void> _load({bool reset = false}) async {
+    final auth = Provider.of<AuthService>(context, listen: false);
     if (reset) {
       setState(() {
         _loading = true;
         _error = null;
+        _needsSignIn = false;
       });
     } else {
       if (_loadingMore || !_hasMore) return;
       _loadingMore = true;
     }
-    final auth = Provider.of<AuthService>(context, listen: false);
+    if (_mode == 'following' && !widget.standalone && !auth.isAuthenticated) {
+      setState(() {
+        _needsSignIn = true;
+        _drops.clear();
+        _loading = false;
+        _loadingMore = false;
+      });
+      return;
+    }
     final res = await ApiClient(auth).get(widget.standalone ? '/stores/${widget.storeId}/drops' : '/drops/feed', query: {
       'mode': _mode,
       'limit': '8',
@@ -153,11 +167,24 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
       setState(() {
         _loading = false;
         _loadingMore = false;
-        if (reset) _error = res.error;
+        if (reset && res.status == 401 && _mode == 'following') {
+          _needsSignIn = true;
+        } else if (reset) {
+          _error = res.errorText(context);
+        }
       });
       return;
     }
-    final incoming = ((res.data['drops'] as List?) ?? []).map((d) => Map<String, dynamic>.from(d)).toList();
+    final incoming = ((res.data['drops'] as List?) ?? []).whereType<Map>().map((d) => Map<String, dynamic>.from(d)).toList();
+    final startId = widget.startDropId;
+    if (reset && startId != null && !incoming.any((d) => asInt(d['id']) == startId)) {
+      // The drop that was tapped is not on the first page: fetch it and show it first
+      final one = await ApiClient(auth).get('/drops/$startId', query: DeliveryLocation.instance.query);
+      if (!mounted) return;
+      if (one.ok && one.data['drop'] is Map) incoming.insert(0, Map<String, dynamic>.from(one.data['drop']));
+    }
+    // Later pages never repeat a drop already in the list (e.g. the one shown first)
+    if (!reset) incoming.removeWhere((d) => _drops.any((x) => asInt(x['id']) == asInt(d['id'])));
     setState(() {
       if (reset) {
         for (final c in _videos.values) {
@@ -310,9 +337,9 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     if (!mounted) return;
     if (!res.ok) {
       setState(() => _setFollowed(storeId, !next));
-      _snack(res.error!);
+      _snack(res.errorText(context)!);
     } else if (next) {
-      _snack(tr(context, 'Following. New drops from this store appear in Following.', 'Seuraat kauppaa. Sen uudet julkaisut näkyvät Seuratut-välilehdellä.'));
+      _snack(tr(context, 'Following. New drops from this store appear in Following.', 'Seuraat kauppaa. Sen uudet dropit näkyvät Seuratut-välilehdellä.'));
     }
   }
 
@@ -384,7 +411,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
 
   Future<void> _addToBag(Map<String, dynamic> drop) async {
     final added = await showAddToBagSheet(context, Map<String, dynamic>.from(drop['product']), store: Map<String, dynamic>.from(drop['store']));
-    if (added && mounted) _snack(tr(context, 'Added to your bag', 'Lisätty kassiin'));
+    if (added && mounted) showAddedToBag(context);
   }
 
   void _report(Map<String, dynamic> drop) {
@@ -399,7 +426,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-              child: Text(tr(context, 'Report this drop', 'Ilmoita julkaisusta'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+              child: Text(tr(context, 'Report this drop', 'Ilmoita dropista'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -417,7 +444,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                   final res = await ApiClient(Provider.of<AuthService>(context, listen: false))
                       .post('/drops/${drop['id']}/report', {'reason': e.key});
                   if (mounted) {
-                    _snack(res.ok ? tr(context, 'Thanks — we will review it.', 'Kiitos — tarkistamme sen.') : res.error!);
+                    _snack(res.ok ? tr(context, 'Thanks — we will review it.', 'Kiitos — tarkistamme sen.') : res.errorText(context)!);
                   }
                 },
               ),
@@ -445,7 +472,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
             Text(
               tr(context,
                   '"For you" ranks drops by how new they are, how people respond to them (likes, shares, full views), how close the store is to your delivery address and the store\'s rating. We do not build a profile of you. "Latest" shows the newest drops first, nothing else.',
-                  '"Sinulle" järjestää julkaisut sen mukaan, kuinka uusia ne ovat, miten ihmiset reagoivat niihin (tykkäykset, jaot, loppuun katsotut), kuinka lähellä kauppa on toimitusosoitettasi ja kaupan arvosanan perusteella. Emme profiloi sinua. "Uusimmat" näyttää uusimmat julkaisut ensin.'),
+                  '"Sinulle" järjestää dropit sen mukaan, kuinka uusia ne ovat, miten ihmiset reagoivat niihin (tykkäykset, jaot, loppuun katsotut), kuinka lähellä kauppa on toimitusosoitettasi ja kaupan arvosanan perusteella. Emme profiloi sinua. "Uusimmat" näyttää uusimmat dropit ensin.'),
               style: TextStyle(height: 1.45, color: AppTheme.secondaryText(context)),
             ),
             const SizedBox(height: 16),
@@ -477,6 +504,15 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
           children: [
             if (_loading)
               const Center(child: CircularProgressIndicator(color: Colors.white))
+            else if (_needsSignIn)
+              _message(
+                Icons.storefront_rounded,
+                tr(context, 'Sign in to see stores you follow', 'Kirjaudu sisään nähdäksesi seuraamasi kaupat'),
+                action: tr(context, 'Sign in / Create account', 'Kirjaudu / Luo tili'),
+                onTap: () async {
+                  if (await openSignIn(context) && mounted) _load(reset: true);
+                },
+              )
             else if (_error != null)
               _message(Icons.wifi_off_rounded, _error!, action: tr(context, 'Try again', 'Yritä uudelleen'), onTap: () => _load(reset: true))
             else if (_drops.isEmpty)
@@ -484,9 +520,9 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                 _mode == 'following' ? Icons.storefront_rounded : Icons.play_circle_outline_rounded,
                 _mode == 'following'
                     ? tr(context, 'Follow stores to see their new drops here. Tap + on a store in For you.',
-                        'Seuraa kauppoja nähdäksesi niiden uudet julkaisut täällä. Napauta kaupan +-merkkiä Sinulle-välilehdellä.')
+                        'Seuraa kauppoja nähdäksesi niiden uudet dropit täällä. Napauta kaupan +-merkkiä Sinulle-välilehdellä.')
                     : tr(context, 'No drops yet. When stores near you post videos, they show up here.',
-                        'Ei vielä julkaisuja. Kun lähialueen kaupat julkaisevat videoita, ne näkyvät täällä.'),
+                        'Ei vielä droppeja. Kun lähialueen kaupat julkaisevat videoita, ne näkyvät täällä.'),
                 action: tr(context, 'Refresh', 'Päivitä'),
                 onTap: () => _load(reset: true),
               )
@@ -570,6 +606,8 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16, shadows: [Shadow(blurRadius: 8, color: Colors.black54)])),
             ),
             IconButton(
+              tooltip: _muted ? tr(context, 'Sound on', 'Ääni päälle') : tr(context, 'Mute', 'Mykistä'),
+              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
               icon: Icon(_muted ? Icons.volume_off_rounded : Icons.volume_up_rounded, color: Colors.white),
               onPressed: _toggleMute,
             ),
@@ -609,6 +647,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
             ),
             IconButton(
               tooltip: _muted ? tr(context, 'Sound on', 'Ääni päälle') : tr(context, 'Mute', 'Mykistä'),
+              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
               icon: Icon(_muted ? Icons.volume_off_rounded : Icons.volume_up_rounded, color: Colors.white),
               onPressed: _toggleMute,
             ),
@@ -686,10 +725,12 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
             button: true,
             label: tooltip,
             child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
               onTap: onTap,
               child: Column(
                 children: [
-                  Icon(icon, size: 34, color: color, shadows: const [Shadow(blurRadius: 10, color: Colors.black54)]),
+                  // At least 48 px wide to tap
+                  SizedBox(width: 48, child: Icon(icon, size: 34, color: color, shadows: const [Shadow(blurRadius: 10, color: Colors.black54)])),
                   if (label != null)
                     Text(label,
                         style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700, shadows: [Shadow(blurRadius: 6, color: Colors.black54)])),
@@ -701,11 +742,15 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
 
     return Column(
       children: [
+        // The store's logo with a follow button overlapping its lower edge; the follow button has a
+        // full 48 px tap area inside the stack (taps outside a Stack's bounds are not received)
         Padding(
-          padding: const EdgeInsets.only(bottom: 24),
-          child: Stack(
-            clipBehavior: Clip.none,
-            alignment: Alignment.bottomCenter,
+          padding: const EdgeInsets.only(bottom: 8),
+          child: SizedBox(
+            width: 56,
+            height: 76,
+            child: Stack(
+            alignment: Alignment.topCenter,
             children: [
               GestureDetector(
                 onTap: () => _open(StoreDetailScreen(store: store)),
@@ -721,28 +766,37 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                 ),
               ),
               Positioned(
-                bottom: -10,
+                bottom: 0,
                 child: Semantics(
                   button: true,
                   label: store['followedByMe'] == true ? tr(context, 'Unfollow store', 'Lopeta seuraaminen') : tr(context, 'Follow store', 'Seuraa kauppaa'),
+                  excludeSemantics: true,
                   child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
                     onTap: () => _toggleFollow(drop),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      width: 22,
-                      height: 22,
-                      decoration: BoxDecoration(
-                        color: store['followedByMe'] == true ? Colors.white : AppTheme.primary,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 1.5),
+                    child: SizedBox(
+                      width: 48,
+                      height: 48,
+                      child: Center(
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: store['followedByMe'] == true ? Colors.white : AppTheme.primary,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 2),
+                          ),
+                          child: Icon(store['followedByMe'] == true ? Icons.check_rounded : Icons.add_rounded,
+                              size: 18, color: store['followedByMe'] == true ? AppTheme.primary : Colors.white),
+                        ),
                       ),
-                      child: Icon(store['followedByMe'] == true ? Icons.check_rounded : Icons.add_rounded,
-                          size: 15, color: store['followedByMe'] == true ? AppTheme.primary : Colors.white),
                     ),
                   ),
                 ),
               ),
             ],
+          ),
           ),
         ),
         action(liked ? Icons.favorite_rounded : Icons.favorite_border_rounded, _compact(drop['likeCount']), () => _toggleLike(drop),

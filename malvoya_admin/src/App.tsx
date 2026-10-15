@@ -13,6 +13,8 @@ import Payouts from './pages/Payouts';
 import Support from './pages/Support';
 import System from './pages/System';
 import PromoCodes from './pages/PromoCodes';
+import Analytics from './pages/Analytics';
+import Dac7 from './pages/Dac7';
 
 function RequireAuth({ children }: { children: React.ReactElement }) {
   const token = localStorage.getItem('token');
@@ -37,6 +39,8 @@ function App() {
         <Route path="/support"  element={<RequireAuth><Support /></RequireAuth>} />
         <Route path="/system"   element={<RequireAuth><System /></RequireAuth>} />
         <Route path="/promo-codes" element={<RequireAuth><PromoCodes /></RequireAuth>} />
+        <Route path="/analytics" element={<RequireAuth><Analytics /></RequireAuth>} />
+        <Route path="/dac7"     element={<RequireAuth><Dac7 /></RequireAuth>} />
         <Route path="*"         element={<Navigate to="/" replace />} />
       </Routes>
     </Router>

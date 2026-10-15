@@ -7,6 +7,7 @@ interface Vendor {
   id: number; name: string; category: string;
   email: string | null; isVerified: boolean;
   rating: number; commissionRate: number;
+  taxInfoComplete?: boolean; // DAC7 seller data given (GET/PUT /stores/my/tax-info in the store app)
   owner: { name: string; email: string };
   _count: { products: number; orders: number };
   createdAt: string;
@@ -114,7 +115,7 @@ export default function Vendors() {
           <table style={{ width:'100%', fontSize:'0.875rem', borderCollapse:'collapse' }}>
             <thead>
               <tr style={{ borderBottom:'1px solid #F5F5F7' }}>
-                {['Store','Owner','Category','Products','Orders','Commission','Status','Actions'].map(h => (
+                {['Store','Owner','Category','Products','Orders','Commission','Tax data','Status','Actions'].map(h => (
                   <th key={h} style={{ textAlign:'left',padding:'1rem 1.5rem',fontSize:'0.6875rem',fontWeight:500,color:'#8E8E93',textTransform:'uppercase',letterSpacing:'0.05em' }}>{h}</th>
                 ))}
               </tr>
@@ -155,6 +156,11 @@ export default function Vendors() {
                         {Math.round(v.commissionRate * 100)} % <Pencil style={{ width:'12px',height:'12px',color:'#0071E3' }} />
                       </button>
                     )}
+                  </td>
+                  <td style={{ padding:'1rem 1.5rem' }}>
+                    {v.taxInfoComplete
+                      ? <span className="badge-green" title="DAC7 identity and tax data complete">Complete</span>
+                      : <a href="#/dac7" className="badge-yellow" title="Missing DAC7 data: see the DAC7 page">Missing</a>}
                   </td>
                   <td style={{ padding:'1rem 1.5rem' }}>
                     {v.isVerified

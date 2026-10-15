@@ -2,10 +2,11 @@ import pino from "pino";
 import { prisma } from "../lib/prisma";
 import { haversineKm } from "../utils/distance";
 import { emitToAllCouriers, emitToCourier } from "../lib/socket";
-import { pushToUsers } from "../lib/push";
+import { pushToUser, pushToUsers } from "../lib/push";
 import { presentCourierPay } from "../utils/courierPay";
 import { freshPosition } from "../utils/courierPosition";
 import { env } from "../config/env";
+import { beforeDispatch, windowText } from "../utils/deliverySlots";
 
 const logger = pino({ name: "dispatch" });
 
@@ -28,11 +29,26 @@ export async function offerOrderToCouriers(orderId: number) {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
     omit: { courierPay: false },
-    include: { store: { select: { id: true, name: true, address: true, latitude: true, longitude: true } } },
+    include: { store: { select: { id: true, name: true, address: true, latitude: true, longitude: true, prepMinutes: true } } },
   });
   // Pickup orders are collected by the customer: couriers never see them
   if (!order || order.courierId || order.paymentStatus !== "SUCCEEDED" || order.fulfilment !== "DELIVERY") return;
   if (!["CONFIRMED", "PROCESSING"].includes(order.status)) return;
+  // Scheduled delivery: nobody is offered the job before slot start − prep time − 15 min (the watchdog starts it)
+  if (beforeDispatch(order, order.store.prepMinutes)) return;
+
+  // The first offer of a scheduled order: tell the customer, once (conditional update)
+  if (order.scheduledStart && order.scheduledEnd && !order.dispatchStartedAt) {
+    const claimed = await prisma.order.updateMany({ where: { id: orderId, dispatchStartedAt: null }, data: { dispatchStartedAt: new Date() } });
+    if (claimed.count) {
+      order.dispatchStartedAt = new Date();
+      pushToUser(order.userId, {
+        title: `Finding a courier for order #${order.id}`,
+        body: `Your delivery ${windowText(order.scheduledStart, order.scheduledEnd).en.replace(/^T/, "t")} is starting: we are offering it to couriers now.`,
+        data: { type: "order", orderId: String(order.id) },
+      }).catch(() => {});
+    }
+  }
 
   const offer = {
     orderId: order.id,
@@ -49,8 +65,11 @@ export async function offerOrderToCouriers(orderId: number) {
     // Before the courier accepts (Platform Work Directive). Ride to the shop: estimated per nearby courier,
     // fixed on acceptance; waiting at the shop is added at pickup.
     courierPay: presentCourierPay(order),
-    // When the job was first offered (the store accepted it)
-    offeredAt: order.confirmedAt ?? order.lastOfferAt ?? new Date(),
+    // When the job was first offered (the store accepted it, or dispatch for its slot started)
+    offeredAt: (order.scheduledStart ? order.dispatchStartedAt : order.confirmedAt) ?? order.lastOfferAt ?? new Date(),
+    // Scheduled delivery: hand it over within this window (null = as soon as possible)
+    scheduledStart: order.scheduledStart,
+    scheduledEnd: order.scheduledEnd,
     createdAt: order.createdAt,
   };
 

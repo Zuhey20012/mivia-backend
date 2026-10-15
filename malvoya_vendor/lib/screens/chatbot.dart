@@ -19,22 +19,39 @@ class ChatbotScreen extends StatefulWidget {
 class _ChatbotScreenState extends State<ChatbotScreen> {
   final _topic = TextEditingController();
   final _message = TextEditingController();
+  final _email = TextEditingController();
   bool _sending = false;
 
   @override
   void dispose() {
     _topic.dispose();
     _message.dispose();
+    _email.dispose();
     super.dispose();
   }
 
+  /// Phone sign-ins have no real email address (the server stores a placeholder), so they give one here.
+  bool get _needsEmail {
+    final email = Provider.of<AuthService>(context, listen: false).currentUser?.email ?? '';
+    return email.isEmpty || email.endsWith('@phone.malvoya.app');
+  }
+
   Future<void> _send() async {
-    if (_message.text.trim().length < 5) return;
+    if (_message.text.trim().length < 5) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr(context, 'Write a few words about what you need.', 'Kirjoita muutama sana siitä, mitä tarvitset.'))));
+      return;
+    }
+    final email = _email.text.trim();
+    if (_needsEmail && !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr(context, 'Give an email address we can reply to.', 'Anna sähköpostiosoite, johon voimme vastata.'))));
+      return;
+    }
     setState(() => _sending = true);
     final res = await ApiClient(Provider.of<AuthService>(context, listen: false)).post('/support', {
       'app': 'store',
       'topic': _topic.text.trim().isEmpty ? 'Seller question' : _topic.text.trim(),
       'message': _message.text.trim(),
+      if (_needsEmail) 'email': email,
     });
     if (!mounted) return;
     setState(() => _sending = false);
@@ -45,7 +62,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(res.ok
           ? tr(context, 'Sent (#${res.data['id']}). We reply by email to ${res.data['replyTo']}.', 'Lähetetty (#${res.data['id']}). Vastaamme sähköpostitse osoitteeseen ${res.data['replyTo']}.')
-          : res.error!),
+          : res.errorMessage),
     ));
   }
 
@@ -92,6 +109,16 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
           const SizedBox(height: 8),
           TextField(controller: _topic, maxLength: 80, decoration: InputDecoration(labelText: tr(context, 'Subject', 'Aihe'))),
           TextField(controller: _message, maxLength: 4000, maxLines: 5, decoration: InputDecoration(labelText: tr(context, 'How can we help?', 'Miten voimme auttaa?'))),
+          if (_needsEmail)
+            TextField(
+              controller: _email,
+              keyboardType: TextInputType.emailAddress,
+              autofillHints: const [AutofillHints.email],
+              decoration: InputDecoration(
+                labelText: tr(context, 'Your email address', 'Sähköpostiosoitteesi'),
+                helperText: tr(context, 'You signed in with your phone, so tell us where to reply.', 'Kirjauduit puhelimella, joten kerro, mihin vastaamme.'),
+              ),
+            ),
           const SizedBox(height: 8),
           SizedBox(
             height: 50,
@@ -101,7 +128,11 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
             ),
           ),
           const SizedBox(height: 6),
-          Text(tr(context, 'We reply by email to your account address.', 'Vastaamme sähköpostitse tilisi osoitteeseen.'), style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+          Text(
+              _needsEmail
+                  ? tr(context, 'We reply by email to the address above.', 'Vastaamme sähköpostitse yllä olevaan osoitteeseen.')
+                  : tr(context, 'We reply by email to your account address.', 'Vastaamme sähköpostitse tilisi osoitteeseen.'),
+              style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
         ],
       ),
     );

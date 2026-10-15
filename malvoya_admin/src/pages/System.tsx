@@ -13,7 +13,8 @@ type Status = {
   attention: string[];
   integrations: Record<string, Integration>;
   marketplace: Record<string, number>;
-  ordersInFlight: { waitingForStore: number; waitingForCourier: number; waitingForPickup?: number };
+  ordersInFlight: { waitingForStore: number; waitingForCourier: number; waitingForPickup?: number; scheduledUpcoming?: number };
+  scheduledDelivery?: { slots: { start: string; end: string }[]; discountCents: number; leadMinutes: number; dispatchBufferMinutes: number };
   pickup?: { reminderHours: number; holdHours: number };
   referrals?: Referrals;
   appLinks?: { fingerprints: number; url: string };
@@ -153,6 +154,9 @@ export default function System() {
                 ))}
                 <div className="flex items-center justify-between text-sm"><span>Paid orders waiting for a store</span><span className="font-semibold">{status.ordersInFlight.waitingForStore}</span></div>
                 <div className="flex items-center justify-between text-sm"><span>Accepted orders waiting for a courier</span><span className="font-semibold">{status.ordersInFlight.waitingForCourier}</span></div>
+                {status.ordersInFlight.scheduledUpcoming !== undefined && (
+                  <div className="flex items-center justify-between text-sm"><span>Scheduled deliveries, courier search not started yet</span><span className="font-semibold">{status.ordersInFlight.scheduledUpcoming}</span></div>
+                )}
                 {status.ordersInFlight.waitingForPickup !== undefined && (
                   <div className="flex items-center justify-between text-sm"><span>Pickup orders ready, not collected yet</span><span className="font-semibold">{status.ordersInFlight.waitingForPickup}</span></div>
                 )}
@@ -208,6 +212,14 @@ export default function System() {
                   <div className="space-y-2 text-sm">
                     <div className="flex items-center justify-between"><span>Customer is reminded after</span><span className="font-semibold">{status.pickup.reminderHours} h</span></div>
                     <div className="flex items-center justify-between"><span>Not collected: cancelled and refunded after</span><span className="font-semibold">{status.pickup.holdHours} h</span></div>
+                    {status.scheduledDelivery && (
+                      <>
+                        <p className="font-semibold pt-3">Scheduled delivery</p>
+                        <div className="flex items-center justify-between"><span>Slots (DELIVERY_SLOTS, Finnish time)</span><span className="font-semibold">{status.scheduledDelivery.slots.map(x => `${x.start}–${x.end}`).join(', ')}</span></div>
+                        <div className="flex items-center justify-between"><span>Delivery fee discount (SCHEDULED_DELIVERY_DISCOUNT_CENTS)</span><span className="font-semibold">{(status.scheduledDelivery.discountCents / 100).toFixed(2).replace('.', ',')} €</span></div>
+                        <div className="flex items-center justify-between"><span>Couriers offered the job</span><span className="font-semibold">slot start − prep − {status.scheduledDelivery.dispatchBufferMinutes} min</span></div>
+                      </>
+                    )}
                     {status.appLinks && (
                       <div className="flex items-center justify-between">
                         <span>Android app links (ANDROID_APP_SHA256)</span>

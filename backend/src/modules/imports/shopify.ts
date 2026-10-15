@@ -36,9 +36,9 @@ type ShopifyProduct = {
 
 const PAGE_SIZE = 250;
 const MAX_PAGES = 4;
-const SIZE_OPTION = /^(size|sizes|koko|storlek|größe|grösse|taille|talla|taglia)$/i;
-const COLOR_OPTION = /^(colou?rs?|väri|värit|färg|farbe|couleur)$/i;
-const USED_TAG = /^(used|vintage|second[- ]?hand|pre-?owned|preloved|käytetty|kierrätetty)$/i;
+export const SIZE_OPTION = /^(size|sizes|koko|storlek|größe|grösse|taille|talla|taglia)$/i;
+export const COLOR_OPTION = /^(colou?rs?|väri|värit|färg|farbe|couleur)$/i;
+export const USED_TAG = /^(used|vintage|second[- ]?hand|pre-?owned|preloved|käytetty|kierrätetty)$/i;
 
 /**
  * Reads up to 4 pages. The public feed returns at most 250 products per request and some shops ignore

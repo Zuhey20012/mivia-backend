@@ -8,11 +8,15 @@ import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'config/constants.dart';
 import 'core/api_client.dart';
+import 'core/server_errors.dart';
 
 const _secureStorage = FlutterSecureStorage();
 
 /// The account role this app is for. Other roles are refused at sign-in.
 const String kAppRole = 'VENDOR';
+
+/// Where the signed-in store owner stands, from GET /stores/my.
+enum StoreState { unknown, none, inReview, approved, error }
 
 class User {
   final int id;
@@ -53,9 +57,50 @@ class AuthService extends ChangeNotifier {
   String? get accessToken => _accessToken;
   bool get isReady => _ready;
 
-  /// Vendors can always open the dashboard to set up their store; the server keeps an
-  /// unverified store hidden from customers until an admin approves it.
-  bool get isPendingApproval => false;
+  StoreState _storeState = StoreState.unknown;
+  String? _storeError;
+  bool _checkingStore = false;
+
+  /// Whether this account has a store yet, and whether it is approved. The app's home screen follows it:
+  /// no store → setup, a store (in review or approved) → dashboard.
+  StoreState get storeState => _storeState;
+  String? get storeError => _storeError;
+
+  /// The store exists but Malvoya has not approved it yet (customers cannot see it). The dashboard
+  /// still opens, so products and drops can be prepared meanwhile.
+  bool get isPendingApproval => _storeState == StoreState.inReview;
+
+  /// Asks the server whether this account has a store (and whether it is approved).
+  Future<void> checkStore() async {
+    if (_checkingStore || !isAuthenticated) return;
+    _checkingStore = true;
+    final res = await ApiClient(this).get('/stores/my');
+    _checkingStore = false;
+    if (!isAuthenticated) return;
+    if (res.status == 404) {
+      _storeState = StoreState.none;
+    } else if (res.ok && res.data['store'] is Map) {
+      updateStore(Map<String, dynamic>.from(res.data['store']));
+      return;
+    } else {
+      _storeState = StoreState.error;
+      _storeError = res.errorMessage;
+    }
+    notifyListeners();
+  }
+
+  /// Keeps [storeState] in step with a store payload loaded elsewhere (null = the account has no store).
+  void updateStore(Map<String, dynamic>? store) {
+    final next = store == null
+        ? StoreState.none
+        : store['isVerified'] == true
+            ? StoreState.approved
+            : StoreState.inReview;
+    if (next == _storeState) return;
+    _storeState = next;
+    _storeError = null;
+    notifyListeners();
+  }
 
   AuthService() {
     _loadSession();
@@ -141,11 +186,11 @@ class AuthService extends ChangeNotifier {
   String _errorFrom(http.Response res, String fallback) {
     try {
       final body = jsonDecode(res.body);
-      if (body['error'] is String) return body['error'];
+      if (body['error'] is String) return localizeServerError(body['error']);
       final fieldErrors = body['errors']?['fieldErrors'] as Map<String, dynamic>?;
-      if (fieldErrors != null && fieldErrors.isNotEmpty) return (fieldErrors.values.first as List).first.toString();
+      if (fieldErrors != null && fieldErrors.isNotEmpty) return localizeServerError((fieldErrors.values.first as List).first.toString());
     } catch (_) {}
-    return fallback;
+    return localizeServerError(fallback);
   }
 
   // ── Email / password ───────────────────────────────────────────────────────
@@ -307,6 +352,8 @@ class AuthService extends ChangeNotifier {
     _currentUser = null;
     _accessToken = null;
     _refreshToken = null;
+    _storeState = StoreState.unknown;
+    _storeError = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('user');
     await _secureStorage.delete(key: 'accessToken');

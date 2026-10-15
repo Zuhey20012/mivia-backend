@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -15,6 +16,17 @@ import '../widgets/loading_states.dart';
 const productCategories = ['Clothing', 'Shoes', 'Bags', 'Accessories', 'Jewelry', 'Beauty', 'Home', 'Other'];
 const productSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'One Size', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45'];
 const productColors = ['Black', 'White', 'Grey', 'Beige', 'Brown', 'Blue', 'Green', 'Red', 'Pink', 'Purple', 'Yellow', 'Multi'];
+
+/// Finnish names for the values above. The API keeps the English values (shared with the customer app).
+const _categoryFi = {
+  'Clothing': 'Vaatteet', 'Shoes': 'Kengät', 'Bags': 'Laukut', 'Accessories': 'Asusteet', 'Jewelry': 'Korut',
+  'Beauty': 'Kauneus', 'Home': 'Koti', 'Other': 'Muu',
+};
+const _colorFi = {
+  'Black': 'Musta', 'White': 'Valkoinen', 'Grey': 'Harmaa', 'Beige': 'Beige', 'Brown': 'Ruskea', 'Blue': 'Sininen',
+  'Green': 'Vihreä', 'Red': 'Punainen', 'Pink': 'Vaaleanpunainen', 'Purple': 'Violetti', 'Yellow': 'Keltainen', 'Multi': 'Monivärinen',
+};
+const _sizeFi = {'One Size': 'Yksi koko'};
 
 class _Option {
   int? id;
@@ -77,7 +89,88 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
       .toList();
 
   bool _saving = false;
+  bool _deleting = false;
   String? _error;
+
+  /// What the form looked like when opened, to ask before throwing changes away.
+  late final String _initial;
+
+  @override
+  void initState() {
+    super.initState();
+    _initial = _snapshot();
+  }
+
+  String _snapshot() => jsonEncode({
+        'name': _name.text, 'description': _description.text, 'price': _price.text, 'stock': _stock.text,
+        'category': _category, 'condition': _condition, 'secondHand': _secondHand, 'eco': _eco, 'handmade': _handmade,
+        'available': _available,
+        'photos': _photos.map((p) => p.url ?? 'uploading').toList(),
+        'videos': _videos.map((v) => v.id ?? v.status).toList(),
+        'options': _options.map((o) => [o.id, o.size, o.color, o.stock]).toList(),
+      });
+
+  bool get _hasChanges => !_saving && !_deleting && _snapshot() != _initial;
+
+  String _show(Map<String, String> fi, String value) => isFinnish(context) ? (fi[value] ?? value) : value;
+
+  Future<void> _confirmDiscard() async {
+    final discard = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(tr(ctx, 'Discard changes?', 'Hylätäänkö muutokset?')),
+        content: Text(tr(ctx, 'Your changes to this product have not been saved.', 'Tuotteeseen tekemiäsi muutoksia ei ole tallennettu.')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(ctx, 'Keep editing', 'Jatka muokkausta'))),
+          OutlinedButton(
+            style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFFD93025), side: const BorderSide(color: Color(0xFFD93025), width: 1.5), minimumSize: const Size(64, 48)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(tr(ctx, 'Discard', 'Hylkää')),
+          ),
+        ],
+      ),
+    );
+    if (discard == true && mounted) Navigator.pop(context);
+  }
+
+  /// DELETE /products/:id hides the product for good: past orders still refer to it, so the server keeps it
+  /// (hidden) instead of erasing it.
+  Future<void> _delete() async {
+    const red = Color(0xFFD93025);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(tr(ctx, 'Remove this product?', 'Poistetaanko tuote?')),
+        content: Text(tr(ctx,
+            'Shoppers can no longer see or buy it. Past orders still refer to it, so it stays in your list as hidden; you can switch it back on later.',
+            'Asiakkaat eivät enää näe tai voi ostaa sitä. Aiemmat tilaukset viittaavat siihen, joten se jää listaasi piilotettuna; voit kytkeä sen myöhemmin takaisin.')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(ctx, 'Back', 'Takaisin'))),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: red, foregroundColor: Colors.white, minimumSize: const Size(64, 48)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(tr(ctx, 'Remove', 'Poista')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() {
+      _deleting = true;
+      _error = null;
+    });
+    final res = await _api.delete('/products/${widget.product!['id']}');
+    if (!mounted) return;
+    if (!res.ok) {
+      setState(() {
+        _deleting = false;
+        _error = res.errorMessage;
+      });
+      return;
+    }
+    HapticFeedback.mediumImpact();
+    Navigator.pop(context, true);
+  }
 
   bool get _editing => widget.product != null;
   ApiClient get _api => ApiClient(Provider.of<AuthService>(context, listen: false));
@@ -179,7 +272,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
     if (video.id != null && _editing) {
       final res = await _api.delete('/products/${widget.product!['id']}/videos/${video.id}');
       if (!res.ok) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.error!)));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.errorMessage)));
         return;
       }
     }
@@ -252,14 +345,19 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
     } else {
       setState(() {
         _saving = false;
-        _error = res.error;
+        _error = res.errorMessage;
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: !_hasChanges,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _confirmDiscard();
+      },
+      child: Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(title: Text(_editing ? tr(context, 'Edit product', 'Muokkaa tuotetta') : tr(context, 'New product', 'Uusi tuote'))),
       body: Form(
@@ -350,7 +448,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
             DropdownButtonFormField<String>(
               value: _category,
               decoration: InputDecoration(labelText: tr(context, 'Category', 'Kategoria')),
-              items: _categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+              items: _categories.map((c) => DropdownMenuItem(value: c, child: Text(_show(_categoryFi, c)))).toList(),
               onChanged: (v) => setState(() => _category = v!),
             ),
             const SizedBox(height: 12),
@@ -410,15 +508,27 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
             SizedBox(
               height: 54,
               child: FilledButton(
-                onPressed: _saving ? null : _save,
+                onPressed: _saving || _deleting ? null : _save,
                 child: _saving
                     ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                     : Text(_editing ? tr(context, 'Save changes', 'Tallenna muutokset') : tr(context, 'Add product', 'Lisää tuote')),
               ),
             ),
+            if (_editing) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFFD93025), side: const BorderSide(color: Color(0xFFD93025), width: 1.5)),
+                onPressed: _saving || _deleting ? null : _delete,
+                icon: _deleting
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.delete_outline_rounded),
+                label: Text(tr(context, 'Remove product', 'Poista tuote')),
+              ),
+            ],
           ],
         ),
       ),
+    ),
     );
   }
 
@@ -519,18 +629,18 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
 
   Widget _optionRow(_Option o) => Container(
         margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(10),
+        padding: const EdgeInsets.fromLTRB(10, 10, 4, 4),
         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.divider)),
-        child: Row(
-          children: [
+        child: Column(children: [
+          Row(children: [
             Expanded(
               child: DropdownButtonFormField<String?>(
                 value: o.size,
-                isDense: true,
-                decoration: InputDecoration(labelText: tr(context, 'Size', 'Koko'), isDense: true),
+                isExpanded: true,
+                decoration: InputDecoration(labelText: tr(context, 'Size', 'Koko')),
                 items: [
                   DropdownMenuItem(value: null, child: Text(tr(context, 'None', 'Ei'))),
-                  ...{...productSizes, if (o.size != null) o.size!}.map((s) => DropdownMenuItem(value: s, child: Text(s))),
+                  ...{...productSizes, if (o.size != null) o.size!}.map((s) => DropdownMenuItem(value: s, child: Text(_show(_sizeFi, s)))),
                 ],
                 onChanged: (v) => setState(() => o.size = v),
               ),
@@ -539,40 +649,41 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
             Expanded(
               child: DropdownButtonFormField<String?>(
                 value: o.color,
-                isDense: true,
-                decoration: InputDecoration(labelText: tr(context, 'Colour', 'Väri'), isDense: true),
+                isExpanded: true,
+                decoration: InputDecoration(labelText: tr(context, 'Colour', 'Väri')),
                 items: [
                   DropdownMenuItem(value: null, child: Text(tr(context, 'None', 'Ei'))),
-                  ...{...productColors, if (o.color != null) o.color!}.map((c) => DropdownMenuItem(value: c, child: Text(c))),
+                  ...{...productColors, if (o.color != null) o.color!}.map((c) => DropdownMenuItem(value: c, child: Text(_show(_colorFi, c), overflow: TextOverflow.ellipsis))),
                 ],
                 onChanged: (v) => setState(() => o.color = v),
               ),
             ),
             const SizedBox(width: 6),
-            Column(
-              children: [
-                Text(tr(context, 'In stock', 'Varastossa'), style: const TextStyle(fontSize: 10.5, color: AppTheme.textSecondary)),
-                Row(children: [
-                  Semantics(
-                    button: true,
-                    label: tr(context, 'One less', 'Yksi vähemmän'),
-                    child: InkWell(onTap: o.stock > 0 ? () => setState(() => o.stock--) : null, child: const Icon(Icons.remove_circle_outline, size: 22)),
-                  ),
-                  Padding(padding: const EdgeInsets.symmetric(horizontal: 6), child: Text('${o.stock}', style: const TextStyle(fontWeight: FontWeight.w700))),
-                  Semantics(
-                    button: true,
-                    label: tr(context, 'One more', 'Yksi lisää'),
-                    child: InkWell(onTap: () => setState(() => o.stock++), child: const Icon(Icons.add_circle_outline, size: 22)),
-                  ),
-                ]),
-              ],
-            ),
+          ]),
+          Row(children: [
+            Text(tr(context, 'In stock', 'Varastossa'), style: const TextStyle(fontWeight: FontWeight.w600)),
+            const Spacer(),
             IconButton(
-              tooltip: tr(context, 'Remove', 'Poista'),
+              tooltip: tr(context, 'One less', 'Yksi vähemmän'),
+              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+              onPressed: o.stock > 0 ? () => setState(() => o.stock--) : null,
+              icon: const Icon(Icons.remove_circle_outline),
+            ),
+            SizedBox(width: 36, child: Text('${o.stock}', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
+            IconButton(
+              tooltip: tr(context, 'One more', 'Yksi lisää'),
+              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+              onPressed: () => setState(() => o.stock++),
+              icon: const Icon(Icons.add_circle_outline),
+            ),
+            const SizedBox(width: 4),
+            IconButton(
+              tooltip: tr(context, 'Remove option', 'Poista vaihtoehto'),
+              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
               icon: const Icon(Icons.delete_outline_rounded, color: AppTheme.accent),
               onPressed: () => setState(() => _options.remove(o)),
             ),
-          ],
-        ),
+          ]),
+        ]),
       );
 }

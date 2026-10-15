@@ -12,12 +12,26 @@ const checkoutSchema = z.object({
   tipCents:        z.number().int().min(0).max(2000).optional(),
   // Optional promo code or a friend's invite code (platform-funded discount); an unusable code is refused with 409
   promoCode:       z.string().trim().max(40).optional(),
+  // Scheduled delivery (DELIVERY only): one of the platform slots (Finnish time), today or tomorrow.
+  // Absent = as soon as possible.
+  deliverySlot:    z.object({
+    date:  z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD"),
+    start: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use HH:MM"),
+    end:   z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use HH:MM"),
+  }).strict().optional(),
   items: z.array(z.object({
     productId: z.number().int().positive(),
     variantId: z.number().int().positive().optional(),
     quantity:  z.number().int().min(1).max(20),
   })).min(1).max(50),
 });
+
+/** A pickup order is collected at the store, so it has no delivery time slot. */
+function slotOnlyForDelivery(d: { fulfilment: string; deliverySlot?: unknown }, ctx: z.RefinementCtx) {
+  if (d.fulfilment === "PICKUP" && d.deliverySlot) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["deliverySlot"], message: "Pickup orders have no delivery time" });
+  }
+}
 
 export const createOrderSchema = checkoutSchema.extend({
   // Required for delivery; not used for pickup
@@ -27,10 +41,11 @@ export const createOrderSchema = checkoutSchema.extend({
   if (d.fulfilment === "DELIVERY" && !d.deliveryAddress) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["deliveryAddress"], message: "Enter a delivery address" });
   }
+  slotOnlyForDelivery(d, ctx);
 });
 
 // Exact price before payment: the same basket as an order, without the address
-export const quoteOrderSchema = checkoutSchema;
+export const quoteOrderSchema = checkoutSchema.superRefine(slotOnlyForDelivery);
 
 export const createRentalSchema = z.object({
   startDate: z.string().datetime(),

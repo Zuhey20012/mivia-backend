@@ -38,60 +38,217 @@ class _ReturnsManagerState extends State<ReturnsManager> {
     });
   }
 
-  Future<void> _update(Map<String, dynamic> r, String status, {String? note, int? deduction}) async {
+  static const _red = Color(0xFFD93025);
+
+  Future<ApiResult> _send(Map<String, dynamic> r, String status, {String? note, int? deduction}) => _api.patch('/returns/${r['id']}/status', {
+        'status': status,
+        if (note != null && note.isNotEmpty) 'conditionNote': note,
+        if (deduction != null && deduction > 0) 'damageDedCents': deduction,
+      });
+
+  Future<void> _update(Map<String, dynamic> r, String status, {String? note}) async {
     HapticFeedback.mediumImpact();
-    final res = await _api.patch('/returns/${r['id']}/status', {
-      'status': status,
-      if (note != null && note.isNotEmpty) 'conditionNote': note,
-      if (deduction != null && deduction > 0) 'damageDedCents': deduction,
-    });
+    final res = await _send(r, status, note: note);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.ok ? tr(context, 'Updated', 'Päivitetty') : res.error!)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.ok ? tr(context, 'Updated', 'Päivitetty') : res.errorMessage)));
     _load();
+  }
+
+  /// Rejecting needs a written reason (saved as the return's condition note). Consumers who bought from a
+  /// business have a statutory 14-day right of withdrawal, so a rejection must have a real ground.
+  Future<void> _reject(Map<String, dynamic> r) async {
+    final reason = TextEditingController();
+    final note = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialog) {
+          final text = reason.text.trim();
+          return AlertDialog(
+            title: Text(tr(ctx, 'Reject this return?', 'Hylätäänkö palautus?')),
+            content: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(
+                  tr(ctx,
+                      'Customers who bought from a business have a statutory 14-day right of withdrawal from delivery. Reject only with a real reason, for example the return period has passed or the item is not the one sold.',
+                      'Yritykseltä ostaneella kuluttajalla on lakisääteinen 14 päivän peruuttamisoikeus toimituksesta. Hylkää vain todellisesta syystä, esimerkiksi jos palautusaika on päättynyt tai tuote ei ole myyty tuote.'),
+                  style: const TextStyle(fontSize: 13, height: 1.4, color: AppTheme.textSecondary),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: reason,
+                  autofocus: true,
+                  maxLength: 500,
+                  maxLines: 3,
+                  onChanged: (_) => setDialog(() {}),
+                  decoration: InputDecoration(labelText: tr(ctx, 'Reason (required)', 'Syy (pakollinen)')),
+                ),
+              ]),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr(ctx, 'Back', 'Takaisin'))),
+              OutlinedButton(
+                style: OutlinedButton.styleFrom(foregroundColor: _red, side: const BorderSide(color: _red, width: 1.5), minimumSize: const Size(64, 48)),
+                onPressed: text.length < 5 ? null : () => Navigator.pop(ctx, text),
+                child: Text(tr(ctx, 'Reject', 'Hylkää')),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    reason.dispose();
+    if (note == null || !mounted) return;
+    await _update(r, 'REJECTED', note: note);
+  }
+
+  /// "12,50" or "12.50" → 1250 cents; null when empty, -1 when not a number.
+  int? _cents(String text) {
+    final t = text.trim().replaceAll('€', '').replaceAll(' ', '').replaceAll(',', '.');
+    if (t.isEmpty) return null;
+    final v = double.tryParse(t);
+    return v == null || v < 0 ? -1 : (v * 100).round();
   }
 
   Future<void> _refund(Map<String, dynamic> r) async {
     final note = TextEditingController();
     final deduction = TextEditingController();
     final whole = _returnedItems(r, ((r['order'] as Map?)?['items'] as List?) ?? const []).whole;
-    final go = await showModalBottomSheet<bool>(
+    final expected = _refundAmount(r);
+    var busy = false;
+    String? error;
+    final done = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + MediaQuery.of(ctx).viewInsets.bottom),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(tr(context, 'Refund the customer', 'Hyvitä asiakkaalle'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 8),
-            Text(
-              whole
-                  ? tr(context,
-                      'A full refund includes the original delivery fee. You may only deduct for wear beyond what was needed to try the item, and you must explain why.',
-                      'Täysi hyvitys sisältää alkuperäisen toimitusmaksun. Voit vähentää vain, jos tuotetta on käsitelty enemmän kuin sen kokeilemiseksi on tarpeen, ja sinun on perusteltava vähennys.')
-                  : tr(context,
-                      'Only some items of the order are returned, so the refund covers those items. You may only deduct for wear beyond what was needed to try an item, and you must explain why.',
-                      'Tilauksesta palautetaan vain osa, joten hyvitys koskee palautettuja tuotteita. Voit vähentää vain, jos tuotetta on käsitelty enemmän kuin sen kokeilemiseksi on tarpeen, ja sinun on perusteltava vähennys.'),
-              style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary, height: 1.4),
-            ),
-            if (_refundAmount(r) != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: Text('${tr(context, 'Refund for this return', 'Tämän palautuksen hyvitys')}: ${euro(context, _refundAmount(r))}',
-                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final ded = _cents(deduction.text);
+          final finalCents = expected == null ? null : expected - (ded != null && ded > 0 ? ded : 0);
+
+          Future<void> confirmAndSend() async {
+            if (ded == -1) {
+              setSheet(() => error = tr(ctx, 'Write the deduction as a number, e.g. 5,00.', 'Kirjoita vähennys numerona, esim. 5,00.'));
+              return;
+            }
+            if (ded != null && ded > 0 && note.text.trim().isEmpty) {
+              setSheet(() => error = tr(ctx, 'Explain the deduction in the condition note.', 'Perustele vähennys kuntohuomiossa.'));
+              return;
+            }
+            if (finalCents != null && finalCents <= 0) {
+              setSheet(() => error = tr(ctx, 'The deduction cannot be the whole refund.', 'Vähennys ei voi olla koko hyvitys.'));
+              return;
+            }
+            final ok = await showDialog<bool>(
+              context: ctx,
+              builder: (dctx) => AlertDialog(
+                title: Text(finalCents != null
+                    ? tr(dctx, 'Refund ${euro(dctx, finalCents)} to the customer?', 'Hyvitetäänkö asiakkaalle ${euro(dctx, finalCents)}?')
+                    : tr(dctx, 'Refund the customer?', 'Hyvitetäänkö asiakkaalle?')),
+                content: Text(tr(dctx, 'The money goes back to the customer\'s card through Stripe. This cannot be undone.',
+                    'Rahat palautetaan asiakkaan kortille Stripen kautta. Tätä ei voi perua.')),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(dctx, false), child: Text(tr(dctx, 'Back', 'Takaisin'))),
+                  FilledButton(onPressed: () => Navigator.pop(dctx, true), child: Text(tr(dctx, 'Refund', 'Hyvitä'))),
+                ],
               ),
-            TextField(controller: deduction, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: tr(context, 'Deduction in € (optional)', 'Vähennys euroina (valinnainen)'))),
-            TextField(controller: note, maxLength: 500, decoration: InputDecoration(labelText: tr(context, 'Condition note', 'Kuntohuomio'))),
-            const SizedBox(height: 8),
-            SizedBox(width: double.infinity, height: 50, child: FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(tr(context, 'Refund now', 'Hyvitä nyt')))),
-          ],
-        ),
+            );
+            if (ok != true) return;
+            setSheet(() {
+              busy = true;
+              error = null;
+            });
+            HapticFeedback.mediumImpact();
+            final res = await _send(r, 'REFUNDED', note: note.text.trim(), deduction: ded != null && ded > 0 ? ded : null);
+            if (!ctx.mounted) return;
+            if (res.ok) {
+              Navigator.pop(ctx, true);
+            } else {
+              setSheet(() {
+                busy = false;
+                error = res.errorMessage;
+              });
+            }
+          }
+
+          return Padding(
+            padding: EdgeInsets.fromLTRB(24, 0, 24, 24 + MediaQuery.of(ctx).viewInsets.bottom),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(tr(ctx, 'Refund the customer', 'Hyvitä asiakkaalle'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 8),
+                  Text(
+                    whole
+                        ? tr(ctx,
+                            'A full refund includes the original delivery fee. You may only deduct for wear beyond what was needed to try the item, and you must explain why.',
+                            'Täysi hyvitys sisältää alkuperäisen toimitusmaksun. Voit vähentää vain, jos tuotetta on käsitelty enemmän kuin sen kokeilemiseksi on tarpeen, ja sinun on perusteltava vähennys.')
+                        : tr(ctx,
+                            'Only some items of the order are returned, so the refund covers those items. You may only deduct for wear beyond what was needed to try an item, and you must explain why.',
+                            'Tilauksesta palautetaan vain osa, joten hyvitys koskee palautettuja tuotteita. Voit vähentää vain, jos tuotetta on käsitelty enemmän kuin sen kokeilemiseksi on tarpeen, ja sinun on perusteltava vähennys.'),
+                    style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary, height: 1.4),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: deduction,
+                    enabled: !busy,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]'))],
+                    onChanged: (_) => setSheet(() => error = null),
+                    decoration: InputDecoration(labelText: tr(ctx, 'Deduction in € (optional)', 'Vähennys euroina (valinnainen)'), hintText: '0,00'),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: note,
+                    enabled: !busy,
+                    maxLength: 500,
+                    onChanged: (_) => setSheet(() => error = null),
+                    decoration: InputDecoration(labelText: tr(ctx, 'Condition note', 'Kuntohuomio')),
+                  ),
+                  if (finalCents != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(children: [
+                        Expanded(child: Text(tr(ctx, 'The customer gets', 'Asiakas saa'), style: const TextStyle(fontWeight: FontWeight.w600))),
+                        Text(euro(ctx, finalCents < 0 ? 0 : finalCents), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+                      ]),
+                    ),
+                  if (error != null)
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(color: const Color(0xFFFDECEA), borderRadius: BorderRadius.circular(14)),
+                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        const Icon(Icons.error_outline_rounded, color: _red, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(error!, style: const TextStyle(color: _red, fontWeight: FontWeight.w600, height: 1.35))),
+                      ]),
+                    ),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 54,
+                    child: FilledButton(
+                      onPressed: busy ? null : confirmAndSend,
+                      child: busy
+                          ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : Text(tr(ctx, 'Refund now', 'Hyvitä nyt')),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
-    if (go != true) return;
-    final ded = double.tryParse(deduction.text.trim().replaceAll(',', '.'));
-    await _update(r, 'REFUNDED', note: note.text.trim(), deduction: ded == null ? null : (ded * 100).round());
+    note.dispose();
+    deduction.dispose();
+    if (!mounted) return;
+    if (done == true) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr(context, 'Refund sent', 'Hyvitys lähetetty'))));
+    }
+    _load();
   }
 
   @override
@@ -259,7 +416,11 @@ class _ReturnsManagerState extends State<ReturnsManager> {
             children: [
               if (status == 'REQUESTED') ...[
                 FilledButton(onPressed: () => _update(r, 'APPROVED'), child: Text(tr(context, 'Approve', 'Hyväksy'))),
-                OutlinedButton(onPressed: () => _update(r, 'REJECTED'), child: Text(tr(context, 'Reject', 'Hylkää'))),
+                OutlinedButton(
+                  style: OutlinedButton.styleFrom(foregroundColor: _red, side: const BorderSide(color: _red, width: 1.5)),
+                  onPressed: () => _reject(r),
+                  child: Text(tr(context, 'Reject', 'Hylkää')),
+                ),
               ],
               if (status == 'APPROVED' || status == 'IN_TRANSIT')
                 FilledButton(onPressed: () => _update(r, 'RECEIVED'), child: Text(tr(context, 'I received the items', 'Sain tuotteet'))),

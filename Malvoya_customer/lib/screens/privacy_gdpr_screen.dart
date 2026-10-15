@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
+import '../core/api_client.dart';
 import '../core/strings.dart';
 import '../core/legal_links.dart';
 import '../config/constants.dart';
@@ -224,31 +225,36 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
               ),
               onPressed: () async {
                 Navigator.pop(dialogCtx);
-                
+
                 if (auth.accessToken != null) {
-                  try {
-                    final res = await http.delete(
-                      Uri.parse('${AppConstants.apiBase}/auth/me'),
-                      headers: {'Authorization': 'Bearer ${auth.accessToken}'},
+                  // Deleting takes a moment: show that it is happening and block other taps
+                  showDialog(
+                    context: context,
+                    barrierDismissible: false,
+                    builder: (ctx) => PopScope(
+                      canPop: false,
+                      child: AlertDialog(
+                        content: Row(children: [
+                          const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5)),
+                          const SizedBox(width: 16),
+                          Expanded(child: Text(tr(context, 'Deleting your account…', 'Poistetaan tiliäsi…'))),
+                        ]),
+                      ),
+                    ),
+                  );
+                  final res = await ApiClient(auth).delete('/auth/me');
+                  if (!mounted) return;
+                  Navigator.of(context, rootNavigator: true).pop();
+                  if (!res.ok) {
+                    showDialog(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: Text(tr(context, 'Your account was not deleted', 'Tiliäsi ei poistettu')),
+                        content: Text(res.errorText(context) ??
+                            tr(context, 'Could not delete your account. Please try again.', 'Tiliä ei voitu poistaa. Yritä uudelleen.')),
+                        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr(context, 'OK', 'OK')))],
+                      ),
                     );
-                    if (res.statusCode != 200) {
-                      String reason = 'Could not delete account. Please try again.';
-                      try { reason = jsonDecode(res.body)['error'] ?? reason; } catch (_) {}
-                      throw Exception(reason);
-                    }
-                  } catch (e) {
-                    if (mounted) {
-                      showDialog(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          title: const Text('Error'),
-                          content: Text(e.toString().replaceFirst('Exception: ', '')),
-                          actions: [
-                            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))
-                          ]
-                        )
-                      );
-                    }
                     return;
                   }
                 }

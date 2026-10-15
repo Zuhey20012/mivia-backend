@@ -111,6 +111,22 @@ function deliveryFeeConfig() {
 }
 export type DeliveryFeeConfig = ReturnType<typeof deliveryFeeConfig>;
 
+const SLOT_RE = /^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)$/;
+const DEFAULT_SLOTS = "17:00-19:00,19:00-21:00";
+
+/** "17:00-19:00,19:00-21:00" → [{ start: "17:00", end: "19:00" }, …], sorted; invalid or overlapping entries are dropped. */
+export function parseDeliverySlots(raw: string | undefined): { start: string; end: string }[] {
+  const parse = (value: string) => {
+    const slots = value.split(",").map((s) => s.trim()).filter((s) => SLOT_RE.test(s))
+      .map((s) => ({ start: s.slice(0, 5), end: s.slice(6, 11) }))
+      .filter((s) => s.start < s.end) // a slot cannot run past midnight
+      .sort((a, b) => (a.start < b.start ? -1 : 1));
+    return slots.filter((s, i) => i === 0 || s.start >= slots[i - 1].end);
+  };
+  const slots = raw === undefined || raw.trim() === "" ? [] : parse(raw);
+  return slots.length ? slots : parse(DEFAULT_SLOTS);
+}
+
 export const env = {
   port:         Number(process.env.PORT)          || 4000,
   nodeEnv,
@@ -182,6 +198,21 @@ export const env = {
     // Accepted pickup orders the store never marks ready are refunded after this
     readyHours:    hours("PICKUP_READY_HOURS", 24),
   },
+
+  // Scheduled delivery ("Tonight 17–19"): platform-wide slots in Finnish time, bookable today or tomorrow from
+  // 60 minutes ahead, only while the store is open at the slot start. Couriers are offered the job from
+  // slot start − the store's prep time − 15 min. The discount comes off the delivery fee (never below 0) and
+  // is paid by Malvoya: courier pay is the same as for a delivery right away.
+  scheduledDelivery: {
+    slots:          parseDeliverySlots(process.env.DELIVERY_SLOTS),
+    discountCents:  cents("SCHEDULED_DELIVERY_DISCOUNT_CENTS"),
+    leadMinutes:    60,
+    dispatchBufferMinutes: 15,
+  },
+
+  // Encryption at rest for sensitive identifiers (the DAC7 tax identification number): 32 random bytes,
+  // base64. Without it, tax IDs cannot be saved (503) and System says so.
+  dataEncryptionKey: process.env.DATA_ENCRYPTION_KEY || "",
 
   // Referrals: off while REFERRAL_DISCOUNT_CENTS is 0. The new customer gets the discount on their first order
   // (platform-funded, like a promo code); the referrer gets a one-time code worth REFERRAL_REWARD_CENTS once that

@@ -131,7 +131,14 @@ function exportUser(userId: number) {
       orders: { include: { items: true } },
       rentals: { include: { items: true } },
       returns: true,
-      store: { include: { products: true, drops: { select: { id: true, caption: true, status: true, createdAt: true, likeCount: true, viewCount: true } } } },
+      store: {
+        include: {
+          products: true,
+          drops: { select: { id: true, caption: true, status: true, createdAt: true, likeCount: true, viewCount: true } },
+          // DAC7 seller data; the tax ID itself stays encrypted (shown masked in the store app)
+          taxInfo: { select: { legalName: true, dateOfBirth: true, vatNumber: true, addressLine: true, postalCode: true, city: true, country: true, createdAt: true, updatedAt: true } },
+        },
+      },
       courier: { select: { id: true, name: true, phone: true, email: true, isApproved: true, createdAt: true, rating: true } },
       favorites: { select: { productId: true, createdAt: true } },
       dropLikes: { select: { dropId: true, createdAt: true } },
@@ -173,7 +180,8 @@ export async function deleteUserAccount(userId: number) {
 
     const store = await tx.store.findUnique({ where: { ownerId: userId } });
     if (store) {
-      // The store's legal identity stays on past orders; it just stops trading.
+      // The store's legal identity stays on past orders; it just stops trading. Its DAC7 tax data (StoreTaxInfo)
+      // is kept: the law requires 10 years' retention after the reporting year (GDPR Art. 17(3)(b)).
       await tx.product.updateMany({ where: { storeId: store.id }, data: { isAvailable: false } });
       await tx.store.update({ where: { id: store.id }, data: { isVerified: false, phone: null, email: null } });
     }

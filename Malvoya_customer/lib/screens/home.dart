@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -26,7 +27,11 @@ import 'package:shimmer/shimmer.dart';
 class HomeScreen extends StatefulWidget {
   /// Switches the app to the Drops tab.
   final VoidCallback? onOpenDrops;
-  const HomeScreen({super.key, this.onOpenDrops});
+
+  /// Ticks whenever Home is shown again (tab switch, back from checkout or an order), so the
+  /// active-order card is fresh.
+  final ValueListenable<int>? visible;
+  const HomeScreen({super.key, this.onOpenDrops, this.visible});
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
@@ -70,10 +75,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   @override
   void initState() {
     super.initState();
-    _pulseCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1800))..repeat(reverse: true);
+    _pulseCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1800));
     _pulseAnim = Tween<double>(begin: 0.9, end: 1.12).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
     DeliveryLocation.instance.addListener(_onLocationChanged);
     NetworkStatus.instance.addListener(_onNetwork);
+    widget.visible?.addListener(checkActiveOrders);
     DeliveryLocation.instance.load().then((_) {
       final addr = DeliveryLocation.instance.address;
       if (addr != null && addr.isNotEmpty && mounted) setState(() => _currentDeliveryCity = addr);
@@ -114,7 +120,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       _alertBusy = false;
       if (res.ok) _alertSaved = !_alertSaved;
     });
-    if (!res.ok) messenger.showSnackBar(SnackBar(content: Text(res.error ?? tr(context, 'Something went wrong', 'Jokin meni vikaan'))));
+    if (!res.ok) messenger.showSnackBar(SnackBar(content: Text(res.errorText(context) ?? tr(context, 'Something went wrong', 'Jokin meni vikaan'))));
   }
 
   /// Back online after a failed load: try again without the customer having to pull to refresh.
@@ -130,33 +136,46 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     fetchStores();
   }
 
+  /// The order to track: paid and on its way. Checkouts left unpaid (PENDING with a pending or
+  /// failed payment) are not "on the way", so they do not get the Track card.
   Future<void> checkActiveOrders() async {
+    if (!mounted) return;
     final auth = Provider.of<AuthService>(context, listen: false);
-    if (auth.accessToken == null) return;
-    try {
-      final res = await http.get(
-        Uri.parse('${AppConstants.apiBase}/orders'),
-        headers: {
-          'Authorization': 'Bearer ${auth.accessToken}',
-          'Content-Type': 'application/json',
-        },
-      ).timeout(const Duration(seconds: 4));
-      if (res.statusCode == 200 && mounted) {
-        final data = jsonDecode(res.body);
-        final list = data is List ? data : (data['orders'] ?? []);
-        final activeList = list.where((o) => ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED'].contains(o['status'])).toList();
-        setState(() {
-          hasActiveOrder = activeList.isNotEmpty;
-          activeOrder = activeList.isNotEmpty ? Map<String, dynamic>.from(activeList.first) : null;
-        });
-      }
-    } catch (_) {}
+    if (!auth.isAuthenticated) {
+      if (activeOrder != null) setState(() => activeOrder = null);
+      return;
+    }
+    final res = await ApiClient(auth).get('/orders');
+    if (!mounted || !res.ok) return;
+    final list = res.data['orders'];
+    final activeList = (list is List ? list : const [])
+        .whereType<Map>()
+        .where((o) => ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED'].contains(o['status']))
+        .where((o) => !(o['status'] == 'PENDING' && (o['paymentStatus'] == 'PENDING' || o['paymentStatus'] == 'FAILED')))
+        .toList();
+    setState(() {
+      hasActiveOrder = activeList.isNotEmpty;
+      activeOrder = activeList.isNotEmpty ? Map<String, dynamic>.from(activeList.first) : null;
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // "Remove animations" in the phone's accessibility settings: keep the courier icon still
+    if (MediaQuery.of(context).disableAnimations) {
+      _pulseCtrl.stop();
+      _pulseCtrl.value = 0.5;
+    } else if (!_pulseCtrl.isAnimating) {
+      _pulseCtrl.repeat(reverse: true);
+    }
   }
 
   @override
   void dispose() {
     DeliveryLocation.instance.removeListener(_onLocationChanged);
     NetworkStatus.instance.removeListener(_onNetwork);
+    widget.visible?.removeListener(checkActiveOrders);
     _pulseCtrl.dispose();
     super.dispose();
   }
@@ -346,6 +365,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       'PROCESSING' => tr(context, 'Being packed', 'Pakataan'),
       _ => tr(context, 'On its way to you', 'Matkalla sinulle'),
     };
+    final window = order['status'] == 'SHIPPED' ? null : scheduledWindow(context, order['scheduledStart'], order['scheduledEnd']);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
       child: Material(
@@ -376,8 +396,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
-                      Text('${order['store']?['name'] ?? ''} · #${order['id']}',
-                          maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                      Text([order['store']?['name'] ?? '', '#${order['id']}', if (window != null) window].join(' · '),
+                          maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70, fontSize: 13)),
                     ],
                   ),
                 ),
@@ -397,10 +417,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   // ── Bento: Drops + two favourite shelves ────────────────────────────────
   Widget _bento(BuildContext context, AppLocalizations l10n) {
+    // Grows with the phone's text size (up to 1.5×) so the labels never overflow
+    final grow = (MediaQuery.textScalerOf(context).scale(100) / 100).clamp(1.0, 1.5);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
       child: SizedBox(
-        height: 214,
+        height: 214 * grow,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -429,9 +451,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                               style: const TextStyle(color: AppTheme.ink, fontSize: 12, fontWeight: FontWeight.w800)),
                         ),
                         const Spacer(),
-                        Text(
-                          tr(context, 'Drops\nnear you', 'Dropit\nlähelläsi'),
-                          style: AppTheme.display(context, size: 26, color: Colors.white),
+                        Flexible(
+                          flex: 4,
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.bottomLeft,
+                            child: Text(
+                              tr(context, 'Drops\nnear you', 'Dropit\nlähelläsi'),
+                              style: AppTheme.display(context, size: 26, color: Colors.white),
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -486,8 +515,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         children: [
           Icon(icon, color: fg, size: 26),
           const Spacer(),
-          Text(l10n.translateCategory(name),
-              maxLines: 1, overflow: TextOverflow.ellipsis, style: AppTheme.display(context, size: 18, color: fg)),
+          Flexible(
+            flex: 3,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.bottomLeft,
+              child: Text(l10n.translateCategory(name), maxLines: 1, style: AppTheme.display(context, size: 18, color: fg)),
+            ),
+          ),
         ],
       ),
     );
@@ -498,7 +533,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     final textPrimary = AppTheme.primaryText(context);
     final dark = AppTheme.isDarkMode(context);
     return SizedBox(
-      height: 100,
+      // Icon tile + label; the label line grows with the phone's text size
+      height: 82 + MediaQuery.textScalerOf(context).scale(18),
       child: ListView.separated(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         physics: const BouncingScrollPhysics(),

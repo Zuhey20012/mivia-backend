@@ -32,6 +32,17 @@ void main() async {
   runApp(const MalvoyaCourierApp());
 }
 
+/// The app's navigator. When the session changes (signed in, approved, signed out or deleted),
+/// every screen pushed on top is closed so the home screen below decides what is shown: no
+/// sign-in or register screen stays open over the dashboard, and no account sheet over the
+/// welcome screen.
+final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
+
+String _gateOf(AuthService auth) {
+  if (!auth.isAuthenticated) return 'out';
+  return auth.currentUser?.role == 'COURIER' && !auth.isPendingApproval ? 'courier' : 'pending';
+}
+
 class MalvoyaCourierApp extends StatelessWidget {
   const MalvoyaCourierApp({super.key});
   @override
@@ -44,6 +55,13 @@ class MalvoyaCourierApp extends StatelessWidget {
           PushService.instance.attach(auth);
           // The location fallback over HTTP needs the current access token, which is refreshed every 15 min
           auth.addListener(() => CourierTelemetryService().updateToken(auth.accessToken));
+          var gate = _gateOf(auth);
+          auth.addListener(() {
+            final next = _gateOf(auth);
+            if (next == gate) return;
+            gate = next;
+            appNavigatorKey.currentState?.popUntil((route) => route.isFirst);
+          });
           return auth;
         }),
         ChangeNotifierProvider(create: (_) => LocaleProvider()),
@@ -51,6 +69,7 @@ class MalvoyaCourierApp extends StatelessWidget {
       child: Consumer<LocaleProvider>(
         builder: (context, localeProvider, child) => MaterialApp(
           title: 'Malvoya Courier',
+          navigatorKey: appNavigatorKey,
           debugShowCheckedModeBanner: false,
           theme: AppTheme.lightTheme,
           locale: localeProvider.locale,

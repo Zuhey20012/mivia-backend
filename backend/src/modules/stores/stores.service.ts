@@ -7,6 +7,7 @@ import { deliveryFeeForDistance } from "../../utils/pricing";
 import { priceInfoFor, presentProduct, productInclude } from "../products/pricing";
 import { followInfo } from "../drops/social";
 import { storeAvailability } from "../../utils/openingHours";
+import { taxInfoComplete, taxRowSelect } from "../sellers/taxInfo";
 
 /** Trader information shoppers are entitled to see (DSA Art. 30, Omnibus Art. 6a CRD). */
 const publicStoreFields = {
@@ -93,11 +94,18 @@ export async function getStoreById(id: number, viewerId?: number, lat: number | 
 export async function getMyStore(ownerId: number) {
   const store = await prisma.store.findUnique({
     where: { ownerId },
-    include: { products: { include: productInclude, orderBy: { createdAt: "desc" } } },
+    include: { products: { include: productInclude, orderBy: { createdAt: "desc" } }, taxInfo: { select: taxRowSelect } },
   });
   if (!store) return null;
   const info = await priceInfoFor(store.products);
-  return { ...store, ...storeAvailability(store), products: store.products.map((p) => presentProduct(p, info.get(p.id), { owner: true })) };
+  const { taxInfo, ...rest } = store;
+  return {
+    ...rest,
+    ...storeAvailability(store),
+    // DAC7: whether the seller has given the identity and tax data Malvoya must report (GET/PUT /stores/my/tax-info)
+    taxInfoComplete: taxInfoComplete(store, taxInfo),
+    products: store.products.map((p) => presentProduct(p, info.get(p.id), { owner: true })),
+  };
 }
 
 function assertOwnStoreImages(data: { logoUrl?: string; bannerUrl?: string }, storeId: number | null) {

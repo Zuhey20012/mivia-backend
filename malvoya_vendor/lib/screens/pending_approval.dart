@@ -3,12 +3,14 @@ import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/strings.dart';
-import 'vendor_dashboard.dart';
+import '../widgets/account_sheet.dart';
 
-/// Shown right after a vendor registers. Explains the review process; business and payout
-/// details are verified by the Malvoya team and a payment provider, never stored in this app.
+/// Welcome for a store account without a store yet (right after registering). Explains the review
+/// process; payout details are verified by Stripe, never stored in this app.
 class PendingApprovalScreen extends StatelessWidget {
-  const PendingApprovalScreen({super.key});
+  /// "Set up my store": the home screen then shows the store setup.
+  final VoidCallback onStart;
+  const PendingApprovalScreen({super.key, required this.onStart});
 
   @override
   Widget build(BuildContext context) {
@@ -62,17 +64,14 @@ class PendingApprovalScreen extends StatelessWidget {
               SizedBox(
                 height: 52,
                 child: ElevatedButton(
-                  onPressed: () => Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(builder: (_) => const VendorDashboard()),
-                  ),
+                  onPressed: onStart,
                   child: Text(tr(context, 'Set up my store', 'Perusta kauppani')),
                 ),
               ),
               const SizedBox(height: 12),
               TextButton(
-                onPressed: () => auth.logout(),
-                child: Text(tr(context, 'Sign out', 'Kirjaudu ulos'), style: const TextStyle(color: AppTheme.textSecondary)),
+                onPressed: () => showAccountSheet(context),
+                child: Text(tr(context, 'Help, sign out or delete account', 'Apua, uloskirjautuminen tai tilin poisto'), style: const TextStyle(color: AppTheme.textSecondary)),
               ),
             ],
           ),

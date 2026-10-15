@@ -21,6 +21,9 @@ Malvoya is a marketplace. Stores that sell through Malvoya are independent selle
 | Payment status and Stripe payment reference | Confirm payment and issue refunds. **We never receive or store card or bank account numbers**; Stripe processes them. | Contract; legal obligation |
 | Courier location, only while the courier is online | Show the courier's position to the customer and store of an active order; offer jobs to nearby couriers; calculate pay for the ride to the store when a job is accepted (only the distance is stored) | Contract with the courier (6(1)(b)) |
 | Store business details (for sellers) | Verify sellers; tax reporting on marketplace sellers (DAC7) | Contract; legal obligation |
+| Seller tax details (DAC7): for business sellers the legal name, business ID (Y-tunnus), VAT number if any and registered address; for private sellers the legal name, date of birth, tax identification number (for Finnish residents the personal identity code, henkilötunnus) and home address; and each seller's yearly number of sales, amounts paid to them and commissions per quarter | Report sellers to the Finnish Tax Administration once a year, as the EU directive on reporting by digital platforms (DAC7, Council Directive (EU) 2021/514) requires. We collect only what that report needs | Legal obligation (6(1)(c)) |
+| Monthly sales statements (for sellers) | Give each seller a statement of their sales, refunds, commission and payouts | Contract (6(1)(b)); legal obligation (Accounting Act) |
+| Chosen delivery time (if you book a delivery slot) | Have the store prepare the order and offer it to couriers in time for that slot | Contract (6(1)(b)) |
 | Drops you like, views of drops (counted once per day; for signed-out viewers we keep only a one-way scrambled form of the IP address, which changes every day — nothing is stored on your phone for this), favourites and reviews | Show likes and favourites, rank the Drops feed, show verified reviews | Contract (6(1)(b)); legitimate interest (6(1)(f)) |
 | Delivery photo and the courier's position at handover, when the order is left at the door | Proof of delivery | Contract; legitimate interest |
 | Push notification token of your phone | Send order, delivery and payout updates. No marketing. | Contract (6(1)(b)) |
@@ -55,6 +58,8 @@ Delivery jobs are offered to approved, online couriers within 7.5 km of the stor
   - [EMAIL PROVIDER] (email)
 - **Authorities**, where the law requires it (for example the Finnish Tax Administration for DAC7 seller reporting).
 
+**Seller tax details (DAC7).** A seller's tax identification number is stored encrypted (AES-256) and is shown to the seller only in part (its last characters). It is decrypted only for Malvoya's yearly report, which only Malvoya's administrators can open, and it is sent only to the Finnish Tax Administration; that authority may share it with the tax authorities of other EU countries where the seller lives, as the directive provides. Sellers who stay under the directive's threshold (fewer than 30 sales and at most 2 000 € in a year) are not reported, but their details are kept as the law requires.
+
 ## 6. Transfers outside the EU/EEA
 
 Hosting is provided by Render. [STATE REGION: "in Frankfurt, Germany (EU)" once migrated. Until then: "in the United States under the EU Standard Contractual Clauses / EU–US Data Privacy Framework".] Some providers (Google, Twilio, Stripe) may process data in the United States under the EU–US Data Privacy Framework or Standard Contractual Clauses.
@@ -65,6 +70,7 @@ Hosting is provided by Render. [STATE REGION: "in Frankfurt, Germany (EU)" once 
 |---|---|
 | Account data | Until you delete your account |
 | Orders, receipts, refunds | 6 years from the end of the financial year (Accounting Act 2:10); anonymised if you delete your account earlier |
+| Seller tax details and the yearly DAC7 report data | 10 years from the end of the year the data was reported for (DAC7), also if the seller deletes their account |
 | Courier live location | Until the courier goes offline |
 | Delivery photos and handover position | 30 days after delivery |
 | Drop views | Counted per day; the daily record keeps no content beyond the viewer key |

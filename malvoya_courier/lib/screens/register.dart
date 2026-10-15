@@ -4,7 +4,6 @@ import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/legal_links.dart';
 import '../core/strings.dart';
-import 'pending_approval.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -19,6 +18,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _passCtrl = TextEditingController();
   bool _loading = false;
   bool _obscurePass = true;
+  bool _agreed = false;
   String? _error;
 
   @override
@@ -34,30 +34,28 @@ class _RegisterScreenState extends State<RegisterScreen> {
       setState(() => _error = tr(context, 'Please fill out all fields.', 'Täytä kaikki kentät.'));
       return;
     }
+    if (!_agreed) {
+      setState(() => _error = tr(context, 'Accept the courier agreement to send your application.', 'Hyväksy lähettisopimus lähettääksesi hakemuksen.'));
+      return;
+    }
     setState(() { _loading = true; _error = null; });
     final auth = Provider.of<AuthService>(context, listen: false);
     final err = await auth.register(
       _nameCtrl.text.trim(),
       _emailCtrl.text.trim(),
       _passCtrl.text,
-      'COURIER',
+      acceptTerms: _agreed,
     );
-
-    if (mounted) {
-      if (err != null) {
-        setState(() { _error = err; _loading = false; });
-      } else {
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const PendingApprovalScreen()));
-      }
-    }
+    // On success the app closes this screen itself and its home shows the pending-approval screen
+    if (mounted && err != null) setState(() { _error = err; _loading = false; });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: AppTheme.background,
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded, color: AppTheme.textPrimary),
@@ -136,24 +134,38 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
               ],
 
-              const SizedBox(height: 32),
+              const SizedBox(height: 20),
+              // Required: the application records that the courier accepted the agreement
+              CheckboxListTile(
+                value: _agreed,
+                onChanged: _loading ? null : (v) => setState(() { _agreed = v ?? false; if (_agreed) _error = null; }),
+                controlAffinity: ListTileControlAffinity.leading,
+                contentPadding: EdgeInsets.zero,
+                activeColor: AppTheme.primary,
+                title: Text(
+                  tr(context, 'I have read and accept the Courier Agreement', 'Olen lukenut ja hyväksyn lähettisopimuksen'),
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => openLegal('couriers'),
+                  icon: const Icon(Icons.gavel_rounded, size: 20),
+                  label: Text(tr(context, 'Read the courier agreement', 'Lue lähettisopimus')),
+                ),
+              ),
+              const SizedBox(height: 20),
               SizedBox(
                 width: double.infinity,
                 child: _loading
                     ? const Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5)))
                     : ElevatedButton(
-                        onPressed: _handleRegister,
+                        onPressed: _agreed ? _handleRegister : null,
                         child: Text(tr(context, 'Send application', 'Lähetä hakemus')),
                       ),
               ),
-              const SizedBox(height: 8),
-              Center(
-                child: TextButton(
-                  onPressed: () => openLegal('couriers'),
-                  child: Text(tr(context, 'Read the courier agreement', 'Lue lähettisopimus')),
-                ),
-              ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 32),
             ],
           ),
         ),

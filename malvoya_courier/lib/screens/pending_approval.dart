@@ -1,13 +1,18 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
+import '../core/delete_account_tile.dart';
 import '../core/legal_links.dart';
 import '../core/strings.dart';
+import 'help_screen.dart';
 
 /// Shown until an admin approves the courier on the server.
 /// Identity and right-to-work documents are checked by the Malvoya team, never collected in this app.
-/// The server sends no message on approval, so the courier checks the status here.
+/// The server sends no message on approval, so this screen checks the status itself: when the app
+/// comes back to the foreground and every minute while it is on screen. Once approved, the app's
+/// home switches to the dashboard on its own.
 class PendingApprovalScreen extends StatefulWidget {
   const PendingApprovalScreen({super.key});
 
@@ -15,20 +20,58 @@ class PendingApprovalScreen extends StatefulWidget {
   State<PendingApprovalScreen> createState() => _PendingApprovalScreenState();
 }
 
-class _PendingApprovalScreenState extends State<PendingApprovalScreen> {
+class _PendingApprovalScreenState extends State<PendingApprovalScreen> with WidgetsBindingObserver {
   bool _checking = false;
+  DateTime? _lastChecked;
+  Timer? _timer;
 
-  Future<void> _checkStatus() async {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _startTimer();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _check(silent: true);
+      _startTimer();
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      _timer?.cancel();
+      _timer = null;
+    }
+  }
+
+  void _startTimer() {
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 60), (_) => _check(silent: true));
+  }
+
+  Future<void> _check({bool silent = false}) async {
+    if (_checking) return;
     setState(() => _checking = true);
     final approved = await Provider.of<AuthService>(context, listen: false).refreshApprovalStatus();
     if (!mounted) return;
-    setState(() => _checking = false);
-    if (!approved) {
+    setState(() {
+      _checking = false;
+      _lastChecked = DateTime.now();
+    });
+    if (!approved && !silent) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(tr(context, 'Still under review. Please check again later.', 'Vielä tarkistettavana. Tarkista tilanne myöhemmin uudelleen.'))),
+        SnackBar(content: Text(tr(context, 'Still under review. This screen keeps checking for you.', 'Vielä tarkistettavana. Tämä näkymä tarkistaa tilanteen puolestasi.'))),
       );
     }
   }
+
+  String _time(DateTime t) => '${t.hour.toString().padLeft(2, '0')}.${t.minute.toString().padLeft(2, '0')}';
 
   @override
   Widget build(BuildContext context) {
@@ -61,18 +104,23 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> {
               ),
               const SizedBox(height: 10),
               Text(
-                tr(context, 'Your courier account is being reviewed.', 'Lähettitilisi on tarkistettavana.'),
+                tr(context, 'Your courier application is being reviewed.', 'Lähettihakemuksesi on tarkistettavana.'),
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 16, height: 1.4, color: AppTheme.textSecondary),
               ),
               const SizedBox(height: 32),
-              _step(Icons.badge_outlined, tr(context, 'Identity, age and right to work', 'Henkilöllisyys, ikä ja työnteko-oikeus'),
-                  tr(context, 'The Malvoya team contacts you to check your identity, that you are at least 18 and your right to work in Finland. No documents are uploaded in this app.',
-                      'Malvoyan tiimi ottaa sinuun yhteyttä tarkistaakseen henkilöllisyytesi, että olet vähintään 18-vuotias, ja oikeutesi tehdä työtä Suomessa. Asiakirjoja ei ladata tähän sovellukseen.')),
+              _step(Icons.person_search_outlined, tr(context, 'A person reviews it', 'Hakemuksen käsittelee ihminen'),
+                  tr(context,
+                      'Approval is done by hand by the Malvoya team, not automatically. They check your identity, that you are at least 18 and your right to work in Finland. No documents are uploaded in this app; if the team needs something from you, they use the contact details you signed up with.',
+                      'Malvoyan tiimi hyväksyy hakemukset käsin, ei automaattisesti. Tiimi tarkistaa henkilöllisyytesi, että olet vähintään 18-vuotias, ja oikeutesi tehdä työtä Suomessa. Asiakirjoja ei ladata tähän sovellukseen; jos tiimi tarvitsee sinulta jotain, se käyttää yhteystietoja, jotka annoit rekisteröityessäsi.')),
+              _step(Icons.sync_rounded, tr(context, 'Check your status here', 'Tarkista tilanne täältä'),
+                  tr(context,
+                      'This screen checks your status by itself every minute while it is open, and whenever you come back to the app. When you are approved, the app opens your courier view here. No separate message is sent on approval yet.',
+                      'Tämä näkymä tarkistaa tilanteesi itse minuutin välein, kun se on auki, ja aina kun palaat sovellukseen. Kun hakemuksesi on hyväksytty, sovellus avaa lähettinäkymän tähän. Hyväksynnästä ei vielä lähetetä erillistä viestiä.')),
               _step(Icons.description_outlined, tr(context, 'Courier agreement', 'Lähettisopimus'),
                   tr(context, 'You deliver as an independent entrepreneur under the courier agreement. Please read it before your first delivery.',
                       'Toimitat itsenäisenä yrittäjänä lähettisopimuksen mukaisesti. Lue se ennen ensimmäistä toimitusta.')),
-              _step(Icons.check_circle_outline, tr(context, 'Start delivering', 'Aloita toimitukset'),
+              _step(Icons.check_circle_outline, tr(context, 'Then: start delivering', 'Sitten: aloita toimitukset'),
                   tr(context, 'Once approved, go online when it suits you and accept the jobs you want. Malvoya is just starting, so jobs may be rare at first.',
                       'Hyväksynnän jälkeen mene linjoille silloin kun sinulle sopii ja ota haluamasi keikat. Malvoya on vasta aloittamassa, joten keikkoja voi aluksi olla harvoin.')),
               Align(
@@ -85,18 +133,44 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> {
               ),
               const SizedBox(height: 24),
               SizedBox(
-                height: 52,
+                width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: _checking ? null : _checkStatus,
+                  onPressed: _checking ? null : () => _check(),
                   child: _checking
                       ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : Text(tr(context, 'Check status', 'Tarkista tilanne')),
+                      : Text(tr(context, 'Check status now', 'Tarkista tilanne nyt')),
                 ),
               ),
+              if (_lastChecked != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  tr(context, 'Last checked at ${_time(_lastChecked!)}', 'Tarkistettu viimeksi klo ${_time(_lastChecked!)}'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary),
+                ),
+              ],
+              const SizedBox(height: 20),
+              Container(
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.divider)),
+                child: Column(children: [
+                  ListTile(
+                    leading: const Icon(Icons.support_agent_rounded),
+                    title: Text(tr(context, 'Help and contact', 'Apua ja yhteydenotto'), style: const TextStyle(fontWeight: FontWeight.w600)),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HelpScreen())),
+                  ),
+                  const Divider(height: 1),
+                  const DeleteAccountTile(),
+                ]),
+              ),
               const SizedBox(height: 12),
-              TextButton(
-                onPressed: () => auth.logout(),
-                child: Text(tr(context, 'Sign out', 'Kirjaudu ulos'), style: const TextStyle(color: AppTheme.textSecondary)),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => auth.logout(),
+                  icon: const Icon(Icons.logout_rounded),
+                  label: Text(tr(context, 'Sign out', 'Kirjaudu ulos')),
+                ),
               ),
             ],
           ),

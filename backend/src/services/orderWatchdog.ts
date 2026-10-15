@@ -6,6 +6,7 @@ import { emitToStore } from "../lib/socket";
 import { cancelOrderInternal } from "../modules/orders/orders.service";
 import { sendOrderStatusEmail } from "./notificationDeliveryService";
 import { offerOrderToCouriers } from "./dispatchService";
+import { beforeDispatch, scheduledDispatchHorizon } from "../utils/deliverySlots";
 
 const logger = pino({ name: "order-watchdog" });
 const ago = (min: number) => new Date(Date.now() - min * 60_000);
@@ -16,7 +17,8 @@ const BATCH = 100;
  *  1. unpaid checkouts release their reserved stock,
  *  2. a store that has not answered a paid order is reminded, then the order is refunded,
  *  3. jobs nobody took are offered to couriers again, the customer hears about a delay,
- *     and if still nobody comes the order is refunded,
+ *     and if still nobody comes the order is refunded. Scheduled orders are first offered at slot start −
+ *     the store's prep time − 15 min, and their delay/refund timers count from the slot start,
  *  4. pickup orders that are ready but not collected: the customer is reminded once, and after the hold
  *     time the order is cancelled with a full refund (the items go back into stock).
  * Every step is idempotent and safe to run on several instances (the scheduler holds a lease).
@@ -80,17 +82,23 @@ export async function runOrderWatchdog() {
     result.storeTimeouts++;
   }
 
-  // 3. Accepted orders without a courier
+  // 3. Accepted orders without a courier (scheduled ones only once their dispatch time is near)
   const unassigned = await prisma.order.findMany({
-    where: { status: { in: ["CONFIRMED", "PROCESSING"] }, paymentStatus: "SUCCEEDED", courierId: null, fulfilment: "DELIVERY" },
+    where: {
+      status: { in: ["CONFIRMED", "PROCESSING"] }, paymentStatus: "SUCCEEDED", courierId: null, fulfilment: "DELIVERY",
+      OR: [{ scheduledStart: null }, { scheduledStart: { lte: scheduledDispatchHorizon() } }],
+    },
     select: {
-      id: true, userId: true, confirmedAt: true, updatedAt: true, lastOfferAt: true, courierSearchNotifiedAt: true,
-      user: { select: { email: true } }, store: { select: { ownerId: true } },
+      id: true, userId: true, confirmedAt: true, updatedAt: true, lastOfferAt: true, courierSearchNotifiedAt: true, scheduledStart: true,
+      user: { select: { email: true } }, store: { select: { ownerId: true, prepMinutes: true } },
     },
     take: BATCH,
   });
   for (const o of unassigned) {
-    const since = (o.confirmedAt ?? o.updatedAt).getTime();
+    // Scheduled: wait for slot start − prep − 15 min; the first offer below starts dispatch (and tells the customer)
+    if (beforeDispatch(o, o.store.prepMinutes)) continue;
+    // "No courier" timers: from acceptance, or for a scheduled order from the slot start
+    const since = o.scheduledStart ? o.scheduledStart.getTime() : (o.confirmedAt ?? o.updatedAt).getTime();
     const waitedMin = (Date.now() - since) / 60_000;
 
     if (waitedMin >= t.courierSearch) {

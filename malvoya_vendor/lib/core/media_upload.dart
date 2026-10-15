@@ -46,7 +46,7 @@ class MediaUpload {
     }
 
     final sign = await api.post('/media/sign', {'kind': kind, if (orderId != null) 'orderId': orderId});
-    if (!sign.ok) throw UploadException(sign.error!);
+    if (!sign.ok) throw UploadException(sign.errorMessage);
     final params = Map<String, dynamic>.from(sign.data['params']);
 
     final req = http.MultipartRequest('POST', Uri.parse(sign.data['uploadUrl']));
@@ -94,7 +94,7 @@ class MediaUpload {
   static Future<String> uploadImage({required ApiClient api, required String kind, required File file, void Function(double)? onProgress}) async {
     final media = await upload(api: api, kind: kind, file: file, onProgress: onProgress);
     final confirm = await api.post('/media/confirm', {'kind': kind, ...media.toProof()});
-    if (!confirm.ok) throw UploadException(confirm.error!);
+    if (!confirm.ok) throw UploadException(confirm.errorMessage);
     return confirm.data['media']['url'] as String;
   }
 }

@@ -10,9 +10,10 @@ import { ImportIssue, ImportItem } from "./mapping";
 import { assertPublicHost, parseShopUrl } from "./safeFetch";
 import { assertEuroShop, fetchShopifyProducts, mapShopifyProduct } from "./shopify";
 import { csvToItems } from "./csv";
+import { WooKeys, fetchWooProducts, fetchWooVariations, mapWooProduct, wooShopChecks } from "./woocommerce";
 
 /**
- * Catalogue import (Shopify public feed or CSV). Runs in-process after the request has returned 202;
+ * Catalogue import (Shopify public feed, WooCommerce REST API with read-only keys, or CSV). Runs in-process after the request has returned 202;
  * products arrive HIDDEN (drafts) until the store publishes the job. Photos are re-hosted into the store's
  * own Cloudinary folder, so products only ever reference the store's own uploads. Re-importing updates
  * the same products (storeId + source + external id), never duplicates them.
@@ -102,6 +103,40 @@ export async function startShopifyImport(ownerId: number, shopUrl: string) {
     }
     issues.unshift(...currencyIssues);
     const items = products.map((p) => mapShopifyProduct(p, issues)).filter((x): x is ImportItem => !!x);
+    return { items, issues, skipped: products.length - items.length, total: products.length };
+  });
+  return presentJob(job);
+}
+
+/**
+ * WooCommerce: the store's own read-only REST API keys. They are kept only in this job's closure while it runs
+ * (never written to the database or logs) and sent only to the shop's own origin.
+ */
+export async function startWooImport(ownerId: number, siteUrl: string, keys: WooKeys) {
+  requireMedia();
+  const store = await importingStore(ownerId);
+  const origin = parseShopUrl(siteUrl);
+  await assertCanStart(store.id); // before any DNS lookup
+  await assertPublicHost(origin);
+  const job = await createJob(store.id, { source: "WOOCOMMERCE", sourceRef: origin.host, rightsConfirmedAt: new Date() });
+  launch(job.id, store.id, "WOOCOMMERCE", async () => {
+    const shopIssues = await wooShopChecks(origin, keys); // wrong keys or another currency stop the job here
+    const { products, issues } = await fetchWooProducts(origin, keys);
+    issues.unshift(...shopIssues);
+    const items: ImportItem[] = [];
+    for (const p of products) {
+      let variations: Awaited<ReturnType<typeof fetchWooVariations>> = [];
+      if (p.type === "variable" && typeof p.id === "number") {
+        try {
+          variations = await fetchWooVariations(origin, keys, p.id);
+        } catch (e: any) {
+          issues.push({ item: String(p.name ?? p.id), message: `Options could not be read (${e instanceof ApiError ? e.message : "error"})`, level: "error" });
+          continue;
+        }
+      }
+      const item = mapWooProduct(p, variations, issues);
+      if (item) items.push(item);
+    }
     return { items, issues, skipped: products.length - items.length, total: products.length };
   });
   return presentJob(job);

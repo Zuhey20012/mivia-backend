@@ -75,7 +75,7 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
     if (!mounted) return;
     setState(() => _opening = false);
     if (!res.ok) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.error!)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.errorMessage)));
       return;
     }
     await launchUrl(Uri.parse(res.data['url']), mode: LaunchMode.externalApplication);

@@ -29,8 +29,8 @@ class ProductTile extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AspectRatio(
-            aspectRatio: 4 / 5,
+          // The photo takes what the text leaves, so large phone text sizes never overflow the tile
+          Expanded(
             child: ClipRRect(
               borderRadius: BorderRadius.circular(AppTheme.radiusMd + 2),
               child: Stack(

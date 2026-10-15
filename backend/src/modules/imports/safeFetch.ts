@@ -109,12 +109,23 @@ function guardedLookup(hostname: string, options: { all?: boolean }, callback: (
 type Answer = { status: number; location: string | null; body: Buffer | null };
 
 /** One GET without following redirects. Public hosts go through the guarded lookup. */
-function getOnce(url: URL, opts: { maxBytes: number; timeoutMs: number }): Promise<Answer> {
+type FetchOpts = {
+  maxBytes: number; timeoutMs: number;
+  /** Sent only to the starting origin (e.g. WooCommerce API keys as Basic auth); a redirect elsewhere is refused. */
+  authorization?: string;
+  /** A user-readable message for an error status (else the generic one). */
+  errorFor?: (status: number) => string | null;
+};
+
+function getOnce(url: URL, opts: FetchOpts): Promise<Answer> {
   return new Promise((resolve, reject) => {
     const client = url.protocol === "https:" ? https : http;
     const req = client.request(url, {
       method: "GET",
-      headers: { Accept: "application/json", "User-Agent": "MalvoyaCatalogueImport/1.0" },
+      headers: {
+        Accept: "application/json", "User-Agent": "MalvoyaCatalogueImport/1.0",
+        ...(opts.authorization ? { Authorization: opts.authorization } : {}),
+      },
       ...(allowListed(url) ? {} : { lookup: guardedLookup as any }),
       timeout: opts.timeoutMs,
     }, (res) => {
@@ -158,7 +169,7 @@ function getOnce(url: URL, opts: { maxBytes: number; timeoutMs: number }): Promi
 }
 
 /** GET a JSON document from a public site: manual redirects (max 3, each checked), timeout, size cap. */
-export async function fetchPublicJson(start: URL, opts: { maxBytes: number; timeoutMs: number }): Promise<unknown> {
+export async function fetchPublicJson(start: URL, opts: FetchOpts): Promise<unknown> {
   let url = start;
   for (let hop = 0; hop <= 3; hop++) {
     checkUrlShape(url);
@@ -166,10 +177,15 @@ export async function fetchPublicJson(start: URL, opts: { maxBytes: number; time
     const res = await getOnce(url, opts);
     if (res.status >= 300 && res.status < 400) {
       if (!res.location) throw new ApiError("The shop sent an invalid redirect", 502);
-      url = new URL(res.location, url);
+      const next = new URL(res.location, url);
+      // Credentials never follow a redirect to another site
+      if (opts.authorization && next.origin !== start.origin) throw new ApiError("The shop redirected to another site; enter its final address", 502);
+      url = next;
       continue;
     }
     if (!res.body) {
+      const custom = opts.errorFor?.(res.status);
+      if (custom) throw new ApiError(custom, 502);
       throw new ApiError(res.status === 404 ? "This shop has no public product feed (products.json)" : `The shop answered with an error (${res.status})`, 502);
     }
     try {

@@ -5,7 +5,7 @@ import { positiveId, sendError } from "../../lib/errors";
 import * as imports from "./imports.service";
 
 /**
- * Catalogue import for stores: /products/import/{shopify,csv} start a job (202), GET reads jobs,
+ * Catalogue import for stores: /products/import/{shopify,woocommerce,csv} start a job (202), GET reads jobs,
  * /products/import/:id/publish makes the job's drafts visible.
  */
 
@@ -27,6 +27,13 @@ const rights = z.literal(true, {
   errorMap: () => ({ message: "Confirm that your store may use these photos and texts (rightsConfirmed: true)" }),
 });
 const shopifySchema = z.object({ shopUrl: z.string().trim().min(3).max(300), rightsConfirmed: rights });
+// WooCommerce REST API keys (WooCommerce → Settings → Advanced → REST API, permission "Read"); never stored
+const wooSchema = z.object({
+  siteUrl: z.string().trim().min(3).max(300),
+  consumerKey: z.string().trim().regex(/^ck_[A-Za-z0-9]{20,64}$/, "Paste the consumer key (starts with ck_)"),
+  consumerSecret: z.string().trim().regex(/^cs_[A-Za-z0-9]{20,64}$/, "Paste the consumer secret (starts with cs_)"),
+  rightsConfirmed: rights,
+}).strict();
 const csvSchema = z.object({ csv: z.string().min(1), rightsConfirmed: rights });
 
 const router = Router();
@@ -37,6 +44,15 @@ router.post("/products/import/shopify", ...vendor, async (req: AuthRequest, res:
   if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.issues[0]?.message ?? "Invalid request", errors: parsed.error.flatten() });
   try {
     res.status(202).json({ ok: true, job: await imports.startShopifyImport(req.user!.id, parsed.data.shopUrl) });
+  } catch (e) { sendError(res, e); }
+});
+
+router.post("/products/import/woocommerce", ...vendor, async (req: AuthRequest, res: Response) => {
+  const parsed = wooSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.issues[0]?.message ?? "Invalid request", errors: parsed.error.flatten() });
+  const { siteUrl, consumerKey, consumerSecret } = parsed.data;
+  try {
+    res.status(202).json({ ok: true, job: await imports.startWooImport(req.user!.id, siteUrl, { consumerKey, consumerSecret }) });
   } catch (e) { sendError(res, e); }
 });
 

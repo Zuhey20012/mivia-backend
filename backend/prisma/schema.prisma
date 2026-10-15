@@ -238,12 +238,35 @@ model Store {
   payouts    Payout[]
   followers  StoreFollow[]
   importJobs ImportJob[]
+  taxInfo    StoreTaxInfo?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Query-path indexes (Postgres does not index foreign keys automatically)
   @@index([isVerified, rating])
+}
+
+// Seller identity and tax data the platform must collect and report to Vero once a year (DAC7, Council
+// Directive (EU) 2021/514, implemented in Finland by Vero; report due by 31 January). Kept 10 years after the reporting year.
+// BUSINESS: legal name + Store.businessId (Y-tunnus) + optional VAT number + registered address.
+// PRIVATE: legal name + date of birth + tax identification number (TIN) + primary address.
+// The TIN (for Finns the henkilötunnus) is encrypted at rest (AES-256-GCM, DATA_ENCRYPTION_KEY) and only
+// decrypted for the admin DAC7 report; the owner sees it masked.
+model StoreTaxInfo {
+  id           Int       @id @default(autoincrement())
+  storeId      Int       @unique
+  store        Store     @relation(fields: [storeId], references: [id])
+  legalName    String
+  dateOfBirth  DateTime? @db.Date // private sellers only
+  tinEncrypted String? // private sellers only: "v1:<base64 iv|tag|ciphertext>"
+  vatNumber    String? // business sellers, optional (e.g. FI12345678)
+  addressLine  String
+  postalCode   String
+  city         String
+  country      String // ISO 3166-1 alpha-2, e.g. "FI"
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }
 
 // ─────────────────────────────────────────────
@@ -276,7 +299,7 @@ model Product {
   isAvailable   Boolean @default(true)
 
   // Catalogue import (Shopify feed or CSV): re-importing the same item updates it instead of duplicating it
-  externalSource String? // "SHOPIFY" | "CSV"
+  externalSource String? // "SHOPIFY" | "WOOCOMMERCE" | "CSV"
   externalId     String? // id in the source (Shopify product id, CSV external_id or name)
   gtin           String? // EAN/GTIN barcode, 8–14 digits
   importJobId    Int? // the import that last created or updated it (publish works per job)
@@ -413,7 +436,13 @@ model Order {
   deliveryAddress String?
   deliveryLat     Float?
   deliveryLng     Float?
-  etaMinutes      Int? // estimate given to the customer when the order was paid
+  etaMinutes      Int? // estimate given to the customer when the order was paid (null for scheduled orders)
+
+  // Scheduled delivery (since 2.9.0): the customer picked a platform slot (DELIVERY_SLOTS, Europe/Helsinki).
+  // Couriers are offered the job from scheduledStart − store prepMinutes − 15 min; null = as soon as possible.
+  scheduledStart    DateTime?
+  scheduledEnd      DateTime?
+  dispatchStartedAt DateTime? // the first courier offer went out (the customer was told), set once
 
   // Proof of delivery. Photos are private and deleted after 30 days (data minimisation).
   handoverMethod        String? // "IN_PERSON" | "PHOTO"
@@ -452,6 +481,9 @@ model Order {
   @@index([promoCodeId])
   @@index([fulfilment, status, readyAt])
   @@index([referrerId])
+  @@index([deliveredAt])
+  @@index([paidAt])
+  @@index([scheduledStart])
 }
 
 model OrderItem {
@@ -960,6 +992,7 @@ model PromoRedemption {
 enum ImportSource {
   SHOPIFY
   CSV
+  WOOCOMMERCE
 }
 
 enum ImportStatus {
@@ -975,7 +1008,7 @@ model ImportJob {
   store             Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
   source            ImportSource
   status            ImportStatus @default(QUEUED)
-  sourceRef         String? // the Shopify shop domain; null for CSV
+  sourceRef         String? // the Shopify / WooCommerce shop domain; null for CSV
   total             Int          @default(0) // products found in the source
   created           Int          @default(0)
   updated           Int          @default(0)

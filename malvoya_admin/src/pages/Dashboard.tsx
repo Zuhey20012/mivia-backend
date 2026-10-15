@@ -24,6 +24,7 @@ const LABELS: Record<string, string> = {
   payments: 'Payments (Stripe)', paymentWebhook: 'Payment confirmations', email: 'Email',
   supportInbox: 'Support inbox', sms: 'SMS codes', pushNotifications: 'Push notifications',
   photosAndVideos: 'Photos and videos (Cloudinary)', googleSignIn: 'Google sign-in',
+  dataEncryption: 'Tax ID encryption (DAC7)',
 };
 
 export default function Overview() {

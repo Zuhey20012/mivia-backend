@@ -59,13 +59,36 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
   void _useSaved(Map<String, dynamic> addr) {
     final text = (addr['subtitle'] ?? addr['title'] ?? '').toString();
     widget.onLocationSelected?.call(text);
-    final lat = addr['lat'];
-    final lng = addr['lng'];
-    DeliveryLocation.instance.set(
-      text,
-      latitude: lat is num ? lat.toDouble() : null,
-      longitude: lng is num ? lng.toDouble() : null,
+    DeliveryLocation.instance.use(addr);
+  }
+
+  /// Opens the map (centred on the phone's position with [locate]), then saves and uses the pin.
+  Future<void> _fromMap({bool locate = false}) async {
+    HapticFeedback.lightImpact();
+    final res = await Navigator.push<AddressResult>(
+      context,
+      MaterialPageRoute(builder: (_) => MapAddressPickerScreen(locateOnOpen: locate)),
     );
+    if (res == null || !mounted) return;
+    widget.onLocationSelected?.call(res.fullAddress);
+    DeliveryLocation.instance.set(res.fullAddress, latitude: res.latitude, longitude: res.longitude);
+    final newAddress = {
+      'id': 'addr_${DateTime.now().millisecondsSinceEpoch}',
+      'title': res.street.isNotEmpty ? res.street : tr(context, 'Pinned location', 'Merkitty sijainti'),
+      'subtitle': res.fullAddress,
+      'lat': res.latitude,
+      'lng': res.longitude,
+      'buzzer': '',
+      'isDefault': _savedAddresses.isEmpty,
+    };
+    setState(() => _savedAddresses.insert(0, newAddress));
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(DeliveryLocation.savedAddressesKey, jsonEncode(_savedAddresses));
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final text = tr(context, 'Delivery address: ${res.fullAddress}', 'Toimitusosoite: ${res.fullAddress}');
+    Navigator.pop(context);
+    messenger.showSnackBar(SnackBar(content: Text(text), backgroundColor: const Color(0xFF248A52), behavior: SnackBarBehavior.floating));
   }
 
   Future<void> _saveNewManualAddress() async {
@@ -90,7 +113,8 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('malvoya_addresses', jsonEncode(_savedAddresses));
     widget.onLocationSelected?.call(addressText);
-    DeliveryLocation.instance.set(addressText);
+    final door = _buzzerCtrl.text.trim();
+    DeliveryLocation.instance.set(addressText, doorCode: door.isEmpty ? null : door);
     if (mounted) {
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -154,6 +178,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                   ),
                 ),
                 IconButton(
+                  tooltip: tr(context, 'Close', 'Sulje'),
                   icon: const Icon(Icons.close_rounded, color: Colors.grey),
                   onPressed: () => Navigator.pop(context),
                 ),
@@ -166,43 +191,9 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
               physics: const BouncingScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
               children: [
-                // Live Interactive Google Map Pinpoint Shortcut
+                // Pin the door on the OpenStreetMap map
                 GestureDetector(
-                  onTap: () async {
-                    HapticFeedback.lightImpact();
-                    final result = await Navigator.push<AddressResult>(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const MapAddressPickerScreen(),
-                      ),
-                    );
-                    if (result != null && mounted) {
-                      widget.onLocationSelected?.call(result.fullAddress);
-                      DeliveryLocation.instance.set(result.fullAddress, latitude: result.latitude, longitude: result.longitude);
-                      final newAddress = {
-                        'id': 'addr_${DateTime.now().millisecondsSinceEpoch}',
-                        'title': result.street.isNotEmpty ? result.street : 'Pin Location',
-                        'subtitle': result.fullAddress,
-                        'lat': result.latitude,
-                        'lng': result.longitude,
-                        'buzzer': '',
-                        'isDefault': _savedAddresses.isEmpty,
-                      };
-                      setState(() {
-                        _savedAddresses.insert(0, newAddress);
-                      });
-                      final prefs = await SharedPreferences.getInstance();
-                      await prefs.setString('malvoya_addresses', jsonEncode(_savedAddresses));
-                      Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(tr(context, 'Delivery address: ${result.fullAddress}', 'Toimitusosoite: ${result.fullAddress}')),
-                          backgroundColor: const Color(0xFF248A52),
-                          behavior: SnackBarBehavior.floating,
-                        ),
-                      );
-                    }
-                  },
+                  onTap: () => _fromMap(),
                   child: Container(
                     margin: const EdgeInsets.only(bottom: 14),
                     padding: const EdgeInsets.all(16),
@@ -225,18 +216,19 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                           child: const Icon(Icons.map_rounded, color: AppTheme.primary, size: 20),
                         ),
                         const SizedBox(width: 14),
-                        const Expanded(
+                        Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Pin Exact Address on Live Map',
-                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14),
+                                tr(context, 'Pin your door on the map', 'Merkitse ovesi kartalle'),
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14),
                               ),
-                              SizedBox(height: 2),
+                              const SizedBox(height: 2),
                               Text(
-                                'Satellite, Hybrid & 3D Google Maps pinpointing',
-                                style: TextStyle(color: Colors.white70, fontSize: 11),
+                                tr(context, 'For the exact delivery fee and an easy find for your courier',
+                                    'Tarkka toimitusmaksu, ja kuriiri löytää perille helposti'),
+                                style: const TextStyle(color: Colors.white70, fontSize: 11),
                               ),
                             ],
                           ),
@@ -252,41 +244,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                   children: [
                     Expanded(
                       child: GestureDetector(
-                        onTap: () async {
-                          HapticFeedback.mediumImpact();
-                          final res = await Navigator.push<AddressResult>(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const MapAddressPickerScreen(),
-                            ),
-                          );
-                          if (res != null && mounted) {
-                            widget.onLocationSelected?.call(res.fullAddress);
-                            DeliveryLocation.instance.set(res.fullAddress, latitude: res.latitude, longitude: res.longitude);
-                            final newAddress = {
-                              'id': 'addr_${DateTime.now().millisecondsSinceEpoch}',
-                              'title': res.street.isNotEmpty ? res.street : 'Pinned location',
-                              'subtitle': res.fullAddress,
-                              'lat': res.latitude,
-                              'lng': res.longitude,
-                              'buzzer': '',
-                              'isDefault': _savedAddresses.isEmpty,
-                            };
-                            setState(() {
-                              _savedAddresses.insert(0, newAddress);
-                            });
-                            final prefs = await SharedPreferences.getInstance();
-                            await prefs.setString('malvoya_addresses', jsonEncode(_savedAddresses));
-                            Navigator.pop(context);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(tr(context, 'Delivery address: ${res.fullAddress}', 'Toimitusosoite: ${res.fullAddress}')),
-                                backgroundColor: const Color(0xFF248A52),
-                                behavior: SnackBarBehavior.floating,
-                              ),
-                            );
-                          }
-                        },
+                        onTap: () => _fromMap(locate: true),
                         child: Container(
                           padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
                           decoration: BoxDecoration(
@@ -351,7 +309,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                           controller: _streetCtrl,
                           style: TextStyle(color: textPrimary, fontSize: 13),
                           decoration: InputDecoration(
-                            hintText: 'e.g. Aleksanterinkatu 15',
+                            hintText: tr(context, 'e.g. Aleksanterinkatu 15', 'esim. Aleksanterinkatu 15'),
                             hintStyle: TextStyle(color: textSecondary, fontSize: 13),
                             filled: true,
                             fillColor: cardBg,
@@ -421,7 +379,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                           controller: _buzzerCtrl,
                           style: TextStyle(color: textPrimary, fontSize: 13),
                           decoration: InputDecoration(
-                            hintText: 'e.g. #1234',
+                            hintText: tr(context, 'e.g. A 1234', 'esim. A 1234'),
                             hintStyle: TextStyle(color: textSecondary, fontSize: 13),
                             filled: true,
                             fillColor: cardBg,
@@ -496,9 +454,10 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                           ),
                           child: const Icon(Icons.home_outlined, color: AppTheme.primary, size: 20),
                         ),
-                        title: Text(addr['title'] ?? 'Address', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
+                        title: Text('${addr['title'] ?? tr(context, 'Address', 'Osoite')}', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
                         subtitle: Text(addr['subtitle'] ?? '', style: TextStyle(fontSize: 12, color: textSecondary)),
                         trailing: IconButton(
+                          tooltip: tr(context, 'Use this address', 'Käytä tätä osoitetta'),
                           icon: const Icon(Icons.check_circle_outline, color: AppTheme.primary),
                           onPressed: () {
                             _useSaved(addr);

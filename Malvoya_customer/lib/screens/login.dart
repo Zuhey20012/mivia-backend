@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../widgets/brand_mark.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
+import '../core/api_client.dart' show localizeServerMessage;
 import '../config/theme.dart';
 import '../l10n.dart';
 import '../locale_provider.dart';
@@ -12,7 +13,10 @@ import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import '../realtime_notification_service.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  /// Opened from inside the app (a guest going to pay, Profile…): closes itself once signed in,
+  /// so the customer lands back where they were with their bag intact.
+  final bool returnAfterSignIn;
+  const LoginScreen({super.key, this.returnAfterSignIn = false});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -25,24 +29,46 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _obscurePass = true;
   String? _error;
 
+  AuthService? _auth;
+  bool _returned = false;
+
   @override
   void initState() {
     super.initState();
     // Explicitly start with blank fields - no autofill or saved email at top
     _emailCtrl.clear();
     _passCtrl.clear();
+    if (widget.returnAfterSignIn) {
+      _auth = Provider.of<AuthService>(context, listen: false)..addListener(_onAuth);
+    }
   }
 
   @override
   void dispose() {
+    _auth?.removeListener(_onAuth);
     _emailCtrl.dispose();
     _passCtrl.dispose();
     super.dispose();
   }
 
+  /// Signed in (any method, or a new account): go back to the screen that opened sign-in. The short
+  /// wait lets a code sheet or the register screen close itself first.
+  void _onAuth() {
+    if (_returned || !(_auth?.isAuthenticated ?? false)) return;
+    _returned = true;
+    Future.delayed(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      final route = ModalRoute.of(context);
+      if (route == null || !route.isActive) return;
+      final nav = Navigator.of(context);
+      nav.popUntil((r) => r == route);
+      nav.pop(true);
+    });
+  }
+
   Future<void> _handleLogin() async {
     if (_emailCtrl.text.trim().isEmpty || _passCtrl.text.isEmpty) {
-      setState(() => _error = 'Please enter your email and password.');
+      setState(() => _error = tr(context, 'Please enter your email and password.', 'Kirjoita sähköpostiosoitteesi ja salasanasi.'));
       return;
     }
     setState(() { _loading = true; _error = null; });
@@ -50,7 +76,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final err = await auth.login(_emailCtrl.text.trim(), _passCtrl.text);
     if (mounted) {
       if (err != null) {
-        setState(() { _error = err; _loading = false; });
+        setState(() { _error = localizeServerMessage(context, err); _loading = false; });
       } else {
         RealtimeNotificationService.notifyCustomerJoined(
           context,
@@ -67,7 +93,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final err = await auth.loginWithGoogle();
     if (mounted) {
       if (err != null) {
-        setState(() { _error = err; _loading = false; });
+        setState(() { _error = localizeServerMessage(context, err); _loading = false; });
       } else {
         final email = auth.currentUser?.email ?? '';
         final name = auth.currentUser?.name ?? 'Customer';
@@ -164,14 +190,15 @@ class _LoginScreenState extends State<LoginScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(l10n.translate('signInWithPhone'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textPrimary)),
-                            Text('SMS- tai sähköpostivahvistus • Kertakäyttöinen turvakoodi', style: TextStyle(fontSize: 12, color: textSecondary)),
+                            Text(tr(context, 'We send a one-time code by text message or email', 'Lähetämme kertakäyttöisen koodin tekstiviestillä tai sähköpostiin'),
+                                style: TextStyle(fontSize: 12, color: textSecondary)),
                           ],
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 20),
-                  Text('Puhelinnumero tai sähköposti', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: textPrimary)),
+                  Text(tr(context, 'Phone number or email', 'Puhelinnumero tai sähköposti'), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: textPrimary)),
                   const SizedBox(height: 6),
                   TextField(
                     controller: phoneCtrl,
@@ -179,7 +206,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     autofocus: true,
                     style: TextStyle(color: textPrimary, fontSize: 16, fontWeight: FontWeight.w600),
                     decoration: InputDecoration(
-                      hintText: '+358... tai nimi@esimerkki.fi',
+                      hintText: tr(context, '+358… or name@example.com', '+358… tai nimi@esimerkki.fi'),
                       hintStyle: TextStyle(color: textSecondary.withValues(alpha: 0.6)),
                       prefixIcon: const Icon(Icons.phonelink_lock_rounded, color: AppTheme.primary),
                       filled: true,
@@ -189,7 +216,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Text('Vastaanota aito 6-numeroinen vahvistuskoodi puhelimeen tai sähköpostiin.', style: TextStyle(fontSize: 11, color: textSecondary)),
+                  Text(tr(context, 'You will get a 6-digit code. Enter it on the next step.', 'Saat 6-numeroisen koodin. Kirjoita se seuraavassa vaiheessa.'),
+                      style: TextStyle(fontSize: 11, color: textSecondary)),
                   const SizedBox(height: 22),
                   SizedBox(
                     width: double.infinity,
@@ -203,7 +231,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         final rawDestination = phoneCtrl.text.trim();
                         if (rawDestination.length < 5) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Syötä puhelinnumero tai sähköpostiosoite.')),
+                            SnackBar(content: Text(tr(context, 'Enter your phone number or email address.', 'Kirjoita puhelinnumerosi tai sähköpostiosoitteesi.'))),
                           );
                           return;
                         }
@@ -267,7 +295,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                           const Icon(Icons.sms_rounded, color: Color(0xFF248A52), size: 20),
                                           const SizedBox(width: 10),
                                           Expanded(
-                                            child: Text('Vahvistuskoodi lähetetty tekstiviestillä kohteeseen $destination. Syötä koodi alle.'),
+                                            child: Text(tr(context, 'Code sent by text message to $destination. Enter it below.',
+                                                'Koodi lähetetty tekstiviestillä numeroon $destination. Kirjoita se alle.')),
                                           ),
                                         ],
                                       ),
@@ -279,7 +308,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 } else {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
-                                      content: Text(res['error'] ?? e.message ?? 'Vahvistuskoodin lähetys epäonnistui.'),
+                                      content: Text(res['error'] ?? tr(context, 'The code could not be sent. Please try again.', 'Koodia ei voitu lähettää. Yritä uudelleen.')),
                                       backgroundColor: Colors.red.shade700,
                                     ),
                                   );
@@ -308,7 +337,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                         const Icon(Icons.sms_rounded, color: Color(0xFF248A52), size: 20),
                                         const SizedBox(width: 10),
                                         Expanded(
-                                          child: Text('Vahvistuskoodi lähetetty tekstiviestillä kohteeseen $destination. Syötä koodi alle.'),
+                                          child: Text(tr(context, 'Code sent by text message to $destination. Enter it below.',
+                                              'Koodi lähetetty tekstiviestillä numeroon $destination. Kirjoita se alle.')),
                                         ),
                                       ],
                                     ),
@@ -343,7 +373,11 @@ class _LoginScreenState extends State<LoginScreen> {
                               setDialogState(() => step = 2);
                             } else {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Virhe: $e'), backgroundColor: Colors.red.shade700),
+                                SnackBar(
+                                  content: Text(res['error'] ?? tr(context, 'The code could not be sent. Check the number and try again.',
+                                      'Koodia ei voitu lähettää. Tarkista numero ja yritä uudelleen.')),
+                                  backgroundColor: Colors.red.shade700,
+                                ),
                               );
                             }
                           }
@@ -371,7 +405,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                     const Icon(Icons.mark_email_read_rounded, color: Color(0xFF248A52), size: 20),
                                     const SizedBox(width: 10),
                                     Expanded(
-                                      child: Text('Vahvistuskoodi lähetetty sähköpostiin $destination. Tarkista saapuneet viestit.'),
+                                      child: Text(tr(context, 'Code sent to $destination. Check your inbox.', 'Koodi lähetetty osoitteeseen $destination. Tarkista saapuneet viestit.')),
                                     ),
                                   ],
                                 ),
@@ -383,7 +417,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           } else {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                content: Text(res['error'] ?? 'Vahvistuskoodin lähetys epäonnistui.'),
+                                content: Text(res['error'] ?? tr(context, 'The code could not be sent. Please try again.', 'Koodia ei voitu lähettää. Yritä uudelleen.')),
                                 backgroundColor: Colors.red.shade700,
                               ),
                             );
@@ -409,7 +443,8 @@ class _LoginScreenState extends State<LoginScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(l10n.translate('verifyPhoneCode'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textPrimary)),
-                            Text('Koodi lähetetty kohteeseen ${formatDestination(phoneCtrl.text.trim())}', style: TextStyle(fontSize: 12, color: textSecondary)),
+                            Text(tr(context, 'Code sent to ${formatDestination(phoneCtrl.text.trim())}', 'Koodi lähetetty: ${formatDestination(phoneCtrl.text.trim())}'),
+                                style: TextStyle(fontSize: 12, color: textSecondary)),
                           ],
                         ),
                       ),
@@ -441,7 +476,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        countdown > 0 ? 'Resend in ${countdown}s' : 'Resend code',
+                        countdown > 0
+                            ? tr(context, 'Resend in ${countdown}s', 'Uusi koodi $countdown s kuluttua')
+                            : tr(context, 'Didn’t get it?', 'Eikö koodi tullut?'),
                         style: TextStyle(fontSize: 12, color: textSecondary),
                       ),
                       if (countdown == 0)
@@ -465,16 +502,16 @@ class _LoginScreenState extends State<LoginScreen> {
                                 verificationCompleted: (_) {},
                                 verificationFailed: (e) {
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text(e.message ?? 'Uudelleenlähetys epäonnistui.')),
+                                    SnackBar(content: Text(tr(context, 'The code could not be sent again. Please try again.', 'Koodia ei voitu lähettää uudelleen. Yritä uudelleen.'))),
                                   );
                                 },
                                 codeSent: (verId, token) {
                                   verificationId = verId;
                                   resendToken = token;
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('Uusi SMS-vahvistuskoodi lähetetty puhelimeesi.'),
-                                      backgroundColor: Color(0xFF1E293B),
+                                    SnackBar(
+                                      content: Text(tr(context, 'A new code was sent to your phone.', 'Uusi koodi lähetettiin puhelimeesi.')),
+                                      backgroundColor: const Color(0xFF1E293B),
                                     ),
                                   );
                                 },
@@ -486,15 +523,15 @@ class _LoginScreenState extends State<LoginScreen> {
                               );
                               if (res['ok'] == true) {
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Uusi vahvistuskoodi lähetetty.'),
-                                    backgroundColor: Color(0xFF1E293B),
+                                  SnackBar(
+                                    content: Text(tr(context, 'A new code was sent.', 'Uusi koodi lähetettiin.')),
+                                    backgroundColor: const Color(0xFF1E293B),
                                   ),
                                 );
                               }
                             }
                           },
-                          child: const Text('Resend', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primary, fontSize: 13)),
+                          child: Text(tr(context, 'Send again', 'Lähetä uudelleen'), style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primary, fontSize: 13)),
                         ),
                     ],
                   ),
@@ -511,7 +548,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         final entered = otpCtrl.text.trim();
                         if (entered.length != 6) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Syötä 6-numeroinen vahvistuskoodi.')),
+                            SnackBar(content: Text(tr(context, 'Enter the 6-digit code.', 'Kirjoita 6-numeroinen koodi.'))),
                           );
                           return;
                         }
@@ -546,9 +583,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                 name: 'Customer ($userPhone)',
                               );
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Kirjauduttu sisään onnistuneesti! Tervetuloa.'),
-                                  backgroundColor: Color(0xFF248A52),
+                                SnackBar(
+                                  content: Text(tr(context, 'You’re signed in. Welcome!', 'Olet kirjautunut sisään. Tervetuloa!')),
+                                  backgroundColor: const Color(0xFF248A52),
                                 ),
                               );
                             }
@@ -557,7 +594,10 @@ class _LoginScreenState extends State<LoginScreen> {
                             if (ctx.mounted) {
                               ScaffoldMessenger.of(ctx).showSnackBar(
                                 SnackBar(
-                                  content: Text(e.message ?? 'Virheellinen tai vanhentunut vahvistuskoodi.'),
+                                  content: Text(e.code == 'invalid-verification-code' || e.code == 'session-expired'
+                                      ? tr(context, 'That code is wrong or has expired. Check it or ask for a new one.',
+                                          'Koodi on väärä tai vanhentunut. Tarkista se tai pyydä uusi.')
+                                      : tr(context, 'The code could not be checked. Please try again.', 'Koodia ei voitu tarkistaa. Yritä uudelleen.')),
                                   backgroundColor: Colors.red.shade700,
                                 ),
                               );
@@ -567,7 +607,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             if (ctx.mounted) {
                               ScaffoldMessenger.of(ctx).showSnackBar(
                                 SnackBar(
-                                  content: Text('Vahvistus epäonnistui: $e'),
+                                  content: Text(tr(context, 'Signing in did not work. Please try again.', 'Kirjautuminen ei onnistunut. Yritä uudelleen.')),
                                   backgroundColor: Colors.red.shade700,
                                 ),
                               );
@@ -595,9 +635,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                 name: verifyRes['user']?['name'] ?? 'Customer',
                               );
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Kirjauduttu sisään onnistuneesti!'),
-                                  backgroundColor: Color(0xFF248A52),
+                                SnackBar(
+                                  content: Text(tr(context, 'You’re signed in.', 'Olet kirjautunut sisään.')),
+                                  backgroundColor: const Color(0xFF248A52),
                                 ),
                               );
                             }
@@ -605,7 +645,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             if (ctx.mounted) {
                               ScaffoldMessenger.of(ctx).showSnackBar(
                                 SnackBar(
-                                  content: Text(verifyRes['error'] ?? 'Virheellinen vahvistuskoodi.'),
+                                  content: Text(verifyRes['error'] ?? tr(context, 'That code is not right.', 'Koodi ei ole oikein.')),
                                   backgroundColor: Colors.red.shade700,
                                 ),
                               );
@@ -737,10 +777,17 @@ class _LoginScreenState extends State<LoginScreen> {
             children: [
               const SizedBox(height: 16),
 
-              // Top row: Language switcher pill
-              Align(
-                alignment: Alignment.topRight,
-                child: GestureDetector(
+              // Top row: back (when opened from inside the app) and the language switcher pill
+              Row(
+                children: [
+                  if (widget.returnAfterSignIn)
+                    IconButton(
+                      tooltip: tr(context, 'Back', 'Takaisin'),
+                      onPressed: () => Navigator.maybePop(context),
+                      icon: Icon(Icons.arrow_back_rounded, color: textPrimary),
+                    ),
+                  const Spacer(),
+                  GestureDetector(
                   onTap: () => _showLanguageSelector(context),
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -764,6 +811,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                 ),
+                ],
               ),
 
               const SizedBox(height: 24),
@@ -911,7 +959,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
               const SizedBox(height: 12),
 
-              // Malvoya Continue as Guest button
+              // Malvoya Continue as Guest button (not when a guest opened sign-in from inside the app)
+              if (!widget.returnAfterSignIn)
               OutlinedButton(
                 onPressed: () async {
                   setState(() => _loading = true);

@@ -85,7 +85,7 @@ class _StoreDropCommentsState extends State<_StoreDropComments> {
         _setCount(_count + 1);
       }
     });
-    if (!res.ok) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.error!)));
+    if (!res.ok) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.errorMessage)));
   }
 
   Future<void> _delete(Map<String, dynamic> c) async {
@@ -108,7 +108,7 @@ class _StoreDropCommentsState extends State<_StoreDropComments> {
         _setCount(_count - 1);
       });
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.error!)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.errorMessage)));
     }
   }
 

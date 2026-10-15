@@ -20,7 +20,11 @@ import 'returns_screen.dart';
 /// courier, and — once delivered — the delivery photo, a rating and returns.
 class OrderDetailScreen extends StatefulWidget {
   final int orderId;
-  const OrderDetailScreen({super.key, required this.orderId});
+
+  /// Opened straight after the payment sheet succeeded: until Stripe confirms the payment to the
+  /// server (usually seconds) the order still looks unpaid, so it says "confirming" instead.
+  final bool justPaid;
+  const OrderDetailScreen({super.key, required this.orderId, this.justPaid = false});
 
   @override
   State<OrderDetailScreen> createState() => _OrderDetailScreenState();
@@ -32,7 +36,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
   String? _error;
   LatLng? _courier;
   DateTime? _courierSeenAt;
-  final List<Map<String, dynamic>> _chat = [];
+  /// Chat messages of this delivery. The chat sheet is its own route, so it listens to this
+  /// directly and shows replies that arrive while it is open.
+  final _chat = ValueNotifier<List<Map<String, dynamic>>>(const []);
+  bool _chatOpen = false;
+
+  /// A courier message arrived while the chat was closed (a dot on the chat button).
+  bool _unread = false;
   final _map = MapController();
   bool _cameraFitted = false;
 
@@ -66,6 +76,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
     socket.stopTracking(widget.orderId);
     socket.leaveChat(widget.orderId);
     _map.dispose();
+    _chat.dispose();
     super.dispose();
   }
 
@@ -111,7 +122,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
 
   void _onChatMessage(Map<String, dynamic> d) {
     if (asInt(d['orderId']) != widget.orderId || !mounted) return;
-    setState(() => _chat.add(d));
+    _chat.value = [..._chat.value, d];
+    if (!_chatOpen && d['role'] != 'CUSTOMER') setState(() => _unread = true);
   }
 
   Future<void> _load() async {
@@ -195,6 +207,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
       final km = (meters / 1000).toStringAsFixed(1);
       return tr(context, 'Your courier is $km km away', 'Kuriiri on ${km.replaceAll('.', ',')} km:n päässä');
     }
+    // A scheduled delivery is promised its window, not minutes from now
+    final window = scheduledWindow(context, o['scheduledStart'], o['scheduledEnd']);
+    if (window != null) return tr(context, 'Scheduled: $window', 'Ajastettu: $window');
     final eta = asInt(o['etaMinutes']);
     final paid = _time('paidAt') ?? _time('createdAt');
     if (eta != null && paid != null) {
@@ -207,12 +222,20 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
 
   // ── Actions ─────────────────────────────────────────────────────────────
 
+  /// Payment was never completed (left or declined in the payment sheet): nothing was charged.
+  bool _unpaid(Map<String, dynamic> o) =>
+      o['status'] == 'PENDING' && o['paymentStatus'] != 'SUCCEEDED' && o['paymentStatus'] != 'REFUNDED';
+
   Future<void> _cancel() async {
+    final unpaid = _order != null && _unpaid(_order!);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(tr(context, 'Cancel this order?', 'Perutaanko tilaus?')),
-        content: Text(tr(context, 'You will get your money back in full.', 'Saat rahasi takaisin kokonaan.')),
+        content: Text(unpaid
+            ? tr(context, 'Nothing was charged, so there is nothing to refund. The items go back on sale.',
+                'Mitään ei veloitettu, joten palautettavaa ei ole. Tuotteet palaavat myyntiin.')
+            : tr(context, 'You will get your money back in full.', 'Saat rahasi takaisin kokonaan.')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(context, 'Keep order', 'Pidä tilaus'))),
           FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(tr(context, 'Cancel order', 'Peru tilaus'))),
@@ -340,101 +363,122 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
     }
   }
 
-  void _openChat() {
+  Future<void> _openChat() async {
     final input = TextEditingController();
+    final scroll = ScrollController();
     final auth = Provider.of<AuthService>(context, listen: false);
     final myName = (auth.currentUser?.name ?? '').split(' ').first;
-    showModalBottomSheet(
+    setState(() {
+      _chatOpen = true;
+      _unread = false;
+    });
+
+    // Keeps the newest message in view
+    void toNewest() => WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (scroll.hasClients) {
+            scroll.animateTo(scroll.position.maxScrollExtent, duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
+          }
+        });
+
+    void send(String text) {
+      if (text.trim().isEmpty) return;
+      CustomerSocketService().sendChatMessage(widget.orderId, text.trim(), myName.isEmpty ? tr(context, 'Customer', 'Asiakas') : myName);
+      input.clear();
+    }
+
+    final quick = [
+      tr(context, 'I\'m coming down', 'Tulen alas'),
+      tr(context, 'Please leave it at the door', 'Jätä ovelle'),
+      tr(context, 'The door code is ', 'Ovikoodi on '),
+    ];
+    await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
-        void send(String text) {
-          if (text.trim().isEmpty) return;
-          CustomerSocketService().sendChatMessage(widget.orderId, text.trim(), myName.isEmpty ? tr(context, 'Customer', 'Asiakas') : myName);
-          input.clear();
-          Future.delayed(const Duration(milliseconds: 400), () {
-            if (ctx.mounted) set(() {});
-          });
-        }
-
-        final quick = [
-          tr(context, 'I\'m coming down', 'Tulen alas'),
-          tr(context, 'Please leave it at the door', 'Jätä ovelle'),
-          tr(context, 'The door code is ', 'Ovikoodi on '),
-        ];
-        return SizedBox(
-          height: MediaQuery.of(ctx).size.height * 0.7,
-          child: Padding(
-            padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
-            child: Column(
-              children: [
-                ListTile(
-                  title: Text(tr(context, 'Chat with your courier', 'Chat kuriirin kanssa'), style: const TextStyle(fontWeight: FontWeight.w700)),
-                  subtitle: Text(tr(context, 'Messages are not stored after delivery.', 'Viestejä ei tallenneta toimituksen jälkeen.')),
-                ),
-                Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: _chat.map((m) {
-                      final mine = m['role'] == 'CUSTOMER';
-                      return Align(
-                        alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-                        child: Container(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                          constraints: const BoxConstraints(maxWidth: 280),
-                          decoration: BoxDecoration(
-                            color: mine ? AppTheme.primary : AppTheme.inputBackground(context),
-                            borderRadius: BorderRadius.circular(16),
+      builder: (ctx) => SizedBox(
+        height: MediaQuery.of(ctx).size.height * 0.7,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          child: Column(
+            children: [
+              ListTile(
+                title: Text(tr(context, 'Chat with your courier', 'Chat kuriirin kanssa'), style: const TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text(tr(context, 'Messages are not stored after delivery.', 'Viestejä ei tallenneta toimituksen jälkeen.')),
+              ),
+              Expanded(
+                // Rebuilds when a message arrives, also while the sheet is open
+                child: ValueListenableBuilder<List<Map<String, dynamic>>>(
+                  valueListenable: _chat,
+                  builder: (ctx, messages, _) {
+                    toNewest();
+                    return ListView.builder(
+                      controller: scroll,
+                      padding: const EdgeInsets.all(16),
+                      itemCount: messages.length,
+                      itemBuilder: (_, i) {
+                        final m = messages[i];
+                        final mine = m['role'] == 'CUSTOMER';
+                        return Align(
+                          alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+                          child: Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            constraints: const BoxConstraints(maxWidth: 280),
+                            decoration: BoxDecoration(
+                              color: mine ? AppTheme.primary : AppTheme.inputBackground(context),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Text('${m['text'] ?? ''}', style: TextStyle(color: mine ? Colors.white : AppTheme.primaryText(context))),
                           ),
-                          child: Text(m['text'] ?? '', style: TextStyle(color: mine ? Colors.white : AppTheme.primaryText(context))),
-                        ),
-                      );
-                    }).toList(),
-                  ),
+                        );
+                      },
+                    );
+                  },
                 ),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Row(
-                    children: quick
-                        .map((q) => Padding(
-                              padding: const EdgeInsets.only(right: 8),
-                              child: ActionChip(label: Text(q), onPressed: () => q.endsWith(' ') ? input.text = q : send(q)),
-                            ))
-                        .toList(),
-                  ),
+              ),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
+                  children: quick
+                      .map((q) => Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ActionChip(label: Text(q), onPressed: () => q.endsWith(' ') ? input.text = q : send(q)),
+                          ))
+                      .toList(),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: input,
-                          maxLength: 1000,
-                          textInputAction: TextInputAction.send,
-                          onSubmitted: send,
-                          decoration: InputDecoration(counterText: '', hintText: tr(context, 'Message', 'Viesti')),
-                        ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: input,
+                        maxLength: 1000,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: send,
+                        decoration: InputDecoration(counterText: '', hintText: tr(context, 'Message', 'Viesti')),
                       ),
-                      IconButton(
-                        tooltip: tr(context, 'Send', 'Lähetä'),
-                        icon: const Icon(Icons.send_rounded, color: AppTheme.primary),
-                        onPressed: () {
-                          HapticFeedback.selectionClick();
-                          send(input.text);
-                        },
-                      ),
-                    ],
-                  ),
+                    ),
+                    IconButton(
+                      tooltip: tr(context, 'Send', 'Lähetä'),
+                      icon: const Icon(Icons.send_rounded, color: AppTheme.primary),
+                      onPressed: () {
+                        HapticFeedback.selectionClick();
+                        send(input.text);
+                      },
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        );
-      }),
+        ),
+      ),
     );
+    _chatOpen = false;
+    scroll.dispose();
+    input.dispose();
   }
 
   // ── UI ──────────────────────────────────────────────────────────────────
@@ -663,6 +707,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
       (tr(context, 'Delivered', 'Toimitettu'), _time('deliveredAt'), status == 'DELIVERED'),
     ];
     final cancelled = status == 'CANCELLED' || status == 'REFUNDED';
+    final unpaid = _unpaid(o);
+    // Right after paying, the bank's confirmation may still be on its way to Malvoya
+    final confirming = unpaid && widget.justPaid && o['paymentStatus'] != 'FAILED';
+    final created = _time('createdAt');
+    final heldUntil = created?.add(const Duration(minutes: 30));
     final courierName = (o['courier']?['name'] ?? '').toString().split(' ').first;
     final stale = _courierSeenAt != null && DateTime.now().difference(_courierSeenAt!) > const Duration(minutes: 2);
 
@@ -674,7 +723,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          cancelled ? tr(context, 'Cancelled', 'Peruttu') : (eta ?? tr(context, 'Waiting for the store', 'Odotetaan kauppaa')),
+          cancelled
+              ? tr(context, 'Cancelled', 'Peruttu')
+              : unpaid
+                  ? (confirming ? tr(context, 'Confirming your payment…', 'Vahvistetaan maksua…') : tr(context, 'Payment not finished', 'Maksu jäi kesken'))
+                  : (eta ?? tr(context, 'Waiting for the store', 'Odotetaan kauppaa')),
           style: AppTheme.display(context, size: 25),
         ),
         Padding(
@@ -683,6 +736,30 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
         ),
         if (cancelled && o['cancelReason'] != null)
           Padding(padding: const EdgeInsets.only(top: 4), child: Text(o['cancelReason'], style: TextStyle(color: AppTheme.secondaryText(context)))),
+        if (unpaid && !confirming) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine),
+              borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+            ),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Icon(Icons.info_outline_rounded, color: Color(0xFF8A5A00), size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  heldUntil == null
+                      ? tr(context, 'Payment not finished — nothing was charged. The items are held for 30 minutes.',
+                          'Maksu jäi kesken – mitään ei veloitettu. Tuotteet pidetään varattuina 30 minuuttia.')
+                      : tr(context, 'Payment not finished — nothing was charged. The items are held for 30 minutes (until ${_clock(heldUntil)}), then the order is cancelled.',
+                          'Maksu jäi kesken – mitään ei veloitettu. Tuotteet pidetään varattuina 30 minuuttia (klo ${_clock(heldUntil)} asti), minkä jälkeen tilaus perutaan.'),
+                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, height: 1.35, color: AppTheme.primaryText(context)),
+                ),
+              ),
+            ]),
+          ),
+        ],
         if (!cancelled) ...[
           const SizedBox(height: 14),
           // One segment per step, filled as the order moves along
@@ -741,7 +818,34 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                             HapticFeedback.selectionClick();
                             _openChat();
                           },
-                          child: const SizedBox(width: 44, height: 44, child: Icon(Icons.chat_bubble_outline_rounded, color: Colors.white, size: 20)),
+                          child: SizedBox(
+                            width: 48,
+                            height: 48,
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                const Icon(Icons.chat_bubble_outline_rounded, color: Colors.white, size: 20),
+                                // A courier message the customer has not opened yet
+                                if (_unread)
+                                  Positioned(
+                                    top: 9,
+                                    right: 9,
+                                    child: Semantics(
+                                      label: tr(context, 'New message', 'Uusi viesti'),
+                                      child: Container(
+                                        width: 12,
+                                        height: 12,
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.sunshine,
+                                          shape: BoxShape.circle,
+                                          border: Border.all(color: AppTheme.primary, width: 2),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -811,6 +915,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
           Text(tr(context, 'Collect from the shop', 'Nouto kaupasta'), style: TextStyle(color: muted, fontSize: 13))
         else if (o['deliveryAddress'] != null)
           Text(o['deliveryAddress'], style: TextStyle(color: muted, fontSize: 13)),
+        if (!_isPickup && scheduledWindow(context, o['scheduledStart'], o['scheduledEnd']) != null)
+          Text(
+            '${tr(context, 'Delivery time', 'Toimitusaika')}: ${scheduledWindow(context, o['scheduledStart'], o['scheduledEnd'])}',
+            style: TextStyle(color: muted, fontSize: 13),
+          ),
         const Divider(height: 24),
         for (final i in items)
           Padding(
@@ -868,7 +977,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
           ),
         ),
       if (status == 'DELIVERED' || status == 'CANCELLED')
-        _button(Icons.replay_rounded, tr(context, 'Order again', 'Tilaa uudelleen'), () => reorder(context, o), primary: status == 'DELIVERED' && _review != null),
+        ValueListenableBuilder<int?>(
+          valueListenable: reorderBusy,
+          builder: (_, busy, __) => _button(
+            Icons.replay_rounded,
+            tr(context, 'Order again', 'Tilaa uudelleen'),
+            () => reorder(context, o),
+            primary: status == 'DELIVERED' && _review != null,
+            busy: busy != null,
+          ),
+        ),
       if (status == 'DELIVERED' && withinReturn)
         _button(Icons.assignment_return_outlined, tr(context, 'Return items', 'Palauta tuotteita'),
             () async {
@@ -880,14 +998,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
     return Padding(padding: const EdgeInsets.fromLTRB(16, 16, 16, 0), child: Column(children: buttons));
   }
 
-  Widget _button(IconData icon, String label, VoidCallback onTap, {bool primary = false}) => Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: SizedBox(
-          width: double.infinity,
-          height: 54,
-          child: primary
-              ? FilledButton.icon(onPressed: () => _tap(onTap), icon: Icon(icon), label: Text(label))
-              : OutlinedButton.icon(onPressed: () => _tap(onTap), icon: Icon(icon), label: Text(label)),
-        ),
-      );
+  Widget _button(IconData icon, String label, VoidCallback onTap, {bool primary = false, bool busy = false}) {
+    final glyph = busy ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : Icon(icon);
+    final onPressed = busy ? null : () => _tap(onTap);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: SizedBox(
+        width: double.infinity,
+        height: 54,
+        child: primary
+            ? FilledButton.icon(onPressed: onPressed, icon: glyph, label: Text(label))
+            : OutlinedButton.icon(onPressed: onPressed, icon: glyph, label: Text(label)),
+      ),
+    );
+  }
 }

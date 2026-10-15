@@ -248,7 +248,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
                               content: Text(res.ok
                                   ? tr(context, 'Sent (#${res.data['id']}). We will reply to ${res.data['replyTo']}.',
                                       'Lähetetty (#${res.data['id']}). Vastaamme osoitteeseen ${res.data['replyTo']}.')
-                                  : res.error!),
+                                  : res.errorText(context)!),
                             ));
                           },
                     child: sending

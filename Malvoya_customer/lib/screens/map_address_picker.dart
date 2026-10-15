@@ -6,6 +6,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
 import '../config/theme.dart';
+import '../core/current_position.dart';
 import '../core/strings.dart';
 import '../local_notification_service.dart';
 
@@ -37,11 +38,15 @@ class MapAddressPickerScreen extends StatefulWidget {
   final double? initialLng;
   final String? initialAddress;
 
+  /// Start from the phone's position ("Use my location") instead of the given/default spot.
+  final bool locateOnOpen;
+
   const MapAddressPickerScreen({
     super.key,
     this.initialLat,
     this.initialLng,
     this.initialAddress,
+    this.locateOnOpen = false,
   });
 
   @override
@@ -59,11 +64,13 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
   // used directly outside the official Maps SDK, so there is no satellite layer.
   String get _currentTileUrl => 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 
-  String _street = 'Scanning map...';
+  // Filled in from OpenStreetMap's reverse geocoding of the pin
+  String _street = '';
   String _houseNumber = '';
   String _postalCode = '';
   String _city = 'Helsinki';
-  String _fullAddress = 'Drag map to pin your exact entrance';
+  String _fullAddress = '';
+  bool _locating = false;
 
   final TextEditingController _searchCtrl = TextEditingController();
   bool _isSearching = false;
@@ -79,9 +86,13 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
     if (widget.initialAddress != null && widget.initialAddress!.isNotEmpty) {
       _fullAddress = widget.initialAddress!;
     }
-    // Reverse geocode the initial center
+    // Reverse geocode the initial center, or first find the phone's position
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _reverseGeocode(_currentCenter);
+      if (widget.locateOnOpen) {
+        _locate();
+      } else {
+        _reverseGeocode(_currentCenter);
+      }
     });
   }
 
@@ -102,6 +113,30 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
     });
   }
 
+  /// Centres the map on the phone's real position. If location is off or not allowed, the map stays
+  /// where it is and the customer drags it instead.
+  Future<void> _locate() async {
+    if (_locating) return;
+    setState(() => _locating = true);
+    final (pos, problem) = await CurrentPosition.read();
+    if (!mounted) return;
+    setState(() => _locating = false);
+    if (pos != null) {
+      _mapController.move(pos, 17.0);
+      _currentCenter = pos;
+      _reverseGeocode(pos);
+      return;
+    }
+    if (_fullAddress.isEmpty) _reverseGeocode(_currentCenter);
+    final canFix = problem == LocateProblem.deniedForever || problem == LocateProblem.serviceOff;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(CurrentPosition.message(context, problem!)),
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 6),
+      action: canFix ? SnackBarAction(label: tr(context, 'Settings', 'Asetukset'), onPressed: () => CurrentPosition.openSettings(problem)) : null,
+    ));
+  }
+
   Future<void> _reverseGeocode(LatLng point) async {
     if (!mounted) return;
     setState(() => _isGeocoding = true);
@@ -119,7 +154,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
         final address = data['address'] as Map<String, dynamic>? ?? {};
 
-        final road = address['road'] ?? address['pedestrian'] ?? address['footway'] ?? address['suburb'] ?? 'Street';
+        final road = address['road'] ?? address['pedestrian'] ?? address['footway'] ?? address['suburb'] ?? '';
         final houseNo = address['house_number'] ?? '';
         final post = address['postcode'] ?? '';
         final town = address['city'] ?? address['town'] ?? address['village'] ?? address['municipality'] ?? 'Helsinki';
@@ -133,7 +168,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
           final parts = <String>[];
           if (houseNo.isNotEmpty) {
             parts.add('$_street $_houseNumber');
-          } else {
+          } else if (_street.isNotEmpty) {
             parts.add(_street);
           }
           if (_postalCode.isNotEmpty) parts.add(_postalCode);
@@ -149,9 +184,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
     if (mounted) {
       setState(() {
         _isGeocoding = false;
-        if (_street == 'Scanning map...') {
-          _fullAddress = '${point.latitude.toStringAsFixed(4)}° N, ${point.longitude.toStringAsFixed(4)}° E, Helsinki';
-        }
+        if (_street.isEmpty) _fullAddress = _coordinates(point);
       });
     }
   }
@@ -182,14 +215,22 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
           _reverseGeocode(target);
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Address not found. Please drag map to pin location.'), behavior: SnackBarBehavior.floating),
+            SnackBar(
+              content: Text(tr(context, 'Address not found. Drag the map so the pin is on your door.',
+                  'Osoitetta ei löytynyt. Vedä karttaa, kunnes merkki on ovesi kohdalla.')),
+              behavior: SnackBarBehavior.floating,
+            ),
           );
         }
       }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Network timeout. Drag pin directly on map.'), behavior: SnackBarBehavior.floating),
+          SnackBar(
+            content: Text(tr(context, 'The search did not answer. Drag the map to your door instead.',
+                'Haku ei vastannut. Vedä kartta ovesi kohdalle.')),
+            behavior: SnackBarBehavior.floating,
+          ),
         );
       }
     } finally {
@@ -204,12 +245,14 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
       houseNumber: _houseNumber,
       postalCode: _postalCode,
       city: _city,
-      fullAddress: _fullAddress,
+      fullAddress: _fullAddress.isNotEmpty ? _fullAddress : _coordinates(_currentCenter),
       latitude: _currentCenter.latitude,
       longitude: _currentCenter.longitude,
     );
     Navigator.pop(context, result);
   }
+
+  String _coordinates(LatLng p) => '${p.latitude.toStringAsFixed(4)}° N, ${p.longitude.toStringAsFixed(4)}° E';
 
   @override
   Widget build(BuildContext context) {
@@ -268,9 +311,9 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                         else
                           const Icon(Icons.touch_app_rounded, color: Colors.white, size: 14),
                         const SizedBox(width: 6),
-                        const Text(
-                          'Deliver Here',
-                          style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                        Text(
+                          tr(context, 'Deliver here', 'Toimitus tähän'),
+                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
@@ -320,8 +363,8 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                       GestureDetector(
                         onTap: () => Navigator.pop(context),
                         child: Container(
-                          width: 46,
-                          height: 46,
+                          width: 48,
+                          height: 48,
                           decoration: BoxDecoration(
                             color: cardBg,
                             borderRadius: BorderRadius.circular(16),
@@ -357,7 +400,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                                   onSubmitted: _searchAddress,
                                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textPrimary),
                                   decoration: InputDecoration(
-                                    hintText: 'Search street, building, city...',
+                                    hintText: tr(context, 'Search street, building, city…', 'Hae katu, rakennus, kaupunki…'),
                                     hintStyle: TextStyle(fontSize: 13, color: textSecondary),
                                     border: InputBorder.none,
                                     enabledBorder: InputBorder.none,
@@ -441,8 +484,8 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                     _mapController.move(_currentCenter, newZoom);
                   },
                   child: Container(
-                    width: 42,
-                    height: 42,
+                    width: 48,
+                    height: 48,
                     decoration: BoxDecoration(
                       color: cardBg,
                       borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
@@ -462,8 +505,8 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                     _mapController.move(_currentCenter, newZoom);
                   },
                   child: Container(
-                    width: 42,
-                    height: 42,
+                    width: 48,
+                    height: 48,
                     decoration: BoxDecoration(
                       color: cardBg,
                       borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
@@ -485,14 +528,11 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                 GestureDetector(
                   onTap: () {
                     HapticFeedback.lightImpact();
-                    final helsinkiCenter = LatLng(60.1699, 24.9384);
-                    _mapController.move(helsinkiCenter, 16.0);
-                    _currentCenter = helsinkiCenter;
-                    _reverseGeocode(helsinkiCenter);
+                    _locate();
                   },
                   child: Container(
-                    width: 44,
-                    height: 44,
+                    width: 48,
+                    height: 48,
                     decoration: BoxDecoration(
                       color: cardBg,
                       shape: BoxShape.circle,
@@ -501,7 +541,9 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                         BoxShadow(color: Colors.black.withValues(alpha: 0.14), blurRadius: 10, offset: const Offset(0, 3)),
                       ],
                     ),
-                    child: const Icon(Icons.my_location_rounded, color: AppTheme.primary, size: 20),
+                    child: _locating
+                        ? const Padding(padding: EdgeInsets.all(14), child: CircularProgressIndicator(strokeWidth: 2))
+                        : Icon(Icons.my_location_rounded, color: AppTheme.primary, size: 20, semanticLabel: tr(context, 'Use my location', 'Käytä sijaintiani')),
                   ),
                 ),
               ],
@@ -543,7 +585,9 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              _street.isNotEmpty ? _street : 'Pinpoint Location',
+                              _street.isNotEmpty
+                                  ? (_houseNumber.isNotEmpty ? '$_street $_houseNumber' : _street)
+                                  : (_isGeocoding || _locating ? tr(context, 'Finding the address…', 'Haetaan osoitetta…') : tr(context, 'Pinned spot', 'Merkitty kohta')),
                               style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: textPrimary),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -574,7 +618,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            _fullAddress,
+                            _fullAddress.isNotEmpty ? _fullAddress : tr(context, 'Drag the map so the pin is on your door', 'Vedä karttaa, kunnes merkki on ovesi kohdalla'),
                             style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textPrimary),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
@@ -595,12 +639,16 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                         elevation: 2,
                       ),
                       onPressed: _confirmAndReturn,
-                      child: const Row(
+                      child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
-                          SizedBox(width: 8),
-                          Text('Confirm Pin Location', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white)),
+                          const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(tr(context, 'Confirm this spot', 'Vahvista tämä kohta'),
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white)),
+                          ),
                         ],
                       ),
                     ),

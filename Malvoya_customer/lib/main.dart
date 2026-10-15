@@ -67,6 +67,8 @@ void main() async {
   unawaited(NetworkStatus.instance.start());
   // Live order updates belong to the signed-in account; close the connection on sign-out
   AuthService.beforeLogout.add((_) async => CustomerSocketService().disconnect());
+  // Saved and active delivery addresses belong to the account holder, not to the next person
+  AuthService.beforeLogout.add((_) => DeliveryLocation.instance.clear());
 
   PushService.instance.onOpen = (data) {
     final orderId = asInt(data['orderId']);
@@ -105,8 +107,8 @@ class MalvoyaApp extends StatelessWidget {
       child: Consumer2<LocaleProvider, ThemeProvider>(
         builder: (context, localeProvider, themeProvider, child) {
           return MaterialApp(
-            key: ValueKey('malvoya_app_${localeProvider.locale.languageCode}_${themeProvider.mode}'),
             navigatorKey: navigatorKey,
+            navigatorObservers: [mainRouteObserver],
             title: 'Malvoya',
             debugShowCheckedModeBanner: false,
             theme: themeProvider.currentTheme,

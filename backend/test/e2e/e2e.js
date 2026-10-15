@@ -1,4 +1,4 @@
-// End-to-end test for API v2.8 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
+// End-to-end test for API v2.9 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
 const { execSync, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -62,6 +62,12 @@ async function startFeeApi(extraEnv) {
 }
 process.on("exit", () => { if (feeApi) feeApi.kill(); });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Finnish wall-clock date/time/weekday of an instant (scheduled delivery slots are in Europe/Helsinki)
+function hel(d = new Date()) {
+  const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Helsinki", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short", hourCycle: "h23" }).formatToParts(d);
+  const g = (t) => p.find((x) => x.type === t).value;
+  return { date: `${g("year")}-${g("month")}-${g("day")}`, time: `${g("hour")}:${g("minute")}`, wd: g("weekday").toLowerCase().slice(0, 3) };
+}
 function connect(token) {
   return new Promise((resolve) => {
     const s = io(BASE, { auth: { token }, transports: ["websocket"], reconnection: false });
@@ -550,6 +556,66 @@ async function register(name, role, extra = {}) {
   check("clearing the hours makes the store always open", reopened.status === 200 && (await call("GET", `/stores/${storeId}`)).body.store?.openNow === true, reopened.body);
   check("only the owner can pause a store", (await call("PATCH", `/stores/${storeId}`, { acceptingOrders: false }, otherCust.accessToken)).status === 403);
 
+
+  console.log("\n— Scheduled delivery (Tonight / tomorrow slots)");
+  const nowHel = hel();
+  const tmr = hel(new Date(Date.now() + 86_400_000));
+  const minOf = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  const slotBody = (date, start, end, extra = {}) => ({ ...orderBody, deliverySlot: { date, start, end }, ...extra });
+  const paySched = (o) => call("POST", "/payments/webhook", null, null, signedWebhook({
+    id: `evt_sched_${o.id}_${uniq}`, type: "payment_intent.succeeded",
+    data: { object: { id: o.stripePaymentIntentId, amount_received: o.totalCents, metadata: { type: "ORDER", orderId: String(o.id) } } },
+  }));
+  const sq = await call("POST", "/orders/quote", { storeId, deliveryLat: 60.18, deliveryLng: 24.95, items: [{ productId, quantity: 1 }] }, otherCust.accessToken);
+  const expectedSlots = [
+    ...["17:00", "19:00"].filter((st) => minOf(st) >= minOf(nowHel.time) + 60).map((st) => `${nowHel.date} ${st}`),
+    `${tmr.date} 17:00`, `${tmr.date} 19:00`,
+  ];
+  const gotSlots = (sq.body.quote?.slots || []).map((x) => `${x.date} ${x.start}`);
+  check("quote lists the bookable slots (today from 60 min ahead, and tomorrow) with their fee; no slot picked", sq.status === 200 && gotSlots.join() === expectedSlots.join() && sq.body.quote.slots.every((x) => x.feeCents === fee && x.end === (x.start === "17:00" ? "19:00" : "21:00")) && sq.body.quote.deliverySlot === null, [gotSlots, expectedSlots, sq.body.quote?.slots]);
+  const tmrSlot = sq.body.quote?.slots?.find((x) => x.date === tmr.date && x.start === "17:00");
+  check("slot labels in English and Finnish", tmrSlot?.label?.en === "Tomorrow 17:00–19:00" && tmrSlot.label.fi === "Huomenna 17.00–19.00", tmrSlot);
+  const sqPick = await call("POST", "/orders/quote", { storeId, fulfilment: "PICKUP", items: [{ productId, quantity: 1 }] }, otherCust.accessToken);
+  check("pickup quotes offer no delivery slots", sqPick.status === 200 && Array.isArray(sqPick.body.quote.slots) && sqPick.body.quote.slots.length === 0 && sqPick.body.quote.deliverySlot === null, sqPick.body.quote);
+  check("a pickup order cannot have a delivery slot (400)", (await call("POST", "/orders/quote", { storeId, fulfilment: "PICKUP", items: [{ productId, quantity: 1 }], deliverySlot: { date: tmr.date, start: "17:00", end: "19:00" } }, otherCust.accessToken)).status === 400);
+  const sqPicked = await call("POST", "/orders/quote", { storeId, deliveryLat: 60.18, deliveryLng: 24.95, items: [{ productId, quantity: 1 }], deliverySlot: { date: tmr.date, start: "17:00", end: "19:00" } }, otherCust.accessToken);
+  check("quote echoes the picked slot with its label and fee", sqPicked.status === 200 && sqPicked.body.quote.deliverySlot?.date === tmr.date && sqPicked.body.quote.deliverySlot.start === "17:00" && sqPicked.body.quote.deliverySlot.label.en === "Tomorrow 17:00–19:00" && sqPicked.body.quote.deliverySlot.feeCents === fee && sqPicked.body.quote.deliveryFeeCents === fee, sqPicked.body.quote);
+  const badSlots = [
+    slotBody(tmr.date, "10:00", "12:00"), slotBody(tmr.date, "17:00", "21:00"),
+    slotBody(hel(new Date(Date.now() - 86_400_000)).date, "17:00", "19:00"), slotBody(hel(new Date(Date.now() + 2 * 86_400_000)).date, "17:00", "19:00"),
+    slotBody("2026-02-30", "17:00", "19:00"), slotBody(tmr.date, "5pm", "7pm"),
+  ];
+  const badStatuses = [];
+  for (const b of badSlots) badStatuses.push((await call("POST", "/orders", b, otherCust.accessToken)).status);
+  check("slots that are not offered, not today/tomorrow or malformed are refused (400)", badStatuses.every((x) => x === 400), badStatuses);
+  const pastToday = ["17:00", "19:00"].find((st) => minOf(st) < minOf(nowHel.time) + 60);
+  if (pastToday) {
+    const tooSoon = await call("POST", "/orders", slotBody(nowHel.date, pastToday, pastToday === "17:00" ? "19:00" : "21:00"), otherCust.accessToken);
+    check("a slot starting in less than 60 minutes is refused (409)", tooSoon.status === 409 && /too soon/.test(tooSoon.body.error || ""), tooSoon.body);
+  }
+  // Open now, but closed tomorrow evening: tomorrow's slots disappear and cannot be booked
+  await call("PATCH", `/stores/${storeId}`, { openingHours: { [nowHel.wd]: [["00:00", "23:59"]], [tmr.wd]: [["00:00", "12:00"]] } }, vendor.accessToken);
+  const closedSlots = (await call("POST", "/orders/quote", { storeId, deliveryLat: 60.18, deliveryLng: 24.95, items: [{ productId, quantity: 1 }] }, otherCust.accessToken)).body.quote?.slots || [];
+  const closedOrder2 = await call("POST", "/orders", slotBody(tmr.date, "17:00", "19:00"), otherCust.accessToken);
+  check("slots only when the store is open at the slot start", !closedSlots.some((x) => x.date === tmr.date) && closedOrder2.status === 409 && /closed at that time/.test(closedOrder2.body.error || ""), [closedSlots, closedOrder2.body]);
+  await call("PATCH", `/stores/${storeId}`, { openingHours: null }, vendor.accessToken);
+  const schedRes = await call("POST", "/orders", slotBody(tmr.date, "17:00", "19:00"), otherCust.accessToken);
+  const so = schedRes.body.order;
+  check("a scheduled order stores its window (Finnish 17:00–19:00 tomorrow) and promises no minutes-ETA", schedRes.status === 201 && hel(new Date(so.scheduledStart)).date === tmr.date && hel(new Date(so.scheduledStart)).time === "17:00" && hel(new Date(so.scheduledEnd)).time === "19:00" && so.etaMinutes === null && so.deliveryFeeCents === fee && so.courierFeeCents === 650, so);
+  check("an order without a slot is as soon as possible", sql(`select "scheduledStart" is null and "etaMinutes" > 0 from "Order" where id=${ro.id}`) === "t");
+  c1Sock.events.length = 0; c2Sock.events.length = 0; vendorSock.events.length = 0;
+  await paySched(so);
+  await sleep(300);
+  check("the store's new-order event carries the window", vendorSock.events.some((e) => e.ev === "order:new" && e.data.id === so.id && e.data.scheduledStart && e.data.scheduledEnd));
+  check("the store accepts the scheduled order", (await call("PATCH", `/orders/${so.id}/status`, { status: "CONFIRMED" }, vendor.accessToken)).status === 200);
+  await sleep(500);
+  check("couriers are not offered a scheduled job before slot start − prep time − 15 min", !c1Sock.events.some((e) => e.ev === "courier:dispatch_offer" && e.data.orderId === so.id) && !c2Sock.events.some((e) => e.ev === "courier:dispatch_offer" && e.data.orderId === so.id) && sql(`select ("lastOfferAt" is null) and ("dispatchStartedAt" is null) from "Order" where id=${so.id}`) === "t");
+  check("an early scheduled job is not in the courier job list and cannot be taken", !(await call("GET", "/orders/available", null, c1.accessToken)).body.orders?.some((o) => o.id === so.id) && (await call("PATCH", `/orders/${so.id}/assign-courier`, null, c1.accessToken)).status === 409);
+  const vendSched = (await call("GET", "/orders", null, vendor.accessToken)).body.orders?.find((o) => o.id === so.id);
+  check("the store sees the window on the order", vendSched?.scheduledStart === so.scheduledStart && vendSched?.scheduledEnd === so.scheduledEnd, vendSched);
+  // Move the slot to 10 min from now (Vera's prep time 8 min → dispatch is due): the watchdog makes the first offer
+  sql(`update "Order" set "scheduledStart" = now() + interval '10 minutes', "scheduledEnd" = now() + interval '130 minutes' where id=${so.id}`);
+
   // Four stuck orders, aged with SQL, for the watchdog (runs every minute) to resolve
   const stuck = await call("POST", "/orders", orderBody, otherCust.accessToken);
   const unpaidId = stuck.body.order?.id;
@@ -566,6 +632,10 @@ async function register(name, role, extra = {}) {
   const pickupLateId = mkPickup("PROCESSING", "pklate", `,"confirmedAt","readyAt"`, `,now() - interval '74 hours',now() - interval '73 hours'`);
   const pickupWaitId = mkPickup("CONFIRMED", "pkwait", `,"confirmedAt"`, `,now() - interval '50 minutes'`);
   const pickupNeverReadyId = mkPickup("CONFIRMED", "pknever", `,"confirmedAt"`, `,now() - interval '25 hours'`);
+  // Scheduled: "no courier" timers count from the slot start, not from acceptance; tomorrow's slot is left alone
+  const schedLateId = mk("CONFIRMED", { tag: "schedlate", paidAt: "now() - interval '3 hours'", cols: `,"confirmedAt","scheduledStart","scheduledEnd"`, vals: `,now() - interval '2 minutes',now() - interval '50 minutes',now() + interval '70 minutes'` });
+  const schedDelayId = mk("CONFIRMED", { tag: "scheddelay", paidAt: "now() - interval '3 hours'", cols: `,"confirmedAt","scheduledStart","scheduledEnd"`, vals: `,now() - interval '3 minutes',now() - interval '16 minutes',now() + interval '104 minutes'` });
+  const schedLaterId = mk("CONFIRMED", { tag: "schedlater", paidAt: "now() - interval '3 hours'", cols: `,"confirmedAt","scheduledStart","scheduledEnd"`, vals: `,now() - interval '60 minutes',now() + interval '1 day',now() + interval '1 day 2 hours'` });
   let watched = "";
   for (let i = 0; i < 45 && watched !== "CANCELLED"; i++) {
     await sleep(3000);
@@ -584,6 +654,12 @@ async function register(name, role, extra = {}) {
   check("watchdog: a pickup order not collected within 72 h is cancelled and refunded", row(pickupLateId, `status || '|' || "paymentStatus" || '|' || "cancelReason"`) === "CANCELLED|REFUNDED|Not collected in time", row(pickupLateId, `status || '|' || coalesce("cancelReason",'')`));
   check("watchdog: a pickup order accepted but never marked ready within 24 h is refunded", row(pickupNeverReadyId, `status || '|' || "paymentStatus" || '|' || "cancelReason"`) === "CANCELLED|REFUNDED|The store did not get the order ready in time", row(pickupNeverReadyId, `status || '|' || coalesce("cancelReason",'')`));
   check("watchdog: an accepted pickup order is never offered to couriers or cancelled for lack of one", row(pickupWaitId, `status || '|' || ("lastOfferAt" is null)`) === "CONFIRMED|true");
+  check("watchdog: a scheduled order is first offered to couriers shortly before its slot; the customer is told once", row(so.id, `status || '|' || ("lastOfferAt" is not null) || '|' || ("dispatchStartedAt" is not null) || '|' || ("courierSearchNotifiedAt" is null)`) === "CONFIRMED|true|true|true", row(so.id, `status || '|' || coalesce("lastOfferAt"::text,'-') || '|' || coalesce("dispatchStartedAt"::text,'-')`));
+  const soJob = (await call("GET", "/orders/available", null, c1.accessToken)).body.orders?.find((o) => o.id === so.id);
+  check("once dispatch started, couriers see the job with its window", !!soJob && !!soJob.scheduledEnd && !!soJob.offeredAt, soJob);
+  check("watchdog: a scheduled order with no courier 45 min after its slot start is refunded", row(schedLateId, `status || '|' || "cancelReason"`) === "CANCELLED|No courier was available", row(schedLateId, `status || '|' || coalesce("cancelReason",'')`));
+  check("watchdog: the delay notice counts from the slot start (accepted 3 min ago, slot started 16 min ago)", row(schedDelayId, `status || '|' || ("courierSearchNotifiedAt" is not null) || '|' || ("dispatchStartedAt" is not null)`) === "CONFIRMED|true|true");
+  check("watchdog: tomorrow's scheduled order is not offered or cancelled yet (accepted an hour ago)", row(schedLaterId, `status || '|' || ("lastOfferAt" is null) || '|' || ("dispatchStartedAt" is null)`) === "CONFIRMED|true|true");
   check("store acceptance records when it happened", sql(`select "confirmedAt" is not null from "Order" where id=${orderId}`) === "t");
 
   console.log("\n— Tips and app updates");
@@ -610,7 +686,7 @@ async function register(name, role, extra = {}) {
   }));
 
   const sysDefault = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.8.0", sysDefault.pricing);
+  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.9.0", sysDefault.pricing);
   const stockBeforeQuote = stockOf(productId);
   const ordersBeforeQuote = sql(`select count(*) from "Order" where "userId"=${otherCust.user.id}`);
   const q0 = await quote(quoteBody, otherCust.accessToken);
@@ -976,7 +1052,7 @@ async function register(name, role, extra = {}) {
   check("another store cannot see or publish the import", (await call("GET", `/products/import/${sj.body.job.id}`, null, vendor.accessToken)).status === 404 && (await call("POST", `/products/import/${sj.body.job.id}/publish`, null, vendor.accessToken)).status === 404);
   const impJobs = await call("GET", "/products/import", null, importer.accessToken);
   check("the store lists its recent imports, newest first", impJobs.status === 200 && impJobs.body.jobs?.length === 4 && impJobs.body.jobs[0].id === sjSek.body.job?.id && impJobs.body.jobs[3].id === sj.body.job?.id, impJobs.body);
-  shopSrv.close();
+  await new Promise((r) => shopSrv.close(r));
 
   console.log("\n— Catalogue import: CSV");
   const csvText = [
@@ -1016,8 +1092,159 @@ async function register(name, role, extra = {}) {
   const limited = await csvImport({ csv: "name,price\nX,1", rightsConfirmed: true });
   check("at most 10 imports per store per day (429)", limited.status === 429, limited.body);
 
+
+
+  console.log("\n— Catalogue import: WooCommerce (read-only REST API keys)");
+  const CK = `ck_${"a1".repeat(20)}`, CS = `cs_${"b2".repeat(20)}`;
+  let wooCurrency = "EUR";
+  const wooSeen = [];
+  const wooProducts = [
+    { id: 201, name: "Merino Cardigan", type: "variable", status: "publish", description: "<p>Soft <em>merino</em> wool</p>", categories: [{ name: "Knitwear" }], tags: [], images: [{ src: "https://cdn.woo.test/cardigan-1.jpg" }, { src: "https://cdn.woo.test/cardigan-2.jpg" }] },
+    { id: 202, name: "Leather Belt", type: "simple", status: "publish", price: "35.00", regular_price: "35.00", stock_status: "instock", manage_stock: false, categories: [{ name: "Accessories" }], tags: [{ name: "Vintage" }], images: [{ src: "https://cdn.woo.test/belt.jpg" }] },
+    { id: 203, name: "Gift set", type: "grouped", status: "publish", images: [] },
+    { id: 204, name: "Mystery item", type: "simple", status: "publish", price: "", images: [] },
+  ];
+  const wooVariations = [
+    { id: 1, price: "79.00", attributes: [{ name: "Size", option: "S" }, { name: "Colour", option: "Grey" }], manage_stock: true, stock_quantity: 2, global_unique_id: "6412345678901" },
+    { id: 2, price: "85.00", attributes: [{ name: "pa_size", option: "M" }, { name: "Colour", option: "Grey" }], manage_stock: false, stock_status: "outofstock" },
+  ];
+  const wooSrv = require("http").createServer((req, res) => {
+    const u = new URL(req.url, "http://localhost");
+    wooSeen.push({ url: req.url, auth: req.headers.authorization || "", method: req.method });
+    const json = (code, body) => { res.writeHead(code, { "Content-Type": "application/json" }); res.end(JSON.stringify(body)); };
+    if (req.headers.authorization !== `Basic ${Buffer.from(`${CK}:${CS}`).toString("base64")}`) return json(401, { code: "woocommerce_rest_cannot_view" });
+    if (u.pathname === "/wp-json/wc/v3/settings/general/woocommerce_currency") return json(200, { id: "woocommerce_currency", value: wooCurrency });
+    if (u.pathname === "/wp-json/wc/v3/settings/tax/woocommerce_prices_include_tax") return json(200, { id: "woocommerce_prices_include_tax", value: "yes" });
+    if (u.pathname === "/wp-json/wc/v3/products") return json(200, Number(u.searchParams.get("page") || 1) === 1 ? wooProducts : []);
+    if (u.pathname === "/wp-json/wc/v3/products/201/variations") return json(200, wooVariations);
+    json(404, { code: "rest_no_route" });
+  });
+  await new Promise((r) => wooSrv.listen(12223, r));
+  const wilma = await register("Wilma", "VENDOR");
+  const wStore = (await call("POST", "/stores", { name: `Wilma Woo ${uniq}`, category: "APPAREL", sellerType: "BUSINESS", businessId: "4567890-1", latitude: 60.17, longitude: 24.94 }, wilma.accessToken)).body.store;
+  await call("PATCH", `/admin/vendors/${wStore.id}/approve`, null, adminToken);
+  const wooImport = (body, tok = wilma.accessToken) => call("POST", "/products/import/woocommerce", body, tok);
+  const wooBody = { siteUrl: "http://localhost:12223/shop", consumerKey: CK, consumerSecret: CS, rightsConfirmed: true };
+  check("WooCommerce import validates the keys and the rights confirmation", (await wooImport({ ...wooBody, consumerKey: "nope" })).status === 400 && (await wooImport({ ...wooBody, consumerSecret: CK })).status === 400 && (await wooImport({ ...wooBody, rightsConfirmed: undefined })).status === 400 && (await wooImport({ ...wooBody, extra: 1 })).status === 400);
+  check("WooCommerce import uses the same SSRF guard", (await wooImport({ ...wooBody, siteUrl: "https://127.0.0.1" })).status === 400 && (await wooImport({ ...wooBody, siteUrl: "http://example.com" })).status === 400);
+  check("customers cannot import from WooCommerce", (await wooImport(wooBody, otherCust.accessToken)).status === 403);
+  const wj = await wooImport(wooBody);
+  check("WooCommerce import starts in the background (202)", wj.status === 202 && wj.body.job?.source === "WOOCOMMERCE" && wj.body.job.shopDomain === "localhost:12223", wj.body);
+  const wjob = await waitJob(wj.body.job?.id, wilma.accessToken);
+  check("WooCommerce job: 4 found, 2 created, grouped and unpriced products skipped with reasons", wjob?.status === "DONE" && wjob.total === 4 && wjob.created === 2 && wjob.skipped === 2 && wjob.errors.some((e) => e.item === "Gift set" && e.level === "error") && wjob.errors.some((e) => e.item === "Mystery item" && /price/i.test(e.message)), wjob);
+  const wOwn = (await call("GET", `/stores/${wStore.id}/products?limit=50`, null, wilma.accessToken)).body.products;
+  const cardigan = wOwn?.find((x) => x.externalId === "201");
+  const belt = wOwn?.find((x) => x.externalId === "202");
+  check("WooCommerce mapping: variations become size/colour options with price differences and stock, GTIN, plain-text description", cardigan?.name === "Merino Cardigan" && cardigan.externalSource === "WOOCOMMERCE" && cardigan.salePriceCents === 7900 && cardigan.description === "Soft merino wool" && cardigan.category === "Clothing" && cardigan.variants.length === 2 && cardigan.variants[0].size === "S" && cardigan.variants[0].color === "Grey" && cardigan.variants[0].stock === 2 && cardigan.variants[1].size === "M" && cardigan.variants[1].stock === 0 && cardigan.variants[1].priceAdjustCents === 600 && cardigan.gtin === "6412345678901" && cardigan.images.length === 2 && cardigan.isAvailable === false, cardigan);
+  check("WooCommerce mapping: a simple vintage product, stock not tracked → 1 with a warning, photos re-hosted", belt?.salePriceCents === 3500 && belt.condition === "GOOD" && belt.stockQuantity === 1 && belt.category === "Accessories" && belt.images.every((u) => u.includes(`/malvoya/products/s${wStore.id}/imp-`)) && wjob.errors.some((e) => e.item === "Leather Belt" && /stock/.test(e.message)), belt);
+  const keyLeak = wooSeen.some((r) => r.url.includes("ck_") || r.url.includes("cs_")) || wooSeen.some((r) => r.method !== "GET");
+  check("the keys go only in the Authorization header of GET requests to the shop, never in a URL", wooSeen.length > 0 && !keyLeak && wooSeen.every((r) => r.url.startsWith("/wp-json/wc/v3/")), wooSeen.slice(0, 5));
+  check("the keys are not stored anywhere", sql(`select count(*) from "ImportJob" where "errors"::text ~ '(ck|cs)_' or coalesce("sourceRef",'') ~ '(ck|cs)_'`) === "0" && !JSON.stringify(wj.body).includes(CS));
+  check("publishing the WooCommerce import shows the products with a photo", (await call("POST", `/products/import/${wj.body.job.id}/publish`, null, wilma.accessToken)).body.published === 2);
+  const wj2 = await wooImport(wooBody);
+  const wjob2 = await waitJob(wj2.body.job?.id, wilma.accessToken);
+  check("re-importing from WooCommerce updates instead of duplicating", wjob2?.status === "DONE" && wjob2.created === 0 && wjob2.updated === 2, wjob2);
+  const wBad = await wooImport({ ...wooBody, consumerSecret: `cs_${"c3".repeat(20)}` });
+  const wjBad = await waitJob(wBad.body.job?.id, wilma.accessToken);
+  check("wrong keys fail the job with a clear message", wjBad?.status === "FAILED" && wjBad.errors.some((e) => /refused the API keys/.test(e.message)), wjBad);
+  wooCurrency = "USD";
+  const wUsd = await wooImport(wooBody);
+  const wjUsd = await waitJob(wUsd.body.job?.id, wilma.accessToken);
+  check("a WooCommerce shop that sells in another currency is refused", wjUsd?.status === "FAILED" && wjUsd.errors.some((e) => /USD/.test(e.message)) && wjUsd.created === 0, wjUsd);
+  await new Promise((r) => wooSrv.close(r));
+
+  console.log("\n— DAC7 seller data (tax info)");
+  const stinaV = await register("Stina", "VENDOR");
+  const stina = (await call("POST", "/stores", { name: `Stina <b>Studio</b> ${uniq}`, category: "APPAREL", sellerType: "BUSINESS", businessId: "3456789-0", latitude: 60.16, longitude: 24.93, address: "Bulevardi 3, Helsinki" }, stinaV.accessToken)).body.store;
+  await call("PATCH", `/admin/vendors/${stina.id}/approve`, null, adminToken);
+  const paulaV = await register("Paula", "VENDOR");
+  const paula = (await call("POST", "/stores", { name: `Paula's wardrobe ${uniq}`, category: "THRIFT", sellerType: "PRIVATE", latitude: 60.19, longitude: 24.96 }, paulaV.accessToken)).body.store;
+  const taxGet = (tok) => call("GET", "/stores/my/tax-info", null, tok);
+  const taxPut = (body, tok) => call("PUT", "/stores/my/tax-info", body, tok);
+  const t0 = await taxGet(stinaV.accessToken);
+  check("a new store has no tax data yet and is told what is missing", t0.status === 200 && t0.body.taxInfo === null && t0.body.taxInfoComplete === false && t0.body.missing.includes("legalName") && t0.body.missing.includes("address") && !t0.body.missing.includes("businessId") && t0.body.canSaveTin === true, t0.body);
+  check("/stores/my says the tax data is incomplete", (await call("GET", "/stores/my", null, stinaV.accessToken)).body.store?.taxInfoComplete === false);
+  const sysTax = (await call("GET", "/admin/system", null, adminToken)).body;
+  check("system status counts live stores missing tax data", sysTax.attention?.some((a) => /missing tax data \(DAC7\)/.test(a)) && sysTax.integrations?.dataEncryption?.configured === true, sysTax.attention);
+  check("tax data is the store owner's (customers 403, no token 401)", (await taxGet(otherCust.accessToken)).status === 403 && (await call("GET", "/stores/my/tax-info")).status === 401);
+  const stinaTax = { legalName: "+Stina Studio Oy", addressLine: "Bulevardi 3 A 5", postalCode: "00120", city: "Helsinki", country: "fi" };
+  check("a Finnish postal code has 5 digits", (await taxPut({ ...stinaTax, postalCode: "120" }, stinaV.accessToken)).status === 400);
+  const badVat = await taxPut({ ...stinaTax, vatNumber: "FI12345678" }, stinaV.accessToken);
+  check("a Finnish VAT number must match the store's Y-tunnus", badVat.status === 400 && /FI34567890/.test(badVat.body.error || ""), badVat.body);
+  check("unknown fields are refused", (await taxPut({ ...stinaTax, iban: "FI00" }, stinaV.accessToken)).status === 400);
+  const t1 = await taxPut({ ...stinaTax, vatNumber: "fi 3456 7890" }, stinaV.accessToken);
+  check("business seller saves legal name, VAT number and registered address; Y-tunnus comes from the store", t1.status === 200 && t1.body.taxInfoComplete === true && t1.body.taxInfo.vatNumber === "FI34567890" && t1.body.taxInfo.businessId === "3456789-0" && t1.body.taxInfo.country === "FI" && t1.body.taxInfo.dateOfBirth === null && t1.body.taxInfo.tinMasked === null, t1.body);
+  check("/stores/my and the admin vendor list say the tax data is complete", (await call("GET", "/stores/my", null, stinaV.accessToken)).body.store?.taxInfoComplete === true && (await call("GET", "/admin/vendors", null, adminToken)).body.stores?.find((x) => x.id === stina.id)?.taxInfoComplete === true && !JSON.stringify((await call("GET", "/admin/vendors", null, adminToken)).body).includes("tinEncrypted"));
+  const paulaTax = { legalName: "Paula Virtanen", dateOfBirth: "1952-10-13", addressLine: "Mannerheimintie 100 B 7", postalCode: "00250", city: "Helsinki" };
+  const noTin = await taxPut(paulaTax, paulaV.accessToken);
+  check("a private seller must give a tax ID", noTin.status === 400 && /tax identification/.test(noTin.body.error || ""), noTin.body);
+  check("an invalid henkilötunnus is refused (check character)", (await taxPut({ ...paulaTax, tin: "131052-308A" }, paulaV.accessToken)).status === 400);
+  check("the henkilötunnus must match the date of birth", /does not match/.test((await taxPut({ ...paulaTax, dateOfBirth: "1952-10-14", tin: "131052-308T" }, paulaV.accessToken)).body.error || ""));
+  check("sellers must be adults", /18/.test((await taxPut({ ...paulaTax, dateOfBirth: "2015-01-01", tin: "131052-308T" }, paulaV.accessToken)).body.error || ""));
+  const t2 = await taxPut({ ...paulaTax, tin: "131052-308t" }, paulaV.accessToken);
+  check("private seller saves name, date of birth, tax ID and address; the tax ID comes back masked", t2.status === 200 && t2.body.taxInfoComplete === true && t2.body.taxInfo.tinMasked === "•••••-308T" && t2.body.taxInfo.dateOfBirth === "1952-10-13" && !JSON.stringify(t2.body).includes("131052"), t2.body);
+  check("the tax ID is encrypted at rest (AES-256-GCM), never stored in clear", sql(`select "tinEncrypted" like 'v1:%' and "tinEncrypted" not like '%308T%' and "tinEncrypted" not like '%131052%' from "StoreTaxInfo" where "storeId"=${paula.id}`) === "t");
+  const t3 = await taxPut({ ...paulaTax, city: "Espoo", postalCode: "02100" }, paulaV.accessToken);
+  check("updating without re-entering the tax ID keeps the saved one", t3.status === 200 && t3.body.taxInfo.city === "Espoo" && t3.body.taxInfo.tinMasked === "•••••-308T", t3.body);
+  // Paula's ciphertext copied onto Vera's store must not decrypt there (checked in the DAC7 report below)
+  sql(`insert into "StoreTaxInfo" ("storeId","legalName","tinEncrypted","addressLine","postalCode","city","country","updatedAt") select ${storeId}, 'Vera Vintage Oy', "tinEncrypted", 'Mannerheimintie 1', '00100', 'Helsinki', 'FI', now() from "StoreTaxInfo" where "storeId"=${paula.id}`);
+
+  console.log("\n— Monthly store statements");
+  // Stina's month: A paid out, B with one of two items returned, D fully refunded; C was delivered 40 days ago
+  const mkS = (vals) => Number(sql(`insert into "Order" ("userId","storeId","status","subtotalCents","deliveryFeeCents","courierFeeCents","commissionCents","sellerPayoutCents","totalCents","paymentStatus","paidAt","deliveredAt","refundedCents","discountCents","updatedAt") values (${otherCust.user.id},${stina.id},${vals}, now()) returning id`).split("\n")[0]);
+  const sA = mkS(`'DELIVERED',10000,190,650,1000,9000,9690,'SUCCEEDED',now() - interval '5 minutes',now() - interval '3 minutes',0,500`);
+  const sB = mkS(`'DELIVERED',4000,190,650,400,3600,4190,'SUCCEEDED',now() - interval '5 minutes',now() - interval '2 minutes',2000,0`);
+  const sD = mkS(`'REFUNDED',3000,190,650,300,2700,3190,'REFUNDED',now() - interval '5 minutes',now() - interval '1 minute',3190,0`);
+  const sC = mkS(`'DELIVERED',2000,190,650,200,1800,2190,'SUCCEEDED',now() - interval '41 days',now() - interval '40 days',0,0`);
+  sql(`update "Order" set "userId"=${stinaV.user.id} where id=${sC}`); // another buyer (keeps the analytics cohorts simple)
+  sql(`insert into "OrderItem" ("orderId","productId","quantity","unitCents") values (${sA},${productId},1,10000),(${sC},${productId},1,2000),(${sD},${productId},1,3000)`);
+  const sBline = Number(sql(`insert into "OrderItem" ("orderId","productId","quantity","unitCents") values (${sB},${productId},2,2000) returning id`).split("\n")[0]);
+  const sBret = Number(sql(`insert into "Return" ("orderId","userId","reason","status","refundCents","updatedAt") values (${sB},${otherCust.user.id},'CHANGED_MIND','REFUNDED',2000,now()) returning id`).split("\n")[0]);
+  sql(`insert into "ReturnItem" ("returnId","orderItemId","quantity") values (${sBret},${sBline},1)`);
+  sql(`insert into "Return" ("orderId","userId","reason","status","refundCents","updatedAt") values (${sD},${otherCust.user.id},'CHANGED_MIND','REFUNDED',3190,now())`);
+  sql(`insert into "Payout" ("orderId","party","storeId","amountCents","status","releaseAt","paidAt","updatedAt") values (${sA},'STORE',${stina.id},9000,'PAID',now(),now(),now()),(${sB},'STORE',${stina.id},1800,'SCHEDULED',now() + interval '15 days',null,now()),(${sD},'STORE',${stina.id},0,'CANCELLED',now() + interval '15 days',null,now()),(${sC},'STORE',${stina.id},1800,'SCHEDULED',now(),null,now())`);
+  const month = hel().date.slice(0, 7);
+  const stm = await call("GET", `/stores/my/statements?month=${month}`, null, stinaV.accessToken);
+  const rowOf = (id) => stm.body.orders?.find((o) => o.id === id);
+  check("statement lists the month's delivered orders only, oldest first", stm.status === 200 && stm.body.month === month && stm.body.orders?.map((o) => o.id).join() === [sA, sB, sD].join(), stm.body);
+  check("statement row: sales at full price (discount is Malvoya's), commission rate, payout and its status", rowOf(sA)?.itemsCents === 10000 && rowOf(sA).refundsCents === 0 && rowOf(sA).commissionRate === 0.1 && rowOf(sA).commissionCents === 1000 && rowOf(sA).payoutCents === 9000 && rowOf(sA).payoutStatus === "PAID" && !!rowOf(sA).deliveredAt, rowOf(sA));
+  check("a partial return takes back the goods less their commission (refund claw-back)", rowOf(sB)?.refundsCents === 2000 && rowOf(sB).commissionCents === 200 && rowOf(sB).payoutCents === 1800 && rowOf(sB).payoutStatus === "SCHEDULED", rowOf(sB));
+  check("a fully refunded order: everything back, no commission, no payout", rowOf(sD)?.refundsCents === 3000 && rowOf(sD).commissionCents === 0 && rowOf(sD).payoutCents === 0 && rowOf(sD).payoutStatus === "CANCELLED", rowOf(sD));
+  const tt = stm.body.totals;
+  check("statement totals: sales, refunds, commission, payouts sent and pending", tt?.salesCents === 17000 && tt.refundsCents === 5000 && tt.commissionCents === 1200 && tt.payoutsSentCents === 9000 && tt.payoutsPendingCents === 1800 && tt.salesCents - tt.refundsCents - tt.commissionCents === tt.payoutsSentCents + tt.payoutsPendingCents, tt);
+  const admStm = await call("GET", `/admin/stores/${stina.id}/statements?month=${month}`, null, adminToken);
+  check("admins get the same statement for any store", admStm.status === 200 && JSON.stringify(admStm.body.totals) === JSON.stringify(tt) && (await call("GET", `/admin/stores/999999/statements?month=${month}`, null, adminToken)).status === 404 && (await call("GET", `/admin/stores/${stina.id}/statements?month=${month}`, null, stinaV.accessToken)).status === 403);
+  check("statements are per store and owner-only; the month is validated", (await call("GET", `/stores/my/statements?month=${month}`, null, paulaV.accessToken)).body.orders?.length === 0 && (await call("GET", `/stores/my/statements?month=${month}`, null, otherCust.accessToken)).status === 403 && (await call("GET", "/stores/my/statements?month=2026-13", null, stinaV.accessToken)).status === 400);
+  const stRes = await fetch(`${API}/stores/my/statements/${month}.html`, { headers: { Authorization: `Bearer ${stinaV.accessToken}` } });
+  const stHtml = await stRes.text();
+  check("printable statement: titled 'not a VAT invoice', store name escaped, Y-tunnus, Malvoya's details as placeholders, no scripts", stRes.status === 200 && /text\/html/.test(stRes.headers.get("content-type") || "") && stHtml.includes("Statement — not a VAT invoice") && stHtml.includes("Stina &lt;b&gt;Studio&lt;/b&gt;") && !stHtml.includes("<b>Studio") && stHtml.includes("3456789-0") && stHtml.includes("+Stina Studio Oy") && stHtml.includes("[COMPANY LEGAL NAME]") && stHtml.includes(`#${sA}`) && !/<script/i.test(stHtml) && (stRes.headers.get("content-security-policy") || "").startsWith("default-src 'none'"), stHtml.slice(0, 400));
+  check("the printable statement needs the owner's token", (await fetch(`${API}/stores/my/statements/${month}.html`)).status === 401 && (await fetch(`${API}/stores/my/statements/2026-1.html`, { headers: { Authorization: `Bearer ${stinaV.accessToken}` } })).status === 404);
+
+  console.log("\n— DAC7 report (admin)");
+  // Paula sold one item this year
+  const pO = mkS(`'DELIVERED',2500,190,650,250,2250,2690,'SUCCEEDED',now() - interval '5 minutes',now() - interval '4 minutes',0,0`);
+  sql(`update "Order" set "storeId"=${paula.id} where id=${pO}`);
+  const year = Number(hel().date.slice(0, 4));
+  const cInYear = sql(`select extract(year from (("deliveredAt" at time zone 'UTC') at time zone 'Europe/Helsinki'))::int from "Order" where id=${sC}`) === String(year);
+  const d7 = await call("GET", `/admin/dac7?year=${year}`, null, adminToken);
+  const dS = d7.body.sellers?.find((x) => x.storeId === stina.id);
+  const dP = d7.body.sellers?.find((x) => x.storeId === paula.id);
+  const q = `q${Math.floor((Number(hel().date.slice(5, 7)) - 1) / 3) + 1}`;
+  check("DAC7: sales count excludes fully refunded orders; consideration is net of commission; fees per quarter", d7.status === 200 && dS?.sales === 2 + (cInYear ? 1 : 0) && dS.considerationCents.total === 10800 + (cInYear ? 1800 : 0) && dS.feesCents.total === 1200 + (cInYear ? 200 : 0) && dS.considerationCents[q] >= 10800 && dS.feesCents[q] >= 1200, dS);
+  check("DAC7: business identity (legal name, Y-tunnus, VAT number, address)", dS?.identity?.legalName === "+Stina Studio Oy" && dS.identity.businessId === "3456789-0" && dS.identity.vatNumber === "FI34567890" && dS.identity.address?.postalCode === "00120" && dS.identity.tin === null && dS.taxInfoComplete === true, dS?.identity);
+  check("DAC7: the private seller's tax ID is decrypted for the admin report only", dP?.identity?.tin === "131052-308T" && dP.identity.dateOfBirth === "1952-10-13" && dP.sales === 1 && dP.considerationCents.total === 2250 && dP.feesCents.total === 250, dP);
+  check("DAC7: sellers under the de-minimis (< 30 sales and ≤ 2 000 €) are flagged exempt", dS?.exempt === true && dP?.exempt === true && d7.body.deMinimis?.salesBelow === 30 && d7.body.dueBy === `${year + 1}-01-31`);
+  check("DAC7: live stores missing tax data are listed", d7.body.missingTaxData?.some((x) => x.storeId === impStore.id && x.missing.includes("tin")) && d7.body.missingTaxData.every((x) => Array.isArray(x.missing) && x.missing.length > 0) && !d7.body.missingTaxData.some((x) => x.storeId === stina.id), d7.body.missingTaxData);
+  const dV = d7.body.sellers?.find((x) => x.storeId === storeId);
+  check("DAC7: a tax-ID ciphertext copied to another store does not decrypt there", dV?.identity?.tin === null && dV.identity.tinUnreadable === true, dV?.identity);
+  check("DAC7 report is admin-only; the year is validated", (await call("GET", `/admin/dac7?year=${year}`, null, stinaV.accessToken)).status === 403 && (await call("GET", "/admin/dac7?year=19x", null, adminToken)).status === 400);
+  const csvRes = await fetch(`${API}/admin/dac7.csv?year=${year}`, { headers: { Authorization: `Bearer ${adminToken}` } });
+  const csvBody = await csvRes.text();
+  check("DAC7 CSV: header, one line per seller, cells that start a formula are neutralised", csvRes.status === 200 && /text\/csv/.test(csvRes.headers.get("content-type") || "") && /attachment; filename="malvoya-dac7-\d{4}\.csv"/.test(csvRes.headers.get("content-disposition") || "") && csvBody.includes("store_id,store_name,seller_type,legal_name") && csvBody.includes(",'+Stina Studio Oy,") && !csvBody.includes(",+Stina Studio Oy,") && csvBody.includes("131052-308T"), csvBody.slice(0, 600));
+  check("DAC7 CSV is admin-only", (await fetch(`${API}/admin/dac7.csv?year=${year}`, { headers: { Authorization: `Bearer ${paulaV.accessToken}` } })).status === 403);
+
   console.log("\n— Fees switched on (second API instance with fee env vars, old courier pay rule, no Cloudinary)");
-  const feeUp = await startFeeApi({ SERVICE_FEE_PERCENT: "5", SERVICE_FEE_MIN_CENTS: "49", SERVICE_FEE_MAX_CENTS: "300", SMALL_ORDER_THRESHOLD_CENTS: "6000", SMALL_ORDER_FEE_CENTS: "150", COURIER_PAY_MODE: "fee_share", CLOUDINARY_CLOUD_NAME: "" });
+  const feeUp = await startFeeApi({ SERVICE_FEE_PERCENT: "5", SERVICE_FEE_MIN_CENTS: "49", SERVICE_FEE_MAX_CENTS: "300", SMALL_ORDER_THRESHOLD_CENTS: "6000", SMALL_ORDER_FEE_CENTS: "150", COURIER_PAY_MODE: "fee_share", CLOUDINARY_CLOUD_NAME: "", DATA_ENCRYPTION_KEY: "", DELIVERY_SLOTS: "00:00-23:59,25:00-26:00", SCHEDULED_DELIVERY_DISCOUNT_CENTS: "100" });
   check("API starts with fee settings", feeUp);
   const qF = (await quote({ ...quoteBody, tipCents: 0 }, otherCust.accessToken, FEE_API)).body.quote;
   check("service fee (5 %) and small-order fee are added below the threshold", qF?.serviceFeeCents === 250 && qF.smallOrderFeeCents === 150 && qF.smallOrderThresholdCents === 6000 && qF.totalCents === 5000 + fee + 250 + 150, qF);
@@ -1033,8 +1260,21 @@ async function register(name, role, extra = {}) {
   const sysF = (await callAt(FEE_API, "GET", "/admin/system", null, adminToken)).body;
   check("system status shows the fee settings in use", sysF.pricing?.serviceFeePercent === 5 && sysF.pricing?.serviceFeeMaxCents === 300 && sysF.pricing?.smallOrderFeeCents === 150, sysF.pricing);
   check("paying an order with fees works (the webhook checks the exact amount)", (await payOrder(oF.body.order)).status === 200 && sql(`select "paymentStatus" from "Order" where id=${oF.body.order.id}`) === "SUCCEEDED");
+
+  const fq = (await quote({ ...quoteBody, tipCents: 0 }, otherCust.accessToken, FEE_API)).body.quote;
+  check("DELIVERY_SLOTS and the scheduled-delivery discount: slots from the env, discount off the delivery fee", fq?.slots?.map((x) => `${x.date} ${x.start}-${x.end}`).join() === `${tmr.date} 00:00-23:59` && fq.slots[0].feeCents === fee - 100 && fq.deliveryFeeCents === fee, fq?.slots);
+  const fo = await order({ ...quoteBody, tipCents: 0, deliverySlot: { date: tmr.date, start: "00:00", end: "23:59" } }, otherCust.accessToken, FEE_API);
+  check("a scheduled order pays the discounted delivery fee; courier pay is unchanged (Malvoya pays the discount)", fo.status === 201 && fo.body.order.deliveryFeeCents === fee - 100 && fo.body.order.courierFeeCents === fee && fo.body.order.totalCents === 5000 + fee - 100 + 250 + 150, fo.body.order);
+  check("a slot that has already started is refused (409)", (await order({ ...quoteBody, deliverySlot: { date: hel().date, start: "00:00", end: "23:59" } }, otherCust.accessToken, FEE_API)).status === 409);
+  const noKeyGet = (await callAt(FEE_API, "GET", "/stores/my/tax-info", null, paulaV.accessToken)).body;
+  check("without DATA_ENCRYPTION_KEY the app is told tax IDs cannot be saved, and the saved one is not readable", noKeyGet.canSaveTin === false && noKeyGet.taxInfo?.tinMasked === "•••••" && noKeyGet.taxInfoComplete === true, noKeyGet);
+  const noKeyPut = await callAt(FEE_API, "PUT", "/stores/my/tax-info", { ...paulaTax, tin: "131052-308T" }, paulaV.accessToken);
+  check("without DATA_ENCRYPTION_KEY saving a tax ID is refused with a clear 503", noKeyPut.status === 503 && /secure storage is not set up/.test(noKeyPut.body.error || ""), noKeyPut.body);
+  check("...other details can still be updated (the saved tax ID is kept)", (await callAt(FEE_API, "PUT", "/stores/my/tax-info", paulaTax, paulaV.accessToken)).status === 200 && sql(`select "tinEncrypted" like 'v1:%' from "StoreTaxInfo" where "storeId"=${paula.id}`) === "t");
+  const sysNoKey = (await callAt(FEE_API, "GET", "/admin/system", null, adminToken)).body;
+  check("system status says the encryption key is missing", sysNoKey.integrations?.dataEncryption?.configured === false && sysNoKey.attention?.some((a) => /DATA_ENCRYPTION_KEY/.test(a)) && sysNoKey.scheduledDelivery?.discountCents === 100 && sysNoKey.scheduledDelivery?.slots?.length === 1, [sysNoKey.integrations?.dataEncryption, sysNoKey.scheduledDelivery]);
   const noMedia = await callAt(FEE_API, "POST", "/products/import/csv", { csv: csvText, rightsConfirmed: true }, importer.accessToken);
-  check("without Cloudinary the import is switched off (503), like uploads", noMedia.status === 503 && (await callAt(FEE_API, "POST", "/products/import/shopify", { shopUrl: "http://localhost:12223", rightsConfirmed: true }, importer.accessToken)).status === 503, noMedia.body);
+  check("without Cloudinary the import is switched off (503), like uploads", noMedia.status === 503 && (await callAt(FEE_API, "POST", "/products/import/shopify", { shopUrl: "http://localhost:12223", rightsConfirmed: true }, importer.accessToken)).status === 503 && (await callAt(FEE_API, "POST", "/products/import/woocommerce", { siteUrl: "http://localhost:12223", consumerKey: `ck_${"a1".repeat(20)}`, consumerSecret: `cs_${"b2".repeat(20)}`, rightsConfirmed: true }, importer.accessToken)).status === 503, noMedia.body);
   feeApi.kill();
   feeApi = null;
 
@@ -1141,6 +1381,23 @@ async function register(name, role, extra = {}) {
   check("system status is admin-only", (await call("GET", "/admin/system", null, otherCust.accessToken)).status === 403);
   check("leaving the waitlist works", (await call("DELETE", "/me/launch-alert", null, otherCust.accessToken)).status === 200 && (await call("GET", "/me/launch-alert", null, otherCust.accessToken)).body.alert === null);
 
+
+  console.log("\n— Analytics (admin)");
+  const an = await call("GET", "/admin/analytics", null, adminToken);
+  const at = an.body.totals;
+  const rangeSql = `"paidAt" >= ((date_trunc('day', now() at time zone 'Europe/Helsinki') - interval '27 days') at time zone 'Europe/Helsinki') at time zone 'UTC'`;
+  check("analytics: last 28 Finnish days by default, one row per day", an.status === 200 && an.body.range?.days === 28 && an.body.daily?.length === 28 && an.body.range.to === hel().date && an.body.daily[27].date === hel().date, an.body.range);
+  check("analytics: orders paid and GMV match the orders", at?.ordersPaid === Number(sql(`select count(*) from "Order" where ${rangeSql}`)) && at.gmvCents === Number(sql(`select coalesce(sum("subtotalCents"),0) from "Order" where ${rangeSql}`)) && at.ordersPaid === an.body.daily.reduce((t, d) => t + d.ordersPaid, 0), [at?.ordersPaid, at?.gmvCents]);
+  check("analytics: cancellations by reason", at?.cancelledByReason?.store_timeout >= 1 && at.cancelledByReason.no_courier >= 2 && at.cancelledByReason.customer >= 1 && at.cancelledByReason.pickup_not_collected >= 1 && at.cancelledByReason.store_not_ready >= 1 && at.cancelled === Object.values(at.cancelledByReason).reduce((a, b) => a + b, 0), at?.cancelledByReason);
+  const netSql = Number(sql(`select coalesce(sum("commissionCents" + "serviceFeeCents" + "smallOrderFeeCents" + "deliveryFeeCents" - ("courierFeeCents" - "tipCents") - "discountCents"),0) from "Order" where "paymentStatus"='SUCCEEDED' and status <> 'CANCELLED' and ${rangeSql}`));
+  check("analytics: net platform revenue uses the admin-stats rule", at?.revenue?.netPlatformRevenueCents === netSql && at.revenue.netPlatformRevenueCents === an.body.daily.reduce((t, d) => t + d.netRevenueCents, 0), [at?.revenue, netSql]);
+  check("analytics: store acceptance rate and median time to accept", at?.storeAcceptance?.accepted >= 1 && at.storeAcceptance.timedOut >= 1 && at.storeAcceptance.rate > 0 && at.storeAcceptance.rate < 1 && typeof at.storeAcceptance.medianSecondsToAccept === "number", at?.storeAcceptance);
+  check("analytics: on-time deliveries, median delivery time, returns and refunds", at?.onTimeDelivery?.measured >= 1 && at.onTimeDelivery.onTime >= 1 && at.onTimeDelivery.rate <= 1 && typeof at.medianDeliveryMinutes === "number" && at.returns?.ordersWithReturn >= 2 && at.returns.orderRate > 0 && at.returns.itemRate > 0 && at.refunds?.refundedCents > 0, [at?.onTimeDelivery, at?.medianDeliveryMinutes, at?.returns, at?.refunds]);
+  check("analytics: new customers, repeat customers within 30 days and the waiting list", at?.customers?.newCustomers >= 1 && at.customers.repeatWithin30Days?.cohort >= 1 && at.customers.repeatWithin30Days.repeaters >= 1 && typeof at.waitlist === "number" && at.customers.signups >= 1, at?.customers);
+  const anDay = await call("GET", `/admin/analytics?from=${hel().date}&to=${hel().date}`, null, adminToken);
+  check("analytics: a custom range", anDay.status === 200 && anDay.body.daily?.length === 1 && anDay.body.range.from === hel().date);
+  check("analytics: bad ranges are refused; admin only", (await call("GET", "/admin/analytics?from=2026-10-10&to=2026-10-01", null, adminToken)).status === 400 && (await call("GET", "/admin/analytics?from=2026-13-01", null, adminToken)).status === 400 && (await call("GET", "/admin/analytics?from=2020-01-01&to=2026-01-01", null, adminToken)).status === 400 && (await call("GET", "/admin/analytics", null, otherCust.accessToken)).status === 403);
+
   console.log("\n— Background jobs and input hardening");
   const leaseSql = `INSERT INTO "JobLease" ("name","lockedUntil") VALUES ('t${uniq}', now() + interval '1 minute') ON CONFLICT ("name") DO UPDATE SET "lockedUntil" = now() + interval '1 minute' WHERE "JobLease"."lockedUntil" < now() RETURNING "name"`;
   const firstLine = (q) => sql(q).split(/\r?\n/)[0];
@@ -1151,7 +1408,7 @@ async function register(name, role, extra = {}) {
   check("huge search input rejected", (await call("GET", `/products/search?q=${"a".repeat(200)}`)).status === 400);
   const cors = await fetch(`${API}/stores`, { headers: { Origin: "https://evil.example" } });
   check("CORS does not allow unknown origins", !cors.headers.get("access-control-allow-origin"));
-  check("health reports v2.8.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.8.0");
+  check("health reports v2.9.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.9.0");
 
   [vendorSock, custSock, otherSock, c1Sock, c2Sock].forEach((s) => s.close());
   console.log(`\n${pass} passed, ${fail} failed`);

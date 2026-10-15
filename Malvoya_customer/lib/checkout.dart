@@ -11,6 +11,7 @@ import 'config/theme.dart';
 import 'core/api_client.dart';
 import 'core/delivery_location.dart';
 import 'core/pending_promo.dart';
+import 'core/sign_in.dart';
 import 'core/store_hours.dart';
 import 'core/strings.dart';
 import 'local_notification_service.dart';
@@ -37,6 +38,21 @@ class _CheckoutPageState extends State<CheckoutPage> {
   final _addressCtrl = TextEditingController();
   final _promoCtrl = TextEditingController();
   int _tipCents = 0;
+
+  /// Door code and delivery instructions for the courier (sent as the order's `notes`).
+  final _notesCtrl = TextEditingController();
+
+  /// What was filled in from the saved address, so a new address can replace it while untouched.
+  String _notesPrefill = '';
+
+  /// Scheduled delivery: the time window picked (`{date, start, end}`), null = as soon as possible.
+  Map<String, dynamic>? _slot;
+
+  /// Windows the latest delivery quote offered. Empty = the selector is hidden.
+  List<Map<String, dynamic>> _slots = const [];
+
+  /// Delivery fee of the latest "as soon as possible" quote, shown on that choice.
+  int? _asapFeeCents;
 
   /// The promo code the customer applied (the server validates it in every quote).
   String? _promoCode;
@@ -96,6 +112,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
     _debounce?.cancel();
     _addressCtrl.dispose();
     _promoCtrl.dispose();
+    _notesCtrl.dispose();
     super.dispose();
   }
 
@@ -112,7 +129,21 @@ class _CheckoutPageState extends State<CheckoutPage> {
           prefs.getString('saved_default_address') ??
           prefs.getString('user_delivery_address');
       if (saved != null && saved.isNotEmpty && mounted) setState(() => _addressCtrl.text = saved);
+      _prefillDoorCode();
     } catch (_) {}
+  }
+
+  /// Offers the active saved address's door code to the courier (editable, and replaced when the
+  /// address changes unless the customer wrote something of their own).
+  void _prefillDoorCode() {
+    if (!mounted) return;
+    final code = DeliveryLocation.instance.doorCode?.trim() ?? '';
+    final text = code.isEmpty ? '' : '${tr(context, 'Door code', 'Ovikoodi')}: $code';
+    if (_notesCtrl.text.trim().isNotEmpty && _notesCtrl.text != _notesPrefill) return;
+    setState(() {
+      _notesPrefill = text;
+      _notesCtrl.text = text;
+    });
   }
 
   bool get _pinned {
@@ -126,7 +157,8 @@ class _CheckoutPageState extends State<CheckoutPage> {
     final loc = DeliveryLocation.instance;
     final items = cart.items.map((i) => '${i.productId}:${i.variantId}:${i.quantity}').join(',');
     if (_pickup) return [cart.storeId, items, 'PICKUP', _promoCode ?? ''].join('|');
-    return [cart.storeId, items, _pinned ? '${loc.lat},${loc.lng}' : '-', _tipCents, _promoCode ?? ''].join('|');
+    final slot = _slot == null ? 'asap' : '${_slot!['date']} ${_slot!['start']}-${_slot!['end']}';
+    return [cart.storeId, items, _pinned ? '${loc.lat},${loc.lng}' : '-', _tipCents, _promoCode ?? '', slot].join('|');
   }
 
   /// Asks for a new quote when the inputs changed: right away the first time and after applying
@@ -157,6 +189,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
     final loc = DeliveryLocation.instance;
     final pickup = _pickup;
     final pinned = _pinned && !pickup;
+    final slot = pickup ? null : _slot;
     final api = ApiClient(auth);
     final fallbackError = tr(context, 'The price could not be calculated.', 'Hintaa ei voitu laskea.');
 
@@ -170,10 +203,19 @@ class _CheckoutPageState extends State<CheckoutPage> {
         'items': _orderItems(cart),
         if (_tipCents > 0 && !pickup) 'tipCents': _tipCents,
         if (_promoCode != null) 'promoCode': _promoCode,
+        if (slot != null) 'deliverySlot': _slotInput(slot),
       });
       if (!mounted || key != _wantedKey) return;
       if (res.ok && res.data['quote'] is Map) {
         quote = Map<String, dynamic>.from(res.data['quote']);
+        if (!pickup) {
+          // Delivery windows this store offers now; a server without scheduled delivery sends none
+          final slots = quote['slots'];
+          _slots = slots is List
+              ? slots.whereType<Map>().map((s) => Map<String, dynamic>.from(s)).where((s) => s['date'] != null && s['start'] != null && s['end'] != null).toList()
+              : const [];
+          if (slot == null) _asapFeeCents = asInt(quote['deliveryFeeCents']);
+        }
         final priced = quote['fulfilment'];
         if (priced is String) _pickupSupported = true;
         if (pickup && priced != 'PICKUP') {
@@ -225,6 +267,22 @@ class _CheckoutPageState extends State<CheckoutPage> {
 
   List<Map<String, dynamic>> _orderItems(CartService cart) => cart.items.map((i) => i.toOrderItem()..removeWhere((_, v) => v == null)).toList();
 
+  /// The slot as the API takes it (only these three fields).
+  Map<String, dynamic> _slotInput(Map<String, dynamic> s) => {'date': '${s['date']}', 'start': '${s['start']}', 'end': '${s['end']}'};
+
+  bool _sameSlot(Map<String, dynamic>? a, Map<String, dynamic>? b) =>
+      a != null && b != null && a['date'] == b['date'] && a['start'] == b['start'] && a['end'] == b['end'];
+
+  void _pickSlot(Map<String, dynamic>? slot) {
+    if (_paying || _sameSlot(slot, _slot) || (slot == null && _slot == null)) return;
+    HapticFeedback.selectionClick();
+    setState(() {
+      _slot = slot;
+      _errorMessage = null;
+      _quoteNow = true;
+    });
+  }
+
   /// The promo code the server accepted in the current quote, if any.
   String? get _validPromo {
     final promo = _quote?['promo'];
@@ -269,6 +327,20 @@ class _CheckoutPageState extends State<CheckoutPage> {
     if (!mounted) return;
     // A new pin changes the quote inputs, so the next build asks for a fresh price
     if (addr != null && addr.isNotEmpty) setState(() => _addressCtrl.text = addr);
+    _prefillDoorCode();
+  }
+
+  /// A guest keeps the bag, signs in (or creates an account) and comes straight back here.
+  Future<void> _signInToPay() async {
+    HapticFeedback.selectionClick();
+    final signedIn = await openSignIn(context);
+    if (!mounted || !signedIn) return;
+    // Now the server can give the exact price (promo codes, fees, delivery times)
+    setState(() {
+      _legacy = false;
+      _errorMessage = null;
+      _resetQuote();
+    });
   }
 
   void _setFulfilment(String value) {
@@ -285,12 +357,12 @@ class _CheckoutPageState extends State<CheckoutPage> {
     final pickup = _pickup;
     final address = _addressCtrl.text.trim();
     if (!pickup && address.length < 5) {
-      setState(() => _errorMessage = tr(context, 'Enter your delivery address.', 'Kirjoita toimitusosoitteesi.'));
+      _fail(tr(context, 'Enter your delivery address.', 'Kirjoita toimitusosoitteesi.'));
       return;
     }
     final auth = Provider.of<AuthService>(context, listen: false);
     if (!auth.isAuthenticated) {
-      setState(() => _errorMessage = tr(context, 'Sign in to place an order.', 'Kirjaudu sisään tehdäksesi tilauksen.'));
+      await _signInToPay();
       return;
     }
 
@@ -308,6 +380,8 @@ class _CheckoutPageState extends State<CheckoutPage> {
 
     final loc = DeliveryLocation.instance;
     final promo = _legacy ? null : _validPromo;
+    final notes = _notesCtrl.text.trim();
+    final slot = _legacy ? null : _slot;
     final res = await ApiClient(auth).post(
       '/orders',
       pickup
@@ -324,17 +398,17 @@ class _CheckoutPageState extends State<CheckoutPage> {
               if (_pinned) ...{'deliveryLat': loc.lat, 'deliveryLng': loc.lng},
               if (_tipCents > 0) 'tipCents': _tipCents,
               if (promo != null) 'promoCode': promo,
+              // Door code and instructions reach the courier with the order
+              if (notes.isNotEmpty) 'notes': notes.length > 500 ? notes.substring(0, 500) : notes,
+              if (slot != null) 'deliverySlot': _slotInput(slot),
               'items': _orderItems(cart),
             },
     );
     if (!mounted) return;
     if (!res.ok) {
-      setState(() {
-        _paying = false;
-        _errorMessage = res.errorText(context) ?? tr(context, 'The order could not be placed. Please try again.', 'Tilausta ei voitu tehdä. Yritä uudelleen.');
-        // The store may have closed or the promo code stopped working: fetch the current price
-        _resetQuote();
-      });
+      _fail(res.errorText(context) ?? tr(context, 'The order could not be placed. Please try again.', 'Tilausta ei voitu tehdä. Yritä uudelleen.'));
+      // The store may have closed, the time slot or the promo code stopped working: fetch the current price
+      setState(_resetQuote);
       return;
     }
 
@@ -350,7 +424,8 @@ class _CheckoutPageState extends State<CheckoutPage> {
           paymentIntentClientSecret: clientSecret,
           merchantDisplayName: 'Malvoya',
           style: ThemeMode.system,
-          allowsDelayedPaymentMethods: true, // SEPA Direct Debit settles after a few days
+          // No SEPA or other methods that settle days later: unpaid checkouts are released after 30 minutes
+          allowsDelayedPaymentMethods: false,
           googlePay: PaymentSheetGooglePay(
             merchantCountryCode: 'FI',
             currencyCode: 'EUR',
@@ -362,19 +437,13 @@ class _CheckoutPageState extends State<CheckoutPage> {
     } on StripeException catch (e) {
       if (!mounted) return;
       final cancelled = e.error.code == FailureCode.Canceled;
-      setState(() {
-        _paying = false;
-        _errorMessage = cancelled
-            ? tr(context, 'Payment cancelled. You were not charged.', 'Maksu peruttiin. Sinua ei veloitettu.')
-            : (e.error.localizedMessage ?? tr(context, 'Your bank declined the payment.', 'Pankkisi hylkäsi maksun.'));
-      });
+      _fail(cancelled
+          ? tr(context, 'Payment cancelled. You were not charged.', 'Maksu peruttiin. Sinua ei veloitettu.')
+          : (e.error.localizedMessage ?? tr(context, 'Your bank declined the payment.', 'Pankkisi hylkäsi maksun.')));
       return;
     } catch (_) {
       if (!mounted) return;
-      setState(() {
-        _paying = false;
-        _errorMessage = tr(context, 'Payment could not be started. You were not charged.', 'Maksua ei voitu aloittaa. Sinua ei veloitettu.');
-      });
+      _fail(tr(context, 'Payment could not be started. You were not charged.', 'Maksua ei voitu aloittaa. Sinua ei veloitettu.'));
       return;
     }
 
@@ -401,7 +470,16 @@ class _CheckoutPageState extends State<CheckoutPage> {
     if (_promoFromInvite) unawaited(PendingPromo.instance.clear());
     cart.clear();
     // Straight to live tracking, like the big delivery apps
-    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: orderId)));
+    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: orderId, justPaid: true)));
+  }
+
+  /// Shows a payment/order problem right above the Pay button, where the customer is looking.
+  void _fail(String message) {
+    HapticFeedback.heavyImpact();
+    setState(() {
+      _paying = false;
+      _errorMessage = message;
+    });
   }
 
   // ── UI ──────────────────────────────────────────────────────────────────
@@ -472,8 +550,31 @@ class _CheckoutPageState extends State<CheckoutPage> {
                               ),
                               TextButton(onPressed: _pickAddress, child: Text(tr(context, 'Map', 'Kartta'))),
                             ]),
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: _notesCtrl,
+                              maxLength: 500,
+                              minLines: 1,
+                              maxLines: 3,
+                              textCapitalization: TextCapitalization.sentences,
+                              decoration: InputDecoration(
+                                labelText: tr(context, 'Door code & delivery instructions', 'Ovikoodi ja toimitusohjeet'),
+                                hintText: tr(context, 'e.g. Door code A1234, 3rd floor', 'esim. ovikoodi A1234, 3. kerros'),
+                                prefixIcon: const Icon(Icons.door_front_door_outlined),
+                                counterText: '',
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              tr(context, 'Optional. Your courier sees this with the order.', 'Valinnainen. Kuriiri näkee tämän tilauksen yhteydessä.'),
+                              style: TextStyle(fontSize: 12, color: AppTheme.secondaryText(context)),
+                            ),
                           ],
                         ),
+                      if (!_pickup && (_slots.isNotEmpty || _slot != null)) ...[
+                        const SizedBox(height: 14),
+                        _whenSection(),
+                      ],
                       const SizedBox(height: 14),
                       _section(
                         cart.storeName ?? tr(context, 'Your bag', 'Ostoskassi'),
@@ -511,14 +612,10 @@ class _CheckoutPageState extends State<CheckoutPage> {
                       ],
                       const SizedBox(height: 14),
                       _section(tr(context, 'Summary', 'Yhteenveto'), _summary(q, loading: loading, error: error)),
-                      if (_errorMessage != null) ...[
-                        const SizedBox(height: 14),
-                        _notice(Icons.error_outline_rounded, _errorMessage!, error: true),
-                      ],
                     ],
                   ),
                 ),
-                _payBar(cart, ready ? totalCents : null, loading: loading, enabled: ready && closed == null),
+                _payBar(cart, ready ? totalCents : null, loading: loading, enabled: ready && closed == null, guest: !auth.isAuthenticated),
               ],
             ),
     );
@@ -558,7 +655,12 @@ class _CheckoutPageState extends State<CheckoutPage> {
         _summaryRow(tr(context, 'Collect from the shop', 'Nouto kaupasta'),
             cents('deliveryFeeCents') == 0 ? tr(context, 'Free', 'Maksuton') : money('deliveryFeeCents'))
       else
-        _summaryRow(tr(context, 'Delivery', 'Toimitus'), money('deliveryFeeCents')),
+        _summaryRow(
+          [tr(context, 'Delivery', 'Toimitus'), if (_slot != null) (q?['deliverySlot'] is Map ? localized(context, q!['deliverySlot']['label']) : null) ?? localized(context, _slot!['label'])]
+              .whereType<String>()
+              .join(' · '),
+          money('deliveryFeeCents'),
+        ),
       if (cents('serviceFeeCents') > 0) ...[
         const SizedBox(height: 8),
         _summaryRow(tr(context, 'Service fee', 'Palvelumaksu'), money('serviceFeeCents')),
@@ -716,7 +818,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
       final description = (promo['description'] ?? '').toString();
       message = description.isNotEmpty ? description : tr(context, 'Code applied', 'Koodi käytössä');
     } else if (promoError is String && promoError.isNotEmpty) {
-      message = promoError;
+      message = localizeServerMessage(context, promoError);
     } else {
       message = tr(context, 'This code can’t be used right now.', 'Koodia ei voi käyttää juuri nyt.');
     }
@@ -754,9 +856,76 @@ class _CheckoutPageState extends State<CheckoutPage> {
     );
   }
 
-  Widget _payBar(CartService cart, int? totalCents, {required bool loading, required bool enabled}) {
+  /// "When?": as soon as possible, or one of the delivery windows the server offered.
+  Widget _whenSection() {
+    final muted = AppTheme.secondaryText(context);
+    Widget option(String label, int? feeCents, bool selected, VoidCallback onTap) => Semantics(
+          button: true,
+          selected: selected,
+          label: feeCents == null ? label : '$label, ${euro(context, feeCents)}',
+          excludeSemantics: true,
+          child: GestureDetector(
+            onTap: onTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              constraints: const BoxConstraints(minHeight: 52),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: selected ? AppTheme.sunshine : AppTheme.cardBackground(context),
+                borderRadius: BorderRadius.circular(26),
+                border: Border.all(color: selected ? AppTheme.sunshine : AppTheme.cardBorder(context), width: 1.5),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(label, style: TextStyle(fontWeight: FontWeight.w800, color: selected ? AppTheme.ink : AppTheme.primaryText(context))),
+                  if (feeCents != null)
+                    Text(
+                      '${tr(context, 'Delivery', 'Toimitus')} ${euro(context, feeCents)}',
+                      style: TextStyle(fontSize: 12, color: selected ? AppTheme.ink : muted),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+    // A picked window the latest quote no longer lists stays visible so it can be changed
+    final shown = [
+      ..._slots,
+      if (_slot != null && !_slots.any((s) => _sameSlot(s, _slot))) _slot!,
+    ];
+    return _section(tr(context, 'When?', 'Milloin?'), [
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          option(tr(context, 'As soon as possible', 'Mahdollisimman pian'), _asapFeeCents, _slot == null, () => _pickSlot(null)),
+          for (final s in shown)
+            option(
+              localized(context, s['label']) ?? '${s['date']} ${s['start']}–${s['end']}',
+              asInt(s['feeCents']),
+              _sameSlot(s, _slot),
+              () => _pickSlot(s),
+            ),
+        ],
+      ),
+      if (_slot != null) ...[
+        const SizedBox(height: 10),
+        Text(
+          tr(context, 'The shop gets it ready for this time and a courier brings it within the window.',
+              'Kauppa valmistelee tilauksen tähän aikaan, ja kuriiri tuo sen valitun aikaikkunan sisällä.'),
+          style: TextStyle(fontSize: 12.5, color: muted, height: 1.35),
+        ),
+      ],
+    ]);
+  }
+
+  Widget _payBar(CartService cart, int? totalCents, {required bool loading, required bool enabled, bool guest = false}) {
     final String label;
-    if (loading) {
+    if (guest) {
+      label = tr(context, 'Sign in to pay', 'Kirjaudu ja maksa');
+    } else if (loading) {
       label = tr(context, 'Calculating price…', 'Lasketaan hintaa…');
     } else if (totalCents != null) {
       label = '${tr(context, 'Pay', 'Maksa')} ${euro(context, totalCents)}';
@@ -773,11 +942,23 @@ class _CheckoutPageState extends State<CheckoutPage> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // Payment and order problems appear right where the customer is about to tap
+          if (_errorMessage != null) ...[
+            Semantics(
+              liveRegion: true,
+              child: _notice(Icons.error_outline_rounded, _errorMessage!, error: true),
+            ),
+            const SizedBox(height: 10),
+          ],
           SizedBox(
             width: double.infinity,
             height: 56,
             child: FilledButton(
-              onPressed: _paying || !enabled || totalCents == null ? null : () => _placeOrder(cart, totalCents),
+              onPressed: _paying
+                  ? null
+                  : guest
+                      ? _signInToPay
+                      : (!enabled || totalCents == null ? null : () => _placeOrder(cart, totalCents)),
               child: _paying
                   ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
                   : Text(label, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
@@ -819,7 +1000,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
         },
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
-          height: 44,
+          height: 48,
           padding: const EdgeInsets.symmetric(horizontal: 16),
           alignment: Alignment.center,
           decoration: BoxDecoration(

@@ -6,6 +6,9 @@ class LocaleProvider extends ChangeNotifier {
 
   Locale get locale => _locale;
 
+  /// The current language for code without a BuildContext (e.g. API error messages).
+  static String currentCode = 'fi';
+
   /// The app is written in Finnish and English only.
   static const List<String> supportedCodes = ['fi', 'en'];
 
@@ -16,6 +19,7 @@ class LocaleProvider extends ChangeNotifier {
   void setLocale(Locale locale) async {
     if (!supportedCodes.contains(locale.languageCode)) return;
     _locale = locale;
+    currentCode = locale.languageCode;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('languageCode', locale.languageCode);
@@ -26,6 +30,7 @@ class LocaleProvider extends ChangeNotifier {
     final languageCode = prefs.getString('languageCode');
     if (languageCode != null && supportedCodes.contains(languageCode)) {
       _locale = Locale(languageCode);
+      currentCode = languageCode;
       notifyListeners();
     }
   }

@@ -1,15 +1,18 @@
 import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
 import '../core/media_upload.dart';
 import '../core/strings.dart';
-import 'vendor_dashboard.dart';
+import '../widgets/account_sheet.dart';
+import '../widgets/opening_hours_editor.dart';
+import 'store_location_picker.dart';
 
 /// Create the store, or edit it later. Who the seller is (business or private person) is shown
 /// to shoppers, as EU marketplace law requires, and is checked during review.
@@ -37,7 +40,8 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
   String? _logoUrl;
   String? _bannerUrl;
   double? _uploading;
-  bool _locating = false;
+  /// Opening hours chosen while creating the store (later they are edited in Store → Opening hours)
+  final OpeningHoursDraft _hours = OpeningHoursDraft.fromJson(null, defaultOn: true);
   bool _loading = true;
   bool _saving = false;
   String? _error;
@@ -93,28 +97,18 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
     });
   }
 
-  Future<void> _locate() async {
+  /// The map step: the owner puts the pin on the shop (couriers navigate to it).
+  Future<void> _pickLocation() async {
+    final picked = await Navigator.push<LatLng>(
+      context,
+      MaterialPageRoute(builder: (_) => StoreLocationPicker(initialLat: _lat, initialLng: _lng, address: _address.text.trim())),
+    );
+    if (picked == null || !mounted) return;
     setState(() {
-      _locating = true;
+      _lat = picked.latitude;
+      _lng = picked.longitude;
       _error = null;
     });
-    try {
-      var permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-        setState(() => _error = tr(context, 'Location permission is needed to put your store on the map.', 'Sijaintilupa tarvitaan, jotta kauppasi näkyy kartalla.'));
-        return;
-      }
-      final pos = await Geolocator.getCurrentPosition(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
-      setState(() {
-        _lat = pos.latitude;
-        _lng = pos.longitude;
-      });
-    } catch (_) {
-      setState(() => _error = tr(context, 'Could not get your location. Check that location is on.', 'Sijaintia ei saatu. Tarkista, että sijainti on päällä.'));
-    } finally {
-      if (mounted) setState(() => _locating = false);
-    }
   }
 
   Future<void> _pickImage(bool logo) async {
@@ -140,7 +134,12 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
     if (!_form.currentState!.validate()) return;
     if (_lat == null || _lng == null) {
       setState(() =>
-          _error = tr(context, 'Tap "Use my current location" while at the store so couriers can find you.', 'Paina "Käytä nykyistä sijaintia" ollessasi kaupalla, jotta kuriirit löytävät sinut.'));
+          _error = tr(context, 'Put your shop on the map so couriers can find you.', 'Merkitse kauppasi kartalle, jotta kuriirit löytävät sinut.'));
+      return;
+    }
+    final hoursProblem = _existing == null ? _hours.validate(context) : null;
+    if (hoursProblem != null) {
+      setState(() => _error = hoursProblem);
       return;
     }
     setState(() {
@@ -160,6 +159,7 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
       if (!_verified && _sellerType == 'BUSINESS') 'businessId': _businessId.text.trim(),
       if (_logoUrl != null) 'logoUrl': _logoUrl,
       if (_bannerUrl != null) 'bannerUrl': _bannerUrl,
+      if (_existing == null) 'openingHours': _hours.toJson(),
     });
     if (!mounted) return;
     setState(() => _saving = false);
@@ -168,7 +168,8 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
       return;
     }
     if (_existing == null) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const VendorDashboard()));
+      // The app's home follows the store's state and switches to the dashboard by itself
+      await Provider.of<AuthService>(context, listen: false).checkStore();
     } else {
       Navigator.pop(context, true);
     }
@@ -178,7 +179,18 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(title: Text(_existing == null ? tr(context, 'Set up your store', 'Perusta kauppasi') : tr(context, 'Store details', 'Kaupan tiedot'))),
+      appBar: AppBar(
+        title: Text(_existing == null ? tr(context, 'Set up your store', 'Perusta kauppasi') : tr(context, 'Store details', 'Kaupan tiedot')),
+        actions: [
+          // Before the store exists this is the home screen: help, sign out and account deletion live here
+          if (_existing == null && !_loading)
+            IconButton(
+              tooltip: tr(context, 'Account and help', 'Tili ja apua'),
+              icon: const Icon(Icons.manage_accounts_outlined),
+              onPressed: () => showAccountSheet(context),
+            ),
+        ],
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : Form(
@@ -250,13 +262,7 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                     validator: (v) => (v ?? '').trim().length < 5 ? tr(context, 'Enter the address couriers pick up from', 'Anna osoite, josta kuriirit noutavat') : null,
                   ),
                   const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: _locating ? null : _locate,
-                    icon: _locating
-                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                        : Icon(_lat != null ? Icons.check_circle_rounded : Icons.my_location_rounded),
-                    label: Text(_lat != null ? tr(context, 'Location saved — update', 'Sijainti tallennettu — päivitä') : tr(context, 'Use my current location', 'Käytä nykyistä sijaintia')),
-                  ),
+                  _locationCard(),
                   const SizedBox(height: 8),
                   TextFormField(
                       controller: _phone,
@@ -267,6 +273,17 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                   Slider(value: _prepMinutes, min: 0, max: 60, divisions: 12, label: '${_prepMinutes.round()} min', onChanged: (v) => setState(() => _prepMinutes = v)),
                   Text(tr(context, 'Used for the delivery times customers see.', 'Käytetään asiakkaille näytettävissä toimitusajoissa.'),
                       style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                  if (_existing == null) ...[
+                    const SizedBox(height: 24),
+                    Text(tr(context, 'Opening hours', 'Aukioloajat'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                    const SizedBox(height: 4),
+                    Text(
+                      tr(context, 'Customers can only order while you are open (Finnish time). You can change these later in Store → Opening hours.',
+                          'Asiakkaat voivat tilata vain aukioloaikoina (Suomen aikaa). Voit muuttaa niitä myöhemmin kohdassa Kauppa → Aukioloajat.'),
+                      style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary, height: 1.4),
+                    ),
+                    OpeningHoursEditor(draft: _hours, onChanged: () => setState(() {})),
+                  ],
                   if (_error != null) Padding(padding: const EdgeInsets.only(top: 14), child: Text(_error!, style: const TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w600))),
                   const SizedBox(height: 20),
                   SizedBox(
@@ -290,6 +307,50 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                 ],
               ),
             ),
+    );
+  }
+
+  /// The pin on a small map, or a call to set it.
+  Widget _locationCard() {
+    final pin = _lat != null && _lng != null ? LatLng(_lat!, _lng!) : null;
+    return Container(
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(AppTheme.radiusMd), border: Border.all(color: AppTheme.divider)),
+      clipBehavior: Clip.antiAlias,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        if (pin != null)
+          SizedBox(
+            height: 140,
+            child: IgnorePointer(
+              child: FlutterMap(
+                key: ValueKey(pin),
+                options: MapOptions(initialCenter: pin, initialZoom: 16),
+                children: [
+                  TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.malvoya.vendor'),
+                  MarkerLayer(markers: [
+                    Marker(point: pin, width: 40, height: 40, alignment: Alignment.topCenter, child: const Icon(Icons.location_on_rounded, size: 40, color: AppTheme.primary)),
+                  ]),
+                ],
+              ),
+            ),
+          ),
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text(
+              pin != null
+                  ? tr(context, 'Couriers come to this pin. Map © OpenStreetMap contributors', 'Kuriirit tulevat tähän neulaan. Kartta © OpenStreetMapin tekijät')
+                  : tr(context, 'Put your shop on the map so couriers find the door.', 'Merkitse kauppasi kartalle, jotta kuriirit löytävät oven.'),
+              style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _pickLocation,
+              icon: Icon(pin != null ? Icons.edit_location_alt_outlined : Icons.add_location_alt_outlined),
+              label: Text(pin != null ? tr(context, 'Move the pin', 'Siirrä neulaa') : tr(context, 'Set the pin on the map', 'Aseta neula kartalle')),
+            ),
+          ]),
+        ),
+      ]),
     );
   }
 

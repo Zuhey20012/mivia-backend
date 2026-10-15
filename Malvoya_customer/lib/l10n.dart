@@ -421,7 +421,7 @@ class AppLocalizations {
       'botResponseReturns':
           'Kun ostat yritysmyyjältä, voit perua oston 14 päivän kuluessa toimituksesta syytä kertomatta: aloita kohdasta Profiili → Palautukset. Hyvitys palautetaan käyttämällesi maksutavalle. Yksityismyyjiltä tehdyissä ostoissa ei ole lakisääteistä peruuttamisoikeutta, mutta voit silti kysyä myyjältä. Jokaisella kauppasivulla kerrotaan, onko myyjä yritys vai yksityishenkilö.',
       'botResponseSizing':
-          'Koot vaihtelevat merkin ja kaupan mukaan. Katso tuotekuvaus ja tuotesivun kokotaulukko, tai kysy kaupalta sen julkaisujen kommenteissa.',
+          'Koot vaihtelevat merkin ja kaupan mukaan. Katso tuotekuvaus ja tuotesivun kokotaulukko, tai kysy kaupalta sen droppien kommenteissa.',
       'botResponsePayment':
           'Maksat Stripen suojatussa maksuikkunassa. Malvoya ei näe korttitietojasi. Tilaus vahvistetaan vasta, kun maksu on vahvistettu, ja hyvitykset palautetaan käyttämällesi maksutavalle.',
       'botResponseStore':

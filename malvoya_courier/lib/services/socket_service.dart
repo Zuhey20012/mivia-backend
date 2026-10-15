@@ -18,6 +18,8 @@ class CourierSocketService extends ChangeNotifier {
   void Function(Map<String, dynamic>)? onDispatchOffer;
   void Function(Map<String, dynamic>)? onOrderStatus;
   void Function(Map<String, dynamic>)? onChatMessage;
+  /// An offered job is gone: `{orderId, reason: "taken" | "cancelled"}`.
+  void Function(Map<String, dynamic>)? onOfferClosed;
 
   void connect(String accessToken) {
     if (_socket != null) return;
@@ -49,6 +51,9 @@ class CourierSocketService extends ChangeNotifier {
     _socket!.on('courier:dispatch_offer', (data) {
       if (data is Map) onDispatchOffer?.call(Map<String, dynamic>.from(data));
       notifyListeners();
+    });
+    _socket!.on('courier:offer_closed', (data) {
+      if (data is Map) onOfferClosed?.call(Map<String, dynamic>.from(data));
     });
     _socket!.on('order:status', (data) {
       if (data is Map) onOrderStatus?.call(Map<String, dynamic>.from(data));

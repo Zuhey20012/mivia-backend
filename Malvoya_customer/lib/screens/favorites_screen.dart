@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../core/api_client.dart';
+import '../core/sign_in.dart';
 import '../core/strings.dart';
 import '../widgets/product_tile.dart';
 import '../widgets/skeleton.dart';
@@ -46,7 +47,17 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(tr(context, 'Favourites', 'Suosikit'))),
       body: !signedIn
-          ? StateMessage(icon: Icons.favorite_border_rounded, message: tr(context, 'Sign in to save favourites.', 'Kirjaudu sisään tallentaaksesi suosikkeja.'))
+          ? StateMessage(
+              icon: Icons.favorite_border_rounded,
+              message: tr(context, 'Sign in to save favourites.', 'Kirjaudu sisään tallentaaksesi suosikkeja.'),
+              actionLabel: tr(context, 'Sign in / Create account', 'Kirjaudu / Luo tili'),
+              onRetry: () async {
+                if (await openSignIn(context) && mounted) {
+                  setState(() => _loading = true);
+                  _load();
+                }
+              },
+            )
           : _loading
               ? const SkeletonProductGrid(padding: EdgeInsets.fromLTRB(16, 16, 16, 40))
               : RefreshIndicator(

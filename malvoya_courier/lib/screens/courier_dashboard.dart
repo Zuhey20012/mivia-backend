@@ -16,9 +16,12 @@ import '../core/push_service.dart';
 import '../core/strings.dart';
 import '../core/google_link_tile.dart';
 import '../core/delete_account_tile.dart';
+import '../core/location_disclosure.dart';
+import '../core/server_messages.dart';
 import '../services/courier_telemetry_service.dart';
 import '../services/socket_service.dart';
 import '../widgets/skeletons.dart';
+import 'go_online_check.dart';
 import 'help_screen.dart';
 import 'payouts_screen.dart';
 
@@ -39,7 +42,11 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
   List<Map<String, dynamic>> _jobs = [];
   List<Map<String, dynamic>> _mine = [];
   Map<String, dynamic>? _earnings;
-  final List<Map<String, dynamic>> _chat = [];
+  // Chat with the customer of the active order. A notifier, so an open chat sheet shows new
+  // messages as they arrive; _chatUnread puts a dot on the chat buttons while the sheet is closed.
+  final ValueNotifier<List<Map<String, dynamic>>> _chat = ValueNotifier(const []);
+  bool _chatOpen = false;
+  bool _chatUnread = false;
 
   // Each tab shows a placeholder until its first answer, and an error with "Try again" if that fails
   _Load _jobsLoad = _Load.loading;
@@ -84,9 +91,8 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     final socket = CourierSocketService();
     socket.onDispatchOffer = _onOffer;
     socket.onOrderStatus = (_) => _loadMine();
-    socket.onChatMessage = (m) {
-      if (mounted && asInt(m['orderId']) == asInt(_active?['id'])) setState(() => _chat.add(m));
-    };
+    socket.onChatMessage = _onChatMessage;
+    socket.onOfferClosed = _onOfferClosed;
     PushService.instance.onOpen = (data) {
       if (!mounted || data['type'] != 'offer') return;
       if (_active == null) _tabs.animateTo(0);
@@ -109,6 +115,8 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     socket.onDispatchOffer = null;
     socket.onOrderStatus = null;
     socket.onChatMessage = null;
+    socket.onOfferClosed = null;
+    _chat.dispose();
     _tabs.dispose();
     super.dispose();
   }
@@ -160,8 +168,44 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     _meLoaded = me.ok;
     final online = me.ok && me.data['courier']?['isOnline'] == true;
     setState(() => _online = online);
-    if (online) await _startSharing();
+    if (online) {
+      // Still online from last time. Sharing restarts by itself only when the courier has accepted
+      // the location disclosure and the permission is still there; otherwise they are asked first.
+      await _loadMine();
+      if (!mounted) return;
+      if (await LocationDisclosure.canResumeSilently()) {
+        if (!await _startSharing() && mounted) {
+          _snack(tr(context, 'Turn on location to keep sharing your position while you are online.',
+              'Laita sijainti päälle, jotta sijaintisi jaetaan linjoilla ollessasi.'));
+        }
+      } else if (mounted) {
+        await _resumeSharingWithConsent();
+      }
+    }
     await Future.wait([_loadJobs(), _loadMine(), _loadEarnings()]);
+  }
+
+  /// Online on the server, but this phone may not share the location yet (disclosure never
+  /// accepted, or permission withdrawn): ask with the disclosure. If the courier says no, they go
+  /// offline, unless they are carrying an order, which must not be dropped silently.
+  Future<void> _resumeSharingWithConsent() async {
+    final go = await GoOnlineCheck.run(context);
+    if (!mounted) return;
+    if (go && await _startSharing()) return;
+    if (!mounted) return;
+    if (_active != null) {
+      _snack(tr(context, 'Location sharing is off, so the customer cannot follow your delivery. Allow location to turn it back on.',
+          'Sijainnin jakaminen on pois päältä, joten asiakas ei voi seurata toimitusta. Salli sijainti, niin jakaminen jatkuu.'));
+      return;
+    }
+    final res = await _api.post('/courier/status', {'isOnline': false});
+    if (!mounted) return;
+    if (res.ok) {
+      setState(() => _online = false);
+      _syncPolling();
+      _snack(tr(context, 'You are offline because location is not shared. Go online when you are ready.',
+          'Olet poissa linjoilta, koska sijaintia ei jaeta. Mene linjoille, kun olet valmis.'));
+    }
   }
 
   Future<void> _refreshAll() => Future.wait([_loadJobs(manual: true), _loadMine(manual: true), _loadEarnings(manual: true)]);
@@ -186,6 +230,14 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
       if (!mounted) return;
       await _openHelp(orderId: asInt(active['id']), stopping: true);
       return;
+    }
+    if (!_online) {
+      // Location disclosure, permission and a short checklist before going online
+      setState(() => _switching = true);
+      final go = await GoOnlineCheck.run(context);
+      if (!mounted) return;
+      setState(() => _switching = false);
+      if (!go) return;
     }
     await _setOnline(!_online);
   }
@@ -245,8 +297,77 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
   Future<void> _openHelp({int? orderId, bool stopping = false}) =>
       Navigator.push(context, MaterialPageRoute(builder: (_) => HelpScreen(orderId: orderId, stoppingDelivery: stopping)));
 
+  /// Account: Google link, help, sign out and delete account.
+  void _openAccount() {
+    HapticFeedback.selectionClick();
+    final user = _auth.currentUser;
+    final email = user?.email ?? '';
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            ListTile(
+              leading: const CircleAvatar(
+                backgroundColor: AppTheme.primaryLight,
+                child: Icon(Icons.person_outline_rounded, color: AppTheme.primary),
+              ),
+              title: Text(user?.name ?? tr(context, 'Your account', 'Tilisi'), style: AppTheme.display(size: 19)),
+              // Phone sign-ins have a technical address that means nothing to the courier
+              subtitle: email.isEmpty || email.endsWith('@phone.malvoya.app') ? null : Text(email),
+            ),
+            const Divider(height: 16),
+            const GoogleLinkTile(),
+            ListTile(
+              leading: const Icon(Icons.support_agent_rounded),
+              title: Text(tr(context, 'Help and contact', 'Apua ja yhteydenotto'), style: const TextStyle(fontWeight: FontWeight.w600)),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () {
+                Navigator.pop(ctx);
+                _openHelp(orderId: asInt(_active?['id']));
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.gavel_rounded),
+              title: Text(tr(context, 'Courier agreement', 'Lähettisopimus'), style: const TextStyle(fontWeight: FontWeight.w600)),
+              trailing: const Icon(Icons.open_in_new_rounded, size: 20),
+              onTap: () => openLegal('couriers'),
+            ),
+            const Divider(height: 16),
+            const DeleteAccountTile(),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  await _signOut();
+                },
+                icon: const Icon(Icons.logout_rounded),
+                label: Text(tr(context, 'Sign out', 'Kirjaudu ulos')),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
   Future<void> _signOut() async {
     final active = _active;
+    // Online with a delivery in progress has its own warning below; otherwise one plain confirmation
+    if (!_online || active == null) {
+      final ok = await _confirm(
+        title: tr(context, 'Sign out?', 'Kirjaudutaanko ulos?'),
+        body: _online
+            ? tr(context, 'You go offline and stop getting job offers on this phone.', 'Poistut linjoilta etkä enää saa keikkatarjouksia tähän puhelimeen.')
+            : tr(context, 'You stop getting job offers on this phone until you sign in again.', 'Et saa keikkatarjouksia tähän puhelimeen, ennen kuin kirjaudut uudelleen.'),
+        yes: tr(context, 'Sign out', 'Kirjaudu ulos'),
+      );
+      if (!ok || !mounted) return;
+    }
     if (_online && active != null) {
       if (!await _confirmStop(active)) return;
       await _setOnline(false);
@@ -347,15 +468,66 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
 
   void _snack(String t) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t), behavior: SnackBarBehavior.floating));
 
-  /// The server's own message when it gave one (e.g. "Get closer to the shop"), else [fallback].
+  /// The server's own message when it gave one (e.g. "Get closer to the shop"), in Finnish when
+  /// the app is in Finnish and a translation is known, else [fallback].
   String _serverMessage(ApiResult res, String fallback) {
     final e = res.data['error'];
-    return e is String && e.trim().isNotEmpty ? e : fallback;
+    return e is String && e.trim().isNotEmpty ? ServerMessages.localize(e) : fallback;
   }
+
+  /// The server's English message, for recognising which refusal it was.
+  String _rawError(ApiResult res) => '${res.data['error'] ?? ''}';
 
   static final _locationWords = RegExp(r'locat|far |km|metre|meter|closer|nearby|near the|sijain|etäi|lähe', caseSensitive: false);
 
+  // ── Chat ────────────────────────────────────────────────────────────────
+
+  void _resetChat() {
+    _chat.value = const [];
+    _chatUnread = false;
+  }
+
+  /// A chat message for the order being carried (the server also echoes the courier's own).
+  void _onChatMessage(Map<String, dynamic> m) {
+    if (!mounted || asInt(m['orderId']) != asInt(_active?['id'])) return;
+    _chat.value = [..._chat.value, m];
+    if (!_chatOpen && !_isMine(m)) {
+      HapticFeedback.mediumImpact();
+      setState(() => _chatUnread = true);
+    }
+  }
+
+  bool _isMine(Map m) {
+    final sender = asInt(m['senderId']);
+    final me = _auth.currentUser?.id;
+    return sender != null && me != null ? sender == me : m['role'] == 'COURIER';
+  }
+
   // ── Offers ──────────────────────────────────────────────────────────────
+
+  /// Another courier took the job, or the order was cancelled: the offer disappears from the list
+  /// and the notifications. If the courier was looking at it, they are told why.
+  void _onOfferClosed(Map<String, dynamic> data) {
+    final id = asInt(data['orderId']);
+    if (id == null || !mounted) return;
+    PushService.instance.clearOffer(id);
+    // This courier's own accept is answered by the accept request itself
+    if (_acceptingId == id || asInt(_active?['id']) == id) return;
+    final shown = _jobs.any((j) => asInt(j['id']) == id);
+    if (!shown) return;
+    final watching = _foreground && _online && _active == null && _tabs.index == 0;
+    setState(() {
+      _jobs = _jobs.where((j) => asInt(j['id']) != id).toList();
+      _offerPay.remove(id);
+      if (_newOfferId == id) _newOfferId = null;
+    });
+    if (watching) _snack(_offerGoneText(cancelled: data['reason'] == 'cancelled'));
+  }
+
+  String _offerGoneText({bool cancelled = false}) => cancelled
+      ? tr(context, 'That order was cancelled, so the job is gone.', 'Tilaus peruttiin, joten keikka poistui.')
+      : tr(context, 'Taken by another courier.', 'Toinen lähetti otti keikan.');
+
 
   /// A live offer: shown at the top of Jobs straight away, announced once (haptic + the phone's
   /// notification sound), then confirmed against the job list. Never accepted automatically.
@@ -434,8 +606,19 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     if (!mounted) return;
     setState(() => _acceptingId = null);
     if (!res.ok) {
+      if (res.status == 409 && _rawError(res).contains('no longer available')) {
+        // Someone else was faster (or the order was cancelled): drop it and refresh the list
+        PushService.instance.clearOffer(id);
+        setState(() {
+          _jobs = _jobs.where((j) => asInt(j['id']) != id).toList();
+          if (_newOfferId == id) _newOfferId = null;
+        });
+        _snack(_offerGoneText());
+        _loadJobs();
+        return;
+      }
       var message = _serverMessage(res, res.error!);
-      if (res.status == 409 && (!sent || _locationWords.hasMatch(message))) {
+      if (res.status == 409 && (!sent || _locationWords.hasMatch(_rawError(res)))) {
         message = '$message ${tr(context, 'Stay online with location on, so Malvoya can see you are near the shop, and try again.', 'Pysy linjoilla sijainti päällä, jotta Malvoya näkee sinun olevan lähellä kauppaa, ja yritä uudelleen.')}';
       }
       _snack(message);
@@ -444,7 +627,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     }
     PushService.instance.clearOffer(id);
     _newOfferId = null;
-    _chat.clear();
+    _resetChat();
     await _loadMine();
     _loadJobs();
     _tabs.animateTo(1);
@@ -452,9 +635,38 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
 
   // ── Delivery steps ──────────────────────────────────────────────────────
 
+  /// Number of pieces in an order (quantities added up), or null if the items are not known.
+  int? _pieceCount(Map<String, dynamic> o) {
+    final items = (o['items'] as List?)?.whereType<Map>().toList();
+    if (items == null || items.isEmpty) return null;
+    return items.fold<int>(0, (n, i) => n + (asInt(i['quantity']) ?? 1));
+  }
+
+  String _piecesText(int n) => n == 1 ? tr(context, '1 item', '1 tuote') : tr(context, '$n items', '$n tuotetta');
+
+  /// "I have the order": the courier first checks they were handed the right order.
   Future<void> _pickedUp(Map<String, dynamic> o) async {
     if (_pickingUp) return;
     HapticFeedback.mediumImpact();
+    final id = o['id'];
+    final n = _pieceCount(o);
+    final items = ((o['items'] as List?) ?? []).whereType<Map>().toList();
+    final ok = await _confirm(
+      title: n == null
+          ? tr(context, 'Did the shop hand you order #$id?', 'Antoiko kauppa sinulle tilauksen #$id?')
+          : tr(context, 'Did the shop hand you order #$id — ${_piecesText(n)}?', 'Antoiko kauppa sinulle tilauksen #$id — ${_piecesText(n)}?'),
+      body: tr(context, 'Check the order number with the shop and that nothing is missing. The customer is then told the order is on its way.',
+          'Tarkista tilausnumero kaupan kanssa ja ettei mitään puutu. Asiakkaalle kerrotaan sen jälkeen, että tilaus on matkalla.'),
+      yes: tr(context, 'Yes, I have it', 'Kyllä, se on mukanani'),
+      no: tr(context, 'Not yet', 'Ei vielä'),
+      extra: items.isEmpty
+          ? null
+          : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              for (final i in items)
+                Text('${i['quantity']}× ${i['product']?['name'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w600, height: 1.4)),
+            ]),
+    );
+    if (!ok || !mounted) return;
     setState(() => _pickingUp = true);
     final res = await _api.patch('/orders/${o['id']}/status', {'status': 'SHIPPED'});
     if (!mounted) return;
@@ -628,7 +840,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
 
   // ── Handover ────────────────────────────────────────────────────────────
 
-  Future<bool> _confirm({required String title, required String body, required String yes, Widget? extra}) async {
+  Future<bool> _confirm({required String title, required String body, required String yes, String? no, Widget? extra}) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -640,7 +852,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
           ]),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(context, 'Cancel', 'Peruuta'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(no ?? tr(context, 'Cancel', 'Peruuta'))),
           FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(yes)),
         ],
       ),
@@ -725,7 +937,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     setState(() => _completing = false);
     if (!res.ok) return _snack(res.error!);
     HapticFeedback.heavyImpact();
-    _chat.clear();
+    _resetChat();
     await Future.wait([_loadMine(), _loadEarnings(), _loadJobs()]);
     if (!mounted) return;
     final done = _mine.firstWhere((m) => asInt(m['id']) == orderId, orElse: () => o);
@@ -813,85 +1025,53 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     if (mounted) _snack(tr(context, 'Could not start a call.', 'Puhelua ei voitu aloittaa.'));
   }
 
-  void _openChat(Map<String, dynamic> o) {
+  /// Chat with the customer, at any step of the delivery. New messages appear while it is open.
+  Future<void> _openChat(Map<String, dynamic> o) async {
     HapticFeedback.selectionClick();
-    final input = TextEditingController();
     final orderId = asInt(o['id'])!;
     final myName = (_auth.currentUser?.name ?? 'Courier').split(' ').first;
-    showModalBottomSheet(
+    final pickedUp = _stage(o) >= 3;
+    final quick = pickedUp
+        ? [
+            tr(context, "I'm on my way", 'Olen matkalla'),
+            tr(context, "I'm at the door", 'Olen ovella'),
+            tr(context, "I'm outside", 'Olen ulkona'),
+            tr(context, 'Running 5 min late', 'Myöhästyn 5 min'),
+          ]
+        : [
+            tr(context, 'On my way to the shop', 'Olen matkalla kauppaan'),
+            tr(context, 'At the shop, waiting for your order', 'Olen kaupalla, odotan tilaustasi'),
+            tr(context, 'Running 5 min late', 'Myöhästyn 5 min'),
+          ];
+    setState(() {
+      _chatOpen = true;
+      _chatUnread = false;
+    });
+    await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
-        void send(String t) {
-          if (t.trim().isEmpty) return;
-          HapticFeedback.selectionClick();
-          CourierSocketService().sendChat(orderId, t.trim(), myName);
-          input.clear();
-          Future.delayed(const Duration(milliseconds: 400), () => ctx.mounted ? set(() {}) : null);
-        }
-
-        final quick = [
-          tr(context, 'I\'m at the door', 'Olen ovella'),
-          tr(context, 'I\'m outside', 'Olen ulkona'),
-          tr(context, 'Running 5 min late', 'Myöhästyn 5 min'),
-        ];
-        return SizedBox(
-          height: MediaQuery.of(ctx).size.height * 0.7,
-          child: Padding(
-            padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
-            child: Column(children: [
-              ListTile(
-                title: Text(tr(context, 'Chat with the customer', 'Chat asiakkaan kanssa'), style: const TextStyle(fontWeight: FontWeight.w700)),
-                subtitle: Text(tr(context, 'Phone numbers are never shared.', 'Puhelinnumeroita ei jaeta.')),
-              ),
-              Expanded(
-                child: _chat.isEmpty
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Text(tr(context, 'No messages yet.', 'Ei vielä viestejä.'), style: const TextStyle(color: AppTheme.textSecondary)),
-                        ),
-                      )
-                    : ListView(
-                        padding: const EdgeInsets.all(16),
-                        children: _chat.map((m) {
-                          final mine = m['role'] == 'COURIER';
-                          return Align(
-                            alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-                            child: Container(
-                              margin: const EdgeInsets.only(bottom: 8),
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                              constraints: const BoxConstraints(maxWidth: 280),
-                              decoration: BoxDecoration(color: mine ? AppTheme.primary : AppTheme.divider, borderRadius: BorderRadius.circular(16)),
-                              child: Text(m['text'] ?? '', style: TextStyle(color: mine ? Colors.white : AppTheme.textPrimary)),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-              ),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Row(children: quick.map((q) => Padding(padding: const EdgeInsets.only(right: 8), child: ActionChip(label: Text(q), onPressed: () => send(q)))).toList()),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                child: Row(children: [
-                  Expanded(child: TextField(controller: input, maxLength: 1000, onSubmitted: send, decoration: InputDecoration(counterText: '', hintText: tr(context, 'Message', 'Viesti')))),
-                  IconButton(
-                    tooltip: tr(context, 'Send message', 'Lähetä viesti'),
-                    iconSize: 28,
-                    icon: const Icon(Icons.send_rounded, color: AppTheme.primary),
-                    onPressed: () => send(input.text),
-                  ),
-                ]),
-              ),
-            ]),
-          ),
-        );
-      }),
+      builder: (ctx) => _ChatSheet(
+        messages: _chat,
+        quickReplies: quick,
+        isMine: _isMine,
+        onSend: (text) => CourierSocketService().sendChat(orderId, text, myName),
+      ),
     );
+    if (mounted) setState(() => _chatOpen = false);
   }
+
+  /// Chat button with a dot while there are unread messages.
+  Widget _chatButton(Map<String, dynamic> o) => _bigButton(
+        outlined: true,
+        onPressed: () => _openChat(o),
+        icon: Badge(
+          isLabelVisible: _chatUnread,
+          smallSize: 10,
+          backgroundColor: AppTheme.primary,
+          child: const Icon(Icons.chat_bubble_outline_rounded),
+        ),
+        label: Text(_chatUnread ? tr(context, 'New message', 'Uusi viesti') : tr(context, 'Chat', 'Chat')),
+      );
 
   void _howJobsWork() {
     showModalBottomSheet(
@@ -942,7 +1122,11 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
             icon: const Icon(Icons.support_agent_rounded),
             onPressed: () => _openHelp(orderId: asInt(active?['id'])),
           ),
-          IconButton(tooltip: tr(context, 'Sign out', 'Kirjaudu ulos'), icon: const Icon(Icons.logout_rounded), onPressed: _signOut),
+          IconButton(
+            tooltip: tr(context, 'Account', 'Tili'),
+            icon: const Icon(Icons.account_circle_outlined),
+            onPressed: _openAccount,
+          ),
         ],
         bottom: TabBar(
           controller: _tabs,
@@ -969,7 +1153,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
         duration: const Duration(milliseconds: 250),
         margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
         decoration: BoxDecoration(
-          color: _online ? AppTheme.success : AppTheme.textPrimary,
+          color: _online ? AppTheme.successDark : AppTheme.textPrimary,
           borderRadius: BorderRadius.circular(30),
         ),
         padding: const EdgeInsets.fromLTRB(8, 8, 12, 8),
@@ -979,7 +1163,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
             height: 40,
             decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
             child: Icon(_online ? Icons.pedal_bike_rounded : Icons.power_settings_new_rounded,
-                size: 22, color: _online ? AppTheme.success : AppTheme.textPrimary),
+                size: 22, color: _online ? AppTheme.successDark : AppTheme.textPrimary),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -996,7 +1180,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
                     ? tr(context, 'Location is shared only while you are online; a notification shows while it is shared.',
                         'Sijaintisi jaetaan vain, kun olet linjoilla; ilmoitus näkyy jakamisen ajan.')
                     : tr(context, 'Your location is not shared while you are offline.', 'Sijaintiasi ei jaeta, kun olet poissa linjoilta.'),
-                style: const TextStyle(color: Colors.white, fontSize: 11.5, height: 1.25),
+                style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w500, height: 1.25),
               ),
             ]),
           ),
@@ -1271,15 +1455,22 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
                     bar(i < current, hidden: i == labels.length - 1),
                   ]),
                   const SizedBox(height: 6),
-                  Text(
-                    labels[i],
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      height: 1.15,
-                      fontWeight: i == current ? FontWeight.w800 : FontWeight.w600,
-                      color: i == current ? AppTheme.textPrimary : AppTheme.textSecondary,
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        labels[i],
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          height: 1.15,
+                          fontWeight: i == current ? FontWeight.w800 : FontWeight.w600,
+                          color: i == current ? AppTheme.textPrimary : AppTheme.textSecondary,
+                        ),
+                      ),
                     ),
                   ),
                 ]),
@@ -1354,8 +1545,23 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     final arrivalSupported = o.containsKey('courierArrivedAt');
     final arrived = stage == 1;
     final storeName = '${s['name'] ?? ''}';
+    final pieces = _pieceCount(o);
     return _card([
       Text(arrived ? tr(context, 'At $storeName', 'Kaupalla: $storeName') : tr(context, 'Go to $storeName', 'Kauppaan: $storeName'), style: AppTheme.display(size: 22)),
+      // At the shop the courier shows this number so the shop hands over the right bag
+      if (arrived || !arrivalSupported)
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(top: 12),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+          decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(tr(context, 'Show the shop this order number', 'Näytä kaupalle tämä tilausnumero'),
+                style: const TextStyle(color: Color(0xFF6A4500), fontWeight: FontWeight.w700, fontSize: 13)),
+            Text('#${o['id']}', style: AppTheme.display(size: 44)),
+            if (pieces != null) Text(_piecesText(pieces), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+          ]),
+        ),
       if (s['address'] != null) ...[
         const SizedBox(height: 4),
         Text('${s['address']}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
@@ -1397,6 +1603,8 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
           ),
         ],
       ]),
+      const SizedBox(height: 8),
+      _chatButton(o),
       const SizedBox(height: 12),
       ..._arrivalSection(o),
       if (arrivalSupported && !arrived) ...[
@@ -1467,14 +1675,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
           ),
         ),
         const SizedBox(width: 8),
-        Expanded(
-          child: _bigButton(
-            outlined: true,
-            onPressed: () => _openChat(o),
-            icon: const Icon(Icons.chat_bubble_outline_rounded),
-            label: Text(tr(context, 'Chat', 'Chat')),
-          ),
-        ),
+        Expanded(child: _chatButton(o)),
       ]),
       const SizedBox(height: 12),
       _bigButton(
@@ -1645,18 +1846,12 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
         const SizedBox(height: 12),
         Container(
           decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.divider)),
-          child: Column(children: [
-            ListTile(
-              leading: const Icon(Icons.support_agent_rounded),
-              title: Text(tr(context, 'Help and contact', 'Apua ja yhteydenotto')),
-              trailing: const Icon(Icons.chevron_right_rounded),
-              onTap: () => _openHelp(),
-            ),
-            const Divider(height: 1),
-            const GoogleLinkTile(),
-            const Divider(height: 1),
-            const DeleteAccountTile(),
-          ]),
+          child: ListTile(
+            leading: const Icon(Icons.support_agent_rounded),
+            title: Text(tr(context, 'Help and contact', 'Apua ja yhteydenotto')),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => _openHelp(),
+          ),
         ),
         const SizedBox(height: 16),
         Text(tr(context, 'Recent deliveries', 'Viimeisimmät toimitukset'), style: AppTheme.display(size: 18)),
@@ -1707,5 +1902,147 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
   String _when(dynamic iso) {
     final d = DateTime.tryParse('$iso')?.toLocal();
     return d == null ? '' : '${d.day}.${d.month}. ${d.hour.toString().padLeft(2, '0')}.${d.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+/// The chat sheet: the message list follows [messages] and scrolls to the newest one.
+class _ChatSheet extends StatefulWidget {
+  final ValueNotifier<List<Map<String, dynamic>>> messages;
+  final List<String> quickReplies;
+  final bool Function(Map) isMine;
+  final void Function(String text) onSend;
+
+  const _ChatSheet({required this.messages, required this.quickReplies, required this.isMine, required this.onSend});
+
+  @override
+  State<_ChatSheet> createState() => _ChatSheetState();
+}
+
+class _ChatSheetState extends State<_ChatSheet> {
+  final _input = TextEditingController();
+  final _scroll = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    widget.messages.addListener(_toBottom);
+    _jumpToBottom();
+  }
+
+  @override
+  void dispose() {
+    widget.messages.removeListener(_toBottom);
+    _input.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _toBottom() => WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_scroll.hasClients) return;
+        _scroll.animateTo(_scroll.position.maxScrollExtent, duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+      });
+
+  void _jumpToBottom() => WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
+      });
+
+  void _send(String t) {
+    final text = t.trim();
+    if (text.isEmpty) return;
+    HapticFeedback.selectionClick();
+    widget.onSend(text);
+    _input.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: MediaQuery.of(context).size.height * 0.7,
+      child: Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        child: Column(children: [
+          ListTile(
+            title: Text(tr(context, 'Chat with the customer', 'Chat asiakkaan kanssa'), style: const TextStyle(fontWeight: FontWeight.w700)),
+            subtitle: Text(tr(context, 'Phone numbers are never shared.', 'Puhelinnumeroita ei jaeta.')),
+          ),
+          // Messages are relayed live and not stored, so they can be sent only while connected
+          ListenableBuilder(
+            listenable: CourierSocketService(),
+            builder: (context, _) => CourierSocketService().isConnected
+                ? const SizedBox.shrink()
+                : Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.symmetric(horizontal: 16),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(12)),
+                    child: Text(
+                        tr(context, 'Not connected right now, so messages cannot be sent. Check your internet connection.',
+                            'Ei yhteyttä juuri nyt, joten viestejä ei voi lähettää. Tarkista nettiyhteys.'),
+                        style: const TextStyle(color: Color(0xFF6A4500), fontSize: 13)),
+                  ),
+          ),
+          Expanded(
+            child: ValueListenableBuilder<List<Map<String, dynamic>>>(
+              valueListenable: widget.messages,
+              builder: (context, chat, _) => chat.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Text(tr(context, 'No messages yet.', 'Ei vielä viestejä.'), style: const TextStyle(color: AppTheme.textSecondary)),
+                      ),
+                    )
+                  : ListView.builder(
+                      controller: _scroll,
+                      padding: const EdgeInsets.all(16),
+                      itemCount: chat.length,
+                      itemBuilder: (context, i) {
+                        final m = chat[i];
+                        final mine = widget.isMine(m);
+                        return Align(
+                          alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+                          child: Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            constraints: const BoxConstraints(maxWidth: 280),
+                            decoration: BoxDecoration(color: mine ? AppTheme.primary : AppTheme.divider, borderRadius: BorderRadius.circular(16)),
+                            child: Text('${m['text'] ?? ''}', style: TextStyle(color: mine ? Colors.white : AppTheme.textPrimary)),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              children: widget.quickReplies
+                  .map((q) => Padding(padding: const EdgeInsets.only(right: 8), child: ActionChip(label: Text(q), onPressed: () => _send(q))))
+                  .toList(),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+            child: Row(children: [
+              Expanded(
+                child: TextField(
+                  controller: _input,
+                  maxLength: 1000,
+                  onSubmitted: _send,
+                  textInputAction: TextInputAction.send,
+                  decoration: InputDecoration(counterText: '', hintText: tr(context, 'Message', 'Viesti')),
+                ),
+              ),
+              IconButton(
+                tooltip: tr(context, 'Send message', 'Lähetä viesti'),
+                iconSize: 28,
+                icon: const Icon(Icons.send_rounded, color: AppTheme.primary),
+                onPressed: () => _send(_input.text),
+              ),
+            ]),
+          ),
+        ]),
+      ),
+    );
   }
 }

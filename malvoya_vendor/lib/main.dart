@@ -8,8 +8,7 @@ import 'core/font_licenses.dart';
 import 'core/app_gate.dart';
 import 'core/connectivity.dart';
 import 'screens/login.dart';
-import 'screens/vendor_dashboard.dart';
-import 'screens/pending_approval.dart';
+import 'screens/vendor_home.dart';
 import 'auth_service.dart';
 import 'l10n.dart';
 import 'locale_provider.dart';
@@ -25,6 +24,19 @@ void main() async {
   runApp(const MalvoyaVendorApp());
 }
 
+final _navigatorKey = GlobalKey<NavigatorState>();
+
+/// Signing in, out or deleting the account switches the home screen; screens pushed on top of the
+/// old home (e.g. registration, a settings page) are closed so they never cover the new one.
+void _closeStackOnAuthChange(AuthService auth) {
+  bool? signedIn;
+  auth.addListener(() {
+    final now = auth.isAuthenticated;
+    if (signedIn != null && signedIn != now) _navigatorKey.currentState?.popUntil((r) => r.isFirst);
+    signedIn = now;
+  });
+}
+
 class MalvoyaVendorApp extends StatelessWidget {
   const MalvoyaVendorApp({super.key});
   @override
@@ -33,6 +45,7 @@ class MalvoyaVendorApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) {
           final auth = AuthService();
+          _closeStackOnAuthChange(auth);
           // New orders and payouts arrive as notifications even when the app is closed
           PushService.instance.attach(auth);
           return auth;
@@ -42,6 +55,7 @@ class MalvoyaVendorApp extends StatelessWidget {
       child: Consumer<LocaleProvider>(
         builder: (context, localeProvider, child) => MaterialApp(
           title: 'Malvoya Store',
+          navigatorKey: _navigatorKey,
           debugShowCheckedModeBanner: false,
           theme: AppTheme.lightTheme,
           locale: localeProvider.locale,
@@ -57,11 +71,8 @@ class MalvoyaVendorApp extends StatelessWidget {
           home: Consumer<AuthService>(
             builder: (context, auth, child) {
               if (!auth.isAuthenticated) return const LoginScreen();
-              if (auth.currentUser?.role == 'VENDOR' && !auth.isPendingApproval) {
-                return const VendorDashboard();
-              }
-              // Any logged-in user can sign agreement and onboard as vendor
-              return const PendingApprovalScreen();
+              // Welcome and store setup until the store exists, then the dashboard
+              return const VendorHome();
             },
           ),
         ),

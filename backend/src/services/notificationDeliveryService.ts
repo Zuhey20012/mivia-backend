@@ -140,6 +140,8 @@ export interface OrderConfirmationData {
   promoCode?: string | null;
   totalCents: number;
   deliveryAddress?: string | null;
+  /** Scheduled delivery window, e.g. { en: "Tonight 17:00–19:00", fi: "Tänä iltana 17.00–19.00" } */
+  deliveryWindow?: { en: string; fi: string } | null;
 }
 
 /**
@@ -163,6 +165,7 @@ ${data.discountCents ? `<tr><td style="padding:6px 0">Alennus / Discount${data.p
 ${data.tipCents ? `<tr><td style="padding:6px 0">Tippi kuriirille / Courier tip</td><td style="padding:6px 0;text-align:right">${formatCents(data.tipCents)}</td></tr>` : ""}
 <tr><td style="padding:10px 0;font-weight:700">Yhteensä / Total (sis. ALV / incl. VAT)</td><td style="padding:10px 0;text-align:right;font-weight:700">${formatCents(data.totalCents)}</td></tr></table>
 ${data.deliveryAddress ? `<p style="margin:16px 0 0;color:#6E6E73;font-size:14px">Toimitusosoite / Delivery address: ${escapeHtml(data.deliveryAddress)}</p>` : ""}
+${data.deliveryWindow ? `<p style="margin:8px 0 0;color:#6E6E73;font-size:14px">Toimitusaika / Delivery time: ${escapeHtml(data.deliveryWindow.fi)} / ${escapeHtml(data.deliveryWindow.en)}</p>` : ""}
 <p style="margin:20px 0 0;color:#6E6E73;font-size:13px;line-height:1.5">Sinulla on 14 päivän peruuttamisoikeus tuotteen vastaanottamisesta. You have a 14-day right of withdrawal from the day you receive the item.</p>`
   );
   const text = `Order #${data.orderId} from ${data.storeName}. Total ${formatCents(data.totalCents)} incl. VAT.`;

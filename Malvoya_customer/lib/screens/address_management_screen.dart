@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/theme.dart';
+import '../core/delivery_location.dart';
+import '../core/strings.dart';
 import '../l10n.dart';
 import 'map_address_picker.dart';
 
@@ -27,7 +29,7 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
     setState(() => _loading = true);
     try {
       final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString('malvoya_addresses');
+      final raw = prefs.getString(DeliveryLocation.savedAddressesKey);
       if (raw != null) {
         final List decoded = jsonDecode(raw);
         _addresses = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
@@ -42,7 +44,25 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
 
   Future<void> _persistAddresses() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('malvoya_addresses', jsonEncode(_addresses));
+    await prefs.setString(DeliveryLocation.savedAddressesKey, jsonEncode(_addresses));
+  }
+
+  /// Whether this saved address is the one deliveries currently go to.
+  bool _isActive(Map<String, dynamic> addr) {
+    final active = DeliveryLocation.instance.address?.trim();
+    return active != null && active.isNotEmpty && active == '${addr['subtitle'] ?? ''}'.trim();
+  }
+
+  /// Delivers to this address from now on (home, store list, checkout).
+  Future<void> _useAddress(Map<String, dynamic> addr) async {
+    HapticFeedback.selectionClick();
+    await DeliveryLocation.instance.use(addr);
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(tr(context, 'Delivering to ${addr['subtitle'] ?? ''}', 'Toimitus osoitteeseen ${addr['subtitle'] ?? ''}')),
+      behavior: SnackBarBehavior.floating,
+    ));
   }
 
   void _openAddressForm({Map<String, dynamic>? existingAddress, int? editIndex}) {
@@ -54,6 +74,9 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
     final cityCtrl = TextEditingController(text: existingAddress?['city'] ?? 'Helsinki');
     final buzzerCtrl = TextEditingController(text: existingAddress?['buzzer'] ?? '');
     String labelType = existingAddress?['labelType'] ?? 'Home';
+    // Coordinates when the address was filled in from the map (exact fee and drop-off point)
+    double? pinLat = (existingAddress?['lat'] as num?)?.toDouble();
+    double? pinLng = (existingAddress?['lng'] as num?)?.toDouble();
 
     showModalBottomSheet(
       showDragHandle: false,
@@ -123,6 +146,8 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
                           streetCtrl.text = result.street.isNotEmpty ? (result.houseNumber.isNotEmpty ? '${result.street} ${result.houseNumber}' : result.street) : '';
                           cityCtrl.text = result.city;
                           postalCtrl.text = result.postalCode;
+                          pinLat = result.latitude;
+                          pinLng = result.longitude;
                         });
                       }
                     },
@@ -314,8 +339,11 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
                         'city': cityCtrl.text.trim(),
                         'buzzer': buzzerCtrl.text.trim(),
                         'subtitle': fullText,
+                        if (pinLat != null && pinLng != null) ...{'lat': pinLat, 'lng': pinLng},
                         'isDefault': existingAddress?['isDefault'] ?? (_addresses.isEmpty),
                       };
+                      // Editing the address in use updates what deliveries go to
+                      final wasActive = existingAddress != null && _isActive(existingAddress);
 
                       setState(() {
                         if (editIndex != null) {
@@ -325,6 +353,7 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
                         }
                       });
                       await _persistAddresses();
+                      if (wasActive || _addresses.length == 1) await DeliveryLocation.instance.use(updated);
                       if (ctx.mounted) Navigator.pop(ctx);
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -422,6 +451,7 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
                   itemBuilder: (ctx, index) {
                     final addr = _addresses[index];
                     final isDefault = addr['isDefault'] == true;
+                    final inUse = _isActive(addr);
                     final label = addr['labelType'] ?? 'Home';
                     IconData labelIcon = Icons.home_rounded;
                     if (label == 'Work') labelIcon = Icons.business_rounded;
@@ -438,6 +468,7 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
                         ],
                       ),
                       child: ListTile(
+                        onTap: () => _useAddress(addr),
                         contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
                         leading: Container(
                           width: 44,
@@ -448,9 +479,12 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
                           ),
                           child: Icon(labelIcon, color: AppTheme.primary, size: 22),
                         ),
-                        title: Row(
+                        title: Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: 0,
+                          runSpacing: 4,
                           children: [
-                            Text(addr['title'] ?? 'Address', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: textPrimary)),
+                            Text('${addr['title'] ?? tr(context, 'Address', 'Osoite')}', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: textPrimary)),
                             if (isDefault) ...[
                               const SizedBox(width: 8),
                               Container(
@@ -460,6 +494,14 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: Text(l10n.translate('defaultAddress').toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.w900)),
+                              ),
+                            ],
+                            if (inUse) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(8)),
+                                child: Text(tr(context, 'IN USE', 'KÄYTÖSSÄ'), style: const TextStyle(color: AppTheme.ink, fontSize: 8, fontWeight: FontWeight.w900)),
                               ),
                             ],
                           ],
@@ -489,7 +531,10 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
                                 }
                                 addr['isDefault'] = true;
                               });
+                              // Saved on this phone; the default is used whenever the app starts
                               await _persistAddresses();
+                              await DeliveryLocation.instance.use(addr);
+                              if (!context.mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(content: Text('${addr['title']}: ${l10n.translate('defaultPaymentSet')}')),
                               );
@@ -498,6 +543,7 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
                                 _addresses.removeAt(index);
                               });
                               await _persistAddresses();
+                              if (!context.mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(content: Text(l10n.translate('addressRemoved'))),
                               );

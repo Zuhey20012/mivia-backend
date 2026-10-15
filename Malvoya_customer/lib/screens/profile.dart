@@ -13,6 +13,7 @@ import 'privacy_gdpr_screen.dart';
 import 'orders.dart';
 import 'favorites_screen.dart';
 import 'invite_screen.dart';
+import '../core/sign_in.dart';
 import '../core/strings.dart';
 import '../locale_provider.dart';
 import '../l10n.dart';
@@ -478,6 +479,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
 
               const SizedBox(height: 14),
+
+              // Guests: an account is needed to pay, follow orders and save favourites
+              if (!auth.isAuthenticated)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                  child: SignInCard(
+                    title: tr(context, 'Sign in or create an account', 'Kirjaudu tai luo tili'),
+                    message: tr(context, 'You need an account to pay, follow your orders and save favourites. Your bag stays as it is.',
+                        'Tarvitset tilin maksamiseen, tilausten seuraamiseen ja suosikkien tallentamiseen. Ostoskassisi säilyy ennallaan.'),
+                  ),
+                ),
 
               // Quick-Access Action Grid (4 Refined Cards: Orders, Returns/Swap, Addresses, Language)
               // Google Pay completely removed per brand guidelines

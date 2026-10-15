@@ -4,6 +4,8 @@ import { prisma } from "../../lib/prisma";
 import { AuthRequest } from "../../middleware/auth";
 import { revokeAllSessions } from "../auth/session";
 import { notifyLaunchAlertsNear } from "../me/launchAlerts";
+import { platformRevenue } from "./revenue";
+import { taxInfoComplete, taxRowSelect } from "../sellers/taxInfo";
 
 function idParam(req: Request) {
   const id = Number(req.params.id);
@@ -12,24 +14,6 @@ function idParam(req: Request) {
 
 // ─── Overview Stats ────────────────────────────────────────────────────────────
 
-type Sums = {
-  commissionCents: number | null; serviceFeeCents: number | null; smallOrderFeeCents: number | null; discountCents: number | null;
-  deliveryFeeCents: number | null; courierFeeCents: number | null; tipCents: number | null;
-};
-
-/** What Malvoya keeps: commission + fees + the part of the delivery fee not paid to couriers − promo discounts. */
-function platformRevenue(sum: Sums) {
-  const commissionCents = sum.commissionCents ?? 0;
-  const serviceFeeCents = sum.serviceFeeCents ?? 0;
-  const smallOrderFeeCents = sum.smallOrderFeeCents ?? 0;
-  const discountCents = sum.discountCents ?? 0;
-  // courierFeeCents includes tips, which are not Malvoya's money
-  const deliveryMarginCents = (sum.deliveryFeeCents ?? 0) - ((sum.courierFeeCents ?? 0) - (sum.tipCents ?? 0));
-  return {
-    commissionCents, serviceFeeCents, smallOrderFeeCents, deliveryMarginCents, discountCents,
-    netPlatformRevenueCents: commissionCents + serviceFeeCents + smallOrderFeeCents + deliveryMarginCents - discountCents,
-  };
-}
 export async function getStats(_req: Request, res: Response) {
   const [customers, stores, couriers, orders, revenue, earned, pendingVendors, pendingCouriers, activeOrders, liveDrops, openReports, failedPayouts, waitlist] = await Promise.all([
     prisma.user.count({ where: { role: "CUSTOMER", isActive: true } }),
@@ -109,11 +93,13 @@ export async function getVendors(req: Request, res: Response) {
     include: {
       owner: { select: { name: true, email: true } },
       _count: { select: { products: true, orders: true } },
+      taxInfo: { select: taxRowSelect },
     },
     orderBy: { createdAt: "desc" },
     take: 500,
   });
-  res.json({ ok: true, stores });
+  // DAC7: whether each store has given its tax data; the data itself is only in the DAC7 report
+  res.json({ ok: true, stores: stores.map(({ taxInfo, ...s }) => ({ ...s, taxInfoComplete: taxInfoComplete(s, taxInfo) })) });
 }
 
 export async function approveVendor(req: Request, res: Response) {
@@ -185,6 +171,8 @@ export async function rejectVendor(req: Request, res: Response) {
     return res.json({ ok: true, message: "Store suspended (it has order history, so it is kept)" });
   }
   await prisma.$transaction([
+    // No orders means nothing to report under DAC7, so its tax data can go with it
+    prisma.storeTaxInfo.deleteMany({ where: { storeId: id } }),
     prisma.productVariant.deleteMany({ where: { product: { storeId: id } } }),
     prisma.product.deleteMany({ where: { storeId: id } }),
     prisma.store.delete({ where: { id } }),

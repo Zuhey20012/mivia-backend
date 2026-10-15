@@ -59,7 +59,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     final res = next ? await api.put('/me/favorites/${widget.productId}') : await api.delete('/me/favorites/${widget.productId}');
     if (!res.ok && mounted) {
       setState(() => _favorite = !next);
-      _snack(res.error!);
+      _snack(res.errorText(context)!);
     }
   }
 
@@ -183,7 +183,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         Text(p['description'], style: TextStyle(fontSize: 15, height: 1.5, color: text)),
       ],
       const SizedBox(height: 18),
-      _row(Icons.straighten_rounded, tr(context, 'Size guide', 'Kokotaulukko'), () => _showSizeGuide()),
+      // The body-measurement chart is for clothes; shoes, bags, jewellery, beauty and home items skip it
+      if (_isClothing(p)) _row(Icons.straighten_rounded, tr(context, 'Size guide', 'Kokotaulukko'), () => _showSizeGuide()),
       if (store != null) ...[
         const SizedBox(height: 14),
         InkWell(
@@ -338,6 +339,17 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     );
   }
 
+  /// Stores type the category freely ("Dress", "Lipstick"), so anything clearly not worn as
+  /// clothing is recognised by its words, in English and Finnish.
+  static final _notClothing = RegExp(
+    r'shoe|sneaker|\bboots?\b|sandal|kenk|saapa|tennari|\bbags?\b|handbag|laukku|reppu|jewel|koru|sormus|earring|necklace|bracelet|'
+    r'\bwatch|kello|beauty|kauneus|lipstick|huulipuna|make-?up|meikki|cosmetic|kosmetiikka|perfume|hajuvesi|skincare|'
+    r'\bhome\b|koti|sisustus|decor|candle|kynttil|sunglass|aurinkolasi|wallet|lompakko',
+    caseSensitive: false,
+  );
+
+  bool _isClothing(Map<String, dynamic> p) => !_notClothing.hasMatch('${p['category'] ?? ''}');
+
   Widget _buyBar(Map<String, dynamic> p) {
     final inStock = p['inStock'] != false;
     return Container(
@@ -356,7 +368,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               onPressed: inStock
                   ? () async {
                       final added = await showAddToBagSheet(context, p);
-                      if (added && mounted) _snack(tr(context, 'Added to your bag', 'Lisätty kassiin'));
+                      if (added && context.mounted) showAddedToBag(context);
                     }
                   : null,
               icon: const Icon(Icons.shopping_bag_outlined),

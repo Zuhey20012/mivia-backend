@@ -68,6 +68,7 @@ class _LoginScreenState extends State<LoginScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
+      showDragHandle: false,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => Container(
           padding: EdgeInsets.only(
@@ -183,6 +184,7 @@ class _LoginScreenState extends State<LoginScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      showDragHandle: false, // the sheet draws its own handle
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -205,7 +207,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  const Text('Select Language / Valitse kieli', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  Text(tr(context, 'Choose language', 'Valitse kieli'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 12),
                   const Divider(height: 1),
                   Expanded(
@@ -296,7 +298,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 16),
                     const Text('Malvoya Store', style: TextStyle(fontSize: 30, fontWeight: FontWeight.w700, color: AppTheme.textPrimary, letterSpacing: -0.5)),
                     const SizedBox(height: 4),
-                    Text('Myy paikallisesti / Sell locally', style: TextStyle(fontSize: 14, color: Colors.grey.shade500, fontWeight: FontWeight.w500)),
+                    Text(tr(context, 'Sell locally', 'Myy paikallisesti'), style: const TextStyle(fontSize: 14, color: AppTheme.textSecondary, fontWeight: FontWeight.w500)),
                   ],
                 ),
               ),
@@ -380,7 +382,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   Expanded(child: Divider(color: Colors.grey.shade300)),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(tr(context, 'or', 'tai'), style: TextStyle(color: Colors.grey.shade500, fontSize: 13, fontWeight: FontWeight.w500)),
+                    child: Text(tr(context, 'or', 'tai'), style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.w500)),
                   ),
                   Expanded(child: Divider(color: Colors.grey.shade300)),
                 ],

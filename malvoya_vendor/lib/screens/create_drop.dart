@@ -28,6 +28,11 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
   double? _progress;
   String? _error;
   bool _rightsConfirmed = false;
+  /// Drops of stores Malvoya has not approved yet are saved but not shown in the feed.
+  bool _storeApproved = true;
+
+  /// The server accepts drop videos up to 90 seconds (drops.service.ts MAX_VIDEO_SECONDS).
+  static const _maxVideoSeconds = 90;
 
   ApiClient get _api => ApiClient(Provider.of<AuthService>(context, listen: false));
 
@@ -48,6 +53,7 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
     final res = await _api.get('/stores/my');
     if (!mounted || !res.ok) return;
     setState(() {
+      _storeApproved = res.data['store']?['isVerified'] == true;
       _products = ((res.data['store']?['products'] as List?) ?? [])
           .map((p) => Map<String, dynamic>.from(p))
           .where((p) => p['isAvailable'] != false && p['canBeSold'] != false)
@@ -59,7 +65,7 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
   Future<void> _pick(bool video, ImageSource source) async {
     final picker = ImagePicker();
     final picked = video
-        ? await picker.pickVideo(source: source, maxDuration: const Duration(seconds: 60), preferredCameraDevice: CameraDevice.rear)
+        ? await picker.pickVideo(source: source, maxDuration: const Duration(seconds: _maxVideoSeconds), preferredCameraDevice: CameraDevice.rear)
         : await picker.pickImage(source: source, maxWidth: 1440, maxHeight: 1800, imageQuality: 88);
     if (picked == null || !mounted) return;
     _preview?.dispose();
@@ -73,7 +79,7 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
     if (video) {
       final c = VideoPlayerController.file(file);
       await c.initialize();
-      if (c.value.duration > const Duration(seconds: 90)) {
+      if (c.value.duration > const Duration(seconds: _maxVideoSeconds)) {
         c.dispose();
         setState(() {
           _file = null;
@@ -112,10 +118,12 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
         'upload': media.toProof(),
       });
       if (!mounted) return;
-      if (!res.ok) throw UploadException(res.error!);
+      if (!res.ok) throw UploadException(res.errorMessage);
       final live = res.data['drop']?['status'] == 'READY';
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(live
+        content: Text(!_storeApproved
+            ? tr(context, 'Saved — it goes live when your store is approved.', 'Tallennettu — julkaisu näkyy, kun kauppasi on hyväksytty.')
+            : live
             ? tr(context, 'Your drop is live!', 'Julkaisusi on julki!')
             : tr(context, 'Posted! The video is being prepared. It usually goes live within a few minutes; you can see its status under Drops.', 'Julkaistu! Videota valmistellaan. Se näkyy yleensä muutaman minuutin kuluessa; näet tilan Julkaisut-välilehdellä.')),
       ));
@@ -218,6 +226,15 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
               style: const TextStyle(fontSize: 13, height: 1.35),
             ),
           ),
+          if (!_storeApproved)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                tr(context, 'Your store is in review. Drops you save now go live when Malvoya approves the store.',
+                    'Kauppasi on tarkistuksessa. Nyt tallentamasi julkaisut näkyvät, kun Malvoya hyväksyy kaupan.'),
+                style: const TextStyle(fontSize: 12.5, color: Color(0xFF6A4500)),
+              ),
+            ),
           if (_error != null)
             Padding(padding: const EdgeInsets.only(top: 12), child: Text(_error!, style: const TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w600))),
           const SizedBox(height: 20),
@@ -231,7 +248,7 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
               child: FilledButton.icon(
                 onPressed: _file != null && _productId != null && _rightsConfirmed ? _post : null,
                 icon: const Icon(Icons.send_rounded),
-                label: Text(tr(context, 'Post drop', 'Julkaise')),
+                label: Text(_storeApproved ? tr(context, 'Post drop', 'Julkaise') : tr(context, 'Save drop', 'Tallenna julkaisu')),
               ),
             ),
         ],
@@ -245,7 +262,7 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
           children: [
             const Icon(Icons.videocam_outlined, color: Colors.white70, size: 48),
             const SizedBox(height: 16),
-            _choice(Icons.fiber_manual_record_rounded, tr(context, 'Record a video (max 60 s)', 'Kuvaa video (max 60 s)'), () => _pick(true, ImageSource.camera)),
+            _choice(Icons.fiber_manual_record_rounded, tr(context, 'Record a video (max $_maxVideoSeconds s)', 'Kuvaa video (max $_maxVideoSeconds s)'), () => _pick(true, ImageSource.camera)),
             _choice(Icons.video_library_outlined, tr(context, 'Choose a video', 'Valitse video'), () => _pick(true, ImageSource.gallery)),
             _choice(Icons.photo_outlined, tr(context, 'Use a photo instead', 'Käytä kuvaa'), () => _pick(false, ImageSource.gallery)),
           ],

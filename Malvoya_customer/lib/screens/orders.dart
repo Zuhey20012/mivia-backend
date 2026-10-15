@@ -8,6 +8,7 @@ import '../config/theme.dart';
 import '../core/api_client.dart';
 import '../core/network_status.dart';
 import '../core/reorder.dart';
+import '../core/sign_in.dart';
 import '../core/strings.dart';
 import '../services/socket_service.dart';
 import '../widgets/skeleton.dart';
@@ -33,6 +34,9 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
   /// Orders whose room this screen joined, so live status events reach the list.
   final Set<int> _tracked = {};
 
+  /// The account the list was loaded for (the tab stays alive, so it reloads after signing in).
+  int? _loadedFor;
+
   static const _active = ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED'];
 
   @override
@@ -43,6 +47,7 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
     final socket = CustomerSocketService();
     socket.addOrderStatusListener(_onOrderStatus);
     socket.addReconnectListener(_reloadQuietly);
+    _loadedFor = Provider.of<AuthService>(context, listen: false).currentUser?.id;
     _load();
   }
 
@@ -77,6 +82,10 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
 
   void _reloadQuietly() {
     if (mounted) _load(quiet: true);
+  }
+
+  void _reloadAfterSignIn() {
+    if (mounted) _load();
   }
 
   /// Joins the live room of every order that can still change, and leaves the others.
@@ -138,6 +147,12 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
   @override
   Widget build(BuildContext context) {
     final auth = Provider.of<AuthService>(context);
+    final uid = auth.currentUser?.id;
+    if (uid != _loadedFor) {
+      _loadedFor = uid;
+      _orders = [];
+      if (uid != null) WidgetsBinding.instance.addPostFrameCallback((_) => _reloadAfterSignIn());
+    }
     final active = _orders.where((o) => _active.contains(o['status']) && o['paymentStatus'] == 'SUCCEEDED').toList();
     final past = _orders.where((o) => !active.contains(o)).toList();
 
@@ -158,7 +173,12 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
         ],
       ),
       body: !auth.isAuthenticated
-          ? StateMessage(icon: Icons.receipt_long_outlined, message: tr(context, 'Sign in to see your orders.', 'Kirjaudu sisään nähdäksesi tilauksesi.'))
+          ? StateMessage(
+              icon: Icons.receipt_long_outlined,
+              message: tr(context, 'Sign in to see your orders.', 'Kirjaudu sisään nähdäksesi tilauksesi.'),
+              actionLabel: tr(context, 'Sign in / Create account', 'Kirjaudu / Luo tili'),
+              onRetry: () => openSignIn(context),
+            )
           : _loading
               ? const SkeletonCardList()
               : RefreshIndicator(
@@ -266,6 +286,15 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
                     '${created != null ? ' · ${created.day}.${created.month}.' : ''}',
                     style: TextStyle(fontSize: 13, color: AppTheme.secondaryText(context)),
                   ),
+                  // Scheduled delivery: the window it was booked for, while it is still to come
+                  if (_active.contains(o['status']) && scheduledWindow(context, o['scheduledStart'], o['scheduledEnd']) != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        '${tr(context, 'Delivery', 'Toimitus')}: ${scheduledWindow(context, o['scheduledStart'], o['scheduledEnd'])}',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.primaryText(context)),
+                      ),
+                    ),
                   const SizedBox(height: 6),
                   Row(children: [
                     Container(
@@ -289,14 +318,21 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
                     ],
                     const Spacer(),
                     if (o['status'] == 'DELIVERED')
-                      TextButton.icon(
-                        style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8)),
-                        onPressed: () {
-                          HapticFeedback.selectionClick();
-                          reorder(context, Map<String, dynamic>.from(o));
-                        },
-                        icon: const Icon(Icons.replay_rounded, size: 18),
-                        label: Text(tr(context, 'Again', 'Uudelleen')),
+                      ValueListenableBuilder<int?>(
+                        valueListenable: reorderBusy,
+                        builder: (_, busy, __) => TextButton.icon(
+                          style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
+                          onPressed: busy != null
+                              ? null
+                              : () {
+                                  HapticFeedback.selectionClick();
+                                  reorder(context, Map<String, dynamic>.from(o));
+                                },
+                          icon: busy == asInt(o['id'])
+                              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Icon(Icons.replay_rounded, size: 18),
+                          label: Text(tr(context, 'Again', 'Uudelleen')),
+                        ),
                       ),
                   ]),
                 ],

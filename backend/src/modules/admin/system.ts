@@ -10,6 +10,9 @@ import { approachPayFor, calcCourierPay, payRuleSummary, routeKm, waitPayFor } f
 import { appConfigSummary } from "../appConfig/appConfig.routes";
 import { referralSummary } from "../referrals/referrals.service";
 import { ordersPayingOutMoreThanCharged } from "../payouts/payouts.service";
+import { encryptionStatus } from "../../lib/fieldCrypto";
+import { taxInfoComplete, taxRowSelect } from "../sellers/taxInfo";
+import { availableSlots } from "../../utils/deliverySlots";
 
 const startedAt = new Date();
 
@@ -57,6 +60,8 @@ export function integrationStatus() {
     pushNotifications: { configured: pushConfigured() },
     photosAndVideos: { configured: mediaConfigured() },
     googleSignIn: { configured: !!env.googleClientId },
+    // DATA_ENCRYPTION_KEY: needed to save sellers' tax IDs (DAC7); "invalid" = set but not 32 bytes of base64
+    dataEncryption: { configured: encryptionStatus() === "ok", status: encryptionStatus() },
   };
 }
 
@@ -70,7 +75,7 @@ export async function getSystemStatus(_req: Request, res: Response) {
     const [
       liveStores, pendingStores, approvedCouriers, onlineCouriers, pendingCouriers, waitlist,
       waitingForStore, waitingForCourier, refundProblems, failedPayouts, openSupport, openReports, jobs,
-      waitingForPickup, referrals, overPaid,
+      waitingForPickup, referrals, overPaid, taxStores, scheduledUpcoming,
     ] = await Promise.all([
       prisma.store.findMany({ where: { isVerified: true }, select: { acceptingOrders: true, openingHours: true } }),
       prisma.store.count({ where: { isVerified: false } }),
@@ -79,7 +84,7 @@ export async function getSystemStatus(_req: Request, res: Response) {
       prisma.courier.count({ where: { isApproved: false, userId: { not: null } } }),
       prisma.launchAlert.count({ where: { notifiedAt: null } }),
       prisma.order.count({ where: { status: "PENDING", paymentStatus: "SUCCEEDED" } }),
-      prisma.order.count({ where: { status: { in: ["CONFIRMED", "PROCESSING"] }, paymentStatus: "SUCCEEDED", courierId: null, fulfilment: "DELIVERY" } }),
+      prisma.order.count({ where: { status: { in: ["CONFIRMED", "PROCESSING"] }, paymentStatus: "SUCCEEDED", courierId: null, fulfilment: "DELIVERY", OR: [{ scheduledStart: null }, { dispatchStartedAt: { not: null } }] } }),
       // Cancelled but the money was not given back automatically (refund call failed)
       prisma.order.count({ where: { status: "CANCELLED", paymentStatus: "SUCCEEDED" } }),
       prisma.payout.count({ where: { status: "FAILED" } }),
@@ -89,7 +94,12 @@ export async function getSystemStatus(_req: Request, res: Response) {
       prisma.order.count({ where: { fulfilment: "PICKUP", status: "PROCESSING", paymentStatus: "SUCCEEDED" } }),
       referralSummary(),
       ordersPayingOutMoreThanCharged(),
+      // DAC7: live stores and whether their tax data is complete
+      prisma.store.findMany({ where: { isVerified: true }, select: { sellerType: true, businessId: true, taxInfo: { select: taxRowSelect } }, take: 5000 }),
+      // Scheduled deliveries whose courier search has not started yet
+      prisma.order.count({ where: { status: { in: ["CONFIRMED", "PROCESSING"] }, paymentStatus: "SUCCEEDED", courierId: null, fulfilment: "DELIVERY", dispatchStartedAt: null, scheduledStart: { gt: new Date() } } }),
     ]);
+    const missingTax = taxStores.filter((st) => !taxInfoComplete(st, st.taxInfo)).length;
     const storesOpenNow = liveStores.filter((s) => storeAvailability(s).openNow).length;
     const integrations = integrationStatus();
 
@@ -111,11 +121,14 @@ export async function getSystemStatus(_req: Request, res: Response) {
     if (failedPayouts) attention.push(`${failedPayouts} failed payout(s)`);
     if (openSupport) attention.push(`${openSupport} open support request(s)`);
     if (openReports) attention.push(`${openReports} open content report(s)`);
+    if (missingTax) attention.push(`${missingTax} store(s) missing tax data (DAC7): they are asked for it in the store app; the yearly report to Vero is due by 31 January`);
+    if (integrations.dataEncryption.status === "missing") attention.push("Sellers' tax IDs cannot be saved: add DATA_ENCRYPTION_KEY (32 random bytes, base64, e.g. openssl rand -base64 32) on Render. Keep a copy: without it saved tax IDs cannot be read.");
+    if (integrations.dataEncryption.status === "invalid") attention.push("DATA_ENCRYPTION_KEY is set but is not 32 bytes of base64: tax IDs cannot be saved or read until it is fixed.");
     if (overPaid) attention.push(`${overPaid} delivered order(s) pay the store and courier more than the customer paid; Malvoya's Stripe balance covers the difference`);
 
     res.json({
       ok: true,
-      version: "2.8.0",
+      version: "2.9.0",
       region: "frankfurt",
       startedAt,
       readyForOrders: blockers.length === 0,
@@ -127,10 +140,12 @@ export async function getSystemStatus(_req: Request, res: Response) {
         approvedCouriers, onlineCouriers, pendingCouriers,
         waitlist,
       },
-      ordersInFlight: { waitingForStore, waitingForCourier, waitingForPickup },
+      ordersInFlight: { waitingForStore, waitingForCourier, waitingForPickup, scheduledUpcoming },
       timers: t,
       // Reserve & collect (PICKUP_REMINDER_HOURS / PICKUP_HOLD_HOURS), counted from "ready for pickup"
       pickup: env.pickupTimers,
+      // Scheduled delivery (DELIVERY_SLOTS, SCHEDULED_DELIVERY_DISCOUNT_CENTS), Finnish time; slots open now for an always-open store
+      scheduledDelivery: { ...env.scheduledDelivery, bookableNow: availableSlots({ openingHours: null }).map((x) => ({ date: x.date, start: x.start, end: x.end, label: x.label })) },
       // Invite a friend (REFERRAL_DISCOUNT_CENTS / REFERRAL_REWARD_CENTS; off while the discount is 0)
       referrals,
       // Android App Links (ANDROID_APP_SHA256) published at /.well-known/assetlinks.json

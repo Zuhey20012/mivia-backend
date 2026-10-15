@@ -81,7 +81,8 @@ class ApiClient {
   }
 }
 
-/// The client's own fixed messages in Finnish; server messages are shown as they come.
+/// The client's own fixed messages, and the server's most common ones, in Finnish. Other server
+/// messages are shown as they come.
 const _fiMessages = {
   'The server took too long to answer. Please try again.': 'Palvelin ei vastannut ajoissa. Yritä uudelleen.',
   'Could not reach Malvoya. Check your connection and try again.': 'Malvoyaan ei saatu yhteyttä. Tarkista yhteys ja yritä uudelleen.',
@@ -91,13 +92,85 @@ const _fiMessages = {
   'Too many attempts. Please wait a moment.': 'Liian monta yritystä. Odota hetki.',
   'Something went wrong on our side. Please try again.': 'Jotain meni vikaan meidän päässämme. Yritä uudelleen.',
   'Something went wrong. Please try again.': 'Jotain meni vikaan. Yritä uudelleen.',
+  // Server (backend/src) messages customers meet most often
+  'Invalid request': 'Virheellinen pyyntö.',
+  'Forbidden': 'Sinulla ei ole oikeutta tähän.',
+  'Order not found': 'Tilausta ei löytynyt.',
+  'Product not found': 'Tuotetta ei löytynyt.',
+  'Store not found': 'Kauppaa ei löytynyt.',
+  'Return not found': 'Palautusta ei löytynyt.',
+  'Drop not found': 'Droppia ei löytynyt.',
+  'This drop is not available': 'Tämä droppi ei ole saatavilla.',
+  'Promo code not found': 'Alennuskoodia ei löytynyt.',
+  'Invalid credentials': 'Väärä sähköpostiosoite tai salasana.',
+  'Invalid verification code': 'Koodi on väärä.',
+  'The code has already been used': 'Koodi on jo käytetty.',
+  'The code has expired. Please request a new one.': 'Koodi on vanhentunut. Pyydä uusi koodi.',
+  'Too many incorrect attempts. Please request a new code.': 'Liian monta väärää yritystä. Pyydä uusi koodi.',
+  'Please wait a minute before requesting a new code': 'Odota hetki ennen kuin pyydät uuden koodin.',
+  'We could not send a verification code right now. Please try again later.': 'Vahvistuskoodia ei voitu lähettää juuri nyt. Yritä myöhemmin uudelleen.',
+  'Enter a valid email address or phone number': 'Kirjoita kelvollinen sähköpostiosoite tai puhelinnumero.',
+  'An account with this email or phone already exists. Please sign in.': 'Tällä sähköpostilla tai puhelinnumerolla on jo tili. Kirjaudu sisään.',
+  'This account is disabled': 'Tämä tili on poistettu käytöstä.',
+  'This store is not taking orders right now.': 'Kauppa ei ota juuri nyt vastaan tilauksia.',
+  'This store is not accepting orders': 'Kauppa ei ota juuri nyt vastaan tilauksia.',
+  'This store does not offer pickup': 'Tästä kaupasta ei voi noutaa.',
+  'Enter a delivery address': 'Kirjoita toimitusosoite.',
+  'Tips go to couriers, so a pickup order cannot have a tip': 'Tippi menee kuriirille, joten noutotilaukseen ei voi lisätä tippiä.',
+  'The order changed in the meantime, please refresh': 'Tilaus muuttui sillä välin. Päivitä näkymä.',
+  'This order is already on its way and can no longer be cancelled': 'Tilaus on jo matkalla, eikä sitä voi enää perua.',
+  'The store has already accepted this order. Please contact support or use your 14-day return right after delivery.':
+      'Kauppa on jo hyväksynyt tilauksen. Ota yhteyttä tukeen tai käytä 14 päivän palautusoikeutta toimituksen jälkeen.',
+  'You can return an order once it has been delivered': 'Voit palauttaa tilauksen, kun se on toimitettu.',
+  'You can review an order once it has been delivered': 'Voit arvioida tilauksen, kun se on toimitettu.',
+  'Reviews can be left within 30 days of delivery': 'Arvion voi jättää 30 päivän kuluessa toimituksesta.',
+  'This return has already been refunded': 'Tämä palautus on jo hyvitetty.',
+  'You have orders in progress. Your account can be deleted once they are completed or cancelled.':
+      'Sinulla on keskeneräisiä tilauksia. Tilin voi poistaa, kun ne on toimitettu tai peruttu.',
+  'You are commenting very fast. Please wait a few minutes.': 'Kommentoit hyvin nopeasti. Odota muutama minuutti.',
+  'Write a comment first': 'Kirjoita ensin kommentti.',
+  'This delivery time is not offered. Pick one of the times shown.': 'Tätä toimitusaikaa ei ole tarjolla. Valitse jokin näytetyistä ajoista.',
+  'Deliveries can be scheduled for today or tomorrow.': 'Toimituksen voi ajastaa tälle päivälle tai huomiselle.',
+  'The store is closed at that time. Pick another delivery time.': 'Kauppa on silloin kiinni. Valitse toinen toimitusaika.',
+  'Pickup orders have no delivery time': 'Noutotilauksella ei ole toimitusaikaa.',
 };
 
+/// Server messages with a changing part (a product name, an amount, a time).
+final _fiPatterns = <RegExp, String Function(Match)>{
+  RegExp(r'^Insufficient stock for (.+)$'): (m) => 'Tuotetta ”${m[1]}” ei ole riittävästi varastossa.',
+  RegExp(r'^(.+) is not available for purchase$'): (m) => '”${m[1]}” ei ole enää myynnissä.',
+  RegExp(r'^The minimum order is (.+)$'): (m) => 'Vähimmäistilaus on ${m[1]}.',
+  RegExp(r'^This store is closed right now\.(?: It opens again at (\S+)\.)?$'): (m) =>
+      m[1] == null ? 'Kauppa on nyt suljettu.' : 'Kauppa on nyt suljettu. Se aukeaa taas klo ${m[1]!.replaceAll(':', '.')}.',
+  RegExp(r'^This delivery time is too soon\. Pick a time that starts at least (\d+) minutes from now\.$'): (m) =>
+      'Tämä toimitusaika on liian pian. Valitse aika, joka alkaa aikaisintaan ${m[1]} minuutin päästä.',
+};
+
+/// A message from the server in the app's language: known English messages are translated to
+/// Finnish, and messages the server sends in both languages ("Finnish / English") are split.
+String localizeServerMessage(BuildContext context, String message) {
+  final fi = isFinnish(context);
+  final halves = message.split(' / ');
+  // (both halves are whole sentences, so a product name containing " / " is never split)
+  bool sentence(String t) => RegExp(r'[.!?]$').hasMatch(t.trim());
+  if (halves.length == 2 && sentence(halves[0]) && sentence(halves[1])) {
+    return (fi ? halves[0] : halves[1]).trim();
+  }
+  if (!fi) return message;
+  final exact = _fiMessages[message] ?? _fiMessages[message.trim().replaceAll(RegExp(r'\.$'), '')];
+  if (exact != null) return exact;
+  for (final entry in _fiPatterns.entries) {
+    final m = entry.key.firstMatch(message.trim());
+    if (m != null) return entry.value(m);
+  }
+  return message;
+}
+
 extension ApiResultText on ApiResult {
-  /// [error] in the app's language where the client wrote it.
+  /// [error] in the app's language (the client's own messages and the common server ones).
   String? errorText(BuildContext context) {
     final e = error;
     if (e == null) return null;
-    return isFinnish(context) ? (_fiMessages[e] ?? e) : e;
+    return localizeServerMessage(context, e);
   }
 }

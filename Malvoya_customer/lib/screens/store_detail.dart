@@ -8,6 +8,7 @@ import '../checkout.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
 import '../core/delivery_location.dart';
+import '../core/sign_in.dart';
 import '../core/store_hours.dart';
 import '../core/strings.dart';
 import '../widgets/product_tile.dart';
@@ -34,13 +35,22 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
   bool _loading = true;
   String? _error;
 
+  // "All items" pages through the store's products (24 at a time) as the customer scrolls
+  static const _pageSize = 24;
+  int _productPage = 0;
+  int? _productTotal;
+  bool _loadingMore = false;
+
   int get _id => asInt(widget.store['id'])!;
   bool _followBusy = false;
 
   Future<void> _toggleFollow() async {
     final auth = Provider.of<AuthService>(context, listen: false);
     if (!auth.isAuthenticated) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr(context, 'Sign in to follow stores', 'Kirjaudu sisään seurataksesi kauppoja'))));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(tr(context, 'Sign in to follow stores', 'Kirjaudu sisään seurataksesi kauppoja')),
+        action: SnackBarAction(label: tr(context, 'Sign in', 'Kirjaudu'), onPressed: () => openSignIn(context)),
+      ));
       return;
     }
     HapticFeedback.lightImpact();
@@ -56,7 +66,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
         _store['followerCount'] = res.data['followerCount'];
       }
     });
-    if (!res.ok) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.error!)));
+    if (!res.ok) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.errorText(context)!)));
   }
 
   @override
@@ -73,6 +83,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
       api.get('/stores/$_id', query: DeliveryLocation.instance.query),
       api.get('/stores/$_id/drops', query: {'limit': '12'}),
       api.get('/stores/$_id/reviews'),
+      api.get('/stores/$_id/products', query: {'page': '1', 'limit': '$_pageSize'}),
     ]);
     if (!mounted) return;
     setState(() {
@@ -84,7 +95,17 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
       }
       _error = null;
       _store = Map<String, dynamic>.from(store.data['store']);
-      _products = ((_store['products'] as List?) ?? []).map((p) => Map<String, dynamic>.from(p)).toList();
+      final page = results[3];
+      if (page.ok && page.data['products'] is List) {
+        _products = (page.data['products'] as List).whereType<Map>().map((p) => Map<String, dynamic>.from(p)).toList();
+        _productPage = 1;
+        _productTotal = asInt(page.data['total']);
+      } else {
+        // The store's own first products, if the paged list is not available
+        _products = ((_store['products'] as List?) ?? []).map((p) => Map<String, dynamic>.from(p)).toList();
+        _productPage = 0;
+        _productTotal = null;
+      }
       if (results[1].ok) _drops = ((results[1].data['drops'] as List?) ?? []).map((d) => Map<String, dynamic>.from(d)).toList();
       if (results[2].ok) {
         _reviews = ((results[2].data['reviews'] as List?) ?? []).map((r) => Map<String, dynamic>.from(r)).toList();
@@ -93,15 +114,43 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
     });
   }
 
+  bool get _hasMoreProducts => _productPage > 0 && _productTotal != null && _products.length < _productTotal!;
+
+  /// The next page of "All items".
+  Future<void> _loadMoreProducts() async {
+    if (_loadingMore || !_hasMoreProducts) return;
+    setState(() => _loadingMore = true);
+    final res = await ApiClient(Provider.of<AuthService>(context, listen: false))
+        .get('/stores/$_id/products', query: {'page': '${_productPage + 1}', 'limit': '$_pageSize'});
+    if (!mounted) return;
+    setState(() {
+      _loadingMore = false;
+      if (!res.ok || res.data['products'] is! List) return;
+      final incoming = (res.data['products'] as List).whereType<Map>().map((p) => Map<String, dynamic>.from(p)).toList();
+      final known = _products.map((p) => asInt(p['id'])).toSet();
+      _products.addAll(incoming.where((p) => !known.contains(asInt(p['id']))));
+      _productPage++;
+      _productTotal = asInt(res.data['total']) ?? _productTotal;
+      // An empty page means the list is complete even if the total said otherwise
+      if (incoming.isEmpty) _productTotal = _products.length;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final textPrimary = AppTheme.primaryText(context);
+    final safeBottom = MediaQuery.of(context).viewPadding.bottom;
     return Scaffold(
       body: Stack(
         children: [
           RefreshIndicator(
             onRefresh: _load,
-            child: CustomScrollView(
+            child: NotificationListener<ScrollNotification>(
+              onNotification: (n) {
+                if (n.metrics.axis == Axis.vertical && n.metrics.extentAfter < 600) _loadMoreProducts();
+                return false;
+              },
+              child: CustomScrollView(
               physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
               slivers: [
                 SliverAppBar(
@@ -139,7 +188,12 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
-                      child: Text(tr(context, 'All items', 'Kaikki tuotteet'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textPrimary)),
+                      child: Text(
+                        _productTotal != null && _productTotal! > 0
+                            ? tr(context, 'All items ($_productTotal)', 'Kaikki tuotteet ($_productTotal)')
+                            : tr(context, 'All items', 'Kaikki tuotteet'),
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textPrimary),
+                      ),
                     ),
                   ),
                   if (_loading)
@@ -167,9 +221,9 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                         ]),
                       ),
                     )
-                  else
+                  else ...[
                     SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
+                      padding: EdgeInsets.fromLTRB(16, 0, 16, _hasMoreProducts ? 16 : 120 + safeBottom),
                       sliver: SliverGrid(
                         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 2,
@@ -183,11 +237,25 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                         ),
                       ),
                     ),
+                    if (_hasMoreProducts)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: EdgeInsets.fromLTRB(16, 8, 16, 120 + safeBottom),
+                          child: Center(
+                            child: _loadingMore
+                                ? const SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 2.5))
+                                : TextButton(onPressed: _loadMoreProducts, child: Text(tr(context, 'Show more', 'Näytä lisää'))),
+                          ),
+                        ),
+                      ),
+                  ],
                 ],
               ],
             ),
+            ),
           ),
-          Positioned(bottom: 20, left: 16, right: 16, child: _bagBar()),
+          // Above the phone's gesture/navigation bar
+          Positioned(bottom: 20 + safeBottom, left: 16, right: 16, child: _bagBar()),
         ],
       ),
     );
@@ -326,7 +394,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 20, 16, 10),
-            child: Text(tr(context, 'Drops', 'Julkaisut'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppTheme.primaryText(context))),
+            child: Text(tr(context, 'Drops', 'Dropit'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppTheme.primaryText(context))),
           ),
           SizedBox(
             height: 190,

@@ -2,7 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../auth_service.dart';
 import 'api_client.dart';
 
@@ -39,6 +41,13 @@ class PushService {
   String? _token;
   int? _registeredFor;
   bool _started = false;
+
+  /// Whether this phone shows Malvoya's notifications (null = not known yet). A store that has them off
+  /// misses new orders, so the dashboard shows a red bar while this is false.
+  final ValueNotifier<bool?> notificationsAllowed = ValueNotifier(null);
+
+  /// Opens this app's notification settings (MainActivity.kt); iOS uses the app-settings: link.
+  static const _settingsChannel = MethodChannel('malvoya/settings');
 
   Future<void> attach(AuthService auth) async {
     if (_auth != null) return;
@@ -106,7 +115,11 @@ class PushService {
   Future<void> _register(AuthService auth, int userId) async {
     try {
       final settings = await FirebaseMessaging.instance.requestPermission();
-      if (settings.authorizationStatus == AuthorizationStatus.denied) return;
+      if (settings.authorizationStatus == AuthorizationStatus.denied) {
+        notificationsAllowed.value = false;
+        return;
+      }
+      await refreshPermission(registerIfAllowed: false);
       _token ??= await FirebaseMessaging.instance.getToken();
       if (_token == null) return;
       final res = await ApiClient(auth).post('/me/devices', {
@@ -116,6 +129,48 @@ class PushService {
       if (res.ok) _registeredFor = userId;
     } catch (e) {
       debugPrint('Push registration failed: $e');
+    }
+  }
+
+  /// Checks the permission again, e.g. when the store owner comes back from the phone's settings.
+  /// Registers the push token once notifications are allowed.
+  Future<bool?> refreshPermission({bool registerIfAllowed = true}) async {
+    try {
+      final settings = await FirebaseMessaging.instance.getNotificationSettings();
+      var allowed = settings.authorizationStatus == AuthorizationStatus.authorized ||
+          settings.authorizationStatus == AuthorizationStatus.provisional;
+      if (!kIsWeb && Platform.isAndroid) {
+        // Also catches notifications switched off in the phone's settings on older Android versions
+        final enabled = await _local
+            .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+            ?.areNotificationsEnabled();
+        if (enabled != null) allowed = enabled;
+      }
+      notificationsAllowed.value = allowed;
+      if (allowed && registerIfAllowed) _onAuthChanged();
+      return allowed;
+    } catch (e) {
+      debugPrint('Notification permission check failed: $e');
+      return null;
+    }
+  }
+
+  /// "Turn on": asks for the permission, and when the phone no longer asks (refused before), opens
+  /// the app's notification settings. False when neither was possible.
+  Future<bool> enableNotifications() async {
+    try {
+      await FirebaseMessaging.instance.requestPermission();
+      if (await refreshPermission() == true) return true;
+    } catch (_) {}
+    return openNotificationSettings();
+  }
+
+  Future<bool> openNotificationSettings() async {
+    try {
+      if (Platform.isIOS) return await launchUrl(Uri.parse('app-settings:'));
+      return await _settingsChannel.invokeMethod<bool>('openNotificationSettings') ?? false;
+    } catch (_) {
+      return false;
     }
   }
 

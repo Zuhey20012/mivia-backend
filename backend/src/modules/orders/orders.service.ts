@@ -21,6 +21,7 @@ import { checkPromo, normalizeCode } from "../promos/promos.service";
 import { CheckoutDiscount, checkReferralCode, rewardReferralForOrder } from "../referrals/referrals.service";
 import { RIDE_SPEED_KMH, calcCourierPay, courierPayOf, presentCourierPay, withApproach, withWaiting } from "../../utils/courierPay";
 import { freshPosition } from "../../utils/courierPosition";
+import { Slot, SlotInput, availableSlots, beforeDispatch, checkSlot, scheduledDispatchHorizon, scheduledFee, windowText } from "../../utils/deliverySlots";
 
 const logger = pino({ name: "orders" });
 
@@ -36,7 +37,7 @@ type Db = Prisma.TransactionClient | typeof prisma;
 
 type CheckoutInput = {
   storeId: number; fulfilment?: Fulfilment; deliveryLat?: number; deliveryLng?: number; items: ItemInput[];
-  tipCents?: number; promoCode?: string;
+  tipCents?: number; promoCode?: string; deliverySlot?: SlotInput;
 };
 
 /** A courier counts as "at the shop" within this distance. */
@@ -133,19 +134,23 @@ function priceCheckout(
   input: CheckoutInput,
   subtotalCents: number,
   discount: CheckoutDiscount | null,
+  slot: Slot | null = null,
 ) {
   const promo = discount?.terms ?? null;
   if (input.fulfilment === "PICKUP") {
     const pricing = calcCheckoutPricing({
       subtotalCents, commissionRate: store.commissionRate, deliveryFeeCents: 0, tipCents: 0, promo, courierPayCents: 0,
     });
-    return { pricing, distanceKm: null, courierPay: null };
+    return { pricing, distanceKm: null, courierPay: null, fullFeeCents: 0 };
   }
   const distanceKm = deliveryDistanceKm(store, input.deliveryLat, input.deliveryLng);
-  const deliveryFeeCents = deliveryFeeForDistance(distanceKm);
+  const fullFeeCents = deliveryFeeForDistance(distanceKm);
+  // A scheduled slot may carry a platform discount on the delivery fee (never below 0)
+  const deliveryFeeCents = slot ? scheduledFee(fullFeeCents) : fullFeeCents;
   const tipCents = input.tipCents ?? 0;
-  // Courier pay is computed on its own (per-job formula), not from what the customer pays for delivery
-  const courierPay = calcCourierPay({ straightKm: distanceKm, deliveryFeeCents, tipCents });
+  // Courier pay is computed on its own (per-job formula), not from what the customer pays for delivery; the
+  // scheduled-delivery discount is Malvoya's, so courier pay uses the undiscounted fee (fee_share mode)
+  const courierPay = calcCourierPay({ straightKm: distanceKm, deliveryFeeCents: fullFeeCents, tipCents });
   const pricing = calcCheckoutPricing({
     subtotalCents,
     commissionRate: store.commissionRate,
@@ -154,7 +159,20 @@ function priceCheckout(
     promo,
     courierPayCents: courierPay.totalCents - tipCents,
   });
-  return { pricing, distanceKm, courierPay };
+  return { pricing, distanceKm, courierPay, fullFeeCents };
+}
+
+/** The slot the customer picked, checked against the platform slots, the clock and the store's opening hours. */
+function resolveSlot(store: { openingHours: unknown }, input: CheckoutInput): Slot | null {
+  if (!input.deliverySlot || input.fulfilment === "PICKUP") return null;
+  const res = checkSlot(store, input.deliverySlot);
+  if ("error" in res) throw new OrderError(res.error, res.status);
+  return res.slot;
+}
+
+/** A slot as the apps get it: when, a ready-made label (en/fi) and the delivery fee for it. */
+function presentSlot(s: Slot, feeCents: number) {
+  return { date: s.date, start: s.start, end: s.end, label: s.label, feeCents };
 }
 
 /**
@@ -202,9 +220,11 @@ export async function quoteOrder(userId: number, input: CheckoutInput) {
     promoError = e.message;
   }
 
-  const { pricing } = priceCheckout(store, input, subtotalCents, promo);
+  const slot = resolveSlot(store, input);
+  const { pricing, fullFeeCents } = priceCheckout(store, input, subtotalCents, promo, slot);
   const cfg = env.pricing;
   const availability = storeAvailability(store);
+  const delivery = input.fulfilment !== "PICKUP";
   return {
     subtotalCents: pricing.subtotalCents,
     deliveryFeeCents: pricing.deliveryFeeCents,
@@ -220,6 +240,10 @@ export async function quoteOrder(userId: number, input: CheckoutInput) {
     fulfilment: input.fulfilment ?? "DELIVERY",
     ...(input.fulfilment === "PICKUP" ? { pickup: { storeName: store.name, address: store.address } } : {}),
     store: { openNow: availability.openNow, closedReason: availability.closedReason, opensAt: availability.opensAt },
+    // Scheduled delivery: the slots this store can deliver in (today/tomorrow), each with its delivery fee,
+    // and the one picked (null = as soon as possible). Pickup orders have none.
+    slots: delivery ? availableSlots(store).map((s) => presentSlot(s, scheduledFee(fullFeeCents))) : [],
+    deliverySlot: slot ? presentSlot(slot, pricing.deliveryFeeCents) : null,
   };
 }
 
@@ -229,15 +253,17 @@ export async function createOrder(userId: number, input: CheckoutInput & { deliv
   if (!availability.openNow) throw closedStoreError(availability);
   assertPickupPossible(store, input);
   const pickup = input.fulfilment === "PICKUP";
+  const slot = resolveSlot(store, input);
 
   // Price is always computed server-side from the database.
   const order = await prisma.$transaction(async (tx) => {
     const { subtotalCents, lines } = await priceItems(tx, store.id, input.items, true);
     // A code that cannot be used is refused (409), so the customer never pays a different price than quoted.
     const promo = await promoForCheckout(tx, input.promoCode, userId, subtotalCents);
-    const { pricing, distanceKm, courierPay } = priceCheckout(store, input, subtotalCents, promo);
+    const { pricing, distanceKm, courierPay } = priceCheckout(store, input, subtotalCents, promo, slot);
     if (pricing.totalCents < MIN_CHARGE_CENTS) throw new OrderError(`The minimum order is ${formatCents(MIN_CHARGE_CENTS)}`);
-    const etaMinutes = distanceKm === null ? null : estimateDelivery(distanceKm, store.prepMinutes).etaMinutes;
+    // A scheduled order is promised its window (scheduledStart–scheduledEnd), not a "minutes from now" estimate
+    const etaMinutes = distanceKm === null || slot ? null : estimateDelivery(distanceKm, store.prepMinutes).etaMinutes;
 
     return tx.order.create({
       data: {
@@ -254,6 +280,8 @@ export async function createOrder(userId: number, input: CheckoutInput & { deliv
         promoCodeId: promo?.promoCodeId ?? null,
         referrerId: promo?.referrerId ?? null,
         etaMinutes,
+        scheduledStart: slot?.startAt ?? null,
+        scheduledEnd: slot?.endAt ?? null,
         items: { createMany: { data: lines } },
       },
       include: { items: true, promoCode: { select: { code: true, description: true } } },
@@ -334,11 +362,15 @@ export async function markOrderPaid(orderId: number, paymentIntentId: string, am
     totalCents: order.totalCents,
     deliveryAddress: order.deliveryAddress,
     items: order.items.map((i) => ({ name: i.product.name, quantity: i.quantity, unitCents: i.unitCents })),
+    // Scheduled delivery: the store gets it ready for this window (couriers come shortly before it starts)
+    scheduledStart: order.scheduledStart,
+    scheduledEnd: order.scheduledEnd,
     createdAt: order.createdAt,
   });
   emitOrderStatus(orderId, { status: order.status, paymentStatus: "SUCCEEDED" });
+  const slotWindow = order.scheduledStart && order.scheduledEnd ? windowText(order.scheduledStart, order.scheduledEnd) : null;
   pushToUser(order.store.ownerId, {
-    title: pickup ? `New pickup order #${order.id}` : `New order #${order.id}`,
+    title: pickup ? `New pickup order #${order.id}` : slotWindow ? `New order #${order.id} for ${slotWindow.en.replace(/^T/, "t")}` : `New order #${order.id}`,
     body: `${order.items.reduce((n, i) => n + i.quantity, 0)} item(s) · ${(order.subtotalCents / 100).toFixed(2).replace(".", ",")} € — accept it in Malvoya Store.`,
     data: { type: "order", orderId: String(order.id) },
     channel: "new_orders",
@@ -359,6 +391,7 @@ export async function markOrderPaid(orderId: number, paymentIntentId: string, am
     tipCents: order.tipCents,
     totalCents: order.totalCents,
     deliveryAddress: order.deliveryAddress,
+    deliveryWindow: slotWindow,
   }).catch(() => {});
 }
 
@@ -612,9 +645,18 @@ export async function markArrivedAtStore(orderId: number, userId: number) {
   return { ...updated, courierPay: presentCourierPay(updated) };
 }
 
-const STATUS_PUSH: Partial<Record<OrderStatus, (o: { id: number; etaMinutes: number | null }) => { title: string; body: string }>> = {
-  CONFIRMED: (o) => ({ title: `Order #${o.id} accepted`, body: "The store is getting your order ready." }),
-  PROCESSING: (o) => ({ title: `Order #${o.id} is being packed`, body: "A courier will pick it up soon." }),
+type PushOrder = { id: number; etaMinutes: number | null; scheduledStart?: Date | null; scheduledEnd?: Date | null };
+const windowOf = (o: PushOrder) => (o.scheduledStart && o.scheduledEnd ? windowText(o.scheduledStart, o.scheduledEnd).en : null);
+
+const STATUS_PUSH: Partial<Record<OrderStatus, (o: PushOrder) => { title: string; body: string }>> = {
+  CONFIRMED: (o) => ({
+    title: `Order #${o.id} accepted`,
+    body: windowOf(o) ? `The store will have it ready for your delivery: ${windowOf(o)}.` : "The store is getting your order ready.",
+  }),
+  PROCESSING: (o) => ({
+    title: `Order #${o.id} is being packed`,
+    body: windowOf(o) ? `It is ready for your delivery: ${windowOf(o)}. We tell you when a courier is on the way.` : "A courier will pick it up soon.",
+  }),
   SHIPPED: (o) => ({ title: `Order #${o.id} is on its way`, body: "Follow your courier live in the app." }),
   DELIVERED: (o) => ({ title: `Order #${o.id} delivered`, body: "Enjoy! You can rate the store and return items within 14 days." }),
 };
@@ -626,7 +668,10 @@ const PICKUP_PUSH: Partial<Record<OrderStatus, (o: { id: number; storeName: stri
   DELIVERED: (o) => ({ title: `Order #${o.id} collected`, body: "Enjoy! You can rate the store and return items within 14 days." }),
 };
 
-type StatusOrder = { id: number; storeId: number; userId: number; etaMinutes: number | null; fulfilment: Fulfilment; readyAt?: Date | null };
+type StatusOrder = {
+  id: number; storeId: number; userId: number; etaMinutes: number | null; fulfilment: Fulfilment; readyAt?: Date | null;
+  scheduledStart?: Date | null; scheduledEnd?: Date | null;
+};
 
 function afterStatusChange(order: StatusOrder, email: string, next: OrderStatus) {
   const pickup = order.fulfilment === "PICKUP";
@@ -851,16 +896,23 @@ export async function requireApprovedCourier(userId: number) {
 /** Paid, store-accepted, unassigned orders. Customer address is withheld until the courier accepts. */
 export async function listAvailableOrders(userId: number) {
   const courier = await requireApprovedCourier(userId);
-  const orders = await prisma.order.findMany({
-    where: { courierId: null, fulfilment: "DELIVERY", paymentStatus: "SUCCEEDED", status: { in: ["CONFIRMED", "PROCESSING"] } },
+  const rows = await prisma.order.findMany({
+    where: {
+      courierId: null, fulfilment: "DELIVERY", paymentStatus: "SUCCEEDED", status: { in: ["CONFIRMED", "PROCESSING"] },
+      OR: [{ scheduledStart: null }, { scheduledStart: { lte: scheduledDispatchHorizon() } }],
+    },
     omit: { courierPay: false },
     include: {
-      store: { select: { id: true, name: true, address: true, latitude: true, longitude: true } },
+      store: { select: { id: true, name: true, address: true, latitude: true, longitude: true, prepMinutes: true } },
       items: { select: { quantity: true } },
     },
     orderBy: { createdAt: "asc" },
     take: 30,
   });
+  // Scheduled jobs appear once dispatch for their slot has started
+  const orders = rows
+    .filter((o) => !beforeDispatch(o, o.store.prepMinutes))
+    .map(({ store: { prepMinutes: _prep, ...store }, ...o }) => ({ ...o, store }));
   return orders.map((o) => {
     // Expected pay for this courier before any waiting, explained in fi/en; the ride to the shop is
     // estimated from the courier's last known position and fixed when they accept.
@@ -876,8 +928,11 @@ export async function listAvailableOrders(userId: number) {
       courierPay,
       deliveryAreaLat: o.deliveryLat === null ? null : Math.round(o.deliveryLat * 100) / 100,
       deliveryAreaLng: o.deliveryLng === null ? null : Math.round(o.deliveryLng * 100) / 100,
-      // When the job was first offered (the store accepted it)
-      offeredAt: o.confirmedAt ?? o.lastOfferAt,
+      // When the job was first offered (the store accepted it, or dispatch for its slot started)
+      offeredAt: o.scheduledStart ? o.dispatchStartedAt ?? o.lastOfferAt : o.confirmedAt ?? o.lastOfferAt,
+      // Scheduled delivery: hand it over within this window (null = as soon as possible)
+      scheduledStart: o.scheduledStart,
+      scheduledEnd: o.scheduledEnd,
       createdAt: o.createdAt,
     };
   });
@@ -907,7 +962,13 @@ export async function acceptOrder(orderId: number, userId: number) {
   if (!courier.isActive) throw new OrderError("Go online before accepting deliveries", 409);
   if (courier.currentOrderId) throw new OrderError("Finish your current delivery first", 409);
   // A courier whose fresh position is beyond the maximum ride cannot take the job (and cannot inflate ride pay)
-  const target = await prisma.order.findUnique({ where: { id: orderId }, select: { store: { select: { latitude: true, longitude: true } } } });
+  const target = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { scheduledStart: true, store: { select: { latitude: true, longitude: true, prepMinutes: true } } },
+  });
+  if (target && beforeDispatch(target, target.store.prepMinutes)) {
+    throw new OrderError("This delivery is scheduled for later and is not open to couriers yet", 409);
+  }
   const km = target ? approachStraightKm(courier, target.store) : null;
   if (km !== null && km > env.courierPay.approachMaxKm) {
     throw new OrderError("You are too far from the shop to take this job", 409);
