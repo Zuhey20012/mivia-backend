@@ -114,14 +114,21 @@ class PushService {
   }
 
   /// Android does not show notifications for an app that is open, so show them ourselves.
+  /// A job offer is announced once, whether the push or the live connection brings it first.
   void _showWhileOpen(RemoteMessage m) {
     final n = m.notification;
     if (n == null) return;
-    _local.show(
-      m.messageId.hashCode,
-      n.title,
-      n.body,
-      NotificationDetails(
+    if (m.data['type'] == 'offer') {
+      final id = int.tryParse('${m.data['orderId'] ?? ''}');
+      if (id != null) {
+        alertOffer(orderId: id, title: n.title ?? '', body: n.body ?? '');
+        return;
+      }
+    }
+    _local.show(m.messageId.hashCode, n.title, n.body, _details(), payload: jsonEncode(m.data));
+  }
+
+  NotificationDetails _details({bool onlyAlertOnce = false}) => NotificationDetails(
         android: AndroidNotificationDetails(
           _channel.id,
           _channel.name,
@@ -129,10 +136,33 @@ class PushService {
           importance: Importance.high,
           priority: Priority.high,
           icon: '@mipmap/launcher_icon',
+          onlyAlertOnce: onlyAlertOnce,
         ),
         iOS: const DarwinNotificationDetails(),
-      ),
-      payload: jsonEncode(m.data),
-    );
+      );
+
+  // Offers already announced in this session (order ids)
+  final Set<int> _announcedOffers = {};
+
+  static int _offerNotificationId(int orderId) => 700000 + orderId % 1000000;
+
+  /// A new job offer while the app is open: the phone's own notification sound, once per offer.
+  /// Returns false if this offer was already announced (by the push or the live connection).
+  Future<bool> alertOffer({required int orderId, required String title, required String body}) async {
+    if (!_announcedOffers.add(orderId)) return false;
+    try {
+      await _local.show(_offerNotificationId(orderId), title, body, _details(onlyAlertOnce: true),
+          payload: jsonEncode({'type': 'offer', 'orderId': '$orderId'}));
+    } catch (e) {
+      debugPrint('Offer notification failed: $e');
+    }
+    return true;
+  }
+
+  /// The offer was taken, accepted or withdrawn: remove its notification.
+  void clearOffer(int orderId) {
+    try {
+      _local.cancel(_offerNotificationId(orderId));
+    } catch (_) {}
   }
 }

@@ -12,12 +12,17 @@ import '../core/api_client.dart';
 import '../core/connectivity.dart';
 import '../core/media_upload.dart';
 import '../core/legal_links.dart';
+import '../core/push_service.dart';
 import '../core/strings.dart';
 import '../core/google_link_tile.dart';
 import '../core/delete_account_tile.dart';
 import '../services/courier_telemetry_service.dart';
 import '../services/socket_service.dart';
+import '../widgets/skeletons.dart';
+import 'help_screen.dart';
 import 'payouts_screen.dart';
+
+enum _Load { loading, ready, error }
 
 /// Go online, pick the jobs you want, deliver with navigation and chat, and see what you earn.
 class CourierDashboard extends StatefulWidget {
@@ -27,7 +32,7 @@ class CourierDashboard extends StatefulWidget {
   State<CourierDashboard> createState() => _CourierDashboardState();
 }
 
-class _CourierDashboardState extends State<CourierDashboard> with SingleTickerProviderStateMixin {
+class _CourierDashboardState extends State<CourierDashboard> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final TabController _tabs = TabController(length: 3, vsync: this);
   bool _online = false;
   bool _switching = false;
@@ -35,12 +40,33 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
   List<Map<String, dynamic>> _mine = [];
   Map<String, dynamic>? _earnings;
   final List<Map<String, dynamic>> _chat = [];
-  bool _loading = true;
+
+  // Each tab shows a placeholder until its first answer, and an error with "Try again" if that fails
+  _Load _jobsLoad = _Load.loading;
+  _Load _mineLoad = _Load.loading;
+  _Load _earnLoad = _Load.loading;
+  String? _jobsError;
+  String? _mineError;
+  String? _earnError;
+  int _jobsRequest = 0; // only the newest job-list answer is used
+
   // Pay breakdowns that came with live offers, by order id (used if the job list has none yet)
   final Map<int, Map<String, dynamic>> _offerPay = {};
+  // When a live offer reached this phone, by order id
+  final Map<int, DateTime> _offeredAt = {};
+  // The latest live offer, shown first and highlighted
+  int? _newOfferId;
   // Which pay breakdowns are open ("job-12", "active-12")
   final Set<String> _openPay = {};
+
+  int? _acceptingId;
   bool _arriving = false;
+  bool _pickingUp = false;
+  bool _completing = false;
+
+  // The job list is re-checked every 20 s while online, free and in the foreground (socket fallback)
+  Timer? _poll;
+  bool _foreground = true;
 
   AuthService get _auth => Provider.of<AuthService>(context, listen: false);
   ApiClient get _api => ApiClient(_auth);
@@ -54,16 +80,17 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final socket = CourierSocketService();
-    socket.onDispatchOffer = (offer) {
-      final id = asInt(offer['orderId'] ?? offer['id']);
-      if (id != null && offer['courierPay'] is Map) _offerPay[id] = Map<String, dynamic>.from(offer['courierPay']);
-      HapticFeedback.heavyImpact();
-      _loadJobs();
-    };
+    socket.onDispatchOffer = _onOffer;
     socket.onOrderStatus = (_) => _loadMine();
     socket.onChatMessage = (m) {
       if (mounted && asInt(m['orderId']) == asInt(_active?['id'])) setState(() => _chat.add(m));
+    };
+    PushService.instance.onOpen = (data) {
+      if (!mounted || data['type'] != 'offer') return;
+      if (_active == null) _tabs.animateTo(0);
+      _loadJobs();
     };
     WidgetsBinding.instance.addPostFrameCallback((_) => _init());
     _restored = ConnectivityService.instance.onRestored.listen((_) => _backOnline());
@@ -74,9 +101,40 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _poll?.cancel();
     _restored?.cancel();
+    PushService.instance.onOpen = null;
+    final socket = CourierSocketService();
+    socket.onDispatchOffer = null;
+    socket.onOrderStatus = null;
+    socket.onChatMessage = null;
     _tabs.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final foreground = state == AppLifecycleState.resumed;
+    if (foreground == _foreground) return;
+    _foreground = foreground;
+    _syncPolling();
+    // Back in the app: catch up on anything missed while it was in the background
+    if (foreground && _meLoaded) {
+      _loadMine();
+      if (_online) _loadJobs();
+    }
+  }
+
+  /// Polls the job list only while it is useful: online, no delivery in progress, app on screen.
+  void _syncPolling() {
+    final want = _online && _active == null && _foreground;
+    if (want && _poll == null) {
+      _poll = Timer.periodic(const Duration(seconds: 20), (_) => _loadJobs());
+    } else if (!want) {
+      _poll?.cancel();
+      _poll = null;
+    }
   }
 
   /// The internet is back. During a delivery the customer must see the courier again quickly:
@@ -104,8 +162,9 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     setState(() => _online = online);
     if (online) await _startSharing();
     await Future.wait([_loadJobs(), _loadMine(), _loadEarnings()]);
-    if (mounted) setState(() => _loading = false);
   }
+
+  Future<void> _refreshAll() => Future.wait([_loadJobs(manual: true), _loadMine(manual: true), _loadEarnings(manual: true)]);
 
   Future<bool> _startSharing() async {
     final token = _auth.accessToken ?? '';
@@ -114,10 +173,27 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     return ok;
   }
 
-  Future<void> _toggleOnline() async {
+  /// Sends a position through the session-aware client (used right before location-checked actions).
+  Future<bool> _postPosition(Map<String, dynamic> body) async => (await _api.post('/courier/telemetry', body)).ok;
+
+  /// The switch on the online card. While carrying an order, going offline is blocked unless the
+  /// courier confirms they have to stop; they are then shown how to tell Malvoya.
+  Future<void> _onSwitch() async {
+    final active = _active;
+    if (_online && active != null) {
+      if (!await _confirmStop(active)) return;
+      await _setOnline(false);
+      if (!mounted) return;
+      await _openHelp(orderId: asInt(active['id']), stopping: true);
+      return;
+    }
+    await _setOnline(!_online);
+  }
+
+  Future<void> _setOnline(bool next) async {
+    if (next == _online) return;
     HapticFeedback.mediumImpact();
     setState(() => _switching = true);
-    final next = !_online;
     double? lat;
     double? lng;
     if (next) {
@@ -143,63 +219,266 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
       if (res.ok) _online = next;
     });
     if (!res.ok) _snack(res.error!);
-    if (next) _loadJobs();
+    _syncPolling();
+    if (_online) _loadJobs();
   }
 
-  Future<void> _loadJobs() async {
+  /// "You are carrying an order": explains why going offline is blocked. True = the courier has to stop.
+  Future<bool> _confirmStop(Map<String, dynamic> o) async {
+    HapticFeedback.mediumImpact();
+    final stop = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(tr(context, 'You are carrying order #${o['id']}', 'Sinulla on tilaus #${o['id']}')),
+        content: Text(tr(context,
+            'Please stay online until you have handed it over. Going offline stops sharing your location, so the customer can no longer follow the delivery, and the order stays assigned to you.\n\nIf you really have to stop, you can go offline and then tell Malvoya through Help, so we can sort out the order with the shop and the customer.',
+            'Pysy linjoilla, kunnes olet luovuttanut tilauksen. Linjoilta poistuminen lopettaa sijaintisi jakamisen, jolloin asiakas ei voi enää seurata toimitusta, ja tilaus pysyy sinulla.\n\nJos sinun on pakko lopettaa, voit poistua linjoilta ja kertoa siitä Malvoyalle Apua-sivun kautta, niin selvitämme tilauksen kaupan ja asiakkaan kanssa.')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(tr(context, 'I have to stop', 'Minun on pakko lopettaa'))),
+          FilledButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(context, 'Keep delivering', 'Jatka toimitusta'))),
+        ],
+      ),
+    );
+    return stop == true;
+  }
+
+  Future<void> _openHelp({int? orderId, bool stopping = false}) =>
+      Navigator.push(context, MaterialPageRoute(builder: (_) => HelpScreen(orderId: orderId, stoppingDelivery: stopping)));
+
+  Future<void> _signOut() async {
+    final active = _active;
+    if (_online && active != null) {
+      if (!await _confirmStop(active)) return;
+      await _setOnline(false);
+      if (!mounted) return;
+      await _openHelp(orderId: asInt(active['id']), stopping: true);
+    } else if (_online) {
+      await _setOnline(false);
+    }
+    CourierSocketService().disconnect();
+    await _auth.logout();
+  }
+
+  // ── Loading ─────────────────────────────────────────────────────────────
+
+  /// Orders the courier app handles. Pickup orders (collected by the customer) never involve a
+  /// courier, so they are skipped if one ever shows up.
+  List<Map<String, dynamic>> _orders(dynamic list) => ((list as List?) ?? [])
+      .whereType<Map>()
+      .map((o) => Map<String, dynamic>.from(o))
+      .where((o) => o['fulfilment'] != 'PICKUP')
+      .toList();
+
+  Future<void> _loadJobs({bool manual = false}) async {
+    final request = ++_jobsRequest;
     final res = await _api.get('/orders/available');
-    if (!mounted || !res.ok) return;
-    setState(() => _jobs = ((res.data['orders'] as List?) ?? []).map((o) => Map<String, dynamic>.from(o)).toList());
+    if (!mounted || request != _jobsRequest) return;
+    if (!res.ok) {
+      if (_jobsLoad == _Load.ready) {
+        if (manual) _snack(res.error!);
+      } else {
+        setState(() {
+          _jobsLoad = _Load.error;
+          _jobsError = res.error;
+        });
+      }
+      return;
+    }
+    final jobs = _orders(res.data['orders']);
+    final ids = jobs.map((j) => asInt(j['id'])).toSet();
+    // Taken by another courier or withdrawn: the offer disappears here and from the notifications
+    for (final old in _jobs) {
+      final id = asInt(old['id']);
+      if (id != null && !ids.contains(id)) PushService.instance.clearOffer(id);
+    }
+    setState(() {
+      _jobs = jobs;
+      _jobsLoad = _Load.ready;
+      _jobsError = null;
+      if (!ids.contains(_newOfferId)) _newOfferId = null;
+    });
   }
 
-  Future<void> _loadMine() async {
+  Future<void> _loadMine({bool manual = false}) async {
     final res = await _api.get('/orders/courier/mine');
-    if (!mounted || !res.ok) return;
-    setState(() => _mine = ((res.data['orders'] as List?) ?? []).map((o) => Map<String, dynamic>.from(o)).toList());
+    if (!mounted) return;
+    if (!res.ok) {
+      if (_mineLoad == _Load.ready) {
+        if (manual) _snack(res.error!);
+      } else {
+        setState(() {
+          _mineLoad = _Load.error;
+          _mineError = res.error;
+        });
+      }
+      return;
+    }
+    setState(() {
+      _mine = _orders(res.data['orders']);
+      _mineLoad = _Load.ready;
+      _mineError = null;
+    });
     final active = _active;
     CourierTelemetryService().setActiveOrder(asInt(active?['id']));
     if (active != null) CourierSocketService().trackOrder(asInt(active['id'])!);
+    _syncPolling();
   }
 
-  Future<void> _loadEarnings() async {
+  Future<void> _loadEarnings({bool manual = false}) async {
     final res = await _api.get('/payouts');
-    if (!mounted || !res.ok) return;
-    setState(() => _earnings = res.data);
+    if (!mounted) return;
+    if (!res.ok) {
+      if (_earnLoad == _Load.ready) {
+        if (manual) _snack(res.error!);
+      } else {
+        setState(() {
+          _earnLoad = _Load.error;
+          _earnError = res.error;
+        });
+      }
+      return;
+    }
+    setState(() {
+      _earnings = res.data;
+      _earnLoad = _Load.ready;
+      _earnError = null;
+    });
   }
 
   void _snack(String t) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t), behavior: SnackBarBehavior.floating));
 
+  /// The server's own message when it gave one (e.g. "Get closer to the shop"), else [fallback].
+  String _serverMessage(ApiResult res, String fallback) {
+    final e = res.data['error'];
+    return e is String && e.trim().isNotEmpty ? e : fallback;
+  }
+
+  static final _locationWords = RegExp(r'locat|far |km|metre|meter|closer|nearby|near the|sijain|etäi|lähe', caseSensitive: false);
+
+  // ── Offers ──────────────────────────────────────────────────────────────
+
+  /// A live offer: shown at the top of Jobs straight away, announced once (haptic + the phone's
+  /// notification sound), then confirmed against the job list. Never accepted automatically.
+  void _onOffer(Map<String, dynamic> offer) {
+    if (!mounted || offer['fulfilment'] == 'PICKUP') return;
+    final id = asInt(offer['orderId'] ?? offer['id']);
+    if (id == null) return;
+    if (offer['courierPay'] is Map) _offerPay[id] = Map<String, dynamic>.from(offer['courierPay']);
+    // The fallback broadcast reaches busy couriers too; they cannot take another job
+    if (!_online || _active != null) return;
+    final isNew = !_offeredAt.containsKey(id);
+    _offeredAt.putIfAbsent(id, DateTime.now);
+    if (isNew) {
+      setState(() {
+        _newOfferId = id;
+        if (!_jobs.any((j) => asInt(j['id']) == id)) _jobs = [_jobFromOffer(id, offer), ..._jobs];
+        _jobsLoad = _Load.ready;
+      });
+      HapticFeedback.heavyImpact();
+      final store = '${offer['storeName'] ?? ''}';
+      PushService.instance.alertOffer(
+        orderId: id,
+        title: '${tr(context, 'New delivery', 'Uusi toimitus')} · ${_payText(offer)}',
+        body: store.isEmpty ? tr(context, 'Open Jobs to see it.', 'Katso Keikat-välilehdeltä.') : '${tr(context, 'Pick up at', 'Nouto')}: $store',
+      );
+      if (_tabs.index != 0) _tabs.animateTo(0);
+    }
+    _loadJobs();
+  }
+
+  Map<String, dynamic> _jobFromOffer(int id, Map<String, dynamic> offer) => {
+        'id': id,
+        'status': 'CONFIRMED',
+        'store': {
+          'id': offer['storeId'],
+          'name': offer['storeName'],
+          'address': offer['storeAddress'],
+          'latitude': offer['storeLat'],
+          'longitude': offer['storeLng'],
+        },
+        'courierFeeCents': offer['courierFeeCents'],
+        'tipCents': offer['tipCents'],
+        if (offer['courierPay'] is Map) 'courierPay': offer['courierPay'],
+        'deliveryAreaLat': offer['deliveryAreaLat'],
+        'deliveryAreaLng': offer['deliveryAreaLng'],
+        'createdAt': offer['createdAt'],
+      };
+
+  String _ago(DateTime t) {
+    final m = DateTime.now().difference(t).inMinutes;
+    if (m < 1) return tr(context, 'just now', 'juuri nyt');
+    if (m < 60) return tr(context, '$m min ago', '$m min sitten');
+    final h = m ~/ 60;
+    return tr(context, '$h h ago', '$h h sitten');
+  }
+
+  /// How long the offer has been out: exact for live offers, otherwise from the server's timestamps.
+  String? _offerAge(Map j) {
+    final id = asInt(j['id']);
+    final live = id == null ? null : _offeredAt[id];
+    final offered = live ?? DateTime.tryParse('${j['offeredAt'] ?? j['confirmedAt'] ?? ''}')?.toLocal();
+    if (offered != null) return '${tr(context, 'Offered', 'Tarjottu')} ${_ago(offered)}';
+    final placed = DateTime.tryParse('${j['createdAt'] ?? ''}')?.toLocal();
+    return placed == null ? null : '${tr(context, 'Order placed', 'Tilattu')} ${_ago(placed)}';
+  }
+
   Future<void> _accept(Map<String, dynamic> job) async {
+    final id = asInt(job['id']);
+    if (id == null || _acceptingId != null) return;
     HapticFeedback.mediumImpact();
-    final res = await _api.patch('/orders/${job['id']}/assign-courier');
+    setState(() => _acceptingId = id);
+    // The server checks how far the courier is from the shop, so it needs a fresh position
+    final sent = await CourierTelemetryService().sendNow(post: _postPosition);
     if (!mounted) return;
+    final res = await _api.patch('/orders/$id/assign-courier');
+    if (!mounted) return;
+    setState(() => _acceptingId = null);
     if (!res.ok) {
-      _snack(res.error!);
+      var message = _serverMessage(res, res.error!);
+      if (res.status == 409 && (!sent || _locationWords.hasMatch(message))) {
+        message = '$message ${tr(context, 'Stay online with location on, so Malvoya can see you are near the shop, and try again.', 'Pysy linjoilla sijainti päällä, jotta Malvoya näkee sinun olevan lähellä kauppaa, ja yritä uudelleen.')}';
+      }
+      _snack(message);
       _loadJobs();
       return;
     }
+    PushService.instance.clearOffer(id);
+    _newOfferId = null;
     _chat.clear();
     await _loadMine();
     _loadJobs();
     _tabs.animateTo(1);
   }
 
+  // ── Delivery steps ──────────────────────────────────────────────────────
+
   Future<void> _pickedUp(Map<String, dynamic> o) async {
+    if (_pickingUp) return;
     HapticFeedback.mediumImpact();
+    setState(() => _pickingUp = true);
     final res = await _api.patch('/orders/${o['id']}/status', {'status': 'SHIPPED'});
     if (!mounted) return;
+    setState(() => _pickingUp = false);
     if (!res.ok) _snack(res.error!);
-    _loadMine();
+    await _loadMine();
   }
 
-  /// Records that the courier is at the shop, so waiting beyond the free minutes is paid at pickup.
+  /// Records that the courier is at the shop. The server checks the courier is really there,
+  /// so a fresh position is sent first.
   Future<void> _arrivedAtStore(Map<String, dynamic> o) async {
+    if (_arriving) return;
     HapticFeedback.mediumImpact();
     setState(() => _arriving = true);
+    await CourierTelemetryService().sendNow(post: _postPosition);
+    if (!mounted) return;
     final res = await _api.post('/orders/${o['id']}/arrived-at-store');
     if (!mounted) return;
     setState(() => _arriving = false);
-    if (!res.ok) return _snack(res.error!);
+    if (!res.ok) {
+      return _snack(res.status == 409
+          ? _serverMessage(res, tr(context, 'Get a bit closer to the shop and try again.', 'Mene vähän lähemmäs kauppaa ja yritä uudelleen.'))
+          : res.error!);
+    }
     await _loadMine();
   }
 
@@ -210,7 +489,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
   Map<String, dynamic>? _payOf(Map o) {
     final p = o['courierPay'];
     if (p is Map) return Map<String, dynamic>.from(p);
-    final id = asInt(o['id']);
+    final id = asInt(o['id'] ?? o['orderId']);
     return id == null ? null : _offerPay[id];
   }
 
@@ -221,9 +500,8 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     return t == null ? '–' : euro(context, t);
   }
 
-  /// The server's one-line explanation of how the pay is worked out, in the app language.
-  String? _payExplanation(Map<String, dynamic>? pay) {
-    final e = pay?['explanation'];
+  /// The server's text in the app language ({en, fi} or a plain string).
+  String? _localized(dynamic e) {
     String? text;
     if (e is Map) {
       text = '${(isFinnish(context) ? e['fi'] : e['en']) ?? e['en'] ?? e['fi'] ?? ''}';
@@ -238,10 +516,19 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
   int? _freeWaitMinutes(Map<String, dynamic>? pay) {
     final direct = asInt(pay?['freeWaitMinutes']);
     if (direct != null) return direct;
-    final e = pay?['explanation'];
-    final en = e is Map ? '${e['en'] ?? ''}' : '${e ?? ''}';
-    final m = RegExp(r'(\d+)\s*(?:free\s+)?min', caseSensitive: false).firstMatch(en);
-    return m == null ? null : int.tryParse(m.group(1)!);
+    for (final source in [pay?['waitPolicy'], pay?['explanation']]) {
+      final en = source is Map ? '${source['en'] ?? ''}' : '${source ?? ''}';
+      final m = RegExp(r'first (\d+) min|(\d+)\s*(?:free\s+)?min', caseSensitive: false).firstMatch(en);
+      if (m != null) return int.tryParse(m.group(1) ?? m.group(2)!);
+    }
+    return null;
+  }
+
+  /// False when the server says waiting is not paid separately.
+  bool _waitingPaid(Map<String, dynamic>? pay) {
+    final policy = pay?['waitPolicy'];
+    final en = policy is Map ? '${policy['en'] ?? ''}' : '${policy ?? ''}';
+    return !en.toLowerCase().contains('not paid');
   }
 
   String _km(num km) {
@@ -249,23 +536,27 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     return isFinnish(context) ? s.replaceAll('.', ',') : s;
   }
 
-  /// Line-by-line pay: base, distance, waiting, tip and total, then the explanation.
+  /// Line-by-line pay: base, distance, minimum top-up, ride to the shop, waiting, tip and total,
+  /// then the server's explanation.
   Widget _payBreakdown(Map o, Map<String, dynamic> pay, {required bool showWaiting}) {
     final base = asInt(pay['baseCents']) ?? 0;
-    final km = pay['distanceKm'] is num ? pay['distanceKm'] as num : num.tryParse('${pay['distanceKm'] ?? ''}');
+    num? number(dynamic v) => v is num ? v : num.tryParse('${v ?? ''}');
+    final km = number(pay['distanceKm']);
     final dist = asInt(pay['distanceCents']) ?? 0;
+    final topUp = asInt(pay['topUpCents']) ?? 0;
+    final approachKm = number(pay['approachKm']);
+    final approach = asInt(pay['approachCents']) ?? 0;
     final wait = asInt(pay['waitCents']) ?? 0;
+    final waitMin = asInt(pay['waitMinutes']) ?? 0;
     final tip = asInt(pay['tipCents']) ?? asInt(o['tipCents']) ?? 0;
     final total = asInt(pay['totalCents']) ?? asInt(o['courierFeeCents']) ?? 0;
-    final other = total - base - dist - wait - tip;
+    final other = total - base - dist - topUp - approach - wait - tip;
 
     String distLabel = tr(context, 'Distance', 'Matka');
     if (km != null && km > 0) {
       final rate = (dist / km).round();
       final exactRate = rate > 0 && (rate * km).round() == dist;
-      distLabel = exactRate
-          ? '$distLabel ${_km(km)} km × ${euro(context, rate)}/km'
-          : '$distLabel ${_km(km)} km';
+      distLabel = exactRate ? '$distLabel ${_km(km)} km × ${euro(context, rate)}/km' : '$distLabel ${_km(km)} km';
     }
 
     Widget line(String label, int cents, {bool bold = false}) => Padding(
@@ -275,7 +566,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
             Text(euro(context, cents), style: TextStyle(fontSize: 13.5, fontWeight: bold ? FontWeight.w800 : FontWeight.w600)),
           ]),
         );
-    final explanation = _payExplanation(pay);
+    final explanation = _localized(pay['explanation']);
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(top: 8),
@@ -284,7 +575,11 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         line(tr(context, 'Base (pickup + drop-off)', 'Perusmaksu (nouto + luovutus)'), base),
         if (dist != 0 || (km != null && km > 0)) line(distLabel, dist),
-        if (showWaiting && wait > 0) line(tr(context, 'Waiting at the shop', 'Odotus kaupassa'), wait),
+        if (topUp > 0) line(tr(context, 'Top-up to the minimum pay', 'Korotus vähimmäispalkkioon'), topUp),
+        if (approach > 0)
+          line(approachKm != null ? '${tr(context, 'Ride to the shop', 'Ajo kauppaan')} ${_km(approachKm)} km' : tr(context, 'Ride to the shop', 'Ajo kauppaan'), approach),
+        if (showWaiting && wait > 0)
+          line(waitMin > 0 ? '${tr(context, 'Waiting at the shop', 'Odotus kaupassa')} ($waitMin min)' : tr(context, 'Waiting at the shop', 'Odotus kaupassa'), wait),
         if (tip > 0) line(tr(context, 'Tip (all of it is yours)', 'Tippi (koko summa sinulle)'), tip),
         if (other != 0) line(tr(context, 'Other adjustment', 'Muu tasaus'), other),
         const Divider(height: 14),
@@ -305,9 +600,12 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       InkWell(
         borderRadius: BorderRadius.circular(10),
-        onTap: () => setState(() => open ? _openPay.remove(key) : _openPay.add(key)),
+        onTap: () {
+          HapticFeedback.selectionClick();
+          setState(() => open ? _openPay.remove(key) : _openPay.add(key));
+        },
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
+          padding: const EdgeInsets.symmetric(vertical: 10),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Text(open ? tr(context, 'Hide pay breakdown', 'Piilota palkkion erittely') : tr(context, 'How is this pay calculated?', 'Miten palkkio lasketaan?'),
                 style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w700, fontSize: 13.5)),
@@ -328,7 +626,31 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     }
   }
 
+  // ── Handover ────────────────────────────────────────────────────────────
+
+  Future<bool> _confirm({required String title, required String body, required String yes, Widget? extra}) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            if (extra != null) ...[extra, const SizedBox(height: 12)],
+            Text(body, style: const TextStyle(height: 1.4)),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(context, 'Cancel', 'Peruuta'))),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(yes)),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
   Future<void> _complete(Map<String, dynamic> o) async {
+    if (_completing) return;
+    HapticFeedback.mediumImpact();
     final method = await showModalBottomSheet<String>(
       context: context,
       builder: (ctx) => SafeArea(
@@ -337,31 +659,58 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
             title: Text(tr(context, 'How did you hand it over?', 'Miten luovutit tilauksen?'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
           ),
           ListTile(
+            minVerticalPadding: 16,
             leading: const Icon(Icons.handshake_outlined),
-            title: Text(tr(context, 'To the customer in person', 'Asiakkaalle henkilökohtaisesti')),
+            title: Text(tr(context, 'To the customer in person', 'Asiakkaalle henkilökohtaisesti'), style: const TextStyle(fontWeight: FontWeight.w600)),
             onTap: () => Navigator.pop(ctx, 'IN_PERSON'),
           ),
           ListTile(
+            minVerticalPadding: 16,
             leading: const Icon(Icons.photo_camera_outlined),
-            title: Text(tr(context, 'Left at the door — take a photo', 'Jätetty ovelle — ota kuva')),
+            title: Text(tr(context, 'Left at the door — take a photo', 'Jätetty ovelle — ota kuva'), style: const TextStyle(fontWeight: FontWeight.w600)),
             subtitle: Text(tr(context, 'Photograph only the parcel at the door — no people, faces or house numbers. Only the customer sees it; it is deleted after 30 days.',
                 'Kuvaa vain paketti ovella — ei ihmisiä, kasvoja tai ovinumeroita. Vain asiakas näkee kuvan; se poistetaan 30 päivän kuluttua.')),
             onTap: () => Navigator.pop(ctx, 'PHOTO'),
           ),
+          const SizedBox(height: 8),
         ]),
       ),
     );
     if (method == null || !mounted) return;
     final orderId = asInt(o['id'])!;
-    Map<String, dynamic>? proof;
+    XFile? shot;
     if (method == 'PHOTO') {
-      final shot = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 80);
+      shot = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 80);
       if (shot == null || !mounted) return;
+    }
+    // Delivered cannot be undone: one last check before telling the customer
+    final confirmed = await _confirm(
+      title: tr(context, 'Mark order #$orderId as delivered?', 'Merkitäänkö tilaus #$orderId toimitetuksi?'),
+      body: method == 'PHOTO'
+          ? tr(context, 'The customer is told the order was left at the door and sees this photo. This cannot be undone.',
+              'Asiakkaalle kerrotaan, että tilaus jätettiin ovelle, ja hän näkee tämän kuvan. Tätä ei voi perua.')
+          : tr(context, 'Confirm only when the customer has the order in their hands. This cannot be undone.',
+              'Vahvista vasta, kun tilaus on asiakkaan käsissä. Tätä ei voi perua.'),
+      yes: tr(context, 'Delivered', 'Toimitettu'),
+      extra: shot == null
+          ? null
+          : ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Image.file(File(shot.path), height: 180, width: double.infinity, fit: BoxFit.cover),
+            ),
+    );
+    if (!confirmed || !mounted) return;
+    setState(() => _completing = true);
+    Map<String, dynamic>? proof;
+    if (shot != null) {
       _snack(tr(context, 'Uploading photo…', 'Ladataan kuvaa…'));
       try {
         proof = (await MediaUpload.upload(api: _api, kind: 'delivery_proof', file: File(shot.path), orderId: orderId)).toProof();
       } catch (e) {
-        if (mounted) _snack('$e');
+        if (mounted) {
+          setState(() => _completing = false);
+          _snack('$e');
+        }
         return;
       }
     }
@@ -373,20 +722,99 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
       if (pos != null) 'longitude': pos.longitude,
     });
     if (!mounted) return;
+    setState(() => _completing = false);
     if (!res.ok) return _snack(res.error!);
     HapticFeedback.heavyImpact();
-    _snack(tr(context, 'Delivered — nice work!', 'Toimitettu — hyvää työtä!'));
     _chat.clear();
     await Future.wait([_loadMine(), _loadEarnings(), _loadJobs()]);
+    if (!mounted) return;
+    final done = _mine.firstWhere((m) => asInt(m['id']) == orderId, orElse: () => o);
+    await _showCompleted(done);
+    if (mounted) _tabs.animateTo(0);
   }
 
+  /// After the handover: the job's final pay, waiting included, then back to Jobs.
+  Future<void> _showCompleted(Map<String, dynamic> o) {
+    final pay = _payOf(o);
+    return showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: const BoxDecoration(color: Color(0xFFE6F3EC), shape: BoxShape.circle),
+                child: const Icon(Icons.check_rounded, color: AppTheme.success, size: 30),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(tr(context, 'Delivered — nice work!', 'Toimitettu — hyvää työtä!'), style: AppTheme.display(size: 22)),
+                  Text('${tr(context, 'Order', 'Tilaus')} #${o['id']}${o['store']?['name'] != null ? ' · ${o['store']['name']}' : ''}',
+                      style: const TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
+                ]),
+              ),
+            ]),
+            const SizedBox(height: 18),
+            Text(tr(context, 'Your pay for this job', 'Palkkiosi tästä keikasta'), style: const TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
+            Text(_payText(o), style: AppTheme.display(size: 36)),
+            if (pay != null) _payBreakdown(o, pay, showWaiting: true),
+            const SizedBox(height: 10),
+            Text(tr(context, 'You can find it under Earnings, with when it is paid out.', 'Löydät sen Ansiot-välilehdeltä, jossa näkyy myös maksuaika.'),
+                style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary)),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              height: 56,
+              child: FilledButton.icon(
+                onPressed: () => Navigator.pop(ctx),
+                icon: const Icon(Icons.work_outline_rounded),
+                label: Text(tr(context, 'Back to jobs', 'Takaisin keikkoihin')),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  /// Opens the phone's maps app with directions (Apple Maps on iPhone, Google Maps on Android,
+  /// any maps app as a last resort).
   Future<void> _navigate(double? lat, double? lng, String? address) async {
-    final destination = lat != null && lng != null ? '$lat,$lng' : Uri.encodeComponent(address ?? '');
-    final uri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$destination&travelmode=bicycling');
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    HapticFeedback.selectionClick();
+    final hasPoint = lat != null && lng != null;
+    final text = (address ?? '').trim();
+    if (!hasPoint && text.isEmpty) {
+      return _snack(tr(context, 'There is no address to navigate to.', 'Navigoitavaa osoitetta ei ole.'));
+    }
+    final destination = hasPoint ? '$lat,$lng' : Uri.encodeComponent(text);
+    final candidates = <Uri>[
+      if (Platform.isIOS) Uri.parse('https://maps.apple.com/?daddr=$destination'),
+      Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$destination&travelmode=bicycling'),
+      if (Platform.isAndroid) Uri.parse(hasPoint ? 'geo:$lat,$lng?q=$lat,$lng' : 'geo:0,0?q=$destination'),
+    ];
+    for (final uri in candidates) {
+      try {
+        if (await launchUrl(uri, mode: LaunchMode.externalApplication)) return;
+      } catch (_) {}
+    }
+    if (mounted) _snack(tr(context, 'Could not open a maps app.', 'Karttasovellusta ei voitu avata.'));
+  }
+
+  Future<void> _call(String phone) async {
+    HapticFeedback.selectionClick();
+    try {
+      if (await launchUrl(Uri.parse('tel:$phone'))) return;
+    } catch (_) {}
+    if (mounted) _snack(tr(context, 'Could not start a call.', 'Puhelua ei voitu aloittaa.'));
   }
 
   void _openChat(Map<String, dynamic> o) {
+    HapticFeedback.selectionClick();
     final input = TextEditingController();
     final orderId = asInt(o['id'])!;
     final myName = (_auth.currentUser?.name ?? 'Courier').split(' ').first;
@@ -396,6 +824,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
       builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
         void send(String t) {
           if (t.trim().isEmpty) return;
+          HapticFeedback.selectionClick();
           CourierSocketService().sendChat(orderId, t.trim(), myName);
           input.clear();
           Future.delayed(const Duration(milliseconds: 400), () => ctx.mounted ? set(() {}) : null);
@@ -416,22 +845,29 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
                 subtitle: Text(tr(context, 'Phone numbers are never shared.', 'Puhelinnumeroita ei jaeta.')),
               ),
               Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.all(16),
-                  children: _chat.map((m) {
-                    final mine = m['role'] == 'COURIER';
-                    return Align(
-                      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-                      child: Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        constraints: const BoxConstraints(maxWidth: 280),
-                        decoration: BoxDecoration(color: mine ? AppTheme.primary : AppTheme.divider, borderRadius: BorderRadius.circular(16)),
-                        child: Text(m['text'] ?? '', style: TextStyle(color: mine ? Colors.white : AppTheme.textPrimary)),
+                child: _chat.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Text(tr(context, 'No messages yet.', 'Ei vielä viestejä.'), style: const TextStyle(color: AppTheme.textSecondary)),
+                        ),
+                      )
+                    : ListView(
+                        padding: const EdgeInsets.all(16),
+                        children: _chat.map((m) {
+                          final mine = m['role'] == 'COURIER';
+                          return Align(
+                            alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              constraints: const BoxConstraints(maxWidth: 280),
+                              decoration: BoxDecoration(color: mine ? AppTheme.primary : AppTheme.divider, borderRadius: BorderRadius.circular(16)),
+                              child: Text(m['text'] ?? '', style: TextStyle(color: mine ? Colors.white : AppTheme.textPrimary)),
+                            ),
+                          );
+                        }).toList(),
                       ),
-                    );
-                  }).toList(),
-                ),
               ),
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
@@ -442,7 +878,12 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
                 child: Row(children: [
                   Expanded(child: TextField(controller: input, maxLength: 1000, onSubmitted: send, decoration: InputDecoration(counterText: '', hintText: tr(context, 'Message', 'Viesti')))),
-                  IconButton(icon: const Icon(Icons.send_rounded, color: AppTheme.primary), onPressed: () => send(input.text)),
+                  IconButton(
+                    tooltip: tr(context, 'Send message', 'Lähetä viesti'),
+                    iconSize: 28,
+                    icon: const Icon(Icons.send_rounded, color: AppTheme.primary),
+                    onPressed: () => send(input.text),
+                  ),
                 ]),
               ),
             ]),
@@ -463,8 +904,8 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
           const SizedBox(height: 12),
           Text(
             tr(context,
-                'When a store accepts an order, it is offered to online couriers within 7.5 km of the store, nearest first. If nobody is that close, every online courier sees it. Distance to the store is the only factor: ratings, acceptance rates and declines are not used. You choose which jobs to take — declining or ignoring a job never affects you.\n\nEach offer shows your pay before you accept, with a breakdown. If you wait at the shop beyond the free minutes, waiting pay is added when you pick up. Tips go to you in full.\n\nMalvoya is just starting, so there may be few jobs or none at first. No number of jobs or level of earnings is promised. You deliver as an independent entrepreneur and may also work for other platforms.\n\nNo automated system rates or deactivates you; account decisions are made by a person and explained to you.',
-                'Kun kauppa hyväksyy tilauksen, se tarjotaan linjoilla oleville läheteille 7,5 km:n säteellä kaupasta, lähin ensin. Jos kukaan ei ole niin lähellä, kaikki linjoilla olevat näkevät sen. Ainoa peruste on etäisyys kauppaan: arvioita, hyväksymisprosenttia tai hylkäyksiä ei käytetä. Valitset itse keikkasi — kieltäytyminen tai ohittaminen ei vaikuta sinuun.\n\nJokainen tarjous näyttää palkkiosi erittelyineen ennen kuin hyväksyt. Jos odotat kaupassa ilmaisten minuuttien jälkeen, odotuksesta maksetaan noudon yhteydessä. Tipit saat kokonaan.\n\nMalvoya on vasta aloittamassa, joten keikkoja voi aluksi olla vähän tai ei lainkaan. Keikkojen määrää tai ansioita ei luvata. Toimitat itsenäisenä yrittäjänä ja voit tehdä keikkoja myös muille alustoille.\n\nMikään automaatti ei arvioi tai sulje tiliäsi; päätökset tekee ihminen ja perustelee ne sinulle.'),
+                'When a store accepts an order, it is offered to online couriers within 7.5 km of the store, nearest first. If nobody is that close, every online courier sees it. Distance to the store is the only factor: ratings, acceptance rates and declines are not used. You choose which jobs to take — declining or ignoring a job never affects you.\n\nEach offer shows your pay before you accept, with a breakdown. If the shop is not ready when you arrive, waiting beyond the free minutes is paid and added when you pick up. Tips go to you in full.\n\nMalvoya is just starting, so there may be few jobs or none at first. No number of jobs or level of earnings is promised. You deliver as an independent entrepreneur and may also work for other platforms.\n\nNo automated system rates or deactivates you; account decisions are made by a person and explained to you.',
+                'Kun kauppa hyväksyy tilauksen, se tarjotaan linjoilla oleville läheteille 7,5 km:n säteellä kaupasta, lähin ensin. Jos kukaan ei ole niin lähellä, kaikki linjoilla olevat näkevät sen. Ainoa peruste on etäisyys kauppaan: arvioita, hyväksymisprosenttia tai hylkäyksiä ei käytetä. Valitset itse keikkasi — kieltäytyminen tai ohittaminen ei vaikuta sinuun.\n\nJokainen tarjous näyttää palkkiosi erittelyineen ennen kuin hyväksyt. Jos tilaus ei ole valmis, kun saavut kauppaan, odotus ilmaisten minuuttien jälkeen maksetaan ja lisätään noudon yhteydessä. Tipit saat kokonaan.\n\nMalvoya on vasta aloittamassa, joten keikkoja voi aluksi olla vähän tai ei lainkaan. Keikkojen määrää tai ansioita ei luvata. Toimitat itsenäisenä yrittäjänä ja voit tehdä keikkoja myös muille alustoille.\n\nMikään automaatti ei arvioi tai sulje tiliäsi; päätökset tekee ihminen ja perustelee ne sinulle.'),
             style: const TextStyle(height: 1.45, color: AppTheme.textSecondary),
           ),
           const SizedBox(height: 12),
@@ -496,11 +937,12 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
         title: Text(name.isEmpty ? 'Malvoya Courier' : '${tr(context, 'Hi', 'Hei')} $name', style: AppTheme.display(size: 22)),
         actions: [
           IconButton(tooltip: tr(context, 'How jobs are offered', 'Miten keikat tarjotaan'), icon: const Icon(Icons.info_outline_rounded), onPressed: _howJobsWork),
-          IconButton(tooltip: tr(context, 'Sign out', 'Kirjaudu ulos'), icon: const Icon(Icons.logout_rounded), onPressed: () async {
-            if (_online) await _toggleOnline();
-            CourierSocketService().disconnect();
-            await _auth.logout();
-          }),
+          IconButton(
+            tooltip: tr(context, 'Help and contact', 'Apua ja yhteydenotto'),
+            icon: const Icon(Icons.support_agent_rounded),
+            onPressed: () => _openHelp(orderId: asInt(active?['id'])),
+          ),
+          IconButton(tooltip: tr(context, 'Sign out', 'Kirjaudu ulos'), icon: const Icon(Icons.logout_rounded), onPressed: _signOut),
         ],
         bottom: TabBar(
           controller: _tabs,
@@ -510,24 +952,20 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
             borderRadius: BorderRadius.all(Radius.circular(2)),
           ),
           tabs: [
-            Tab(text: '${tr(context, 'Jobs', 'Keikat')}${_jobs.isNotEmpty && active == null ? ' (${_jobs.length})' : ''}'),
+            Tab(text: '${tr(context, 'Jobs', 'Keikat')}${_online && _jobs.isNotEmpty && active == null ? ' (${_jobs.length})' : ''}'),
             Tab(text: tr(context, 'Delivery', 'Toimitus')),
             Tab(text: tr(context, 'Earnings', 'Ansiot')),
           ],
         ),
       ),
       body: Column(children: [
-        _onlineBar(),
-        Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : TabBarView(controller: _tabs, children: [_jobsTab(active), _deliveryTab(active), _earningsTab()]),
-        ),
+        _onlineBar(active),
+        Expanded(child: TabBarView(controller: _tabs, children: [_jobsTab(active), _deliveryTab(active), _earningsTab()])),
       ]),
     );
   }
 
-  Widget _onlineBar() => AnimatedContainer(
+  Widget _onlineBar(Map<String, dynamic>? active) => AnimatedContainer(
         duration: const Duration(milliseconds: 250),
         margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
         decoration: BoxDecoration(
@@ -545,101 +983,207 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Text(
-              _online
-                  ? tr(context, 'Online — sharing your location while online', 'Linjoilla — sijaintisi jaetaan, kun olet linjoilla')
-                  : tr(context, 'Offline — you get no jobs and your location is not shared', 'Poissa — et saa keikkoja eikä sijaintiasi jaeta'),
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
-            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+              Text(
+                _online
+                    ? (active != null ? '${tr(context, 'Online · delivering', 'Linjoilla · toimitus')} #${active['id']}' : tr(context, 'Online', 'Linjoilla'))
+                    : tr(context, 'Offline · no job offers', 'Poissa · ei keikkatarjouksia'),
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14),
+              ),
+              // Same promise as the courier agreement (section 6)
+              Text(
+                _online
+                    ? tr(context, 'Location is shared only while you are online; a notification shows while it is shared.',
+                        'Sijaintisi jaetaan vain, kun olet linjoilla; ilmoitus näkyy jakamisen ajan.')
+                    : tr(context, 'Your location is not shared while you are offline.', 'Sijaintiasi ei jaeta, kun olet poissa linjoilta.'),
+                style: const TextStyle(color: Colors.white, fontSize: 11.5, height: 1.25),
+              ),
+            ]),
           ),
+          const SizedBox(width: 6),
           _switching
               ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : Switch(value: _online, onChanged: (_) => _toggleOnline(), activeColor: Colors.white, activeTrackColor: Colors.white38),
+              : Semantics(
+                  label: tr(context, 'Online', 'Linjoilla'),
+                  child: Switch(value: _online, onChanged: (_) => _onSwitch(), activeColor: Colors.white, activeTrackColor: Colors.white38),
+                ),
         ]),
       );
 
+  /// Error state for a tab whose first load failed.
+  Widget _loadError(String title, String? message, VoidCallback retry) => StateMessage(
+        error: true,
+        icon: Icons.cloud_off_rounded,
+        title: title,
+        text: message ?? tr(context, 'Something went wrong. Please try again.', 'Jotain meni vikaan. Yritä uudelleen.'),
+        onRetry: () {
+          HapticFeedback.selectionClick();
+          retry();
+        },
+      );
+
+  Widget _bigButton({required VoidCallback? onPressed, required Widget label, Widget? icon, bool busy = false, bool outlined = false}) {
+    final shownIcon = busy
+        ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5, color: outlined ? AppTheme.primary : Colors.white))
+        : icon;
+    final style = ButtonStyle(minimumSize: WidgetStateProperty.all(const Size(64, 56)));
+    final button = outlined
+        ? (shownIcon == null
+            ? OutlinedButton(style: style, onPressed: busy ? null : onPressed, child: label)
+            : OutlinedButton.icon(style: style, onPressed: busy ? null : onPressed, icon: shownIcon, label: label))
+        : (shownIcon == null
+            ? FilledButton(style: style, onPressed: busy ? null : onPressed, child: label)
+            : FilledButton.icon(style: style, onPressed: busy ? null : onPressed, icon: shownIcon, label: label));
+    return SizedBox(width: double.infinity, height: 56, child: button);
+  }
+
   Widget _jobsTab(Map<String, dynamic>? active) {
     if (active != null) {
-      return _empty(Icons.pedal_bike_rounded, tr(context, 'Finish your current delivery to take the next job.', 'Tee nykyinen toimitus loppuun ottaaksesi seuraavan keikan.'));
+      return RefreshIndicator(
+        onRefresh: _refreshAll,
+        child: StateMessage(
+          icon: Icons.pedal_bike_rounded,
+          text: tr(context, 'Finish your current delivery to take the next job.', 'Tee nykyinen toimitus loppuun ottaaksesi seuraavan keikan.'),
+          action: OutlinedButton.icon(
+            onPressed: () => _tabs.animateTo(1),
+            icon: const Icon(Icons.inventory_2_outlined),
+            label: Text(tr(context, 'Open the delivery', 'Avaa toimitus')),
+          ),
+        ),
+      );
     }
-    if (!_online) return _goOnlinePrompt();
-    final here = CourierTelemetryService().lastPosition;
+    if (!_online) return RefreshIndicator(onRefresh: _refreshAll, child: _goOnlinePrompt());
+    if (_jobsLoad == _Load.loading) return const JobsSkeleton();
+    if (_jobsLoad == _Load.error) {
+      return RefreshIndicator(
+        onRefresh: () => _loadJobs(manual: true),
+        child: _loadError(tr(context, 'Could not load jobs', 'Keikkoja ei voitu ladata'), _jobsError, () {
+          setState(() => _jobsLoad = _Load.loading);
+          _loadJobs();
+        }),
+      );
+    }
+    if (_jobs.isEmpty) {
+      return RefreshIndicator(
+        onRefresh: () => _loadJobs(manual: true),
+        child: StateMessage(
+          icon: Icons.hourglass_empty_rounded,
+          text: tr(context, 'No jobs right now. Malvoya is just starting, so jobs may be rare at first. While you are online, you get a notification when one comes in.',
+              'Ei keikkoja juuri nyt. Malvoya on vasta aloittamassa, joten keikkoja voi aluksi olla harvoin. Kun olet linjoilla, saat ilmoituksen uudesta keikasta.'),
+        ),
+      );
+    }
+    // The newest live offer first
+    final jobs = [..._jobs]..sort((a, b) => (asInt(a['id']) == _newOfferId ? 0 : 1) - (asInt(b['id']) == _newOfferId ? 0 : 1));
     return RefreshIndicator(
-      onRefresh: _loadJobs,
-      child: _jobs.isEmpty
-          ? ListView(children: [_empty(Icons.hourglass_empty_rounded, tr(context, 'No jobs right now. Malvoya is just starting, so jobs may be rare at first. While you are online, you get a notification when one comes in.', 'Ei keikkoja juuri nyt. Malvoya on vasta aloittamassa, joten keikkoja voi aluksi olla harvoin. Kun olet linjoilla, saat ilmoituksen uudesta keikasta.'))])
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: _jobs.map((j) {
-                final s = (j['store'] as Map?) ?? {};
-                String? toStore;
-                String? drop;
-                if (here != null && s['latitude'] != null) {
-                  toStore = '${(Geolocator.distanceBetween(here.latitude, here.longitude, (s['latitude'] as num).toDouble(), (s['longitude'] as num).toDouble()) / 1000).toStringAsFixed(1)} km';
-                }
-                if (s['latitude'] != null && j['deliveryAreaLat'] != null) {
-                  drop = '${(Geolocator.distanceBetween((s['latitude'] as num).toDouble(), (s['longitude'] as num).toDouble(), (j['deliveryAreaLat'] as num).toDouble(), (j['deliveryAreaLng'] as num).toDouble()) / 1000).toStringAsFixed(1)} km';
-                }
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(AppTheme.radiusLg), border: Border.all(color: AppTheme.divider)),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Row(children: [
-                      Text(_payText(j), style: AppTheme.display(size: 32)),
-                      if ((asInt(_payOf(j)?['tipCents']) ?? asInt(j['tipCents']) ?? 0) > 0)
-                        Container(
-                          margin: const EdgeInsets.only(left: 8),
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                          decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(12)),
-                          child: Text('${tr(context, 'incl. tip', 'sis. tipin')} ${euro(context, asInt(_payOf(j)?['tipCents']) ?? asInt(j['tipCents']))}',
-                              style: const TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w800, fontSize: 12.5)),
-                        ),
-                      const Spacer(),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(12)),
-                        child: Text('${j['itemCount']} ${tr(context, 'item(s)', 'tuote(tta)')}',
-                            style: const TextStyle(color: Color(0xFF8A5A00), fontWeight: FontWeight.w800, fontSize: 12.5)),
-                      ),
-                    ]),
-                    Text(tr(context, 'Your pay for this job', 'Palkkiosi tästä keikasta'), style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
-                    _payToggle('job-${j['id']}', j, showWaiting: false),
-                    const SizedBox(height: 8),
-                    Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Container(width: 12, height: 12, decoration: const BoxDecoration(color: AppTheme.primary, shape: BoxShape.circle)),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text('${tr(context, 'Pick up', 'Nouto')}: ${s['name'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-                          if (s['address'] != null) Text(s['address'], style: const TextStyle(color: AppTheme.textSecondary)),
-                        ]),
-                      ),
-                    ]),
-                    const SizedBox(height: 12),
-                    Row(children: [
-                      _distanceTile(Icons.storefront_outlined, tr(context, 'You → store', 'Sinä → kauppa'), toStore ?? '–'),
-                      const SizedBox(width: 8),
-                      _distanceTile(Icons.location_on_outlined, tr(context, 'Store → drop-off area', 'Kauppa → toimitusalue'), drop == null ? '–' : '~$drop'),
-                    ]),
-                    const SizedBox(height: 8),
-                    Text(
-                      toStore == null
-                          ? tr(context, 'Distance to the store appears once your location is found. The exact address is shown after you accept.',
-                              'Etäisyys kauppaan näkyy, kun sijaintisi löytyy. Tarkka osoite näytetään hyväksynnän jälkeen.')
-                          : tr(context, 'Straight-line distances. The exact address is shown after you accept.',
-                              'Linnuntie-etäisyydet. Tarkka osoite näytetään hyväksynnän jälkeen.'),
-                      style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
-                    ),
-                    const SizedBox(height: 12),
-                    SizedBox(width: double.infinity, height: 56, child: FilledButton(onPressed: () => _accept(j), child: Text(tr(context, 'Accept job', 'Ota keikka')))),
-                  ]),
-                );
-              }).toList(),
+      onRefresh: () => _loadJobs(manual: true),
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        children: [for (final j in jobs) _jobCard(j)],
+      ),
+    );
+  }
+
+  Widget _jobCard(Map<String, dynamic> j) {
+    final here = CourierTelemetryService().lastPosition;
+    final s = (j['store'] as Map?) ?? {};
+    final id = asInt(j['id']);
+    final isNew = id != null && id == _newOfferId;
+    double? d(dynamic v) => v is num ? v.toDouble() : double.tryParse('${v ?? ''}');
+    final sLat = d(s['latitude']), sLng = d(s['longitude']);
+    final aLat = d(j['deliveryAreaLat']), aLng = d(j['deliveryAreaLng']);
+    String? toStore;
+    String? drop;
+    if (here != null && sLat != null && sLng != null) {
+      toStore = '${_km(Geolocator.distanceBetween(here.latitude, here.longitude, sLat, sLng) / 1000)} km';
+    }
+    if (sLat != null && sLng != null && aLat != null && aLng != null) {
+      drop = '${_km(Geolocator.distanceBetween(sLat, sLng, aLat, aLng) / 1000)} km';
+    }
+    final tip = asInt(_payOf(j)?['tipCents']) ?? asInt(j['tipCents']) ?? 0;
+    final items = asInt(j['itemCount']);
+    final age = _offerAge(j);
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        border: Border.all(color: isNew ? AppTheme.primary : AppTheme.divider, width: isNew ? 2 : 1),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (isNew || age != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(children: [
+              if (isNew)
+                Container(
+                  margin: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(12)),
+                  child: Text(tr(context, 'New offer', 'Uusi tarjous'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12)),
+                ),
+              if (age != null)
+                Expanded(child: Text(age, style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary, fontWeight: FontWeight.w600))),
+            ]),
+          ),
+        Row(children: [
+          Text(_payText(j), style: AppTheme.display(size: 32)),
+          if (tip > 0)
+            Container(
+              margin: const EdgeInsets.only(left: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(12)),
+              child: Text('${tr(context, 'incl. tip', 'sis. tipin')} ${euro(context, tip)}',
+                  style: const TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w800, fontSize: 12.5)),
             ),
+          const Spacer(),
+          if (items != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(12)),
+              child: Text('$items ${tr(context, 'item(s)', 'tuote(tta)')}', style: const TextStyle(color: Color(0xFF8A5A00), fontWeight: FontWeight.w800, fontSize: 12.5)),
+            ),
+        ]),
+        Text(tr(context, 'Your pay for this job', 'Palkkiosi tästä keikasta'), style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
+        _payToggle('job-$id', j, showWaiting: false),
+        const SizedBox(height: 4),
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Container(width: 12, height: 12, decoration: const BoxDecoration(color: AppTheme.primary, shape: BoxShape.circle)),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('${tr(context, 'Pick up', 'Nouto')}: ${s['name'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+              if (s['address'] != null) Text('${s['address']}', style: const TextStyle(color: AppTheme.textSecondary)),
+            ]),
+          ),
+        ]),
+        const SizedBox(height: 12),
+        Row(children: [
+          _distanceTile(Icons.storefront_outlined, tr(context, 'You → store', 'Sinä → kauppa'), toStore ?? '–'),
+          const SizedBox(width: 8),
+          _distanceTile(Icons.location_on_outlined, tr(context, 'Store → drop-off area', 'Kauppa → toimitusalue'), drop == null ? '–' : '~$drop'),
+        ]),
+        const SizedBox(height: 8),
+        Text(
+          toStore == null
+              ? tr(context, 'Distance to the store appears once your location is found. The exact address is shown after you accept.',
+                  'Etäisyys kauppaan näkyy, kun sijaintisi löytyy. Tarkka osoite näytetään hyväksynnän jälkeen.')
+              : tr(context, 'Straight-line distances. The exact address is shown after you accept.', 'Linnuntie-etäisyydet. Tarkka osoite näytetään hyväksynnän jälkeen.'),
+          style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+        ),
+        const SizedBox(height: 12),
+        _bigButton(
+          onPressed: _acceptingId == null ? () => _accept(j) : null,
+          busy: _acceptingId == id,
+          label: Text(tr(context, 'Accept job', 'Ota keikka'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+        ),
+      ]),
     );
   }
 
@@ -660,156 +1204,323 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
       );
 
   /// Offline couriers get no jobs: make going online the obvious next step.
-  Widget _goOnlinePrompt() => Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(32),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Container(
-              width: 96,
-              height: 96,
-              decoration: const BoxDecoration(color: AppTheme.sunshineLight, shape: BoxShape.circle),
-              child: const Icon(Icons.pedal_bike_rounded, size: 46, color: AppTheme.primary),
-            ),
-            const SizedBox(height: 18),
-            Text(tr(context, 'You are offline', 'Olet poissa linjoilta'), style: AppTheme.display(size: 24), textAlign: TextAlign.center),
-            const SizedBox(height: 8),
-            Text(
-              tr(context, 'Go online to get job offers near you. Your location is shared only while you are online.',
-                  'Mene linjoille saadaksesi keikkatarjouksia lähelläsi. Sijaintisi jaetaan vain, kun olet linjoilla.'),
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: AppTheme.textSecondary, height: 1.45),
-            ),
-            const SizedBox(height: 22),
-            SizedBox(
-              width: double.infinity,
-              height: 58,
-              child: FilledButton.icon(
-                onPressed: _switching ? null : _toggleOnline,
-                icon: _switching
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
-                    : const Icon(Icons.power_settings_new_rounded),
-                label: Text(tr(context, 'Go online', 'Mene linjoille'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
-              ),
-            ),
-          ]),
+  Widget _goOnlinePrompt() => StateMessage(
+        icon: Icons.pedal_bike_rounded,
+        title: tr(context, 'You are offline', 'Olet poissa linjoilta'),
+        text: tr(context, 'Go online to get job offers near you. Your location is shared only while you are online.',
+            'Mene linjoille saadaksesi keikkatarjouksia lähelläsi. Sijaintisi jaetaan vain, kun olet linjoilla.'),
+        action: SizedBox(
+          width: double.infinity,
+          height: 58,
+          child: FilledButton.icon(
+            onPressed: _switching ? null : _onSwitch,
+            icon: _switching
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                : const Icon(Icons.power_settings_new_rounded),
+            label: Text(tr(context, 'Go online', 'Mene linjoille'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+          ),
         ),
       );
 
+  // ── Delivery ────────────────────────────────────────────────────────────
+
+  /// 0 go to shop · 1 at the shop · 2 picked up · 3 deliver · 4 done
+  int _stage(Map<String, dynamic> o) {
+    if (o['status'] == 'DELIVERED') return 4;
+    if (o['status'] == 'SHIPPED') return 3;
+    if (o['courierArrivedAt'] != null) return 1;
+    return 0;
+  }
+
+  Widget _stepIndicator(int current) {
+    final labels = [
+      tr(context, 'Go to shop', 'Kauppaan'),
+      tr(context, 'At the shop', 'Kaupalla'),
+      tr(context, 'Picked up', 'Noudettu'),
+      tr(context, 'Deliver', 'Toimita'),
+      tr(context, 'Done', 'Valmis'),
+    ];
+    Widget bar(bool on, {bool hidden = false}) =>
+        Expanded(child: Container(height: 3, color: hidden ? Colors.transparent : (on ? AppTheme.success : AppTheme.divider)));
+    return Semantics(
+      label: tr(context, 'Step ${current + 1} of 5: ${labels[current]}', 'Vaihe ${current + 1}/5: ${labels[current]}'),
+      child: ExcludeSemantics(
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(4, 14, 4, 12),
+          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(AppTheme.radiusMd), border: Border.all(color: AppTheme.divider)),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            for (var i = 0; i < labels.length; i++)
+              Expanded(
+                child: Column(children: [
+                  Row(children: [
+                    bar(i <= current, hidden: i == 0),
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 250),
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: i < current ? AppTheme.success : (i == current ? AppTheme.primary : AppTheme.divider),
+                      ),
+                      child: Center(
+                        child: i < current
+                            ? const Icon(Icons.check_rounded, size: 17, color: Colors.white)
+                            : Text('${i + 1}', style: TextStyle(color: i == current ? Colors.white : AppTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.w800)),
+                      ),
+                    ),
+                    bar(i < current, hidden: i == labels.length - 1),
+                  ]),
+                  const SizedBox(height: 6),
+                  Text(
+                    labels[i],
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      height: 1.15,
+                      fontWeight: i == current ? FontWeight.w800 : FontWeight.w600,
+                      color: i == current ? AppTheme.textPrimary : AppTheme.textSecondary,
+                    ),
+                  ),
+                ]),
+              ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _card(List<Widget> children) => Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(top: 12),
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(AppTheme.radiusLg - 2),
+          border: Border.all(color: AppTheme.primary, width: 2),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
+      );
+
   Widget _deliveryTab(Map<String, dynamic>? o) {
-    if (o == null) return _empty(Icons.inventory_2_outlined, tr(context, 'No delivery in progress.', 'Ei toimitusta käynnissä.'));
-    final s = (o['store'] as Map?) ?? {};
-    final pickedUp = o['status'] == 'SHIPPED';
-    final storeReady = o['status'] == 'PROCESSING';
-    final items = (o['items'] as List?) ?? [];
-    final customer = (o['user']?['name'] ?? '').toString().split(' ').first;
-
-    Widget step(int n, String title, bool done, bool current, List<Widget> children) => Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(AppTheme.radiusLg - 2),
-            border: Border.all(color: current ? AppTheme.primary : AppTheme.divider, width: current ? 2 : 1),
-          ),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              CircleAvatar(radius: 13, backgroundColor: done ? AppTheme.success : (current ? AppTheme.primary : AppTheme.divider),
-                  child: done ? const Icon(Icons.check, size: 16, color: Colors.white) : Text('$n', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700))),
-              const SizedBox(width: 10),
-              Expanded(child: Text(title, style: AppTheme.display(size: 18))),
-            ]),
-            if (current) ...[const SizedBox(height: 10), ...children],
-          ]),
-        );
-
+    if (_mineLoad == _Load.loading) return const DeliverySkeleton();
+    if (_mineLoad == _Load.error) {
+      return RefreshIndicator(
+        onRefresh: () => _loadMine(manual: true),
+        child: _loadError(tr(context, 'Could not load your delivery', 'Toimitusta ei voitu ladata'), _mineError, () {
+          setState(() => _mineLoad = _Load.loading);
+          _loadMine();
+        }),
+      );
+    }
+    if (o == null) {
+      return RefreshIndicator(
+        onRefresh: () => _loadMine(manual: true),
+        child: StateMessage(
+          icon: Icons.inventory_2_outlined,
+          text: tr(context, 'No delivery in progress. Jobs you accept appear here, step by step.', 'Ei toimitusta käynnissä. Hyväksymäsi keikat näkyvät täällä vaihe vaiheelta.'),
+          action: _online
+              ? OutlinedButton.icon(
+                  onPressed: () => _tabs.animateTo(0),
+                  icon: const Icon(Icons.work_outline_rounded),
+                  label: Text(tr(context, 'See jobs', 'Katso keikat')),
+                )
+              : null,
+        ),
+      );
+    }
+    final stage = _stage(o);
     return RefreshIndicator(
-      onRefresh: _loadMine,
-      child: ListView(padding: const EdgeInsets.all(16), children: [
-        Text('${tr(context, 'Order', 'Tilaus')} #${o['id']} · ${tr(context, 'your pay', 'palkkiosi')} ${_payText(o)}', style: const TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
+      onRefresh: () => _loadMine(manual: true),
+      child: ListView(physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.fromLTRB(16, 12, 16, 24), children: [
+        Text('${tr(context, 'Order', 'Tilaus')} #${o['id']} · ${tr(context, 'your pay', 'palkkiosi')} ${_payText(o)}',
+            style: const TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
         _payToggle('active-${o['id']}', o, showWaiting: true),
-        const SizedBox(height: 6),
-        step(1, '${tr(context, 'Pick up at', 'Nouda')} ${s['name'] ?? ''}', pickedUp, !pickedUp, [
-          if (s['address'] != null) Text(s['address']),
-          const SizedBox(height: 6),
-          Text(storeReady ? tr(context, 'The store says the order is packed and ready.', 'Kauppa ilmoittaa tilauksen olevan valmis.') : tr(context, 'The store is still packing.', 'Kauppa pakkaa vielä.'),
-              style: TextStyle(color: storeReady ? AppTheme.success : AppTheme.textSecondary, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 6),
-          for (final i in items) Text('${i['quantity']}× ${i['product']?['name'] ?? ''}'),
-          const SizedBox(height: 12),
-          Row(children: [
-            Expanded(child: OutlinedButton.icon(
-              onPressed: () => _navigate((s['latitude'] as num?)?.toDouble(), (s['longitude'] as num?)?.toDouble(), s['address']),
-              icon: const Icon(Icons.navigation_outlined),
-              label: Text(tr(context, 'Navigate', 'Navigoi')),
-            )),
-            if (s['phone'] != null) ...[
-              const SizedBox(width: 8),
-              Expanded(child: OutlinedButton.icon(
-                onPressed: () => launchUrl(Uri.parse('tel:${s['phone']}')),
-                icon: const Icon(Icons.call_outlined),
-                label: Text(tr(context, 'Call store', 'Soita kauppaan')),
-              )),
-            ],
-          ]),
-          const SizedBox(height: 10),
-          ..._arrivalSection(o),
-          SizedBox(width: double.infinity, height: 56, child: FilledButton(onPressed: () => _pickedUp(o), child: Text(tr(context, 'I have the order', 'Tilaus on mukanani')))),
-        ]),
-        step(2, '${tr(context, 'Deliver to', 'Toimita')} ${customer.isEmpty ? tr(context, 'the customer', 'asiakkaalle') : customer}', false, pickedUp, [
-          if (o['deliveryAddress'] != null) Text(o['deliveryAddress'], style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-          if ((o['notes'] ?? '').toString().isNotEmpty)
-            Container(
-              width: double.infinity,
-              margin: const EdgeInsets.only(top: 8),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(14)),
-              child: Text('“${o['notes']}”', style: const TextStyle(color: Color(0xFF6A4500), height: 1.4)),
-            ),
-          const SizedBox(height: 12),
-          Row(children: [
-            Expanded(child: OutlinedButton.icon(
-              onPressed: () => _navigate((o['deliveryLat'] as num?)?.toDouble(), (o['deliveryLng'] as num?)?.toDouble(), o['deliveryAddress']),
-              icon: const Icon(Icons.navigation_outlined),
-              label: Text(tr(context, 'Navigate', 'Navigoi')),
-            )),
-            const SizedBox(width: 8),
-            Expanded(child: OutlinedButton.icon(onPressed: () => _openChat(o), icon: const Icon(Icons.chat_bubble_outline_rounded), label: Text(tr(context, 'Chat', 'Chat')))),
-          ]),
-          const SizedBox(height: 10),
-          SizedBox(width: double.infinity, height: 56, child: FilledButton(onPressed: () => _complete(o), child: Text(tr(context, 'Complete delivery', 'Merkitse toimitetuksi')))),
-        ]),
+        const SizedBox(height: 4),
+        _stepIndicator(stage),
+        if (stage < 3) _pickupCard(o, stage) else _dropOffCard(o),
+        const SizedBox(height: 12),
         Text(tr(context, 'Keep the app open or in the background while delivering so the customer can follow you.', 'Pidä sovellus auki tai taustalla toimituksen aikana, jotta asiakas voi seurata sinua.'),
             style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
       ]),
     );
   }
 
-  /// "I'm at the shop": records the arrival time on the server, so waiting beyond the free minutes
-  /// is paid at pickup. Shown only when the server supports it (the order carries `courierArrivedAt`).
+  /// Go to the shop, check in, pick up.
+  Widget _pickupCard(Map<String, dynamic> o, int stage) {
+    final s = (o['store'] as Map?) ?? {};
+    final storeReady = o['status'] == 'PROCESSING';
+    final items = (o['items'] as List?) ?? [];
+    final arrivalSupported = o.containsKey('courierArrivedAt');
+    final arrived = stage == 1;
+    final storeName = '${s['name'] ?? ''}';
+    return _card([
+      Text(arrived ? tr(context, 'At $storeName', 'Kaupalla: $storeName') : tr(context, 'Go to $storeName', 'Kauppaan: $storeName'), style: AppTheme.display(size: 22)),
+      if (s['address'] != null) ...[
+        const SizedBox(height: 4),
+        Text('${s['address']}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+      ],
+      const SizedBox(height: 8),
+      Row(children: [
+        Icon(storeReady ? Icons.check_circle_rounded : Icons.hourglass_top_rounded, size: 18, color: storeReady ? AppTheme.success : AppTheme.textSecondary),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            storeReady ? tr(context, 'The store says the order is packed and ready.', 'Kauppa ilmoittaa tilauksen olevan valmis.') : tr(context, 'The store is still packing.', 'Kauppa pakkaa vielä.'),
+            style: TextStyle(color: storeReady ? AppTheme.success : AppTheme.textSecondary, fontWeight: FontWeight.w700),
+          ),
+        ),
+      ]),
+      if (items.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        for (final i in items.whereType<Map>()) Text('${i['quantity']}× ${i['product']?['name'] ?? ''}', style: const TextStyle(height: 1.4)),
+      ],
+      const SizedBox(height: 14),
+      Row(children: [
+        Expanded(
+          child: _bigButton(
+            outlined: true,
+            onPressed: () => _navigate((s['latitude'] as num?)?.toDouble(), (s['longitude'] as num?)?.toDouble(), s['address']?.toString()),
+            icon: const Icon(Icons.navigation_outlined),
+            label: Text(tr(context, 'Navigate', 'Navigoi')),
+          ),
+        ),
+        if (s['phone'] != null) ...[
+          const SizedBox(width: 8),
+          Expanded(
+            child: _bigButton(
+              outlined: true,
+              onPressed: () => _call('${s['phone']}'),
+              icon: const Icon(Icons.call_outlined),
+              label: Text(tr(context, 'Call store', 'Soita kauppaan')),
+            ),
+          ),
+        ],
+      ]),
+      const SizedBox(height: 12),
+      ..._arrivalSection(o),
+      if (arrivalSupported && !arrived) ...[
+        _bigButton(
+          onPressed: () => _arrivedAtStore(o),
+          busy: _arriving,
+          icon: const Icon(Icons.storefront_rounded),
+          label: Text(tr(context, "I'm at the shop", 'Olen kaupalla'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+        ),
+        const SizedBox(height: 10),
+        _bigButton(
+          outlined: true,
+          onPressed: () => _pickedUp(o),
+          busy: _pickingUp,
+          icon: const Icon(Icons.shopping_bag_outlined),
+          label: Text(tr(context, 'I have the order', 'Tilaus on mukanani')),
+        ),
+      ] else
+        _bigButton(
+          onPressed: () => _pickedUp(o),
+          busy: _pickingUp,
+          icon: const Icon(Icons.shopping_bag_rounded),
+          label: Text(tr(context, 'I have the order', 'Tilaus on mukanani'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+        ),
+    ]);
+  }
+
+  /// Ride to the customer and hand over.
+  Widget _dropOffCard(Map<String, dynamic> o) {
+    final customer = (o['user']?['name'] ?? '').toString().split(' ').first;
+    final note = (o['notes'] ?? '').toString().trim();
+    final address = o['deliveryAddress']?.toString();
+    return _card([
+      Text('${tr(context, 'Deliver to', 'Toimita:')} ${customer.isEmpty ? tr(context, 'the customer', 'asiakkaalle') : customer}', style: AppTheme.display(size: 22)),
+      if (address != null) ...[
+        const SizedBox(height: 6),
+        Text(address, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, height: 1.3)),
+      ],
+      if (note.isNotEmpty)
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(top: 12),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppTheme.sunshineLight,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppTheme.sunshine, width: 1.5),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.sticky_note_2_outlined, size: 18, color: Color(0xFF6A4500)),
+              const SizedBox(width: 6),
+              Text(tr(context, 'Delivery note from the customer', 'Asiakkaan toimitusohje'),
+                  style: const TextStyle(color: Color(0xFF6A4500), fontWeight: FontWeight.w800, fontSize: 13)),
+            ]),
+            const SizedBox(height: 6),
+            Text(note, style: const TextStyle(color: Color(0xFF4A3000), fontSize: 16, fontWeight: FontWeight.w600, height: 1.4)),
+          ]),
+        ),
+      const SizedBox(height: 14),
+      Row(children: [
+        Expanded(
+          child: _bigButton(
+            outlined: true,
+            onPressed: () => _navigate((o['deliveryLat'] as num?)?.toDouble(), (o['deliveryLng'] as num?)?.toDouble(), address),
+            icon: const Icon(Icons.navigation_outlined),
+            label: Text(tr(context, 'Navigate', 'Navigoi')),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _bigButton(
+            outlined: true,
+            onPressed: () => _openChat(o),
+            icon: const Icon(Icons.chat_bubble_outline_rounded),
+            label: Text(tr(context, 'Chat', 'Chat')),
+          ),
+        ),
+      ]),
+      const SizedBox(height: 12),
+      _bigButton(
+        onPressed: () => _complete(o),
+        busy: _completing,
+        icon: const Icon(Icons.task_alt_rounded),
+        label: Text(tr(context, 'Hand over', 'Luovuta'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+      ),
+    ]);
+  }
+
+  /// Waiting at the shop: paid only when the shop isn't ready after the free minutes, and added
+  /// at pickup. Shown only when the server supports check-in (the order carries `courierArrivedAt`).
   List<Widget> _arrivalSection(Map<String, dynamic> o) {
     if (!o.containsKey('courierArrivedAt')) return const [];
     final pay = _payOf(o);
     final free = _freeWaitMinutes(pay);
     final arrived = DateTime.tryParse('${o['courierArrivedAt'] ?? ''}')?.toLocal();
-    final rule = free != null
-        ? tr(context, 'Waiting at the shop beyond $free free minutes is paid, and added to your pay when you pick up the order.',
-            'Kaupassa odottaminen $free ilmaisen minuutin jälkeen maksetaan, ja se lisätään palkkioosi, kun noudat tilauksen.')
-        : tr(context, 'Waiting at the shop beyond the free minutes is paid, and added to your pay when you pick up the order.',
-            'Kaupassa odottaminen ilmaisten minuuttien jälkeen maksetaan, ja se lisätään palkkioosi, kun noudat tilauksen.');
+    final String rule;
+    if (!_waitingPaid(pay)) {
+      rule = _localized(pay?['waitPolicy']) ?? tr(context, 'Waiting at the shop is not paid separately.', 'Odotusta kaupassa ei makseta erikseen.');
+    } else if (free != null) {
+      rule = tr(context,
+          'If the shop isn\'t ready when you get there, waiting after the first $free minutes is paid and added at pickup. It stops counting when the shop marks the order ready.',
+          'Jos tilaus ei ole valmis, kun saavut, odotus ensimmäisten $free minuutin jälkeen maksetaan ja lisätään noudettaessa. Laskenta päättyy, kun kauppa merkitsee tilauksen valmiiksi.');
+    } else {
+      rule = tr(context,
+          'If the shop isn\'t ready when you get there, waiting after the free minutes is paid and added at pickup. It stops counting when the shop marks the order ready.',
+          'Jos tilaus ei ole valmis, kun saavut, odotus ilmaisten minuuttien jälkeen maksetaan ja lisätään noudettaessa. Laskenta päättyy, kun kauppa merkitsee tilauksen valmiiksi.');
+    }
     if (arrived != null) {
       final hhmm = '${arrived.hour.toString().padLeft(2, '0')}.${arrived.minute.toString().padLeft(2, '0')}';
       return [
         Container(
           width: double.infinity,
-          margin: const EdgeInsets.only(bottom: 10),
+          margin: const EdgeInsets.only(bottom: 12),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(14)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               const Icon(Icons.storefront_rounded, size: 18, color: Color(0xFF6A4500)),
               const SizedBox(width: 6),
-              Expanded(child: Text(tr(context, 'Arrival at the shop recorded at $hhmm', 'Saapuminen kauppaan kirjattu klo $hhmm'),
-                  style: const TextStyle(color: Color(0xFF6A4500), fontWeight: FontWeight.w700))),
+              Expanded(
+                child: Text(tr(context, 'Arrival at the shop recorded at $hhmm', 'Saapuminen kauppaan kirjattu klo $hhmm'),
+                    style: const TextStyle(color: Color(0xFF6A4500), fontWeight: FontWeight.w700)),
+              ),
             ]),
             const SizedBox(height: 4),
             Text(rule, style: const TextStyle(color: Color(0xFF6A4500), fontSize: 12.5, height: 1.4)),
@@ -818,24 +1529,26 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
       ];
     }
     return [
-      SizedBox(
-        width: double.infinity,
-        child: OutlinedButton.icon(
-          onPressed: _arriving ? null : () => _arrivedAtStore(o),
-          icon: _arriving
-              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.storefront_outlined),
-          label: Text(tr(context, "I'm at the shop", 'Olen kaupalla')),
-        ),
-      ),
       Padding(
-        padding: const EdgeInsets.fromLTRB(4, 6, 4, 10),
+        padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
         child: Text(rule, style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary, height: 1.4)),
       ),
     ];
   }
 
+  // ── Earnings ────────────────────────────────────────────────────────────
+
   Widget _earningsTab() {
+    if (_earnLoad == _Load.loading || (_earnLoad == _Load.ready && _mineLoad == _Load.loading)) return const EarningsSkeleton();
+    if (_earnLoad == _Load.error) {
+      return RefreshIndicator(
+        onRefresh: () => _loadEarnings(manual: true),
+        child: _loadError(tr(context, 'Could not load your earnings', 'Ansioita ei voitu ladata'), _earnError, () {
+          setState(() => _earnLoad = _Load.loading);
+          _loadEarnings();
+        }),
+      );
+    }
     final summary = (_earnings?['summary'] as Map?) ?? {};
     final delivered = _mine.where((o) => o['status'] == 'DELIVERED').toList();
     final now = DateTime.now();
@@ -868,8 +1581,8 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
         );
     final waitingForAccount = asInt(summary['waitingForAccountCents']) ?? 0;
     return RefreshIndicator(
-      onRefresh: () async => Future.wait([_loadEarnings(), _loadMine()]),
-      child: ListView(padding: const EdgeInsets.all(16), children: [
+      onRefresh: () async => Future.wait([_loadEarnings(manual: true), _loadMine(manual: true)]),
+      child: ListView(physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.all(16), children: [
         Row(children: [
           stat(tr(context, 'Today', 'Tänään'), euro(context, todayCents),
               sub: todayTips > 0 ? '${tr(context, 'incl. tips', 'sis. tipit')} ${euro(context, todayTips)}' : null, highlight: true),
@@ -932,11 +1645,30 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
         const SizedBox(height: 12),
         Container(
           decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.divider)),
-          child: const Column(children: [GoogleLinkTile(), Divider(height: 1), DeleteAccountTile()]),
+          child: Column(children: [
+            ListTile(
+              leading: const Icon(Icons.support_agent_rounded),
+              title: Text(tr(context, 'Help and contact', 'Apua ja yhteydenotto')),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => _openHelp(),
+            ),
+            const Divider(height: 1),
+            const GoogleLinkTile(),
+            const Divider(height: 1),
+            const DeleteAccountTile(),
+          ]),
         ),
         const SizedBox(height: 16),
         Text(tr(context, 'Recent deliveries', 'Viimeisimmät toimitukset'), style: AppTheme.display(size: 18)),
-        if (delivered.isEmpty)
+        if (_mineLoad == _Load.error)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(children: [
+              Expanded(child: Text(_mineError ?? tr(context, 'Could not load your deliveries.', 'Toimituksia ei voitu ladata.'), style: const TextStyle(color: AppTheme.textSecondary))),
+              TextButton(onPressed: () => _loadMine(manual: true), child: Text(tr(context, 'Try again', 'Yritä uudelleen'))),
+            ]),
+          )
+        else if (delivered.isEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 8),
             child: Text(tr(context, 'No deliveries yet.', 'Ei vielä toimituksia.'), style: const TextStyle(color: AppTheme.textSecondary)),
@@ -976,20 +1708,4 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     final d = DateTime.tryParse('$iso')?.toLocal();
     return d == null ? '' : '${d.day}.${d.month}. ${d.hour.toString().padLeft(2, '0')}.${d.minute.toString().padLeft(2, '0')}';
   }
-
-  Widget _empty(IconData icon, String text) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(40),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Container(
-              width: 88,
-              height: 88,
-              decoration: const BoxDecoration(color: AppTheme.primaryLight, shape: BoxShape.circle),
-              child: Icon(icon, size: 40, color: AppTheme.primary),
-            ),
-            const SizedBox(height: 16),
-            Text(text, textAlign: TextAlign.center, style: const TextStyle(color: AppTheme.textSecondary, height: 1.4)),
-          ]),
-        ),
-      );
 }

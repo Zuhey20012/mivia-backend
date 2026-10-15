@@ -30,6 +30,9 @@ export function mapCategory(...hints: (string | null | undefined)[]): string {
 }
 
 /** "12,90" / "12.90" / "12" / "12,90 €" → 1290 cents; null when it is not a plain euro amount. */
+/** Highest price an import accepts (100 000 €). */
+export const MAX_PRICE_CENTS = 10_000_000;
+
 export function parseEuroCents(raw: unknown): number | null {
   if (typeof raw === "number") return Number.isFinite(raw) && raw > 0 ? Math.round(raw * 100) : null;
   if (typeof raw !== "string") return null;

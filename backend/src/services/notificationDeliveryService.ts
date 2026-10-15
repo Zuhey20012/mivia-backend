@@ -173,6 +173,8 @@ const STATUS_TEXT: Record<string, { fi: string; en: string }> = {
   CONFIRMED: { fi: "Myyjä vahvisti tilauksesi.", en: "The seller confirmed your order." },
   SHIPPED:   { fi: "Lähetti on noutanut tilauksesi ja on matkalla.", en: "Your courier has picked up the order and is on the way." },
   DELIVERED: { fi: "Tilauksesi on toimitettu.", en: "Your order has been delivered." },
+  READY_FOR_PICKUP: { fi: "Tilauksesi on noudettavissa myymälästä. Näytä noutokoodisi sovelluksesta.", en: "Your order is ready for pickup at the store. Show your pickup code from the app." },
+  COLLECTED: { fi: "Olet noutanut tilauksesi.", en: "You have collected your order." },
   CANCELLED: { fi: "Tilauksesi on peruttu. Mahdollinen maksu palautetaan.", en: "Your order was cancelled. Any payment will be refunded." },
 };
 

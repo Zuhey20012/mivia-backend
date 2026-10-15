@@ -9,6 +9,7 @@ import '../config/theme.dart';
 import '../core/api_client.dart';
 import '../core/media_upload.dart';
 import '../core/strings.dart';
+import '../widgets/loading_states.dart';
 
 /// Categories shared with the customer app's home screen and catalogue.
 const productCategories = ['Clothing', 'Shoes', 'Bags', 'Accessories', 'Jewelry', 'Beauty', 'Home', 'Other'];
@@ -436,7 +437,8 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
               fit: StackFit.expand,
               children: [
                 Container(color: AppTheme.primaryLight),
-                if (p.url != null) CachedNetworkImage(imageUrl: p.url!, fit: BoxFit.cover),
+                if (p.url != null)
+                  CachedNetworkImage(imageUrl: p.url!, fit: BoxFit.cover, placeholder: (_, __) => const Shimmering(child: SkeletonBox(height: double.infinity, radius: 0))),
                 if (p.url == null && p.error == null)
                   Center(child: CircularProgressIndicator(value: p.progress > 0 ? p.progress : null, color: AppTheme.primary)),
                 if (p.error != null)
@@ -447,9 +449,16 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
                 Positioned(
                   top: 2,
                   right: 2,
-                  child: GestureDetector(
-                    onTap: () => setState(() => _photos.remove(p)),
-                    child: const CircleAvatar(radius: 12, backgroundColor: Colors.black54, child: Icon(Icons.close_rounded, size: 14, color: Colors.white)),
+                  child: Semantics(
+                    button: true,
+                    label: tr(context, 'Remove photo', 'Poista kuva'),
+                    child: GestureDetector(
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        setState(() => _photos.remove(p));
+                      },
+                      child: const CircleAvatar(radius: 12, backgroundColor: Colors.black54, child: Icon(Icons.close_rounded, size: 14, color: Colors.white)),
+                    ),
                   ),
                 ),
               ],
@@ -492,9 +501,13 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
               Positioned(
                 top: 2,
                 right: 2,
-                child: GestureDetector(
-                  onTap: () => _removeVideo(v),
-                  child: const CircleAvatar(radius: 12, backgroundColor: Colors.black54, child: Icon(Icons.close_rounded, size: 14, color: Colors.white)),
+                child: Semantics(
+                  button: true,
+                  label: tr(context, 'Remove video', 'Poista video'),
+                  child: GestureDetector(
+                    onTap: () => _removeVideo(v),
+                    child: const CircleAvatar(radius: 12, backgroundColor: Colors.black54, child: Icon(Icons.close_rounded, size: 14, color: Colors.white)),
+                  ),
                 ),
               ),
             ],
@@ -540,9 +553,17 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
               children: [
                 Text(tr(context, 'In stock', 'Varastossa'), style: const TextStyle(fontSize: 10.5, color: AppTheme.textSecondary)),
                 Row(children: [
-                  InkWell(onTap: o.stock > 0 ? () => setState(() => o.stock--) : null, child: const Icon(Icons.remove_circle_outline, size: 22)),
+                  Semantics(
+                    button: true,
+                    label: tr(context, 'One less', 'Yksi vähemmän'),
+                    child: InkWell(onTap: o.stock > 0 ? () => setState(() => o.stock--) : null, child: const Icon(Icons.remove_circle_outline, size: 22)),
+                  ),
                   Padding(padding: const EdgeInsets.symmetric(horizontal: 6), child: Text('${o.stock}', style: const TextStyle(fontWeight: FontWeight.w700))),
-                  InkWell(onTap: () => setState(() => o.stock++), child: const Icon(Icons.add_circle_outline, size: 22)),
+                  Semantics(
+                    button: true,
+                    label: tr(context, 'One more', 'Yksi lisää'),
+                    child: InkWell(onTap: () => setState(() => o.stock++), child: const Icon(Icons.add_circle_outline, size: 22)),
+                  ),
                 ]),
               ],
             ),

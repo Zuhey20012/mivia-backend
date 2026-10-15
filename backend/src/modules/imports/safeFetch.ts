@@ -1,4 +1,6 @@
-import dns from "dns/promises";
+import { promises as dnsPromises, LookupAddress } from "dns";
+import http from "http";
+import https from "https";
 import net from "net";
 import { env } from "../../config/env";
 import { ApiError } from "../../lib/errors";
@@ -7,11 +9,15 @@ import { ApiError } from "../../lib/errors";
  * Outbound requests to a shop's public feed (SSRF guard): plain https hostnames only (no IPs, no
  * localhost or internal names, no ports, no credentials), every resolved address must be public,
  * redirects are followed by hand and checked the same way, with timeouts and a size cap.
+ * The address check runs again inside the connection itself (the socket's `lookup`), so a name that
+ * resolves differently the second time (DNS rebinding) can never reach an internal address.
+ * Names are resolved with c-ares (dns Resolver) with a short timeout instead of the blocking libuv pool.
  * IMPORT_ALLOW_HOSTS (test only, ignored in production) lets the e2e suite reach its local mock.
  */
 
 const HOSTNAME = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 const INTERNAL_SUFFIXES = [".localhost", ".local", ".internal", ".lan", ".home.arpa", ".arpa", ".test", ".invalid", ".example", ".onion"];
+const DNS_TIMEOUT_MS = 3000;
 
 const PRIVATE = new net.BlockList();
 for (const [addr, prefix] of [
@@ -19,16 +25,23 @@ for (const [addr, prefix] of [
   ["192.0.0.0", 24], ["192.0.2.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["198.51.100.0", 24],
   ["203.0.113.0", 24], ["224.0.0.0", 4], ["240.0.0.0", 4],
 ] as [string, number][]) PRIVATE.addSubnet(addr, prefix, "ipv4");
-for (const [addr, prefix] of [["::", 128], ["::1", 128], ["fc00::", 7], ["fe80::", 10], ["ff00::", 8], ["64:ff9b::", 96], ["2001:db8::", 32]] as [string, number][]) {
+for (const [addr, prefix] of [
+  ["::", 96], // unspecified, loopback and IPv4-compatible addresses
+  ["fc00::", 7], ["fe80::", 10], ["ff00::", 8],
+  ["64:ff9b::", 96], ["64:ff9b:1::", 48], // NAT64
+  ["2002::", 16], // 6to4 (embeds any IPv4 address)
+  ["2001:db8::", 32],
+] as [string, number][]) {
   PRIVATE.addSubnet(addr, prefix, "ipv6");
 }
 
-function isPrivateAddress(address: string) {
+export function isPrivateAddress(address: string) {
   const v = net.isIP(address);
   if (v === 4) return PRIVATE.check(address, "ipv4");
   if (v === 6) {
     const mapped = address.toLowerCase().match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
     if (mapped) return PRIVATE.check(mapped[1], "ipv4");
+    if (/^::ffff:/i.test(address)) return true; // IPv4-mapped in hex form
     return PRIVATE.check(address, "ipv6");
   }
   return true;
@@ -63,18 +76,85 @@ export function parseShopUrl(input: string): URL {
   return new URL(u.origin);
 }
 
+/** All A and AAAA answers for a name, with a short timeout. Empty when the name does not exist. */
+async function resolveAll(hostname: string): Promise<LookupAddress[]> {
+  const resolver = new dnsPromises.Resolver({ timeout: DNS_TIMEOUT_MS, tries: 2 });
+  const [v4, v6] = await Promise.allSettled([resolver.resolve4(hostname), resolver.resolve6(hostname)]);
+  const out: LookupAddress[] = [];
+  if (v4.status === "fulfilled") out.push(...v4.value.map((address) => ({ address, family: 4 })));
+  if (v6.status === "fulfilled") out.push(...v6.value.map((address) => ({ address, family: 6 })));
+  return out;
+}
+
 /** Every address the name resolves to must be public (no internal network, no cloud metadata). */
 export async function assertPublicHost(u: URL) {
   if (allowListed(u)) return;
-  let addresses: { address: string }[];
-  try {
-    addresses = await dns.lookup(u.hostname, { all: true, verbatim: true });
-  } catch {
-    throw new ApiError("That shop address could not be found", 400);
-  }
-  if (!addresses.length || addresses.some((a) => isPrivateAddress(a.address))) {
-    throw new ApiError("That shop address is not a public website", 400);
-  }
+  const addresses = await resolveAll(u.hostname).catch(() => [] as LookupAddress[]);
+  if (!addresses.length) throw new ApiError("That shop address could not be found", 400);
+  if (addresses.some((a) => isPrivateAddress(a.address))) throw new ApiError("That shop address is not a public website", 400);
+}
+
+/** The socket's own lookup: resolves again and refuses private answers at connection time. */
+function guardedLookup(hostname: string, options: { all?: boolean }, callback: (...args: any[]) => void) {
+  resolveAll(hostname).then((addresses) => {
+    if (!addresses.length) return callback(Object.assign(new Error(`getaddrinfo ENOTFOUND ${hostname}`), { code: "ENOTFOUND" }));
+    if (addresses.some((a) => isPrivateAddress(a.address))) {
+      return callback(Object.assign(new Error("Refusing to connect to a non-public address"), { code: "EPRIVATE" }));
+    }
+    if (options?.all) return callback(null, addresses);
+    callback(null, addresses[0].address, addresses[0].family);
+  }, (err) => callback(err));
+}
+
+type Answer = { status: number; location: string | null; body: Buffer | null };
+
+/** One GET without following redirects. Public hosts go through the guarded lookup. */
+function getOnce(url: URL, opts: { maxBytes: number; timeoutMs: number }): Promise<Answer> {
+  return new Promise((resolve, reject) => {
+    const client = url.protocol === "https:" ? https : http;
+    const req = client.request(url, {
+      method: "GET",
+      headers: { Accept: "application/json", "User-Agent": "MalvoyaCatalogueImport/1.0" },
+      ...(allowListed(url) ? {} : { lookup: guardedLookup as any }),
+      timeout: opts.timeoutMs,
+    }, (res) => {
+      const status = res.statusCode ?? 0;
+      if (status >= 300 && status < 400) {
+        res.resume();
+        return resolve({ status, location: res.headers.location ?? null, body: null });
+      }
+      if (status < 200 || status >= 300) {
+        res.resume();
+        return resolve({ status, location: null, body: null });
+      }
+      const declared = Number(res.headers["content-length"]);
+      if (declared > opts.maxBytes) {
+        res.destroy();
+        return reject(new ApiError("The product feed is too large", 502));
+      }
+      const chunks: Buffer[] = [];
+      let size = 0;
+      res.on("data", (c: Buffer) => {
+        size += c.length;
+        if (size > opts.maxBytes) {
+          res.destroy();
+          reject(new ApiError("The product feed is too large", 502));
+          return;
+        }
+        chunks.push(c);
+      });
+      res.on("end", () => resolve({ status, location: null, body: Buffer.concat(chunks) }));
+      res.on("error", reject);
+    });
+    // Overall deadline as well as the idle timeout
+    const deadline = setTimeout(() => req.destroy(new Error("timeout")), opts.timeoutMs);
+    req.on("close", () => clearTimeout(deadline));
+    req.on("timeout", () => req.destroy(new Error("timeout")));
+    req.on("error", (e: any) => reject(e?.code === "EPRIVATE"
+      ? new ApiError("That shop address is not a public website", 400)
+      : e instanceof ApiError ? e : new ApiError("The shop could not be reached", 502)));
+    req.end();
+  });
 }
 
 /** GET a JSON document from a public site: manual redirects (max 3, each checked), timeout, size cap. */
@@ -83,40 +163,17 @@ export async function fetchPublicJson(start: URL, opts: { maxBytes: number; time
   for (let hop = 0; hop <= 3; hop++) {
     checkUrlShape(url);
     await assertPublicHost(url);
-    const res = await fetch(url, {
-      redirect: "manual",
-      headers: { Accept: "application/json", "User-Agent": "MalvoyaCatalogueImport/1.0" },
-      signal: AbortSignal.timeout(opts.timeoutMs),
-    });
+    const res = await getOnce(url, opts);
     if (res.status >= 300 && res.status < 400) {
-      const location = res.headers.get("location");
-      await res.body?.cancel().catch(() => {});
-      if (!location) throw new ApiError("The shop sent an invalid redirect", 502);
-      url = new URL(location, url);
+      if (!res.location) throw new ApiError("The shop sent an invalid redirect", 502);
+      url = new URL(res.location, url);
       continue;
     }
-    if (!res.ok) {
-      await res.body?.cancel().catch(() => {});
+    if (!res.body) {
       throw new ApiError(res.status === 404 ? "This shop has no public product feed (products.json)" : `The shop answered with an error (${res.status})`, 502);
     }
-    const declared = Number(res.headers.get("content-length"));
-    if (declared > opts.maxBytes) throw new ApiError("The product feed is too large", 502);
-    const reader = res.body?.getReader();
-    if (!reader) throw new ApiError("The shop sent an empty answer", 502);
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > opts.maxBytes) {
-        await reader.cancel().catch(() => {});
-        throw new ApiError("The product feed is too large", 502);
-      }
-      chunks.push(value);
-    }
     try {
-      return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      return JSON.parse(res.body.toString("utf8"));
     } catch {
       throw new ApiError("The shop's product feed is not valid JSON", 502);
     }

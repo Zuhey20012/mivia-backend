@@ -1,5 +1,7 @@
 import { Request, Response } from "express";
+import { z } from "zod";
 import { prisma } from "../../lib/prisma";
+import { AuthRequest } from "../../middleware/auth";
 import { revokeAllSessions } from "../auth/session";
 import { notifyLaunchAlertsNear } from "../me/launchAlerts";
 
@@ -109,6 +111,7 @@ export async function getVendors(req: Request, res: Response) {
       _count: { select: { products: true, orders: true } },
     },
     orderBy: { createdAt: "desc" },
+    take: 500,
   });
   res.json({ ok: true, stores });
 }
@@ -122,6 +125,51 @@ export async function approveVendor(req: Request, res: Response) {
   // First time live: tell customers who asked to hear when Malvoya opens near them
   const notified = before.isVerified ? 0 : await notifyLaunchAlertsNear(store).catch(() => 0);
   res.json({ ok: true, store, launchAlertsSent: notified });
+}
+
+// Commission is a fraction of the item subtotal with two decimals (0.12 = 12 %), at most 50 %
+const commissionSchema = z.object({
+  commissionRate: z.number().min(0).max(0.5).refine((v) => Math.abs(Math.round(v * 100) - v * 100) < 1e-9, {
+    message: "Use at most two decimals (0.12 = 12 %)",
+  }),
+});
+
+/**
+ * Per-store commission. Applies to orders placed from now on: every order keeps the commission it was
+ * priced with (Order.commissionCents). Each change is written to the admin audit log (who, when, old, new).
+ */
+export async function setVendorCommission(req: AuthRequest, res: Response) {
+  const id = idParam(req);
+  if (!id) return res.status(404).json({ ok: false, error: "Store not found" });
+  const body = commissionSchema.safeParse(req.body);
+  if (!body.success) return res.status(400).json({ ok: false, error: body.error.issues[0]?.message ?? "Commission must be between 0 and 0.5", errors: body.error.flatten() });
+  const before = await prisma.store.findUnique({ where: { id }, select: { commissionRate: true } });
+  if (!before) return res.status(404).json({ ok: false, error: "Store not found" });
+  const rate = Math.round(body.data.commissionRate * 100) / 100;
+  const [store, change] = await prisma.$transaction([
+    prisma.store.update({ where: { id }, data: { commissionRate: rate }, select: { id: true, name: true, commissionRate: true } }),
+    prisma.adminAuditLog.create({
+      data: {
+        adminId: req.user!.id, action: "store.commission", entity: "Store", entityId: id,
+        oldValue: { commissionRate: before.commissionRate }, newValue: { commissionRate: rate },
+      },
+    }),
+  ]);
+  res.json({ ok: true, store, change });
+}
+
+/** The store's commission changes, newest first. */
+export async function vendorCommissionHistory(req: Request, res: Response) {
+  const id = idParam(req);
+  if (!id) return res.status(404).json({ ok: false, error: "Store not found" });
+  const rows = await prisma.adminAuditLog.findMany({
+    where: { entity: "Store", entityId: id, action: "store.commission" },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+  const admins = await prisma.user.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.adminId))] } }, select: { id: true, name: true, email: true } });
+  const byId = new Map(admins.map((a) => [a.id, a]));
+  res.json({ ok: true, history: rows.map((r) => ({ ...r, admin: byId.get(r.adminId) ?? null })) });
 }
 
 /** Rejecting hides the store; stores with orders cannot be deleted (bookkeeping). */
@@ -184,6 +232,7 @@ export async function suspendCourier(req: Request, res: Response) {
 // ─── Orders ───────────────────────────────────────────────────────────────────
 export async function getOrders(_req: Request, res: Response) {
   const orders = await prisma.order.findMany({
+    omit: { courierPay: false },
     include: {
       user:  { select: { name: true, email: true } },
       store: { select: { name: true } },

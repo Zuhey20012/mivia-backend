@@ -1,7 +1,7 @@
 import { ApiError } from "../../lib/errors";
 import {
   ImportIssue, ImportItem, MAX_IMAGES_PER_PRODUCT, MAX_IMPORT_PRODUCTS, MAX_VARIANTS,
-  cleanImageUrl, mapCategory, parseEuroCents, validGtin,
+  MAX_PRICE_CENTS, cleanImageUrl, mapCategory, parseEuroCents, validGtin,
 } from "./mapping";
 
 /**
@@ -63,7 +63,9 @@ export function csvToItems(text: string): { items: ImportItem[]; issues: ImportI
   if (unknown.length) issues.push({ item: "header", message: `Ignored columns: ${unknown.join(", ").slice(0, 200)}`, level: "warning" });
 
   type Row = { line: number; get: (c: string) => string };
-  const groups = new Map<string, { key: string; rows: { row: Row; priceCents: number; stock: number; size?: string; color?: string }[]; bad: number }>();
+  const groups = new Map<string, {
+    key: string; rows: { row: Row; priceCents: number; stock: number; size?: string; color?: string }[]; bad: number; options: Set<string>;
+  }>();
 
   for (let r = 1; r < rows.length; r++) {
     const line = r + 1; // the header is row 1
@@ -73,13 +75,20 @@ export function csvToItems(text: string): { items: ImportItem[]; issues: ImportI
     const name = row.get("name");
     const externalId = row.get("external_id");
     const key = externalId ? `id:${externalId.slice(0, 64)}` : `name:${name.toLowerCase()}`;
-    const group = groups.get(key) ?? { key, rows: [], bad: 0 };
+    const group = groups.get(key) ?? { key, rows: [], bad: 0, options: new Set<string>() };
     groups.set(key, group);
+
+    // More cells than columns: usually an unquoted decimal comma ("12,90") in a comma-separated file
+    if (cells.length > header.length && cells.slice(header.length).some((c) => c.trim() !== "")) {
+      fail(`this row has more cells (${cells.length}) than the header (${header.length}). Put prices like 12,90 in quotes, or separate the columns with semicolons`);
+      group.bad++;
+      continue;
+    }
 
     const problems: string[] = [];
     if (name.length < 2 || name.length > 200) problems.push("name must be 2–200 characters");
     const priceCents = parseEuroCents(row.get("price"));
-    if (priceCents === null || priceCents > 10_000_000) problems.push(`price "${row.get("price").slice(0, 20)}" is not a euro amount like 12,90`);
+    if (priceCents === null || priceCents > MAX_PRICE_CENTS) problems.push(`price "${row.get("price").slice(0, 20)}" is not a euro amount like 12,90`);
     const stockRaw = row.get("stock");
     const stock = stockRaw === "" ? 1 : /^\d{1,5}$/.test(stockRaw) && Number(stockRaw) <= 10000 ? Number(stockRaw) : NaN;
     if (Number.isNaN(stock)) problems.push("stock must be a whole number 0–10000");
@@ -96,11 +105,13 @@ export function csvToItems(text: string): { items: ImportItem[]; issues: ImportI
 
     const size = row.get("size") || undefined;
     const color = row.get("colour") || undefined;
-    if (group.rows.some((x) => (x.size ?? "").toLowerCase() === (size ?? "").toLowerCase() && (x.color ?? "").toLowerCase() === (color ?? "").toLowerCase())) {
+    const optionKey = `${(size ?? "").toLowerCase()}|${(color ?? "").toLowerCase()}`;
+    if (group.options.has(optionKey)) {
       fail(size || color ? "the same size/colour appears twice for this product" : "duplicate product row (give each row a size or colour, or a different external_id)");
       group.bad++;
       continue;
     }
+    group.options.add(optionKey);
     group.rows.push({ row, priceCents: priceCents!, stock, size, color });
   }
 

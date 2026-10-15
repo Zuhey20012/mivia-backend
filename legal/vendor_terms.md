@@ -27,6 +27,7 @@ The Seller may import listings from their own online shop or a CSV file. Before 
 - Orders are shown to the Seller only after the customer's payment is confirmed.
 - The Seller accepts or declines each order. Declined orders are refunded to the customer automatically.
 - Accepted orders are prepared promptly for courier pickup.
+- **Reserve & collect.** If the customer chose to collect the order from the store, the Seller marks the order ready in the app once it is packed. The Seller hands the order over only after entering the customer's 6-digit pickup code in the app; the code is shown to the customer only. Five wrong codes lock the handover for 15 minutes. A correct code completes the order; it counts as delivered, which starts the customer's withdrawal period and the payout schedule in section 6. An order that is not collected within [72] hours of being marked ready is cancelled and refunded to the customer, and the Seller puts the items back on sale. The Seller keeps reserved items safe until they are collected or the order is cancelled.
 
 ## 5. Returns
 

@@ -8,7 +8,7 @@ import { createProductSchema } from "../products/products.schema";
 import { applyProductUpdate, assertOwnImages, createProductRecord } from "../products/products.service";
 import { ImportIssue, ImportItem } from "./mapping";
 import { assertPublicHost, parseShopUrl } from "./safeFetch";
-import { fetchShopifyProducts, mapShopifyProduct } from "./shopify";
+import { assertEuroShop, fetchShopifyProducts, mapShopifyProduct } from "./shopify";
 import { csvToItems } from "./csv";
 
 /**
@@ -21,6 +21,12 @@ import { csvToItems } from "./csv";
 const logger = pino({ name: "imports" });
 const MAX_ISSUES = 200;
 export const IMPORT_STALE_MS = 15 * 60_000;
+/** Imports a store may start per 24 hours, and photos it may have copied to Cloudinary per 24 hours. */
+export const DAILY_IMPORT_LIMIT = 10;
+export const DAILY_UPLOAD_CAP = 2000;
+const DAY_MS = 86_400_000;
+/** Namespace of the per-store advisory lock that makes "one import at a time" race-free. */
+const IMPORT_LOCK_NS = 7341;
 
 export function presentJob(j: ImportJob) {
   return {
@@ -41,8 +47,15 @@ export function presentJob(j: ImportJob) {
 }
 
 async function storeForOwner(ownerId: number) {
-  const store = await prisma.store.findUnique({ where: { ownerId }, select: { id: true } });
+  const store = await prisma.store.findUnique({ where: { ownerId }, select: { id: true, isVerified: true } });
   if (!store) throw new ApiError("Create your store first", 404);
+  return store;
+}
+
+/** Imports copy photos into Malvoya's storage, so only approved stores may start one. */
+async function importingStore(ownerId: number) {
+  const store = await storeForOwner(ownerId);
+  if (!store.isVerified) throw new ApiError("You can import your catalogue once Malvoya has approved your store", 403);
   return store;
 }
 
@@ -50,30 +63,44 @@ function requireMedia() {
   if (!mediaConfigured()) throw new ApiError("Photo and video uploads are not switched on yet", 503);
 }
 
-async function assertNoActiveJob(storeId: number) {
-  const active = await prisma.importJob.findFirst({
+type Db = Prisma.TransactionClient | typeof prisma;
+
+/** One running import per store, and at most DAILY_IMPORT_LIMIT per 24 hours. Cheap: runs before any DNS or parsing. */
+async function assertCanStart(storeId: number, db: Db = prisma) {
+  const active = await db.importJob.findFirst({
     where: { storeId, status: { in: ["QUEUED", "RUNNING"] }, updatedAt: { gt: new Date(Date.now() - IMPORT_STALE_MS) } },
     select: { id: true },
   });
   if (active) throw new ApiError("An import is already running for your store. Wait for it to finish.", 409);
+  const today = await db.importJob.count({ where: { storeId, createdAt: { gt: new Date(Date.now() - DAY_MS) } } });
+  if (today >= DAILY_IMPORT_LIMIT) throw new ApiError(`At most ${DAILY_IMPORT_LIMIT} imports per day. Try again tomorrow.`, 429);
+}
+
+/** Creates the job under a per-store advisory lock, so two requests at once cannot both start one. */
+function createJob(storeId: number, data: Omit<Prisma.ImportJobUncheckedCreateInput, "storeId">) {
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT 1 AS locked FROM (SELECT pg_advisory_xact_lock(${IMPORT_LOCK_NS}::int, ${storeId}::int)) AS l`;
+    await assertCanStart(storeId, tx);
+    return tx.importJob.create({ data: { ...data, storeId } });
+  });
 }
 
 export async function startShopifyImport(ownerId: number, shopUrl: string) {
   requireMedia();
-  const store = await storeForOwner(ownerId);
+  const store = await importingStore(ownerId);
   const origin = parseShopUrl(shopUrl);
+  await assertCanStart(store.id); // before any DNS lookup
   await assertPublicHost(origin);
-  await assertNoActiveJob(store.id);
-  const job = await prisma.importJob.create({
-    data: { storeId: store.id, source: "SHOPIFY", sourceRef: origin.host, rightsConfirmedAt: new Date() },
-  });
+  const job = await createJob(store.id, { source: "SHOPIFY", sourceRef: origin.host, rightsConfirmedAt: new Date() });
   launch(job.id, store.id, "SHOPIFY", async () => {
+    const currencyIssues = await assertEuroShop(origin); // a shop pricing in another currency is refused
     let products, issues: ImportIssue[];
     try {
       ({ products, issues } = await fetchShopifyProducts(origin));
     } catch (e: any) {
       throw new ApiError(e?.message === "NOT_A_SHOPIFY_FEED" ? "This is not a Shopify product feed" : e instanceof ApiError ? e.message : "The shop could not be reached", 502);
     }
+    issues.unshift(...currencyIssues);
     const items = products.map((p) => mapShopifyProduct(p, issues)).filter((x): x is ImportItem => !!x);
     return { items, issues, skipped: products.length - items.length, total: products.length };
   });
@@ -82,12 +109,10 @@ export async function startShopifyImport(ownerId: number, shopUrl: string) {
 
 export async function startCsvImport(ownerId: number, csv: string) {
   requireMedia();
-  const store = await storeForOwner(ownerId);
+  const store = await importingStore(ownerId);
+  await assertCanStart(store.id); // before parsing up to 1 MB
   const parsed = csvToItems(csv); // header problems → 400 now; row problems are reported on the job
-  await assertNoActiveJob(store.id);
-  const job = await prisma.importJob.create({
-    data: { storeId: store.id, source: "CSV", rightsConfirmedAt: new Date(), total: parsed.groups },
-  });
+  const job = await createJob(store.id, { source: "CSV", rightsConfirmedAt: new Date(), total: parsed.groups });
   launch(job.id, store.id, "CSV", async () => ({ ...parsed, total: parsed.groups }));
   return presentJob(job);
 }
@@ -115,7 +140,13 @@ async function runJob(jobId: number, storeId: number, source: ImportSource, load
   if (claimed.count === 0) return;
 
   const { items, issues, skipped: preSkipped, total } = await load();
-  const counts = { created: 0, updated: 0, skipped: preSkipped };
+  const counts = { created: 0, updated: 0, skipped: preSkipped, uploads: 0 };
+  // Photos this store already had copied in the last 24 hours (other jobs): the daily cap is shared
+  const earlier = await prisma.importJob.aggregate({
+    where: { storeId, id: { not: jobId }, createdAt: { gt: new Date(Date.now() - DAY_MS) } },
+    _sum: { uploads: true },
+  });
+  const budget = { left: Math.max(0, DAILY_UPLOAD_CAP - (earlier._sum.uploads ?? 0)), used: () => counts.uploads++ };
   const errors: ImportIssue[] = [];
   const note = (i: ImportIssue) => { if (errors.length < MAX_ISSUES) errors.push(i); };
   issues.forEach(note);
@@ -129,7 +160,7 @@ async function runJob(jobId: number, storeId: number, source: ImportSource, load
   const uploaded = new Map<string, string>(); // remote url → our URL, within this job
   for (const item of items) {
     try {
-      const result = await importItem(jobId, storeId, source, item, uploaded, note);
+      const result = await importItem(jobId, storeId, source, item, uploaded, note, budget);
       counts[result]++;
     } catch (e: any) {
       counts.skipped++;
@@ -142,12 +173,20 @@ async function runJob(jobId: number, storeId: number, source: ImportSource, load
   await progress({ status: "DONE", finishedAt: new Date() });
 }
 
-/** Copies a photo into the store's own folder. The same photo always gets the same name (re-imports reuse it). */
-async function rehost(storeId: number, remote: string, cache: Map<string, string>, known: Set<string>) {
+type UploadBudget = { left: number; used: () => void };
+
+/**
+ * Copies a photo into the store's own folder. The same photo always gets the same name (re-imports reuse it).
+ * At most DAILY_UPLOAD_CAP copies per store per 24 hours (protects the Cloudinary quota).
+ */
+async function rehost(storeId: number, remote: string, cache: Map<string, string>, known: Set<string>, budget: UploadBudget) {
   const hit = cache.get(remote);
   if (hit) return hit;
   const publicId = `malvoya/products/s${storeId}/imp-${crypto.createHash("sha1").update(`${storeId}:${remote}`).digest("hex").slice(0, 24)}`;
   if (known.has(imageUrl(publicId))) return imageUrl(publicId); // already copied for this product
+  if (budget.left <= 0) throw new Error(`daily limit of ${DAILY_UPLOAD_CAP} photos reached, try again tomorrow`);
+  budget.left--;
+  budget.used();
   const up = await uploadRemoteImage(remote, publicId);
   const url = imageUrl(up.publicId);
   cache.set(remote, url);
@@ -156,7 +195,7 @@ async function rehost(storeId: number, remote: string, cache: Map<string, string
 
 async function importItem(
   jobId: number, storeId: number, source: ImportSource, item: ImportItem,
-  cache: Map<string, string>, note: (i: ImportIssue) => void,
+  cache: Map<string, string>, note: (i: ImportIssue) => void, budget: UploadBudget,
 ): Promise<"created" | "updated"> {
   const existing = await prisma.product.findFirst({
     where: { storeId, externalSource: source, externalId: item.externalId },
@@ -164,7 +203,7 @@ async function importItem(
   });
   const images: string[] = [];
   const known = new Set(existing?.images ?? []);
-  const settled = await Promise.allSettled(item.imageUrls.map((u) => rehost(storeId, u, cache, known)));
+  const settled = await Promise.allSettled(item.imageUrls.map((u) => rehost(storeId, u, cache, known, budget)));
   settled.forEach((s, i) => {
     if (s.status === "fulfilled") images.push(s.value);
     else note({ item: item.label, message: `Photo ${i + 1} could not be copied (${String(s.reason?.message ?? "error").slice(0, 120)})`, level: "warning" });
@@ -192,7 +231,7 @@ async function importItem(
   const bookkeeping = { gtin: item.gtin ?? null, importJobId: jobId };
 
   if (!existing) {
-    await createProductRecord(storeId, { ...data, isAvailable: false }, { ...bookkeeping, externalSource: source, externalId: item.externalId });
+    await createProductRecord(storeId, { ...data, isAvailable: false }, { ...bookkeeping, importDraft: true, externalSource: source, externalId: item.externalId });
     return "created";
   }
 
@@ -229,16 +268,19 @@ export async function getJob(ownerId: number, id: number) {
   return presentJob(await jobForOwner(ownerId, id));
 }
 
-/** Makes the job's drafts visible: only those with at least one photo and a price. */
+/**
+ * Makes the job's drafts visible: only imported products that were never published or hidden by the store
+ * (importDraft), with at least one photo and a price. A product the store hid or deleted stays hidden.
+ */
 export async function publishJob(ownerId: number, id: number) {
   const job = await jobForOwner(ownerId, id);
   if (job.status === "QUEUED" || job.status === "RUNNING") throw new ApiError("This import is still running", 409);
   const res = await prisma.product.updateMany({
     where: {
-      storeId: job.storeId, importJobId: job.id, isAvailable: false, canBeSold: true,
+      storeId: job.storeId, importJobId: job.id, importDraft: true, isAvailable: false, canBeSold: true,
       salePriceCents: { not: null }, images: { isEmpty: false },
     },
-    data: { isAvailable: true },
+    data: { isAvailable: true, importDraft: false },
   });
   await prisma.importJob.update({ where: { id: job.id }, data: { publishedAt: new Date() } });
   return res.count;

@@ -103,24 +103,54 @@ class CourierTelemetryService extends ChangeNotifier {
     final every = _orderId != null ? const Duration(seconds: 10) : const Duration(seconds: 30);
     if (DateTime.now().difference(_lastHttp) < every) return;
     _lastHttp = DateTime.now();
+    await _post(_body(p));
+  }
+
+  Map<String, dynamic> _body(Position p) => {
+        'latitude': p.latitude,
+        'longitude': p.longitude,
+        'bearing': p.heading,
+        'speed': p.speed,
+        'accuracy': p.accuracy,
+        if (_orderId != null) 'orderId': _orderId,
+      };
+
+  Future<bool> _post(Map<String, dynamic> body) async {
     try {
-      await http
+      final res = await http
           .post(
             Uri.parse('${AppConstants.apiBase}/courier/telemetry'),
             headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $_token'},
-            body: jsonEncode({
-              'latitude': p.latitude,
-              'longitude': p.longitude,
-              'bearing': p.heading,
-              'speed': p.speed,
-              'accuracy': p.accuracy,
-              if (_orderId != null) 'orderId': _orderId,
-            }),
+            body: jsonEncode(body),
           )
           .timeout(const Duration(seconds: 6));
+      return res.statusCode >= 200 && res.statusCode < 300;
     } catch (_) {
       // Next tick tries again with a fresher position; old positions are never replayed
+      return false;
     }
+  }
+
+  /// Takes a fresh GPS fix and sends it to the server straight away, waiting for the answer.
+  /// Used before actions the server checks against where the courier is (accepting a job,
+  /// "I'm at the shop"). [post] lets the caller send it through its session-aware API client.
+  /// Only while sharing is on; returns false when no position could be sent.
+  Future<bool> sendNow({Future<bool> Function(Map<String, dynamic> body)? post}) async {
+    if (_positions == null) return false;
+    Position? p;
+    try {
+      p = await Geolocator.getCurrentPosition(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high))
+          .timeout(const Duration(seconds: 8));
+    } catch (_) {
+      p = _last;
+    }
+    if (p == null) return false;
+    _onPosition(p);
+    _lastHttp = DateTime.now();
+    final body = _body(p);
+    if (post != null) return post(body);
+    if (_token == null) return false;
+    return _post(body);
   }
 
   void stop() {

@@ -10,6 +10,7 @@ import '../core/network_status.dart';
 import '../core/reorder.dart';
 import '../core/strings.dart';
 import '../services/socket_service.dart';
+import '../widgets/skeleton.dart';
 import 'order_detail.dart';
 import 'returns_screen.dart';
 
@@ -148,28 +149,32 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
             tooltip: tr(context, 'Returns', 'Palautukset'),
             icon: const Icon(Icons.assignment_return_outlined),
             onPressed: auth.isAuthenticated
-                ? () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ReturnsScreen()))
+                ? () {
+                    HapticFeedback.selectionClick();
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const ReturnsScreen()));
+                  }
                 : null,
           ),
         ],
       ),
       body: !auth.isAuthenticated
-          ? _empty(Icons.receipt_long_outlined, tr(context, 'Sign in to see your orders.', 'Kirjaudu sisään nähdäksesi tilauksesi.'))
+          ? StateMessage(icon: Icons.receipt_long_outlined, message: tr(context, 'Sign in to see your orders.', 'Kirjaudu sisään nähdäksesi tilauksesi.'))
           : _loading
-              ? const Center(child: CircularProgressIndicator())
+              ? const SkeletonCardList()
               : RefreshIndicator(
                   onRefresh: () => _load(quiet: true),
                   child: _error != null
-                      ? ListView(children: [_empty(Icons.wifi_off_rounded, _error!)])
+                      ? StateMessage.error(message: _error!, onRetry: () => _load())
                       : _orders.isEmpty
-                          ? ListView(children: [
-                              _empty(Icons.shopping_bag_outlined,
-                                  tr(context, 'No orders yet. When you order, you can follow it here live.', 'Ei vielä tilauksia. Kun tilaat, voit seurata sitä täällä reaaliajassa.'))
-                            ])
+                          ? StateMessage(
+                              icon: Icons.shopping_bag_outlined,
+                              message: tr(context, 'No orders yet. When you order, you can follow it here live.',
+                                  'Ei vielä tilauksia. Kun tilaat, voit seurata sitä täällä reaaliajassa.'),
+                            )
                           : ListView(
                               padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
                               children: [
-                                if (active.isNotEmpty) _section(tr(context, 'On its way', 'Tulossa')),
+                                if (active.isNotEmpty) _section(tr(context, 'In progress', 'Käynnissä')),
                                 ...active.map(_card),
                                 if (past.isNotEmpty) _section(tr(context, 'Earlier', 'Aiemmat')),
                                 ...past.map(_card),
@@ -179,21 +184,22 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
     );
   }
 
-  Widget _empty(IconData icon, String text) => Padding(
-        padding: const EdgeInsets.fromLTRB(40, 120, 40, 40),
-        child: Column(children: [
-          Icon(icon, size: 56, color: AppTheme.secondaryText(context)),
-          const SizedBox(height: 14),
-          Text(text, textAlign: TextAlign.center, style: TextStyle(color: AppTheme.secondaryText(context), fontSize: 15, height: 1.4)),
-        ]),
-      );
-
   Widget _section(String label) => Padding(
         padding: const EdgeInsets.fromLTRB(4, 16, 4, 10),
         child: Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.secondaryText(context), letterSpacing: 0.3)),
       );
 
   (String, Color) _status(Map<String, dynamic> o) {
+    if (o['fulfilment'] == 'PICKUP') {
+      switch (o['status']) {
+        case 'CONFIRMED':
+          return (tr(context, 'Being prepared', 'Valmistellaan'), AppTheme.primary);
+        case 'PROCESSING':
+          return (tr(context, 'Ready for pickup', 'Valmis noudettavaksi'), AppTheme.success);
+        case 'DELIVERED':
+          return (tr(context, 'Collected', 'Noudettu'), AppTheme.success);
+      }
+    }
     switch (o['status']) {
       case 'PENDING':
         return o['paymentStatus'] == 'SUCCEEDED'
@@ -267,11 +273,28 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
                       decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12)),
                       child: Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color)),
                     ),
+                    if (o['fulfilment'] == 'PICKUP') ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                        decoration: BoxDecoration(
+                            color: AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine), borderRadius: BorderRadius.circular(12)),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(Icons.storefront_rounded, size: 13, color: AppTheme.primaryText(context)),
+                          const SizedBox(width: 4),
+                          Text(tr(context, 'Collect', 'Nouto'),
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
+                        ]),
+                      ),
+                    ],
                     const Spacer(),
                     if (o['status'] == 'DELIVERED')
                       TextButton.icon(
                         style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8)),
-                        onPressed: () => reorder(context, Map<String, dynamic>.from(o)),
+                        onPressed: () {
+                          HapticFeedback.selectionClick();
+                          reorder(context, Map<String, dynamic>.from(o));
+                        },
                         icon: const Icon(Icons.replay_rounded, size: 18),
                         label: Text(tr(context, 'Again', 'Uudelleen')),
                       ),

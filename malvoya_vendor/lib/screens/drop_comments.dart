@@ -4,6 +4,7 @@ import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
 import '../core/strings.dart';
+import '../widgets/loading_states.dart';
 
 /// Comments on one of the store's drops: answer as the store, or delete comments that do not belong there.
 Future<void> showStoreDropComments(BuildContext context, Map<String, dynamic> drop, {ValueChanged<int>? onCountChanged}) {
@@ -128,9 +129,21 @@ class _StoreDropCommentsState extends State<_StoreDropComments> {
           const Divider(height: 1),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? const SkeletonList(count: 3, lines: 2)
                 : _error != null
-                    ? Center(child: Text(_error!))
+                    ? ListView(children: [
+                        ErrorState(
+                          message: _error,
+                          top: 24,
+                          onRetry: () {
+                            setState(() {
+                              _loading = true;
+                              _error = null;
+                            });
+                            _load(reset: true);
+                          },
+                        ),
+                      ])
                     : _comments.isEmpty
                         ? Center(child: Text(tr(context, 'No comments yet.', 'Ei vielä kommentteja.'), style: const TextStyle(color: AppTheme.textSecondary)))
                         : ListView(children: [

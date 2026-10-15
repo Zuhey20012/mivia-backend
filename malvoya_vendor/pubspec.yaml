@@ -1,7 +1,7 @@
 name: malvoya_vendor
 description: Malvoya Vendor - Premium Store Management App
 publish_to: "none"
-version: 1.5.0+7
+version: 1.6.0+8
 
 environment:
   sdk: ">=3.4.0 <4.0.0"

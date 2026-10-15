@@ -32,6 +32,9 @@ function minutes(name: string, fallback: number) {
   return Number.isFinite(v) && v > 0 ? v : fallback;
 }
 
+/** Any positive number of hours (decimals allowed); anything else falls back to the default. */
+const hours = minutes;
+
 /** Non-negative whole cents from the environment; anything else falls back to the default (0 = off). */
 function cents(name: string, fallback = 0) {
   const v = Number(process.env[name]);
@@ -81,6 +84,9 @@ function courierPayConfig() {
     // Ride to the shop: the courier's position when accepting → shop (route km), paid beyond the free km
     approachFreeKm:    km("COURIER_APPROACH_FREE_KM", 2),
     approachPerKmCents: cents("COURIER_APPROACH_PER_KM_CENTS", 50),
+    // Couriers further than this (straight line, from a fresh position) cannot accept a job; the paid ride is
+    // capped at this distance too. Default = the dispatch radius.
+    approachMaxKm:     km("COURIER_APPROACH_MAX_KM", 7.5),
     // Waiting at the shop, measured from "arrived at shop" to pickup
     waitFreeMinutes:   cents("COURIER_WAIT_FREE_MINUTES", 5),    // not paid
     waitPerMinCents:   cents("COURIER_WAIT_PER_MIN_CENTS", 20),  // per whole minute beyond the free minutes
@@ -167,4 +173,29 @@ export const env = {
     courierDelayNotice: minutes("COURIER_DELAY_NOTICE_MINUTES", 15),
     courierSearch:      minutes("COURIER_SEARCH_MINUTES", 45),
   },
+
+  // Reserve & collect (hours, counted from when the store marked the order ready): the customer is reminded,
+  // then an order nobody collected is cancelled with a full refund and its items go back into stock.
+  pickupTimers: {
+    reminderHours: hours("PICKUP_REMINDER_HOURS", 24),
+    holdHours:     hours("PICKUP_HOLD_HOURS", 72),
+    // Accepted pickup orders the store never marks ready are refunded after this
+    readyHours:    hours("PICKUP_READY_HOURS", 24),
+  },
+
+  // Referrals: off while REFERRAL_DISCOUNT_CENTS is 0. The new customer gets the discount on their first order
+  // (platform-funded, like a promo code); the referrer gets a one-time code worth REFERRAL_REWARD_CENTS once that
+  // order is delivered (0 = no reward).
+  referral: {
+    discountCents: cents("REFERRAL_DISCOUNT_CENTS"),
+    rewardCents:   cents("REFERRAL_REWARD_CENTS"),
+  },
+
+  // Android App Links: SHA-256 fingerprints of the customer app's signing certificates (comma-separated),
+  // published at /.well-known/assetlinks.json. Empty = no verified links.
+  androidAppSha256: (process.env.ANDROID_APP_SHA256 || "")
+    .split(",")
+    .map((f) => f.trim().toUpperCase())
+    .filter((f) => /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/.test(f)),
+  androidCustomerPackage: "com.malvoya.customer",
 };

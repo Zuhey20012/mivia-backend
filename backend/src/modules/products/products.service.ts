@@ -62,7 +62,8 @@ export async function getProductById(id: number, viewerId?: number) {
     include: { ...productInclude, store: { select: { ...publicStoreSelect, ownerId: true } } },
   });
   const isOwner = !!product && product.store.ownerId === viewerId;
-  if (!product || (!product.store.isVerified && !isOwner)) throw new ApiError("Product not found", 404);
+  // Hidden products (drafts, deleted) and products of unapproved stores are for the owner only
+  if (!product || ((!product.store.isVerified || !product.isAvailable) && !isOwner)) throw new ApiError("Product not found", 404);
   const { ownerId, ...store } = product.store;
   const [presented] = await present([{ ...product, store }], { owner: isOwner });
   const favorite = viewerId
@@ -174,7 +175,8 @@ export async function updateProduct(id: number, ownerId: number, data: any) {
   if (!product) throw new ApiError("Product not found", 404);
   if (product.store.ownerId !== ownerId) throw new ApiError("Forbidden", 403);
   assertOwnImages(data.images, product.storeId);
-  const updated = await applyProductUpdate(product, data);
+  // Once the store shows or hides a product itself, publishing an import never changes it again
+  const updated = await applyProductUpdate(product, data, data.isAvailable !== undefined ? { importDraft: false } : {});
   const [presented] = await present([updated], { owner: true });
   return presented;
 }
@@ -231,5 +233,5 @@ export async function deleteProduct(id: number, ownerId: number) {
   if (!product) throw new ApiError("Product not found", 404);
   if (product.store.ownerId !== ownerId) throw new ApiError("Forbidden", 403);
   // Hidden, not deleted: past orders still point at it
-  await prisma.product.update({ where: { id }, data: { isAvailable: false } });
+  await prisma.product.update({ where: { id }, data: { isAvailable: false, importDraft: false } });
 }

@@ -11,6 +11,7 @@ import '../core/delivery_location.dart';
 import '../core/store_hours.dart';
 import '../core/strings.dart';
 import '../widgets/product_tile.dart';
+import '../widgets/skeleton.dart';
 import 'drops_feed.dart';
 
 /// A store: delivery time and fee to your address, who the seller is, their drops, what
@@ -78,7 +79,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
       _loading = false;
       final store = results[0];
       if (!store.ok) {
-        _error = store.error;
+        _error = store.errorText(context);
         return;
       }
       _error = null;
@@ -118,7 +119,19 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                   ),
                 ),
                 if (_error != null)
-                  SliverFillRemaining(child: Center(child: Text(_error!)))
+                  SliverFillRemaining(
+                    child: StateMessage.error(
+                      message: _error!,
+                      top: 60,
+                      onRetry: () {
+                        setState(() {
+                          _loading = true;
+                          _error = null;
+                        });
+                        _load();
+                      },
+                    ),
+                  )
                 else ...[
                   SliverToBoxAdapter(child: _header()),
                   if (_drops.isNotEmpty) SliverToBoxAdapter(child: _dropsStrip()),
@@ -130,13 +143,28 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                     ),
                   ),
                   if (_loading)
-                    const SliverToBoxAdapter(child: Padding(padding: EdgeInsets.all(40), child: Center(child: CircularProgressIndicator())))
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
+                      sliver: SliverGrid(
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 18,
+                          crossAxisSpacing: 14,
+                          childAspectRatio: 0.58,
+                        ),
+                        delegate: SliverChildBuilderDelegate((_, __) => const SkeletonProductTile(), childCount: 4),
+                      ),
+                    )
                   else if (_products.isEmpty)
                     SliverToBoxAdapter(
                       child: Padding(
                         padding: const EdgeInsets.all(40),
-                        child: Text(tr(context, 'This store has not listed anything yet.', 'Kauppa ei ole vielä lisännyt tuotteita.'),
-                            textAlign: TextAlign.center, style: TextStyle(color: AppTheme.secondaryText(context))),
+                        child: Column(children: [
+                          Icon(Icons.checkroom_outlined, size: 40, color: AppTheme.secondaryText(context)),
+                          const SizedBox(height: 10),
+                          Text(tr(context, 'This store has not listed anything yet.', 'Kauppa ei ole vielä lisännyt tuotteita.'),
+                              textAlign: TextAlign.center, style: TextStyle(color: AppTheme.secondaryText(context))),
+                        ]),
                       ),
                     )
                   else
@@ -263,6 +291,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
       );
 
   void _traderInfo() {
+    HapticFeedback.selectionClick();
     final isPrivate = _store['sellerType'] == 'PRIVATE';
     showModalBottomSheet(
       context: context,

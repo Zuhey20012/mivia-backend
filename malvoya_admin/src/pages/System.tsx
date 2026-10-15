@@ -13,7 +13,10 @@ type Status = {
   attention: string[];
   integrations: Record<string, Integration>;
   marketplace: Record<string, number>;
-  ordersInFlight: { waitingForStore: number; waitingForCourier: number };
+  ordersInFlight: { waitingForStore: number; waitingForCourier: number; waitingForPickup?: number };
+  pickup?: { reminderHours: number; holdHours: number };
+  referrals?: Referrals;
+  appLinks?: { fingerprints: number; url: string };
   timers: Record<string, number>;
   apps?: Record<string, { minBuild: number; maintenance: { active: boolean; message: string | null } }>;
   backgroundJobs: { name: string; lastRunAt: string | null }[];
@@ -35,6 +38,9 @@ type Pricing = {
     approachExample: { straightKm: number; routeKm: number | null; cents: number };
     examples: PayExample[];
   };
+};
+type Referrals = {
+  enabled: boolean; discountCents: number; rewardCents: number; referrals: number; rewarded: number; discountGivenCents: number;
 };
 type Demand = { totalWaiting: number; demand: { latitude: number; longitude: number; waiting: number; areas: string[] }[] };
 
@@ -147,6 +153,9 @@ export default function System() {
                 ))}
                 <div className="flex items-center justify-between text-sm"><span>Paid orders waiting for a store</span><span className="font-semibold">{status.ordersInFlight.waitingForStore}</span></div>
                 <div className="flex items-center justify-between text-sm"><span>Accepted orders waiting for a courier</span><span className="font-semibold">{status.ordersInFlight.waitingForCourier}</span></div>
+                {status.ordersInFlight.waitingForPickup !== undefined && (
+                  <div className="flex items-center justify-between text-sm"><span>Pickup orders ready, not collected yet</span><span className="font-semibold">{status.ordersInFlight.waitingForPickup}</span></div>
+                )}
               </div>
             </div>
             <div className="apple-card">
@@ -189,6 +198,28 @@ export default function System() {
             </div>
           </div>
 
+          {(status.referrals || status.pickup) && (
+            <div className="grid md:grid-cols-2 gap-6">
+              {status.referrals && <ReferralCard r={status.referrals} />}
+              {status.pickup && (
+                <div className="apple-card">
+                  <p className="font-semibold mb-1">Reserve &amp; collect</p>
+                  <p className="text-gray-400 text-xs mb-3">Counted from when the store marks a pickup order ready (PICKUP_REMINDER_HOURS / PICKUP_HOLD_HOURS on Render).</p>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex items-center justify-between"><span>Customer is reminded after</span><span className="font-semibold">{status.pickup.reminderHours} h</span></div>
+                    <div className="flex items-center justify-between"><span>Not collected: cancelled and refunded after</span><span className="font-semibold">{status.pickup.holdHours} h</span></div>
+                    {status.appLinks && (
+                      <div className="flex items-center justify-between">
+                        <span>Android app links (ANDROID_APP_SHA256)</span>
+                        <span className={status.appLinks.fingerprints ? 'text-green-600 font-medium' : 'text-gray-500'}>{status.appLinks.fingerprints ? `${status.appLinks.fingerprints} certificate(s)` : 'off'}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {status.pricing?.courierPay && (
             <CourierPayCard pricing={status.pricing} />
           )}
@@ -210,6 +241,31 @@ export default function System() {
         </div>
       )}
     </Layout>
+  );
+}
+
+/** Referral settings (env vars) and how often invites were used. */
+function ReferralCard({ r }: { r: Referrals }) {
+  const rows: [string, string][] = [
+    ['New customer gets (first order)', euro(r.discountCents)],
+    ['Referrer gets (one-time code)', r.rewardCents > 0 ? euro(r.rewardCents) : 'nothing'],
+    ['Friends who ordered with an invite', String(r.referrals)],
+    ['Rewards issued', String(r.rewarded)],
+    ['Invite discounts given', euro(r.discountGivenCents)],
+  ];
+  return (
+    <div className="apple-card">
+      <p className="font-semibold mb-1">Invite a friend (referrals)</p>
+      <p className="text-gray-400 text-xs mb-3">
+        Set REFERRAL_DISCOUNT_CENTS (0 = off) and REFERRAL_REWARD_CENTS on Render. Both are paid by Malvoya, like promo codes.
+      </p>
+      <div className="space-y-2 text-sm">
+        <div className="flex items-center justify-between"><span>Status</span><span className={r.enabled ? 'text-green-600 font-medium' : 'text-gray-500'}>{r.enabled ? 'on' : 'off'}</span></div>
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex items-center justify-between"><span>{k}</span><span className="font-semibold">{v}</span></div>
+        ))}
+      </div>
+    </div>
   );
 }
 

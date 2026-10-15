@@ -14,10 +14,12 @@ import '../core/google_link_tile.dart';
 import '../core/delete_account_tile.dart';
 import '../services/socket_service.dart';
 import '../core/push_service.dart';
+import '../widgets/loading_states.dart';
 import 'chatbot.dart';
 import 'drops_manager.dart';
 import 'import_products_screen.dart';
 import 'payouts_screen.dart';
+import 'pickup_code_sheet.dart';
 import 'product_editor.dart';
 import 'returns_manager.dart';
 import 'store_setup.dart';
@@ -39,6 +41,8 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
   List<Map<String, dynamic>> _orders = [];
   bool _loading = true;
   String? _error;
+  bool _ordersLoaded = false;
+  String? _ordersError;
 
   ApiClient get _api => ApiClient(Provider.of<AuthService>(context, listen: false));
 
@@ -280,8 +284,16 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
 
   Future<void> _loadOrders() async {
     final res = await _api.get('/orders');
-    if (!mounted || !res.ok) return;
-    setState(() => _orders = ((res.data['orders'] as List?) ?? []).map((o) => Map<String, dynamic>.from(o)).toList());
+    if (!mounted) return;
+    if (!res.ok) {
+      setState(() => _ordersError = res.error);
+      return;
+    }
+    setState(() {
+      _orders = ((res.data['orders'] as List?) ?? []).map((o) => Map<String, dynamic>.from(o)).toList();
+      _ordersLoaded = true;
+      _ordersError = null;
+    });
     // Ring while any paid order is waiting for an answer; stop as soon as none is
     final waiting = _orders.where((o) => o['status'] == 'PENDING' && o['paymentStatus'] == 'SUCCEEDED').length;
     PushService.instance.ringNewOrders(waiting);
@@ -397,14 +409,32 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
         _ => null,
       },
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const SkeletonList(button: true)
           : _error != null
-              ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Text(_error!), TextButton(onPressed: _load, child: Text(tr(context, 'Try again', 'Yritä uudelleen')))]))
+              ? RefreshIndicator(
+                  onRefresh: _load,
+                  child: ListView(physics: const AlwaysScrollableScrollPhysics(), children: [ErrorState(message: _error, onRetry: _retryLoad)]),
+                )
               : TabBarView(controller: _tabs, children: [_ordersTab(), _productsTab(), DropsManager(key: _dropsKey), _storeTab()]),
     );
   }
 
+  void _retryLoad() {
+    HapticFeedback.selectionClick();
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    _load();
+  }
+
   // ── Orders ──────────────────────────────────────────────────────────────
+
+  void _retryOrders() {
+    HapticFeedback.selectionClick();
+    setState(() => _ordersError = null);
+    _loadOrders();
+  }
 
   Widget _ordersTab() {
     final active = _orders.where((o) => ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED'].contains(o['status'])).toList();
@@ -412,31 +442,23 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     return RefreshIndicator(
       onRefresh: _loadOrders,
       child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
         children: [
           _availabilityCard(),
-          if (_orders.isEmpty) ...[
-            const SizedBox(height: 64),
-            Center(
-              child: Container(
-                width: 88,
-                height: 88,
-                decoration: const BoxDecoration(color: AppTheme.sunshineLight, shape: BoxShape.circle),
-                child: const Icon(Icons.receipt_long_outlined, size: 40, color: Color(0xFF8A5A00)),
-              ),
+          // First load: placeholders, or what went wrong. Later failures keep the list and show a strip.
+          if (!_ordersLoaded && _ordersError != null) ErrorState(message: _ordersError, onRetry: _retryOrders, top: 24),
+          if (!_ordersLoaded && _ordersError == null) ...[for (var i = 0; i < 3; i++) SkeletonCard(lines: 4, button: i == 0)],
+          if (_ordersLoaded && _ordersError != null) ErrorBanner(message: _ordersError!, onRetry: _retryOrders),
+          if (_ordersLoaded && _orders.isEmpty)
+            EmptyState(
+              icon: Icons.receipt_long_outlined,
+              top: 48,
+              message: _store?['isVerified'] == true
+                  ? tr(context, 'No orders yet. New orders appear here as soon as they are paid, with a sound and a notification. Malvoya is just starting, so the first orders may take a while.',
+                      'Ei vielä tilauksia. Uudet tilaukset näkyvät täällä heti maksun jälkeen äänimerkin ja ilmoituksen kera. Malvoya on vasta aloittamassa, joten ensimmäisiä tilauksia voi joutua odottamaan.')
+                  : tr(context, 'Your store is in review. Add products and drops meanwhile — they go live when you are approved.', 'Kauppasi on tarkistuksessa. Lisää sillä välin tuotteita ja julkaisuja — ne julkaistaan hyväksynnän jälkeen.'),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
-              child: Text(
-                _store?['isVerified'] == true
-                    ? tr(context, 'No orders yet. New orders appear here as soon as they are paid, with a sound and a notification. Malvoya is just starting, so the first orders may take a while.',
-                        'Ei vielä tilauksia. Uudet tilaukset näkyvät täällä heti maksun jälkeen äänimerkin ja ilmoituksen kera. Malvoya on vasta aloittamassa, joten ensimmäisiä tilauksia voi joutua odottamaan.')
-                    : tr(context, 'Your store is in review. Add products and drops meanwhile — they go live when you are approved.', 'Kauppasi on tarkistuksessa. Lisää sillä välin tuotteita ja julkaisuja — ne julkaistaan hyväksynnän jälkeen.'),
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: AppTheme.textSecondary, height: 1.45, fontSize: 15),
-              ),
-            ),
-          ],
           for (final o in active) _orderCard(o),
           if (done.isNotEmpty) Padding(padding: const EdgeInsets.fromLTRB(4, 16, 4, 8), child: Text(tr(context, 'Earlier', 'Aiemmat'), style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.textSecondary))),
           for (final o in done) _orderCard(o),
@@ -519,16 +541,115 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     );
   }
 
+  // ── Pickup orders ("Collect in shop") ───────────────────────────────────
+  // No courier: accept → "Ready for pickup" (PROCESSING, the customer gets a message) → the customer
+  // comes in and the store types the customer's 6-digit code (POST /orders/:id/collect). Orders not
+  // collected within 72 h of being marked ready are refunded automatically by the server.
+
+  /// Orders without `fulfilment` (older server) are deliveries.
+  bool _isPickup(Map<String, dynamic> o) => '${o['fulfilment'] ?? ''}'.toUpperCase() == 'PICKUP';
+
+  bool _isCollected(Map<String, dynamic> o) => o['collectedAt'] != null || ['DELIVERED', 'COLLECTED'].contains(o['status']);
+
+  /// "14.05", or "3.6. 14.05" when it is not today.
+  String _when(DateTime d) {
+    final now = DateTime.now();
+    final time = '${d.hour.toString().padLeft(2, '0')}.${d.minute.toString().padLeft(2, '0')}';
+    final today = d.year == now.year && d.month == now.month && d.day == now.day;
+    return today ? time : '${d.day}.${d.month}. $time';
+  }
+
+  Widget _pickupBadge() => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(12)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.storefront_rounded, size: 15, color: Colors.white),
+          const SizedBox(width: 5),
+          Text(tr(context, 'Collect in shop', 'Nouto kaupasta'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12.5)),
+        ]),
+      );
+
+  /// Ready and waiting: since when, until when, and the big "Customer is here" button.
+  Widget _pickupWaiting(Map<String, dynamic> o) {
+    final readyAt = DateTime.tryParse('${o['readyAt'] ?? ''}')?.toLocal();
+    final deadline = readyAt?.add(const Duration(hours: 72));
+    const fg = Color(0xFF6A4500);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Container(
+        margin: const EdgeInsets.only(top: 12),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(14)),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Icon(Icons.schedule_rounded, size: 18, color: fg),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(
+                readyAt != null
+                    ? tr(context, 'Waiting for the customer · ready since ${_when(readyAt)}', 'Odottaa asiakasta · valmiina ${_when(readyAt)} alkaen')
+                    : tr(context, 'Waiting for the customer', 'Odottaa asiakasta'),
+                style: const TextStyle(fontWeight: FontWeight.w800, color: fg),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                deadline != null
+                    ? tr(context, 'If it is not collected by ${_when(deadline)} (72 h after you marked it ready), the order is refunded automatically.',
+                        'Jos tilausta ei noudeta ${_when(deadline)} mennessä (72 h valmiiksi merkitsemisestä), se hyvitetään automaattisesti.')
+                    : tr(context, 'Orders not collected within 72 h of being marked ready are refunded automatically.',
+                        'Tilaukset, joita ei noudeta 72 tunnin kuluessa valmiiksi merkitsemisestä, hyvitetään automaattisesti.'),
+                style: const TextStyle(fontSize: 12.5, color: fg, height: 1.35),
+              ),
+            ]),
+          ),
+        ]),
+      ),
+      const SizedBox(height: 12),
+      SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          style: FilledButton.styleFrom(minimumSize: const Size(64, 60), textStyle: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+          onPressed: () => _collect(o),
+          icon: const Icon(Icons.how_to_reg_rounded),
+          label: Text(tr(context, 'Customer is here', 'Asiakas on paikalla')),
+        ),
+      ),
+    ]);
+  }
+
+  Future<void> _collect(Map<String, dynamic> o) async {
+    HapticFeedback.selectionClick();
+    final updated = await showPickupCodeSheet(context, o);
+    if (updated == null || !mounted) return;
+    setState(() {
+      o.addAll(updated);
+      if (updated['status'] == null) o['status'] = 'DELIVERED';
+      if (o['deliveredAt'] == null) o['collectedAt'] ??= DateTime.now().toIso8601String();
+    });
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(tr(context, 'Order #${o['id']} collected. Thank you!', 'Tilaus #${o['id']} noudettu. Kiitos!'))));
+    _loadOrders();
+  }
+
   Widget _orderCard(Map<String, dynamic> o) {
     final status = o['status'];
     final items = (o['items'] as List?) ?? [];
     final created = DateTime.tryParse('${o['createdAt']}')?.toLocal();
+    final pickup = _isPickup(o);
+    final collectedAt = DateTime.tryParse('${o['collectedAt'] ?? o['deliveredAt'] ?? ''}')?.toLocal();
     // Status as a soft pill: new orders are sunny so they stand out, active ones green, finished grey
     final (label, bg, fg) = switch (status) {
       'PENDING' => (tr(context, 'New — accept or decline', 'Uusi — hyväksy tai hylkää'), AppTheme.sunshine, AppTheme.textPrimary),
+      'CONFIRMED' when pickup => (tr(context, 'Accepted — get it ready', 'Hyväksytty — valmistele'), AppTheme.primaryLight, AppTheme.primary),
       'CONFIRMED' => (tr(context, 'Accepted — pack it', 'Hyväksytty — pakkaa'), AppTheme.primaryLight, AppTheme.primary),
+      'PROCESSING' when pickup => (tr(context, 'Ready for pickup', 'Valmis noudettavaksi'), AppTheme.primaryLight, AppTheme.primary),
       'PROCESSING' => (tr(context, 'Ready — waiting for courier', 'Valmis — odottaa kuriiria'), AppTheme.primaryLight, AppTheme.primary),
       'SHIPPED' => (tr(context, 'With the courier', 'Kuriirilla'), AppTheme.peach, AppTheme.accent),
+      _ when pickup && _isCollected(o) => (
+          collectedAt != null ? '${tr(context, 'Collected', 'Noudettu')} ${_when(collectedAt)}' : tr(context, 'Collected', 'Noudettu'),
+          AppTheme.sand,
+          AppTheme.textSecondary
+        ),
       'DELIVERED' => (tr(context, 'Delivered', 'Toimitettu'), AppTheme.sand, AppTheme.textSecondary),
       _ => (tr(context, 'Cancelled / refunded', 'Peruttu / hyvitetty'), AppTheme.sand, AppTheme.textSecondary),
     };
@@ -550,11 +671,14 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             Text(euro(context, o['subtotalCents']), style: const TextStyle(fontWeight: FontWeight.w800)),
           ]),
           const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
-            child: Text(label, style: TextStyle(color: fg, fontWeight: FontWeight.w800, fontSize: 12.5)),
-          ),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            if (pickup) _pickupBadge(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
+              child: Text(label, style: TextStyle(color: fg, fontWeight: FontWeight.w800, fontSize: 12.5)),
+            ),
+          ]),
           if (_isWaiting(o)) _waitingNote(o),
           const Divider(height: 20),
           for (final i in items) _itemLine(i as Map),
@@ -582,10 +706,30 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
               Expanded(flex: 2, child: FilledButton(onPressed: () => _setStatus(o, 'CONFIRMED'), child: Text(tr(context, 'Accept', 'Hyväksy')))),
             ]),
           ],
-          if (status == 'CONFIRMED') ...[
+          if (status == 'CONFIRMED' && !pickup) ...[
             const SizedBox(height: 12),
-            SizedBox(width: double.infinity, child: FilledButton(onPressed: () => _setStatus(o, 'PROCESSING'), child: Text(tr(context, 'Packed — ready for pickup', 'Pakattu — valmis noudettavaksi')))),
+            SizedBox(width: double.infinity, child: FilledButton(onPressed: () => _setStatus(o, 'PROCESSING'), child: Text(tr(context, 'Packed — ready for courier', 'Pakattu — valmis kuriirille')))),
           ],
+          if (status == 'CONFIRMED' && pickup) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () => _setStatus(o, 'PROCESSING'),
+                icon: const Icon(Icons.inventory_2_outlined),
+                label: Text(tr(context, 'Ready for pickup', 'Valmis noudettavaksi')),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                tr(context, 'The customer gets a message to come and collect it. Orders not collected within 72 h of being marked ready are refunded automatically.',
+                    'Asiakas saa viestin, että tilauksen voi noutaa. Tilaukset, joita ei noudeta 72 tunnin kuluessa valmiiksi merkitsemisestä, hyvitetään automaattisesti.'),
+                style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary, height: 1.35),
+              ),
+            ),
+          ],
+          if (status == 'PROCESSING' && pickup && !_isCollected(o)) _pickupWaiting(o),
         ],
       ),
     );
@@ -650,43 +794,47 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
   Widget _productsTab() {
     final products = ((_store?['products'] as List?) ?? []).map((p) => Map<String, dynamic>.from(p)).toList();
     if (products.isEmpty) {
-      return Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.only(bottom: 80),
-          child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.checkroom_rounded, size: 56, color: AppTheme.textSecondary),
-            const SizedBox(height: 12),
-            Text(tr(context, 'Add your first product with photos, price and sizes.', 'Lisää ensimmäinen tuotteesi kuvineen, hintoineen ja kokoineen.'), textAlign: TextAlign.center),
-            const SizedBox(height: 16),
-            FilledButton.icon(onPressed: () => _editProduct(), icon: const Icon(Icons.add_rounded), label: Text(tr(context, 'Add product', 'Lisää tuote'))),
-            const SizedBox(height: 28),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
-              child: Column(children: [
-                Text(
-                  tr(context, 'Have a Shopify shop or a spreadsheet? Import everything at once.', 'Onko sinulla Shopify-kauppa tai taulukko? Tuo kaikki kerralla.'),
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF6A4500), height: 1.35),
+      // Pull to refresh works here too (e.g. after importing on another phone)
+      return RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+          children: [
+            EmptyState(
+              icon: Icons.checkroom_rounded,
+              top: 40,
+              message: tr(context, 'Add your first product with photos, price and sizes.', 'Lisää ensimmäinen tuotteesi kuvineen, hintoineen ja kokoineen.'),
+              actions: [
+                FilledButton.icon(onPressed: () => _editProduct(), icon: const Icon(Icons.add_rounded), label: Text(tr(context, 'Add product', 'Lisää tuote'))),
+                const SizedBox(height: 28),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
+                  child: Column(children: [
+                    Text(
+                      tr(context, 'Have a Shopify shop or a spreadsheet? Import everything at once.', 'Onko sinulla Shopify-kauppa tai taulukko? Tuo kaikki kerralla.'),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF6A4500), height: 1.35),
+                    ),
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      onPressed: _importProducts,
+                      icon: const Icon(Icons.upload_file_rounded),
+                      label: Text(tr(context, 'Import products', 'Tuo tuotteita')),
+                    ),
+                  ]),
                 ),
-                const SizedBox(height: 10),
-                OutlinedButton.icon(
-                  onPressed: _importProducts,
-                  icon: const Icon(Icons.upload_file_rounded),
-                  label: Text(tr(context, 'Import products', 'Tuo tuotteita')),
-                ),
-              ]),
+              ],
             ),
-          ]),
-          ),
+          ],
         ),
       );
     }
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView.separated(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
         itemCount: products.length,
         separatorBuilder: (_, __) => const SizedBox(height: 10),
@@ -713,7 +861,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                     child: SizedBox(
                       width: 64,
                       height: 78,
-                      child: images.isEmpty ? Container(color: AppTheme.primaryLight, child: const Icon(Icons.image_outlined, color: AppTheme.primary)) : CachedNetworkImage(imageUrl: images.first, fit: BoxFit.cover),
+                      child: images.isEmpty ? Container(color: AppTheme.primaryLight, child: const Icon(Icons.image_outlined, color: AppTheme.primary)) : CachedNetworkImage(imageUrl: images.first, fit: BoxFit.cover, placeholder: (_, __) => const Shimmering(child: SkeletonBox(height: double.infinity, radius: 0))),
                     ),
                   ),
                 ),

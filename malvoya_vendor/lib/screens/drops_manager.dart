@@ -1,10 +1,12 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
 import '../core/strings.dart';
+import '../widgets/loading_states.dart';
 import 'create_drop.dart';
 import 'drop_comments.dart';
 
@@ -37,6 +39,12 @@ class DropsManagerState extends State<DropsManager> {
     });
   }
 
+  void _retry() {
+    HapticFeedback.selectionClick();
+    setState(() => _loading = true);
+    load();
+  }
+
   Future<void> create() async {
     final posted = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => const CreateDropScreen()));
     if (posted == true) load();
@@ -55,6 +63,7 @@ class DropsManagerState extends State<DropsManager> {
       ),
     );
     if (ok != true || !mounted) return;
+    HapticFeedback.mediumImpact();
     final res = await ApiClient(Provider.of<AuthService>(context, listen: false)).delete('/drops/${d['id']}');
     if (!mounted) return;
     if (!res.ok) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.error!)));
@@ -63,30 +72,29 @@ class DropsManagerState extends State<DropsManager> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) return const SkeletonList(thumbnail: true, lines: 4, padding: EdgeInsets.fromLTRB(16, 16, 16, 100));
     return RefreshIndicator(
       onRefresh: load,
       child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
         children: [
-          _summary(),
-          const SizedBox(height: 16),
-          if (_error != null) Text(_error!, style: const TextStyle(color: AppTheme.accent)),
+          if (_error != null && _drops.isEmpty)
+            ErrorState(message: _error, onRetry: _retry, top: 24)
+          else ...[
+            _summary(),
+            const SizedBox(height: 16),
+            if (_error != null) ErrorBanner(message: _error!, onRetry: _retry),
+          ],
           if (_drops.isEmpty && _error == null)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 40),
-              child: Column(children: [
-                const Icon(Icons.video_camera_back_outlined, size: 56, color: AppTheme.textSecondary),
-                const SizedBox(height: 12),
-                Text(
-                  tr(context, 'Show your items in a short video. Drops appear in the customer app\'s Drops feed with a buy button.',
-                      'Esittele tuotteitasi lyhyellä videolla. Julkaisut näkyvät asiakkaiden Drops-syötteessä osta-painikkeen kanssa.'),
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: AppTheme.textSecondary, height: 1.4),
-                ),
-                const SizedBox(height: 16),
+            EmptyState(
+              icon: Icons.video_camera_back_outlined,
+              top: 24,
+              message: tr(context, 'Show your items in a short video. Drops appear in the customer app\'s Drops feed with a buy button.',
+                  'Esittele tuotteitasi lyhyellä videolla. Julkaisut näkyvät asiakkaiden Drops-syötteessä osta-painikkeen kanssa.'),
+              actions: [
                 FilledButton.icon(onPressed: create, icon: const Icon(Icons.add_rounded), label: Text(tr(context, 'Create your first drop', 'Luo ensimmäinen julkaisu'))),
-              ]),
+              ],
             ),
           for (final d in _drops) _card(d),
         ],
@@ -139,7 +147,7 @@ class DropsManagerState extends State<DropsManager> {
               width: 72,
               height: 110,
               child: poster != null && status == 'READY'
-                  ? CachedNetworkImage(imageUrl: poster, fit: BoxFit.cover)
+                  ? CachedNetworkImage(imageUrl: poster, fit: BoxFit.cover, placeholder: (_, __) => const Shimmering(child: SkeletonBox(height: double.infinity, radius: 0)))
                   : Container(color: AppTheme.primaryLight, child: const Icon(Icons.play_circle_outline, color: AppTheme.primary)),
             ),
           ),
@@ -173,7 +181,7 @@ class DropsManagerState extends State<DropsManager> {
               ],
             ),
           ),
-          IconButton(icon: const Icon(Icons.delete_outline_rounded), onPressed: () => _delete(d)),
+          IconButton(tooltip: tr(context, 'Delete drop', 'Poista julkaisu'), icon: const Icon(Icons.delete_outline_rounded), onPressed: () => _delete(d)),
         ],
       ),
     );

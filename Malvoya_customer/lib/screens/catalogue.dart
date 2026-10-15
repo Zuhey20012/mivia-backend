@@ -9,6 +9,7 @@ import '../core/api_client.dart';
 import '../core/delivery_location.dart';
 import '../core/strings.dart';
 import '../widgets/product_tile.dart';
+import '../widgets/skeleton.dart';
 import 'store_detail.dart';
 
 /// Search across every store: items with size, price, condition and second-hand filters,
@@ -97,7 +98,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
       setState(() {
         _loading = false;
         _stores = res.ok ? ((res.data['stores'] as List?) ?? []).map((s) => Map<String, dynamic>.from(s)).toList() : [];
-        _error = res.ok ? null : res.error;
+        _error = res.ok ? null : res.errorText(context);
       });
       return;
     }
@@ -110,7 +111,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
         _items.addAll(((res.data['products'] as List?) ?? []).map((p) => Map<String, dynamic>.from(p)));
         _total = asInt(res.data['total']) ?? _items.length;
       } else {
-        _error = res.error;
+        _error = res.errorText(context);
       }
     });
   }
@@ -151,10 +152,14 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
             prefixIcon: const Icon(Icons.search_rounded),
             suffixIcon: _query.text.isEmpty
                 ? null
-                : IconButton(icon: const Icon(Icons.close_rounded), onPressed: () {
-                    _query.clear();
-                    _search();
-                  }),
+                : IconButton(
+                    tooltip: tr(context, 'Clear search', 'Tyhjennä haku'),
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () {
+                      HapticFeedback.selectionClick();
+                      _query.clear();
+                      _search();
+                    }),
             isDense: true,
             border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(26)), borderSide: BorderSide.none),
             enabledBorder: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(26)), borderSide: BorderSide.none),
@@ -189,9 +194,9 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
         ),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? (_storesTab ? const SkeletonCardList(thumbHeight: 44) : const SkeletonProductGrid())
           : _error != null
-              ? Center(child: Text(_error!))
+              ? StateMessage.error(message: _error!, onRetry: _search)
               : _storesTab
                   ? _storeList()
                   : _itemGrid(),
@@ -205,7 +210,10 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
             label: Text(label),
             selected: active,
             showCheckmark: false,
-            onSelected: (_) => onTap(),
+            onSelected: (_) {
+              HapticFeedback.selectionClick();
+              onTap();
+            },
           ),
         );
     final sortLabel = {
@@ -259,7 +267,10 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
               ListTile(
                 title: Text(labels[v] ?? v),
                 trailing: v == current ? const Icon(Icons.check_rounded, color: AppTheme.primary) : null,
-                onTap: () => Navigator.pop(ctx, v),
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  Navigator.pop(ctx, v);
+                },
               ),
             if (allowClear && current != null)
               ListTile(title: Text(tr(context, 'Clear', 'Tyhjennä')), onTap: () => Navigator.pop(ctx, '')),
@@ -308,12 +319,9 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
 
   Widget _itemGrid() {
     if (_items.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Text(tr(context, 'Nothing found. Try another word or fewer filters.', 'Ei tuloksia. Kokeile toista hakusanaa tai vähemmän suodattimia.'),
-              textAlign: TextAlign.center, style: TextStyle(color: AppTheme.secondaryText(context))),
-        ),
+      return StateMessage(
+        icon: Icons.search_off_rounded,
+        message: tr(context, 'Nothing found. Try another word or fewer filters.', 'Ei tuloksia. Kokeile toista hakusanaa tai vähemmän suodattimia.'),
       );
     }
     return GridView.builder(
@@ -327,7 +335,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
 
   Widget _storeList() {
     if (_stores.isEmpty) {
-      return Center(child: Text(tr(context, 'No stores found.', 'Kauppoja ei löytynyt.'), style: TextStyle(color: AppTheme.secondaryText(context))));
+      return StateMessage(icon: Icons.storefront_outlined, message: tr(context, 'No stores found.', 'Kauppoja ei löytynyt.'));
     }
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 140),
@@ -349,7 +357,10 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
             if (eta != null) eta,
             '${euro(context, s['deliveryFeeCents'])} ${tr(context, 'delivery', 'toimitus')}',
           ].join(' · ')),
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => StoreDetailScreen(store: s))),
+          onTap: () {
+            HapticFeedback.selectionClick();
+            Navigator.push(context, MaterialPageRoute(builder: (_) => StoreDetailScreen(store: s)));
+          },
         );
       },
     );

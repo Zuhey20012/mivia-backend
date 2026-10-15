@@ -1,8 +1,27 @@
 import { fetchPublicJson } from "./safeFetch";
+import { ApiError } from "../../lib/errors";
 import {
-  ImportIssue, ImportItem, ImportVariant, MAX_IMAGES_PER_PRODUCT, MAX_IMPORT_PRODUCTS, MAX_VARIANTS,
+  ImportIssue, ImportItem, ImportVariant, MAX_IMAGES_PER_PRODUCT, MAX_IMPORT_PRODUCTS, MAX_PRICE_CENTS, MAX_VARIANTS,
   cleanImageUrl, htmlToText, mapCategory, parseEuroCents, validGtin,
 } from "./mapping";
+
+/**
+ * Shopify prices are in the shop's own currency. The shop's public /meta.json says which; a shop that prices in
+ * anything but euros is refused (Malvoya would otherwise show e.g. 49.90 SEK as 49,90 €). When the currency cannot
+ * be read, the job carries a warning.
+ */
+export async function assertEuroShop(origin: URL): Promise<ImportIssue[]> {
+  let meta: { currency?: unknown } | null = null;
+  try {
+    meta = (await fetchPublicJson(new URL("/meta.json", origin), { maxBytes: 256 * 1024, timeoutMs: 10_000 })) as { currency?: unknown };
+  } catch {
+    meta = null;
+  }
+  const currency = typeof meta?.currency === "string" ? meta.currency.trim().toUpperCase().slice(0, 8) : "";
+  if (!currency) return [{ item: "feed", message: "The shop's currency could not be confirmed; prices were read as euros. Check them before publishing.", level: "warning" }];
+  if (currency !== "EUR") throw new ApiError(`This shop prices in ${currency}. Only shops that sell in euros can be imported.`, 400);
+  return [];
+}
 
 /** The shop's public Shopify feed: /products.json?limit=250&page=N, at most 4 pages (1000 products). */
 
@@ -76,8 +95,10 @@ export function mapShopifyProduct(p: ShopifyProduct, issues: ImportIssue[]): Imp
   if (p.id === undefined || p.id === null || String(p.id).length > 64) { add("Missing product id", "error"); return null; }
   if (name.length < 2) { add("Missing product name", "error"); return null; }
 
-  const variants = (p.variants ?? []).filter((v) => parseEuroCents(v.price) !== null);
-  if (!variants.length) { add("No price", "error"); return null; }
+  const priced = (p.variants ?? []).filter((v) => parseEuroCents(v.price) !== null);
+  const variants = priced.filter((v) => parseEuroCents(v.price)! <= MAX_PRICE_CENTS);
+  if (variants.length < priced.length) add(`Options priced over ${MAX_PRICE_CENTS / 100} € were skipped`);
+  if (!variants.length) { add(priced.length ? `Price over ${MAX_PRICE_CENTS / 100} €` : "No price", "error"); return null; }
 
   // Which option holds the size and which the colour (Size / Koko, Colour / Väri)
   const options = (p.options ?? []).map((o, i) => ({ name: String(o.name ?? ""), index: (o.position ?? i + 1) - 1 }));

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../cart.dart';
 import '../config/theme.dart';
+import '../core/deep_links.dart';
 import '../core/strings.dart';
 import 'home.dart';
 import 'drops_feed.dart';
@@ -31,10 +32,13 @@ class _MainNavigationState extends State<MainNavigation> {
   void initState() {
     super.initState();
     _pageController = PageController(initialPage: _index);
+    // Links to a drop, store or invite open once the main screen is up
+    DeepLinks.instance.attach();
   }
 
   @override
   void dispose() {
+    DeepLinks.instance.detach();
     _pageController.dispose();
     super.dispose();
   }

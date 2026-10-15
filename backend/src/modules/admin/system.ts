@@ -8,6 +8,8 @@ import { storeAvailability } from "../../utils/openingHours";
 import { MIN_CHARGE_CENTS, deliveryFeeForDistance } from "../../utils/pricing";
 import { approachPayFor, calcCourierPay, payRuleSummary, routeKm, waitPayFor } from "../../utils/courierPay";
 import { appConfigSummary } from "../appConfig/appConfig.routes";
+import { referralSummary } from "../referrals/referrals.service";
+import { ordersPayingOutMoreThanCharged } from "../payouts/payouts.service";
 
 const startedAt = new Date();
 
@@ -68,6 +70,7 @@ export async function getSystemStatus(_req: Request, res: Response) {
     const [
       liveStores, pendingStores, approvedCouriers, onlineCouriers, pendingCouriers, waitlist,
       waitingForStore, waitingForCourier, refundProblems, failedPayouts, openSupport, openReports, jobs,
+      waitingForPickup, referrals, overPaid,
     ] = await Promise.all([
       prisma.store.findMany({ where: { isVerified: true }, select: { acceptingOrders: true, openingHours: true } }),
       prisma.store.count({ where: { isVerified: false } }),
@@ -76,13 +79,16 @@ export async function getSystemStatus(_req: Request, res: Response) {
       prisma.courier.count({ where: { isApproved: false, userId: { not: null } } }),
       prisma.launchAlert.count({ where: { notifiedAt: null } }),
       prisma.order.count({ where: { status: "PENDING", paymentStatus: "SUCCEEDED" } }),
-      prisma.order.count({ where: { status: { in: ["CONFIRMED", "PROCESSING"] }, paymentStatus: "SUCCEEDED", courierId: null } }),
+      prisma.order.count({ where: { status: { in: ["CONFIRMED", "PROCESSING"] }, paymentStatus: "SUCCEEDED", courierId: null, fulfilment: "DELIVERY" } }),
       // Cancelled but the money was not given back automatically (refund call failed)
       prisma.order.count({ where: { status: "CANCELLED", paymentStatus: "SUCCEEDED" } }),
       prisma.payout.count({ where: { status: "FAILED" } }),
       prisma.supportRequest.count({ where: { status: "OPEN" } }).catch(() => 0),
       prisma.dropReport.count({ where: { status: "OPEN" } }),
       prisma.jobLease.findMany({ select: { name: true, lastRunAt: true } }),
+      prisma.order.count({ where: { fulfilment: "PICKUP", status: "PROCESSING", paymentStatus: "SUCCEEDED" } }),
+      referralSummary(),
+      ordersPayingOutMoreThanCharged(),
     ]);
     const storesOpenNow = liveStores.filter((s) => storeAvailability(s).openNow).length;
     const integrations = integrationStatus();
@@ -105,10 +111,11 @@ export async function getSystemStatus(_req: Request, res: Response) {
     if (failedPayouts) attention.push(`${failedPayouts} failed payout(s)`);
     if (openSupport) attention.push(`${openSupport} open support request(s)`);
     if (openReports) attention.push(`${openReports} open content report(s)`);
+    if (overPaid) attention.push(`${overPaid} delivered order(s) pay the store and courier more than the customer paid; Malvoya's Stripe balance covers the difference`);
 
     res.json({
       ok: true,
-      version: "2.7.0",
+      version: "2.8.0",
       region: "frankfurt",
       startedAt,
       readyForOrders: blockers.length === 0,
@@ -120,8 +127,14 @@ export async function getSystemStatus(_req: Request, res: Response) {
         approvedCouriers, onlineCouriers, pendingCouriers,
         waitlist,
       },
-      ordersInFlight: { waitingForStore, waitingForCourier },
+      ordersInFlight: { waitingForStore, waitingForCourier, waitingForPickup },
       timers: t,
+      // Reserve & collect (PICKUP_REMINDER_HOURS / PICKUP_HOLD_HOURS), counted from "ready for pickup"
+      pickup: env.pickupTimers,
+      // Invite a friend (REFERRAL_DISCOUNT_CENTS / REFERRAL_REWARD_CENTS; off while the discount is 0)
+      referrals,
+      // Android App Links (ANDROID_APP_SHA256) published at /.well-known/assetlinks.json
+      appLinks: { fingerprints: env.androidAppSha256.length, url: `${env.publicApiUrl}/.well-known/assetlinks.json` },
       // Fee levers (0 = off). Changed with env vars on Render; promo codes live under /admin/promo-codes.
       pricing: {
         ...env.pricing,

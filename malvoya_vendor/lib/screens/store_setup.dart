@@ -139,7 +139,8 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
   Future<void> _save() async {
     if (!_form.currentState!.validate()) return;
     if (_lat == null || _lng == null) {
-      setState(() => _error = tr(context, 'Tap "Use my current location" while at the store so couriers can find you.', 'Paina "Käytä nykyistä sijaintia" ollessasi kaupalla, jotta kuriirit löytävät sinut.'));
+      setState(() =>
+          _error = tr(context, 'Tap "Use my current location" while at the store so couriers can find you.', 'Paina "Käytä nykyistä sijaintia" ollessasi kaupalla, jotta kuriirit löytävät sinut.'));
       return;
     }
     setState(() {
@@ -230,7 +231,9 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                   if (_verified)
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
-                      child: Text(tr(context, 'To change this after approval, write to the Malvoya team in Store → Help.', 'Muuttaaksesi tätä hyväksynnän jälkeen kirjoita Malvoyan tiimille kohdassa Kauppa → Apua.'),
+                      child: Text(
+                          tr(context, 'To change this after approval, write to the Malvoya team in Store → Help.',
+                              'Muuttaaksesi tätä hyväksynnän jälkeen kirjoita Malvoyan tiimille kohdassa Kauppa → Apua.'),
                           style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
                     ),
                   if (_sellerType == 'BUSINESS')
@@ -249,15 +252,21 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
                     onPressed: _locating ? null : _locate,
-                    icon: _locating ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : Icon(_lat != null ? Icons.check_circle_rounded : Icons.my_location_rounded),
+                    icon: _locating
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Icon(_lat != null ? Icons.check_circle_rounded : Icons.my_location_rounded),
                     label: Text(_lat != null ? tr(context, 'Location saved — update', 'Sijainti tallennettu — päivitä') : tr(context, 'Use my current location', 'Käytä nykyistä sijaintia')),
                   ),
                   const SizedBox(height: 8),
-                  TextFormField(controller: _phone, keyboardType: TextInputType.phone, decoration: InputDecoration(labelText: tr(context, 'Phone (for couriers, optional)', 'Puhelin (kuriireille, valinnainen)'))),
+                  TextFormField(
+                      controller: _phone,
+                      keyboardType: TextInputType.phone,
+                      decoration: InputDecoration(labelText: tr(context, 'Phone (for couriers, optional)', 'Puhelin (kuriireille, valinnainen)'))),
                   const SizedBox(height: 20),
                   Text('${tr(context, 'Time to pack an order', 'Tilauksen pakkausaika')}: ${_prepMinutes.round()} min', style: const TextStyle(fontWeight: FontWeight.w600)),
                   Slider(value: _prepMinutes, min: 0, max: 60, divisions: 12, label: '${_prepMinutes.round()} min', onChanged: (v) => setState(() => _prepMinutes = v)),
-                  Text(tr(context, 'Used for the delivery times customers see.', 'Käytetään asiakkaille näytettävissä toimitusajoissa.'), style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                  Text(tr(context, 'Used for the delivery times customers see.', 'Käytetään asiakkaille näytettävissä toimitusajoissa.'),
+                      style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
                   if (_error != null) Padding(padding: const EdgeInsets.only(top: 14), child: Text(_error!, style: const TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w600))),
                   const SizedBox(height: 20),
                   SizedBox(
@@ -272,9 +281,11 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                   if (_existing == null)
                     Padding(
                       padding: const EdgeInsets.only(top: 10),
-                      child: Text(tr(context, 'You can add a logo and cover picture once the store is created. Our team reviews every store before it goes live.',
+                      child: Text(
+                          tr(context, 'You can add a logo and cover picture once the store is created. Our team reviews every store before it goes live.',
                               'Voit lisätä logon ja kansikuvan, kun kauppa on luotu. Tiimimme tarkistaa jokaisen kaupan ennen julkaisua.'),
-                          textAlign: TextAlign.center, style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary)),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary)),
                     ),
                 ],
               ),
@@ -285,31 +296,39 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
   Widget _pictures() => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          GestureDetector(
-            onTap: () => _pickImage(false),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: SizedBox(
-                height: 130,
-                width: double.infinity,
-                child: _bannerUrl != null
-                    ? CachedNetworkImage(imageUrl: _bannerUrl!, fit: BoxFit.cover)
-                    : Container(
-                        color: AppTheme.primaryLight,
-                        child: Center(child: Text(tr(context, 'Add a cover picture', 'Lisää kansikuva'), style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w600))),
-                      ),
+          Semantics(
+            button: true,
+            label: tr(context, 'Change cover picture', 'Vaihda kansikuva'),
+            child: GestureDetector(
+              onTap: () => _pickImage(false),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: SizedBox(
+                  height: 130,
+                  width: double.infinity,
+                  child: _bannerUrl != null
+                      ? CachedNetworkImage(imageUrl: _bannerUrl!, fit: BoxFit.cover)
+                      : Container(
+                          color: AppTheme.primaryLight,
+                          child: Center(child: Text(tr(context, 'Add a cover picture', 'Lisää kansikuva'), style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w600))),
+                        ),
+                ),
               ),
             ),
           ),
           const SizedBox(height: 10),
           Row(children: [
-            GestureDetector(
-              onTap: () => _pickImage(true),
-              child: CircleAvatar(
-                radius: 34,
-                backgroundColor: AppTheme.primaryLight,
-                backgroundImage: _logoUrl != null ? CachedNetworkImageProvider(_logoUrl!) : null,
-                child: _logoUrl == null ? const Icon(Icons.add_a_photo_outlined, color: AppTheme.primary) : null,
+            Semantics(
+              button: true,
+              label: tr(context, 'Change logo', 'Vaihda logo'),
+              child: GestureDetector(
+                onTap: () => _pickImage(true),
+                child: CircleAvatar(
+                  radius: 34,
+                  backgroundColor: AppTheme.primaryLight,
+                  backgroundImage: _logoUrl != null ? CachedNetworkImageProvider(_logoUrl!) : null,
+                  child: _logoUrl == null ? const Icon(Icons.add_a_photo_outlined, color: AppTheme.primary) : null,
+                ),
               ),
             ),
             const SizedBox(width: 12),

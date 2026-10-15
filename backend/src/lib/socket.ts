@@ -139,7 +139,7 @@ export function initSocket(httpServer: HttpServer): SocketServer {
 
       if (Date.now() - lastDbWrite > LOCATION_DB_WRITE_INTERVAL_MS) {
         lastDbWrite = Date.now();
-        prisma.courier.update({ where: { id: courierId }, data: { latitude: lat, longitude: lng } }).catch(() => {});
+        prisma.courier.update({ where: { id: courierId }, data: { latitude: lat, longitude: lng, locationAt: new Date() } }).catch(() => {});
       }
     };
     socket.on("courier:telemetry", handleLocation);

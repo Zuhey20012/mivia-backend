@@ -16,12 +16,19 @@ const BATCH = 100;
  *  1. unpaid checkouts release their reserved stock,
  *  2. a store that has not answered a paid order is reminded, then the order is refunded,
  *  3. jobs nobody took are offered to couriers again, the customer hears about a delay,
- *     and if still nobody comes the order is refunded.
+ *     and if still nobody comes the order is refunded,
+ *  4. pickup orders that are ready but not collected: the customer is reminded once, and after the hold
+ *     time the order is cancelled with a full refund (the items go back into stock).
  * Every step is idempotent and safe to run on several instances (the scheduler holds a lease).
  */
 export async function runOrderWatchdog() {
   const t = env.orderTimers;
-  const result = { releasedCheckouts: 0, storeReminders: 0, storeTimeouts: 0, reoffers: 0, delayNotices: 0, courierTimeouts: 0 };
+  const p = env.pickupTimers;
+  const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
+  const result = {
+    releasedCheckouts: 0, storeReminders: 0, storeTimeouts: 0, reoffers: 0, delayNotices: 0, courierTimeouts: 0,
+    pickupReminders: 0, pickupTimeouts: 0, pickupNotReady: 0,
+  };
 
   // 1. Checkouts that were never paid (the customer closed the payment sheet, or the card failed)
   const unpaid = await prisma.order.findMany({
@@ -75,7 +82,7 @@ export async function runOrderWatchdog() {
 
   // 3. Accepted orders without a courier
   const unassigned = await prisma.order.findMany({
-    where: { status: { in: ["CONFIRMED", "PROCESSING"] }, paymentStatus: "SUCCEEDED", courierId: null },
+    where: { status: { in: ["CONFIRMED", "PROCESSING"] }, paymentStatus: "SUCCEEDED", courierId: null, fulfilment: "DELIVERY" },
     select: {
       id: true, userId: true, confirmedAt: true, updatedAt: true, lastOfferAt: true, courierSearchNotifiedAt: true,
       user: { select: { email: true } }, store: { select: { ownerId: true } },
@@ -116,6 +123,62 @@ export async function runOrderWatchdog() {
       await offerOrderToCouriers(o.id).catch((e) => logger.error({ orderId: o.id, err: e?.message }, "Re-offer failed"));
       result.reoffers++;
     }
+  }
+
+  // 4a. Ready for pickup but not collected: one reminder to the customer
+  const uncollected = await prisma.order.findMany({
+    where: { fulfilment: "PICKUP", status: "PROCESSING", paymentStatus: "SUCCEEDED", pickupRemindedAt: null, readyAt: { lt: hoursAgo(p.reminderHours) } },
+    select: { id: true, userId: true, readyAt: true, store: { select: { name: true, address: true } } },
+    take: BATCH,
+  });
+  for (const o of uncollected) {
+    const claimed = await prisma.order.updateMany({ where: { id: o.id, pickupRemindedAt: null }, data: { pickupRemindedAt: new Date() } });
+    if (!claimed.count) continue;
+    const left = Math.max(1, Math.round(p.holdHours - (Date.now() - o.readyAt!.getTime()) / 3_600_000));
+    pushToUser(o.userId, {
+      title: `Your order is waiting at ${o.store.name}`,
+      body: `Collect order #${o.id}${o.store.address ? ` at ${o.store.address}` : ""} within about ${left} h. If it is not collected, it is cancelled and refunded in full.`,
+      data: { type: "order", orderId: String(o.id) },
+    }).catch(() => {});
+    result.pickupReminders++;
+  }
+
+  // 4b. ...and after the hold time, cancel with a full refund
+  const abandoned = await prisma.order.findMany({
+    where: { fulfilment: "PICKUP", status: "PROCESSING", paymentStatus: "SUCCEEDED", readyAt: { lt: hoursAgo(p.holdHours) } },
+    select: { id: true, user: { select: { email: true } }, store: { select: { ownerId: true } } },
+    take: BATCH,
+  });
+  for (const o of abandoned) {
+    await cancelOrderInternal(o.id, "Not collected in time", {
+      customerMessage: `The order was not collected within ${p.holdHours} hours of being ready.`,
+    });
+    sendOrderStatusEmail(o.id, o.user.email, "CANCELLED").catch(() => {});
+    pushToUser(o.store.ownerId, {
+      title: `Order #${o.id} was cancelled`,
+      body: "It was not collected in time, so the customer was refunded. The items are back in your stock; please put them back on sale.",
+      data: { type: "order", orderId: String(o.id) },
+    }).catch(() => {});
+    result.pickupTimeouts++;
+  }
+
+  // 4c. Accepted for pickup but never marked ready: the customer must not wait forever either
+  const neverReady = await prisma.order.findMany({
+    where: { fulfilment: "PICKUP", status: "CONFIRMED", paymentStatus: "SUCCEEDED", confirmedAt: { lt: hoursAgo(p.readyHours) } },
+    select: { id: true, user: { select: { email: true } }, store: { select: { ownerId: true } } },
+    take: BATCH,
+  });
+  for (const o of neverReady) {
+    await cancelOrderInternal(o.id, "The store did not get the order ready in time", {
+      customerMessage: "The shop did not get your order ready in time.",
+    });
+    sendOrderStatusEmail(o.id, o.user.email, "CANCELLED").catch(() => {});
+    pushToUser(o.store.ownerId, {
+      title: `Order #${o.id} was cancelled`,
+      body: `It was not marked ready within ${p.readyHours} hours of accepting, so the customer was refunded.`,
+      data: { type: "order", orderId: String(o.id) },
+    }).catch(() => {});
+    result.pickupNotReady++;
   }
 
   const acted = Object.values(result).some((n) => n > 0);

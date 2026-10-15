@@ -1,11 +1,12 @@
-import { Prisma, OrderStatus, PromoCode } from "@prisma/client";
+import crypto from "crypto";
+import { Prisma, OrderStatus, Fulfilment } from "@prisma/client";
 import pino from "pino";
 import { prisma } from "../../lib/prisma";
 import { getStripe } from "../../lib/stripe";
-import { calcCheckoutPricing, calcRentalPricing, deliveryFeeForDistance } from "../../utils/pricing";
+import { MIN_CHARGE_CENTS, calcCheckoutPricing, calcRentalPricing, deliveryFeeForDistance, formatCents } from "../../utils/pricing";
 import { haversineKm } from "../../utils/distance";
 import { env } from "../../config/env";
-import { emitOrderStatus, emitToStore } from "../../lib/socket";
+import { emitOrderStatus, emitToStore, emitToAllCouriers } from "../../lib/socket";
 import { offerOrderToCouriers } from "../../services/dispatchService";
 import { sendOrderConfirmation, sendOrderStatusEmail } from "../../services/notificationDeliveryService";
 import { pushToUser } from "../../lib/push";
@@ -16,8 +17,10 @@ import { adjustStorePayoutForRefund, createPayoutsForOrder } from "../payouts/pa
 import { Actor, getCourierForUser, getOrderRelation } from "./access";
 import { storeAvailability } from "../../utils/openingHours";
 import { ApiError } from "../../lib/errors";
-import { checkPromo } from "../promos/promos.service";
-import { calcCourierPay, courierPayOf, presentCourierPay, withApproach, withWaiting } from "../../utils/courierPay";
+import { checkPromo, normalizeCode } from "../promos/promos.service";
+import { CheckoutDiscount, checkReferralCode, rewardReferralForOrder } from "../referrals/referrals.service";
+import { RIDE_SPEED_KMH, calcCourierPay, courierPayOf, presentCourierPay, withApproach, withWaiting } from "../../utils/courierPay";
+import { freshPosition } from "../../utils/courierPosition";
 
 const logger = pino({ name: "orders" });
 
@@ -32,8 +35,16 @@ type ItemInput = { productId: number; variantId?: number; quantity: number };
 type Db = Prisma.TransactionClient | typeof prisma;
 
 type CheckoutInput = {
-  storeId: number; deliveryLat?: number; deliveryLng?: number; items: ItemInput[]; tipCents?: number; promoCode?: string;
+  storeId: number; fulfilment?: Fulfilment; deliveryLat?: number; deliveryLng?: number; items: ItemInput[];
+  tipCents?: number; promoCode?: string;
 };
+
+/** A courier counts as "at the shop" within this distance. */
+const ARRIVAL_RADIUS_KM = 0.3;
+
+/** Reserve & collect: 5 wrong pickup codes lock the handover for 15 minutes. */
+const PICKUP_MAX_ATTEMPTS = 5;
+const PICKUP_LOCK_MINUTES = 15;
 
 // ─── ORDERS (SALE) ──────────────────────────────────────────────────────────
 
@@ -113,13 +124,23 @@ function deliveryDistanceKm(store: { latitude: number | null; longitude: number 
     : null;
 }
 
-/** The one place a checkout is priced; used by both the quote and createOrder. */
+/**
+ * The one place a checkout is priced; used by both the quote and createOrder. A pickup order has no delivery
+ * fee, no courier (no courier pay) and no tip; service fee, small-order fee and discounts work the same.
+ */
 function priceCheckout(
   store: { commissionRate: number; latitude: number | null; longitude: number | null },
   input: CheckoutInput,
   subtotalCents: number,
-  promo: PromoCode | null,
+  discount: CheckoutDiscount | null,
 ) {
+  const promo = discount?.terms ?? null;
+  if (input.fulfilment === "PICKUP") {
+    const pricing = calcCheckoutPricing({
+      subtotalCents, commissionRate: store.commissionRate, deliveryFeeCents: 0, tipCents: 0, promo, courierPayCents: 0,
+    });
+    return { pricing, distanceKm: null, courierPay: null };
+  }
   const distanceKm = deliveryDistanceKm(store, input.deliveryLat, input.deliveryLng);
   const deliveryFeeCents = deliveryFeeForDistance(distanceKm);
   const tipCents = input.tipCents ?? 0;
@@ -136,15 +157,31 @@ function priceCheckout(
   return { pricing, distanceKm, courierPay };
 }
 
-/** Checks a promo code for this checkout; turns "cannot be used" into an OrderError with the user-readable reason. */
-async function promoForCheckout(db: Db, code: string | undefined, userId: number, subtotalCents: number) {
+/**
+ * Checks the code typed at checkout: a promo code, or (when referrals are on and no promo code has that name)
+ * another customer's invite code. "Cannot be used" becomes an OrderError with the user-readable reason.
+ */
+async function promoForCheckout(db: Db, code: string | undefined, userId: number, subtotalCents: number): Promise<CheckoutDiscount | null> {
   if (!code?.trim()) return null;
   try {
-    return await checkPromo(db, code, userId, subtotalCents);
+    const normalized = normalizeCode(code);
+    if (!(await db.promoCode.findUnique({ where: { code: normalized }, select: { id: true } }))) {
+      const invite = await checkReferralCode(db, normalized, userId);
+      if (invite) return invite;
+    }
+    const promo = await checkPromo(db, code, userId, subtotalCents);
+    return { terms: promo, promoCodeId: promo.id, referrerId: null, code: promo.code, description: promo.description };
   } catch (e) {
     if (e instanceof ApiError) throw new OrderError(e.message, e.status);
     throw e;
   }
+}
+
+/** Pickup needs a store address to collect from; tips are for couriers, so a pickup order cannot carry one. */
+function assertPickupPossible(store: { address: string | null }, input: CheckoutInput) {
+  if (input.fulfilment !== "PICKUP") return;
+  if ((input.tipCents ?? 0) > 0) throw new OrderError("Tips go to couriers, so a pickup order cannot have a tip", 400);
+  if (!store.address?.trim()) throw new OrderError("This store does not offer pickup", 409);
 }
 
 /**
@@ -153,9 +190,10 @@ async function promoForCheckout(db: Db, code: string | undefined, userId: number
  */
 export async function quoteOrder(userId: number, input: CheckoutInput) {
   const store = await loadOrderStore(input.storeId);
+  assertPickupPossible(store, input);
   const { subtotalCents } = await priceItems(prisma, store.id, input.items, false);
 
-  let promo: PromoCode | null = null;
+  let promo: CheckoutDiscount | null = null;
   let promoError: string | null = null;
   try {
     promo = await promoForCheckout(prisma, input.promoCode, userId, subtotalCents);
@@ -179,14 +217,18 @@ export async function quoteOrder(userId: number, input: CheckoutInput) {
     totalCents: pricing.totalCents,
     promo: promo ? { code: promo.code, description: promo.description } : null,
     promoError,
+    fulfilment: input.fulfilment ?? "DELIVERY",
+    ...(input.fulfilment === "PICKUP" ? { pickup: { storeName: store.name, address: store.address } } : {}),
     store: { openNow: availability.openNow, closedReason: availability.closedReason, opensAt: availability.opensAt },
   };
 }
 
-export async function createOrder(userId: number, input: CheckoutInput & { deliveryAddress: string; notes?: string }) {
+export async function createOrder(userId: number, input: CheckoutInput & { deliveryAddress?: string; notes?: string }) {
   const store = await loadOrderStore(input.storeId);
   const availability = storeAvailability(store);
   if (!availability.openNow) throw closedStoreError(availability);
+  assertPickupPossible(store, input);
+  const pickup = input.fulfilment === "PICKUP";
 
   // Price is always computed server-side from the database.
   const order = await prisma.$transaction(async (tx) => {
@@ -194,19 +236,23 @@ export async function createOrder(userId: number, input: CheckoutInput & { deliv
     // A code that cannot be used is refused (409), so the customer never pays a different price than quoted.
     const promo = await promoForCheckout(tx, input.promoCode, userId, subtotalCents);
     const { pricing, distanceKm, courierPay } = priceCheckout(store, input, subtotalCents, promo);
+    if (pricing.totalCents < MIN_CHARGE_CENTS) throw new OrderError(`The minimum order is ${formatCents(MIN_CHARGE_CENTS)}`);
     const etaMinutes = distanceKm === null ? null : estimateDelivery(distanceKm, store.prepMinutes).etaMinutes;
 
     return tx.order.create({
       data: {
         userId,
         storeId: store.id,
-        deliveryAddress: input.deliveryAddress,
-        deliveryLat: input.deliveryLat,
-        deliveryLng: input.deliveryLng,
+        fulfilment: pickup ? "PICKUP" : "DELIVERY",
+        deliveryAddress: pickup ? null : input.deliveryAddress,
+        deliveryLat: pickup ? null : input.deliveryLat,
+        deliveryLng: pickup ? null : input.deliveryLng,
         notes: input.notes,
         ...pricing, // includes tipCents and courierFeeCents (the tip goes to the courier in full, no commission)
-        courierPay: courierPay as unknown as Prisma.InputJsonValue, // the breakdown behind courierFeeCents
-        promoCodeId: promo?.id ?? null,
+        // the breakdown behind courierFeeCents; none for pickup (no courier)
+        ...(courierPay ? { courierPay: courierPay as unknown as Prisma.InputJsonValue } : {}),
+        promoCodeId: promo?.promoCodeId ?? null,
+        referrerId: promo?.referrerId ?? null,
         etaMinutes,
         items: { createMany: { data: lines } },
       },
@@ -239,6 +285,7 @@ export async function createOrder(userId: number, input: CheckoutInput & { deliv
 export async function markOrderPaid(orderId: number, paymentIntentId: string, amountReceived: number) {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
+    omit: { referrerId: false },
     include: {
       user: true, store: true, items: { include: { product: { select: { name: true } } } },
       promoCode: { select: { code: true } },
@@ -260,9 +307,17 @@ export async function markOrderPaid(orderId: number, paymentIntentId: string, am
     return;
   }
 
-  // A promo code counts as used only once the order is paid (released again if it is cancelled before delivery)
+  // A promo code counts as used only once the order is paid (released again if it is cancelled before delivery).
+  // The same goes for an invite code (one referral per new customer). Pickup orders get their handover code now.
+  const pickup = order.fulfilment === "PICKUP";
   await prisma.$transaction([
-    prisma.order.update({ where: { id: orderId }, data: { paymentStatus: "SUCCEEDED", paidAt: new Date() } }),
+    prisma.order.update({
+      where: { id: orderId },
+      data: { paymentStatus: "SUCCEEDED", paidAt: new Date(), ...(pickup ? { pickupCode: newPickupCode() } : {}) },
+    }),
+    ...(order.referrerId
+      ? [prisma.referral.createMany({ data: [{ referrerId: order.referrerId, refereeId: order.userId, orderId }], skipDuplicates: true })]
+      : []),
     ...(order.promoCodeId
       ? [prisma.promoRedemption.upsert({
           where: { orderId },
@@ -275,6 +330,7 @@ export async function markOrderPaid(orderId: number, paymentIntentId: string, am
   emitToStore(order.storeId, "order:new", {
     id: order.id,
     status: order.status,
+    fulfilment: order.fulfilment,
     totalCents: order.totalCents,
     deliveryAddress: order.deliveryAddress,
     items: order.items.map((i) => ({ name: i.product.name, quantity: i.quantity, unitCents: i.unitCents })),
@@ -282,7 +338,7 @@ export async function markOrderPaid(orderId: number, paymentIntentId: string, am
   });
   emitOrderStatus(orderId, { status: order.status, paymentStatus: "SUCCEEDED" });
   pushToUser(order.store.ownerId, {
-    title: `New order #${order.id}`,
+    title: pickup ? `New pickup order #${order.id}` : `New order #${order.id}`,
     body: `${order.items.reduce((n, i) => n + i.quantity, 0)} item(s) · ${(order.subtotalCents / 100).toFixed(2).replace(".", ",")} € — accept it in Malvoya Store.`,
     data: { type: "order", orderId: String(order.id) },
     channel: "new_orders",
@@ -311,6 +367,11 @@ export async function markOrderPaymentFailed(orderId: number, paymentIntentId: s
   if (!order || order.stripePaymentIntentId !== paymentIntentId || order.paymentStatus === "SUCCEEDED") return;
   await prisma.order.update({ where: { id: orderId }, data: { paymentStatus: "FAILED" } });
   emitOrderStatus(orderId, { status: order.status, paymentStatus: "FAILED" });
+}
+
+/** 6 random digits from the OS's secure random source. */
+function newPickupCode() {
+  return String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
 }
 
 async function restock(tx: Prisma.TransactionClient, orderId: number) {
@@ -344,6 +405,8 @@ export async function cancelOrderInternal(orderId: number, reason: string, opts:
     await restock(tx, orderId);
     // The customer gets the promo code back
     await tx.promoRedemption.deleteMany({ where: { orderId } });
+    // ...and the invite code (it was not used up)
+    await tx.referral.deleteMany({ where: { orderId, rewardedAt: null } });
     if (order.courierId) {
       await tx.courier.updateMany({ where: { id: order.courierId, currentOrderId: orderId }, data: { currentOrderId: null } });
     }
@@ -373,6 +436,7 @@ export async function cancelOrderInternal(orderId: number, reason: string, opts:
 
   emitOrderStatus(orderId, { status: "CANCELLED", cancelReason: reason });
   emitToStore(order.storeId, "order:status", { orderId, status: "CANCELLED" });
+  if (order.fulfilment === "DELIVERY" && !order.courierId) emitToAllCouriers("courier:offer_closed", { orderId, reason: "cancelled" });
   if (opts.notifyCustomer !== false) {
     const money = order.paymentStatus === "SUCCEEDED" ? "Your money is on its way back to you." : "You have not been charged.";
     pushToUser(order.userId, {
@@ -423,6 +487,9 @@ export async function updateOrderStatus(orderId: number, actor: Actor, next: Ord
   if (next === "DELIVERED" && relation === "courier") {
     throw new OrderError("Confirm the handover in the app to complete this delivery", 409);
   }
+  if ((next === "SHIPPED" || next === "DELIVERED") && order.fulfilment === "PICKUP") {
+    throw new OrderError("The store completes a pickup order by entering the customer's pickup code", 409);
+  }
 
   if (next === "CANCELLED") {
     const cancelled = await cancelOrderInternal(orderId, relation === "vendor" ? "Declined by store" : "Cancelled by Malvoya");
@@ -438,6 +505,8 @@ export async function updateOrderStatus(orderId: number, actor: Actor, next: Ord
         ...(next === "DELIVERED" ? { deliveredAt: new Date(), handoverMethod: "ADMIN" } : {}),
         ...(next === "SHIPPED" ? { pickedUpAt: new Date() } : {}),
         ...(next === "CONFIRMED" ? { confirmedAt: new Date() } : {}),
+        // PROCESSING = the store has the order ready (pickup: starts the hold time; delivery: ends paid waiting)
+        ...(next === "PROCESSING" ? { readyAt: new Date() } : {}),
       },
     });
     if (res.count === 0) throw new OrderError("The order changed in the meantime, please refresh", 409);
@@ -452,20 +521,23 @@ export async function updateOrderStatus(orderId: number, actor: Actor, next: Ord
   return updated;
 }
 
-/** Straight-line km from a courier's last known position to the order's shop, or null when either is unknown. */
-function approachStraightKm(
-  courier: { latitude: number | null; longitude: number | null },
-  store: { latitude: number | null; longitude: number | null },
-) {
-  if (courier.latitude === null || courier.longitude === null || store.latitude === null || store.longitude === null) return null;
-  return haversineKm(courier.latitude, courier.longitude, store.latitude, store.longitude);
+type CourierPosition = { latitude: number | null; longitude: number | null; locationAt: Date | null };
+
+/**
+ * Straight-line km from a courier's position to the order's shop, or null when either is unknown. Only a fresh
+ * position counts (reported within the last 2 minutes): an old or missing one gives no ride-to-shop pay.
+ */
+function approachStraightKm(courier: CourierPosition, store: { latitude: number | null; longitude: number | null }) {
+  const pos = freshPosition(courier);
+  if (!pos || store.latitude === null || store.longitude === null) return null;
+  return haversineKm(pos.lat, pos.lng, store.latitude, store.longitude);
 }
 
 /**
  * On acceptance: the ride to the shop (courier's last known position → shop, × road factor) beyond the
  * free km is added to the courier's pay (formula mode).
  */
-async function addApproachPay(tx: Prisma.TransactionClient, orderId: number, courier: { latitude: number | null; longitude: number | null }) {
+async function addApproachPay(tx: Prisma.TransactionClient, orderId: number, courier: CourierPosition) {
   const o = await tx.order.findUniqueOrThrow({
     where: { id: orderId },
     select: {
@@ -484,18 +556,26 @@ async function addApproachPay(tx: Prisma.TransactionClient, orderId: number, cou
 }
 
 /**
- * At pickup: waiting at the shop = pickedUpAt − courierArrivedAt (set by POST /orders/:id/arrived-at-store).
+ * At pickup: waiting is paid only while the shop was not ready. It counts from the check-in at the shop
+ * (POST /orders/:id/arrived-at-store), but never from earlier than acceptance + the expected ride to the shop
+ * (at 15 km/h), until the shop marked the order ready (PROCESSING) or pickup, whichever came first.
  * Whole minutes beyond the free ones are added to the courier's pay (formula mode, capped).
  */
 async function addWaitingPay(tx: Prisma.TransactionClient, orderId: number) {
   const o = await tx.order.findUniqueOrThrow({
     where: { id: orderId },
-    select: { courierArrivedAt: true, pickedUpAt: true, courierPay: true, courierFeeCents: true, tipCents: true, deliveryFeeCents: true },
+    select: {
+      courierArrivedAt: true, acceptedAt: true, readyAt: true, pickedUpAt: true, courierPay: true, courierFeeCents: true,
+      tipCents: true, deliveryFeeCents: true,
+    },
   });
   if (!o.courierArrivedAt || !o.pickedUpAt || o.courierPay === null) return;
   const pay = courierPayOf(o);
   if (pay.mode !== "formula") return;
-  const waitMinutes = Math.floor(Math.max(0, o.pickedUpAt.getTime() - o.courierArrivedAt.getTime()) / 60_000);
+  const rideMs = ((pay.approachKm ?? 0) / RIDE_SPEED_KMH) * 3_600_000;
+  const start = Math.max(o.courierArrivedAt.getTime(), o.acceptedAt ? o.acceptedAt.getTime() + rideMs : 0);
+  const end = o.readyAt && o.readyAt < o.pickedUpAt ? o.readyAt.getTime() : o.pickedUpAt.getTime();
+  const waitMinutes = Math.floor(Math.max(0, end - start) / 60_000);
   const next = withWaiting(pay, waitMinutes);
   await tx.order.update({
     where: { id: orderId },
@@ -509,16 +589,23 @@ async function addWaitingPay(tx: Prisma.TransactionClient, orderId: number) {
  */
 export async function markArrivedAtStore(orderId: number, userId: number) {
   const courier = await requireApprovedCourier(userId);
-  const order = await prisma.order.findUnique({ where: { id: orderId } });
+  const order = await prisma.order.findUnique({ where: { id: orderId }, include: { store: { select: { latitude: true, longitude: true } } } });
   if (!order || order.courierId !== courier.id) throw new OrderError("Order not found", 404);
   if (order.status !== "CONFIRMED" && order.status !== "PROCESSING") {
     throw new OrderError("You can only check in at the shop before pickup", 409);
+  }
+  // The waiting clock starts only with a fresh position at the shop (within 300 m)
+  const pos = freshPosition(courier);
+  const atShop = !!pos && order.store.latitude !== null && order.store.longitude !== null
+    && haversineKm(pos.lat, pos.lng, order.store.latitude, order.store.longitude) <= ARRIVAL_RADIUS_KM;
+  if (!atShop) {
+    throw new OrderError("Check in when you are at the shop: your current position is not within 300 m of it. Keep location sharing on.", 409);
   }
   const res = await prisma.order.updateMany({
     where: { id: orderId, courierId: courier.id, courierArrivedAt: null, status: { in: ["CONFIRMED", "PROCESSING"] } },
     data: { courierArrivedAt: new Date() },
   });
-  const updated = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+  const updated = await prisma.order.findUniqueOrThrow({ where: { id: orderId }, omit: { courierPay: false } });
   if (res.count > 0) {
     emitToStore(updated.storeId, "order:status", { orderId, status: updated.status, courierArrivedAt: updated.courierArrivedAt });
   }
@@ -532,15 +619,101 @@ const STATUS_PUSH: Partial<Record<OrderStatus, (o: { id: number; etaMinutes: num
   DELIVERED: (o) => ({ title: `Order #${o.id} delivered`, body: "Enjoy! You can rate the store and return items within 14 days." }),
 };
 
-function afterStatusChange(order: { id: number; storeId: number; userId: number; etaMinutes: number | null }, email: string, next: OrderStatus) {
-  emitOrderStatus(order.id, { status: next });
-  emitToStore(order.storeId, "order:status", { orderId: order.id, status: next });
-  sendOrderStatusEmail(order.id, email, next).catch(() => {});
-  const push = STATUS_PUSH[next]?.(order);
-  if (push) pushToUser(order.userId, { ...push, data: { type: "order", orderId: String(order.id) } }).catch(() => {});
+/** Reserve & collect: what the customer hears instead of the courier messages. */
+const PICKUP_PUSH: Partial<Record<OrderStatus, (o: { id: number; storeName: string }) => { title: string; body: string }>> = {
+  CONFIRMED: (o) => ({ title: `Order #${o.id} accepted`, body: `${o.storeName} is getting your order ready for pickup.` }),
+  PROCESSING: (o) => ({ title: `Ready for pickup at ${o.storeName}`, body: `Order #${o.id} is waiting for you. Show your pickup code at the store.` }),
+  DELIVERED: (o) => ({ title: `Order #${o.id} collected`, body: "Enjoy! You can rate the store and return items within 14 days." }),
+};
 
-  if (next === "CONFIRMED") offerOrderToCouriers(order.id).catch((e) => logger.error({ orderId: order.id, e }, "Dispatch failed"));
-  if (next === "DELIVERED") createPayoutsForOrder(order.id).catch((e) => logger.error({ orderId: order.id, err: e?.message }, "Payout creation failed"));
+type StatusOrder = { id: number; storeId: number; userId: number; etaMinutes: number | null; fulfilment: Fulfilment; readyAt?: Date | null };
+
+function afterStatusChange(order: StatusOrder, email: string, next: OrderStatus) {
+  const pickup = order.fulfilment === "PICKUP";
+  emitOrderStatus(order.id, { status: next, ...(pickup && next === "PROCESSING" ? { readyAt: order.readyAt } : {}) });
+  emitToStore(order.storeId, "order:status", { orderId: order.id, status: next });
+  const emailStatus = pickup && next === "PROCESSING" ? "READY_FOR_PICKUP" : pickup && next === "DELIVERED" ? "COLLECTED" : next;
+  sendOrderStatusEmail(order.id, email, emailStatus).catch(() => {});
+  if (pickup) {
+    prisma.store.findUnique({ where: { id: order.storeId }, select: { name: true } }).then((s) => {
+      const push = PICKUP_PUSH[next]?.({ id: order.id, storeName: s?.name ?? "the store" });
+      if (push) return pushToUser(order.userId, { ...push, data: { type: "order", orderId: String(order.id) } });
+    }).catch(() => {});
+  } else {
+    const push = STATUS_PUSH[next]?.(order);
+    if (push) pushToUser(order.userId, { ...push, data: { type: "order", orderId: String(order.id) } }).catch(() => {});
+  }
+
+  if (next === "CONFIRMED" && !pickup) offerOrderToCouriers(order.id).catch((e) => logger.error({ orderId: order.id, e }, "Dispatch failed"));
+  if (next === "DELIVERED") {
+    createPayoutsForOrder(order.id).catch((e) => logger.error({ orderId: order.id, err: e?.message }, "Payout creation failed"));
+    rewardReferralForOrder(order.id).catch((e) => logger.error({ orderId: order.id, err: e?.message }, "Referral reward failed"));
+  }
+}
+
+/** An OrderError the store app can act on: how many tries are left, and until when the handover is locked. */
+class PickupCodeError extends OrderError {
+  constructor(message: string, public attemptsLeft: number, public lockedUntil?: Date) {
+    super(message, 400);
+  }
+}
+export { PickupCodeError };
+
+/**
+ * Reserve & collect handover: the store types in the customer's 6-digit code. A wrong code costs one of
+ * 5 attempts; then the handover is locked for 15 minutes. The right code completes the order (DELIVERED,
+ * handoverMethod PICKUP), which starts the 14-day withdrawal period and schedules the store payout.
+ */
+export async function collectOrder(orderId: number, userId: number, code: string) {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: {
+      id: true, status: true, fulfilment: true, paymentStatus: true, pickupCode: true, pickupFailedAttempts: true,
+      pickupLockedUntil: true, store: { select: { ownerId: true } }, user: { select: { email: true } },
+    },
+  });
+  if (!order || order.store.ownerId !== userId) throw new OrderError("Order not found", 404);
+  if (order.fulfilment !== "PICKUP") throw new OrderError("This order is delivered by a courier", 409);
+  if (order.paymentStatus !== "SUCCEEDED" || !order.pickupCode) throw new OrderError("This order has not been paid", 409);
+  if (order.status === "CONFIRMED") throw new OrderError("Mark the order ready before handing it over", 409);
+  if (order.status !== "PROCESSING") throw new OrderError("This order can no longer be handed over", 409);
+
+  const now = new Date();
+  if (order.pickupLockedUntil && order.pickupLockedUntil > now) {
+    const min = Math.max(1, Math.ceil((order.pickupLockedUntil.getTime() - now.getTime()) / 60_000));
+    throw new PickupCodeError(`Too many wrong codes. Try again in ${min} min.`, 0, order.pickupLockedUntil);
+  }
+
+  const given = Buffer.from(code.trim());
+  const expected = Buffer.from(order.pickupCode);
+  const match = given.length === expected.length && crypto.timingSafeEqual(given, expected);
+  if (!match) {
+    // A lock that has run out starts a fresh round of attempts
+    const fresh = order.pickupLockedUntil !== null;
+    const updated = await prisma.order.update({
+      where: { id: orderId },
+      data: fresh ? { pickupFailedAttempts: 1, pickupLockedUntil: null } : { pickupFailedAttempts: { increment: 1 } },
+      select: { pickupFailedAttempts: true },
+    });
+    const attemptsLeft = Math.max(0, PICKUP_MAX_ATTEMPTS - updated.pickupFailedAttempts);
+    if (attemptsLeft === 0) {
+      const lockedUntil = new Date(Date.now() + PICKUP_LOCK_MINUTES * 60_000);
+      await prisma.order.update({ where: { id: orderId }, data: { pickupLockedUntil: lockedUntil, pickupFailedAttempts: 0 } });
+      throw new PickupCodeError(`Wrong code. Too many tries: the handover is locked for ${PICKUP_LOCK_MINUTES} minutes.`, 0, lockedUntil);
+    }
+    throw new PickupCodeError(`Wrong code. ${attemptsLeft} ${attemptsLeft === 1 ? "try" : "tries"} left.`, attemptsLeft);
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const res = await tx.order.updateMany({
+      where: { id: orderId, status: "PROCESSING", fulfilment: "PICKUP" },
+      data: { status: "DELIVERED", deliveredAt: new Date(), handoverMethod: "PICKUP", pickupFailedAttempts: 0, pickupLockedUntil: null },
+    });
+    if (res.count === 0) throw new OrderError("The order changed in the meantime, please refresh", 409);
+    return tx.order.findUniqueOrThrow({ where: { id: orderId } });
+  });
+  afterStatusChange(updated, order.user.email, "DELIVERED");
+  return updated;
 }
 
 /**
@@ -576,7 +749,7 @@ export async function deliverOrder(orderId: number, userId: number, input: {
     });
     if (res.count === 0) throw new OrderError("The order changed in the meantime, please refresh", 409);
     await tx.courier.updateMany({ where: { id: courier.id, currentOrderId: orderId }, data: { currentOrderId: null } });
-    return tx.order.findUniqueOrThrow({ where: { id: orderId } });
+    return tx.order.findUniqueOrThrow({ where: { id: orderId }, omit: { courierPay: false } });
   });
 
   afterStatusChange(updated, order.user.email, "DELIVERED");
@@ -618,18 +791,25 @@ export async function purgeOldDeliveryProofs() {
 
 const courierPublic = { select: { id: true, name: true, latitude: true, longitude: true } };
 
+const orderDetailInclude = {
+  items: { include: { product: { select: { id: true, name: true, images: true } }, variant: { select: { size: true, color: true } } } },
+  courier: courierPublic,
+  store: { select: { id: true, name: true, address: true, latitude: true, longitude: true, logoUrl: true, phone: true } },
+  promoCode: { select: { code: true, description: true } },
+} satisfies Prisma.OrderInclude;
+
+/** The pickup code is the customer's alone, and only while it is needed (accepted or ready, not yet collected). */
+function withPickupCode<T extends { status: OrderStatus; pickupCode: string | null }>(order: T): T {
+  return { ...order, pickupCode: order.status === "CONFIRMED" || order.status === "PROCESSING" ? order.pickupCode : null };
+}
+
 export async function getOrder(id: number, actor: Actor) {
   const relation = await getOrderRelation(id, actor);
   if (!relation) throw new OrderError("Order not found", 404);
-  return prisma.order.findUniqueOrThrow({
-    where: { id },
-    include: {
-      items: { include: { product: { select: { id: true, name: true, images: true } }, variant: { select: { size: true, color: true } } } },
-      courier: courierPublic,
-      store: { select: { id: true, name: true, address: true, latitude: true, longitude: true, logoUrl: true, phone: true } },
-      promoCode: { select: { code: true, description: true } },
-    },
-  });
+  if (relation === "customer") {
+    return withPickupCode(await prisma.order.findUniqueOrThrow({ where: { id }, omit: { pickupCode: false }, include: orderDetailInclude }));
+  }
+  return prisma.order.findUniqueOrThrow({ where: { id }, include: orderDetailInclude });
 }
 
 /** The same endpoint serves every app; what you get depends on your role. */
@@ -653,7 +833,10 @@ export async function listOrdersFor(actor: Actor) {
   }
   if (actor.role === "COURIER") return listCourierOrders(actor.id);
 
-  return prisma.order.findMany({ where: { userId: actor.id }, include, orderBy: { createdAt: "desc" }, take: 200 });
+  const mine = await prisma.order.findMany({
+    where: { userId: actor.id }, omit: { pickupCode: false }, include, orderBy: { createdAt: "desc" }, take: 200,
+  });
+  return mine.map(withPickupCode);
 }
 
 // ─── Courier side ───────────────────────────────────────────────────────────
@@ -669,7 +852,8 @@ export async function requireApprovedCourier(userId: number) {
 export async function listAvailableOrders(userId: number) {
   const courier = await requireApprovedCourier(userId);
   const orders = await prisma.order.findMany({
-    where: { courierId: null, paymentStatus: "SUCCEEDED", status: { in: ["CONFIRMED", "PROCESSING"] } },
+    where: { courierId: null, fulfilment: "DELIVERY", paymentStatus: "SUCCEEDED", status: { in: ["CONFIRMED", "PROCESSING"] } },
+    omit: { courierPay: false },
     include: {
       store: { select: { id: true, name: true, address: true, latitude: true, longitude: true } },
       items: { select: { quantity: true } },
@@ -692,6 +876,8 @@ export async function listAvailableOrders(userId: number) {
       courierPay,
       deliveryAreaLat: o.deliveryLat === null ? null : Math.round(o.deliveryLat * 100) / 100,
       deliveryAreaLng: o.deliveryLng === null ? null : Math.round(o.deliveryLng * 100) / 100,
+      // When the job was first offered (the store accepted it)
+      offeredAt: o.confirmedAt ?? o.lastOfferAt,
       createdAt: o.createdAt,
     };
   });
@@ -702,6 +888,7 @@ export async function listCourierOrders(userId: number) {
   if (!courier) return [];
   const orders = await prisma.order.findMany({
     where: { courierId: courier.id },
+    omit: { courierPay: false },
     include: {
       store: { select: { id: true, name: true, address: true, latitude: true, longitude: true, phone: true } },
       items: { include: { product: { select: { name: true, images: true } } } },
@@ -719,18 +906,25 @@ export async function acceptOrder(orderId: number, userId: number) {
   const courier = await requireApprovedCourier(userId);
   if (!courier.isActive) throw new OrderError("Go online before accepting deliveries", 409);
   if (courier.currentOrderId) throw new OrderError("Finish your current delivery first", 409);
+  // A courier whose fresh position is beyond the maximum ride cannot take the job (and cannot inflate ride pay)
+  const target = await prisma.order.findUnique({ where: { id: orderId }, select: { store: { select: { latitude: true, longitude: true } } } });
+  const km = target ? approachStraightKm(courier, target.store) : null;
+  if (km !== null && km > env.courierPay.approachMaxKm) {
+    throw new OrderError("You are too far from the shop to take this job", 409);
+  }
 
   const updated = await prisma.$transaction(async (tx) => {
     const res = await tx.order.updateMany({
-      where: { id: orderId, courierId: null, paymentStatus: "SUCCEEDED", status: { in: ["CONFIRMED", "PROCESSING"] } },
+      where: { id: orderId, courierId: null, fulfilment: "DELIVERY", paymentStatus: "SUCCEEDED", status: { in: ["CONFIRMED", "PROCESSING"] } },
       data: { courierId: courier.id, acceptedAt: new Date() },
     });
     if (res.count === 0) throw new OrderError("This delivery is no longer available", 409);
     await tx.courier.update({ where: { id: courier.id }, data: { currentOrderId: orderId } });
     await addApproachPay(tx, orderId, courier);
-    return tx.order.findUniqueOrThrow({ where: { id: orderId } });
+    return tx.order.findUniqueOrThrow({ where: { id: orderId }, omit: { courierPay: false } });
   });
 
+  emitToAllCouriers("courier:offer_closed", { orderId, reason: "taken" });
   emitOrderStatus(orderId, { status: updated.status, courierId: courier.id, courierName: courier.name });
   emitToStore(updated.storeId, "order:status", { orderId, status: updated.status, courierName: courier.name });
   pushToUser(updated.userId, {
@@ -838,11 +1032,95 @@ export async function listRentals(userId: number) {
 
 // ─── RETURNS (14-day right of withdrawal) ───────────────────────────────────
 
+type ReturnLine = { orderItemId: number; quantity: number };
+type PlanItem = { id: number; quantity: number; unitCents: number; product?: { name: string } };
+type PlanReturn = {
+  id: number; status: string; refundCents: number | null; damageDedCents: number | null; items: ReturnLine[];
+};
+type PlanOrder = {
+  subtotalCents: number; deliveryFeeCents: number; serviceFeeCents: number; smallOrderFeeCents: number; discountCents: number;
+  items: PlanItem[]; returns: PlanReturn[];
+};
+
+/** Order lines a return covers. Returns made before 2.8 have no rows and cover the whole order. */
+function linesOf(ret: { items: ReturnLine[] }, orderItems: { id: number; quantity: number }[]): ReturnLine[] {
+  return ret.items.length
+    ? ret.items.map((i) => ({ orderItemId: i.orderItemId, quantity: i.quantity }))
+    : orderItems.map((i) => ({ orderItemId: i.id, quantity: i.quantity }));
+}
+
+function sumQuantities(returns: { items: ReturnLine[] }[], orderItems: { id: number; quantity: number }[]) {
+  const used = new Map<number, number>();
+  for (const r of returns) for (const l of linesOf(r, orderItems)) used.set(l.orderItemId, (used.get(l.orderItemId) ?? 0) + l.quantity);
+  return used;
+}
+
+/**
+ * What a return refunds by default (before any deduction):
+ *  - some items: Σ unit price × quantity, less the promo discount in proportion (Malvoya's discount is shared
+ *    over the items; service and small-order fees stay with the order while part of it is kept);
+ *  - the return that completes the order (with the earlier refunded returns): everything paid for the sale —
+ *    items, the original delivery fee, service and small-order fees, less the discount — minus what earlier
+ *    returns already refunded or deducted. So a whole order returned at once or in parts refunds the same total
+ *    (Kuluttajansuojalaki 6:16). The courier tip is not part of the sale.
+ * `goodsCents` is the undiscounted value of the returned goods, used to reduce the store payout.
+ */
+function refundPlan(order: PlanOrder, ret: PlanReturn) {
+  const lines = linesOf(ret, order.items);
+  const byId = new Map(order.items.map((i) => [i.id, i]));
+  const goodsCents = lines.reduce((s, l) => s + (byId.get(l.orderItemId)?.unitCents ?? 0) * l.quantity, 0);
+  const bought = order.items.reduce((s, i) => s + i.quantity, 0);
+  const refunded = order.returns.filter((r) => r.id !== ret.id && r.status === "REFUNDED");
+  const refundedQty = [...sumQuantities(refunded, order.items).values()].reduce((a, b) => a + b, 0);
+  const completesOrder = refundedQty + lines.reduce((s, l) => s + l.quantity, 0) >= bought;
+  let refundCents: number;
+  if (completesOrder) {
+    const paidForSale = order.subtotalCents + order.deliveryFeeCents + order.serviceFeeCents + order.smallOrderFeeCents - order.discountCents;
+    const accounted = refunded.reduce((s, r) => s + (r.refundCents ?? 0) + (r.damageDedCents ?? 0), 0);
+    refundCents = paidForSale - accounted;
+  } else {
+    const share = order.subtotalCents > 0 ? Math.round((order.discountCents * goodsCents) / order.subtotalCents) : 0;
+    refundCents = goodsCents - share;
+  }
+  return { lines, goodsCents, completesOrder, refundCents: Math.max(0, refundCents) };
+}
+
+/**
+ * Return payload: `items` = [{ orderItemId, quantity, name, unitCents }], `refundCents` = what was refunded
+ * (null until then) and `expectedRefundCents` = what refunding it now would give back by default.
+ */
+function presentReturn<R extends PlanReturn>(ret: R, order: PlanOrder | null) {
+  if (!order) return { ...ret, items: [] as { orderItemId: number; quantity: number; name: string; unitCents: number }[], expectedRefundCents: null };
+  const plan = refundPlan(order, ret);
+  const byId = new Map(order.items.map((i) => [i.id, i]));
+  return {
+    ...ret,
+    items: plan.lines.map((l) => ({
+      orderItemId: l.orderItemId,
+      quantity: l.quantity,
+      name: byId.get(l.orderItemId)?.product?.name ?? "",
+      unitCents: byId.get(l.orderItemId)?.unitCents ?? 0,
+    })),
+    expectedRefundCents: ret.status === "REFUNDED" ? ret.refundCents : ret.status === "REJECTED" ? null : plan.refundCents,
+  };
+}
+
+const returnItemsSelect = { select: { orderItemId: true, quantity: true } } as const;
+const planOrderSelect = {
+  subtotalCents: true, deliveryFeeCents: true, serviceFeeCents: true, smallOrderFeeCents: true, discountCents: true,
+  items: { select: { id: true, quantity: true, unitCents: true, productId: true, variantId: true, product: { select: { name: true } } } },
+  returns: { select: { id: true, status: true, refundCents: true, damageDedCents: true, items: returnItemsSelect } },
+} satisfies Prisma.OrderSelect;
+
 export async function createReturn(userId: number, input: {
-  orderId?: number; rentalId?: number; reason: string; conditionNote?: string;
+  orderId?: number; rentalId?: number; reason: string; conditionNote?: string; items?: ReturnLine[];
 }) {
+  let lines: ReturnLine[] = [];
   if (input.orderId) {
-    const order = await prisma.order.findUnique({ where: { id: input.orderId } });
+    const order = await prisma.order.findUnique({
+      where: { id: input.orderId },
+      select: { id: true, userId: true, status: true, deliveredAt: true, ...planOrderSelect },
+    });
     if (!order || order.userId !== userId) throw new OrderError("Order not found", 404);
     if (order.status !== "DELIVERED" || !order.deliveredAt) throw new OrderError("You can return an order once it has been delivered");
     // Kuluttajansuojalaki 6:14 — 14 days from the day the consumer received the goods
@@ -850,8 +1128,28 @@ export async function createReturn(userId: number, input: {
     if (Date.now() - order.deliveredAt.getTime() > windowMs) {
       throw new OrderError(`The ${env.returnWindowDays}-day return period has ended`);
     }
-    const open = await prisma.return.findFirst({ where: { orderId: order.id, status: { notIn: ["REJECTED"] } } });
-    if (open) throw new OrderError("A return for this order already exists", 409);
+    // What is still returnable: bought − in every return that was not rejected
+    const used = sumQuantities(order.returns.filter((r) => r.status !== "REJECTED"), order.items);
+    const left = new Map(order.items.map((i) => [i.id, i.quantity - (used.get(i.id) ?? 0)]));
+    if (input.items) {
+      const wanted = new Map<number, number>();
+      for (const it of input.items) wanted.set(it.orderItemId, (wanted.get(it.orderItemId) ?? 0) + it.quantity);
+      for (const [orderItemId, quantity] of wanted) {
+        const line = order.items.find((i) => i.id === orderItemId);
+        if (!line) throw new OrderError(`Item ${orderItemId} is not part of this order`);
+        const max = left.get(orderItemId) ?? 0;
+        if (quantity > max) {
+          throw new OrderError(max === 0
+            ? `${line.product.name} has already been returned`
+            : `You can return at most ${max} × ${line.product.name}`);
+        }
+        lines.push({ orderItemId, quantity });
+      }
+    } else {
+      // The whole order (what is left of it), as before
+      lines = [...left].filter(([, q]) => q > 0).map(([orderItemId, quantity]) => ({ orderItemId, quantity }));
+      if (!lines.length) throw new OrderError("A return for this order already exists", 409);
+    }
   }
 
   if (input.rentalId) {
@@ -860,13 +1158,19 @@ export async function createReturn(userId: number, input: {
     if (!["ACTIVE", "OVERDUE"].includes(rental.status)) throw new OrderError("Rental must be active to initiate return");
   }
 
-  return prisma.return.create({
-    data: { userId, orderId: input.orderId, rentalId: input.rentalId, reason: input.reason as any, conditionNote: input.conditionNote },
+  const created = await prisma.return.create({
+    data: {
+      userId, orderId: input.orderId, rentalId: input.rentalId, reason: input.reason as any, conditionNote: input.conditionNote,
+      ...(lines.length ? { items: { createMany: { data: lines } } } : {}),
+    },
+    include: { items: returnItemsSelect },
   });
+  return getReturn(created.id, { id: userId, role: "CUSTOMER" });
 }
 
 /**
- * Store (or admin) processes a return. REFUNDED issues a real Stripe refund.
+ * Store (or admin) processes a return. REFUNDED issues a real Stripe refund for the returned items
+ * (see refundPlan) and puts them back into stock.
  * A deduction is only lawful for handling beyond what was needed to inspect the item
  * (Kuluttajansuojalaki 6:17), so any deduction must come with a written condition note.
  */
@@ -874,23 +1178,32 @@ export async function updateReturnStatus(id: number, actor: Actor, data: {
   status: "APPROVED" | "IN_TRANSIT" | "RECEIVED" | "REFUNDED" | "REJECTED";
   conditionNote?: string; refundCents?: number; damageDedCents?: number;
 }) {
-  const ret = await prisma.return.findUnique({ where: { id }, include: { order: { include: { store: true, items: true } } } });
+  const ret = await prisma.return.findUnique({
+    where: { id },
+    include: {
+      items: returnItemsSelect,
+      order: {
+        select: {
+          id: true, totalCents: true, refundedCents: true, stripePaymentIntentId: true, paymentStatus: true,
+          store: { select: { ownerId: true } }, ...planOrderSelect,
+        },
+      },
+    },
+  });
   if (!ret || !ret.order) throw new OrderError("Return not found", 404);
   if (actor.role !== "ADMIN" && ret.order.store.ownerId !== actor.id) throw new OrderError("Forbidden", 403);
   if (ret.status === "REFUNDED") throw new OrderError("This return has already been refunded", 409);
 
   if (data.status !== "REFUNDED") {
-    return prisma.return.update({ where: { id }, data: { status: data.status, conditionNote: data.conditionNote } });
+    await prisma.return.update({ where: { id }, data: { status: data.status, conditionNote: data.conditionNote } });
+    return getReturn(id, actor);
   }
 
   const order = ret.order;
-  const itemsCents = order.subtotalCents;
+  const plan = refundPlan(order, ret);
   const deduction = data.damageDedCents ?? 0;
   if (deduction > 0 && !data.conditionNote) throw new OrderError("Explain the deduction in the condition note");
-  // Full withdrawal refunds what was paid for the goods and the original delivery, including any service or
-  // small-order fee, less a promo discount (Kuluttajansuojalaki 6:16). The courier tip is not part of the sale.
-  const paidForSale = itemsCents + order.deliveryFeeCents + order.serviceFeeCents + order.smallOrderFeeCents - order.discountCents;
-  const refundCents = data.refundCents ?? paidForSale - deduction;
+  const refundCents = data.refundCents ?? plan.refundCents - deduction;
   const refundable = order.totalCents - order.refundedCents;
   if (refundCents <= 0 || refundCents > refundable) throw new OrderError(`Refund must be between 0.01 and ${(refundable / 100).toFixed(2)} €`);
   if (!order.stripePaymentIntentId || order.paymentStatus !== "SUCCEEDED") throw new OrderError("Order has no captured payment to refund", 409);
@@ -900,7 +1213,9 @@ export async function updateReturnStatus(id: number, actor: Actor, data: {
     { idempotencyKey: `return-refund-${id}` }
   );
 
-  const [updated] = await prisma.$transaction([
+  const byId = new Map(order.items.map((i) => [i.id, i]));
+  const returned = plan.lines.map((l) => ({ item: byId.get(l.orderItemId)!, quantity: l.quantity })).filter((r) => r.item);
+  await prisma.$transaction([
     prisma.return.update({ where: { id }, data: { status: "REFUNDED", refundCents, damageDedCents: deduction, conditionNote: data.conditionNote } }),
     prisma.order.update({
       where: { id: order.id },
@@ -910,16 +1225,18 @@ export async function updateReturnStatus(id: number, actor: Actor, data: {
       },
     }),
     // Returned goods go back into stock
-    ...order.items.map((i) => prisma.product.update({ where: { id: i.productId }, data: { stockQuantity: { increment: i.quantity } } })),
-    ...order.items.filter((i) => i.variantId).map((i) => prisma.productVariant.update({ where: { id: i.variantId! }, data: { stock: { increment: i.quantity } } })),
+    ...returned.map((r) => prisma.product.update({ where: { id: r.item.productId }, data: { stockQuantity: { increment: r.quantity } } })),
+    ...returned.filter((r) => r.item.variantId).map((r) => prisma.productVariant.update({ where: { id: r.item.variantId! }, data: { stock: { increment: r.quantity } } })),
   ]);
-  await adjustStorePayoutForRefund(order.id, refundCents);
+  // The store gives back the value of the returned goods (less the commission on them); with a store-chosen
+  // amount the refund itself is scaled back to goods value as before
+  await adjustStorePayoutForRefund(order.id, refundCents, data.refundCents === undefined ? Math.max(0, plan.goodsCents - deduction) : undefined);
   pushToUser(ret.userId, {
     title: "Refund sent",
     body: `${(refundCents / 100).toFixed(2).replace(".", ",")} € for order #${order.id} is on its way back to you.`,
     data: { type: "order", orderId: String(order.id) },
   }).catch(() => {});
-  return updated;
+  return getReturn(id, actor);
 }
 
 /** Customers see their own returns; stores see returns of their orders so they can process them. */
@@ -932,28 +1249,39 @@ export async function listReturns(actor: Actor) {
   } else if (actor.role === "ADMIN") {
     where = {};
   }
-  return prisma.return.findMany({
+  const rows = await prisma.return.findMany({
     where,
     include: {
+      items: returnItemsSelect,
       order: {
         select: {
           id: true, totalCents: true, subtotalCents: true, deliveryFeeCents: true, refundedCents: true, deliveredAt: true,
           serviceFeeCents: true, smallOrderFeeCents: true, discountCents: true, tipCents: true,
           store: { select: { name: true } },
-          items: { select: { quantity: true, unitCents: true, product: { select: { name: true, images: true } }, variant: { select: { size: true, color: true } } } },
+          items: { select: { id: true, quantity: true, unitCents: true, product: { select: { name: true, images: true } }, variant: { select: { size: true, color: true } } } },
+          returns: { select: { id: true, status: true, refundCents: true, damageDedCents: true, items: returnItemsSelect } },
         },
       },
     },
     orderBy: { createdAt: "desc" },
     take: 100,
   });
+  return rows.map((r) => {
+    const presented = presentReturn(r, r.order);
+    if (!presented.order) return presented;
+    const { returns: _others, ...order } = presented.order;
+    return { ...presented, order };
+  });
 }
 
 export async function getReturn(id: number, actor: Actor) {
-  const ret = await prisma.return.findUnique({ where: { id }, include: { order: { select: { store: { select: { ownerId: true } } } } } });
+  const ret = await prisma.return.findUnique({
+    where: { id },
+    include: { items: returnItemsSelect, order: { select: { store: { select: { ownerId: true } }, ...planOrderSelect } } },
+  });
   if (!ret) throw new OrderError("Return not found", 404);
   const allowed = actor.role === "ADMIN" || ret.userId === actor.id || ret.order?.store.ownerId === actor.id;
   if (!allowed) throw new OrderError("Return not found", 404);
-  const { order, ...rest } = ret;
+  const { order, ...rest } = presentReturn(ret, ret.order);
   return rest;
 }

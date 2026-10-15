@@ -4,7 +4,7 @@ import {
   createOrder, quoteOrder, listOrders, getOrder, cancelOrder, updateOrderStatus,
   createRental, listRentals, getRental,
   createReturn, listReturns, getReturn, updateReturnStatus,
-  deliverOrder, getDeliveryProof,
+  deliverOrder, getDeliveryProof, collectOrder,
 } from "./orders.controller";
 
 const router = Router();
@@ -21,6 +21,8 @@ router.patch("/orders/:id(\\d+)/status",      auth, requireRole("VENDOR", "COURI
 // Courier completes the delivery (in person, or at the door with a photo)
 router.post("/orders/:id(\\d+)/deliver",      auth, requireRole("COURIER"), deliverOrder);
 router.get("/orders/:id(\\d+)/proof",         auth, getDeliveryProof);
+// Reserve & collect: the store hands a pickup order over when the customer's 6-digit code matches
+router.post("/orders/:id(\\d+)/collect",      auth, requireRole("VENDOR"), collectOrder);
 
 // Rentals
 router.post("/rentals",                       auth, requireRole("CUSTOMER"), createRental);

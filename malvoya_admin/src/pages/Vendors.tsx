@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Search, Store, CheckCircle, XCircle, RefreshCw } from 'lucide-react';
+import { Search, Store, CheckCircle, XCircle, RefreshCw, Pencil } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../utils/api';
 
@@ -24,6 +24,7 @@ export default function Vendors() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [actionId, setActionId] = useState<number | null>(null);
+  const [editing, setEditing] = useState<{ id: number; percent: string } | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -47,6 +48,28 @@ export default function Vendors() {
     try { await api.delete(`/admin/vendors/${id}`); await load(); }
     catch { alert('Failed to reject vendor.'); }
     finally { setActionId(null); }
+  };
+
+  // Commission in whole percent (0–50). Applies to new orders only; the API records who changed it and when.
+  const saveCommission = async (v: Vendor) => {
+    if (!editing) return;
+    const pct = Number(editing.percent);
+    if (editing.percent.trim() === '' || !Number.isInteger(pct) || pct < 0 || pct > 50) {
+      alert('Enter a whole percentage between 0 and 50.');
+      return;
+    }
+    const old = Math.round(v.commissionRate * 100);
+    if (pct === old) { setEditing(null); return; }
+    if (!confirm(`Change the commission of "${v.name}" from ${old} % to ${pct} %?\n\nIt applies to new orders only; existing orders keep their commission.`)) return;
+    setActionId(v.id);
+    try {
+      await api.patch(`/admin/vendors/${v.id}/commission`, { commissionRate: pct / 100 });
+      setEditing(null);
+      await load();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      alert(msg || 'Failed to change the commission.');
+    } finally { setActionId(null); }
   };
 
   const filtered = vendors.filter(v =>
@@ -91,7 +114,7 @@ export default function Vendors() {
           <table style={{ width:'100%', fontSize:'0.875rem', borderCollapse:'collapse' }}>
             <thead>
               <tr style={{ borderBottom:'1px solid #F5F5F7' }}>
-                {['Store','Owner','Category','Products','Orders','Status','Actions'].map(h => (
+                {['Store','Owner','Category','Products','Orders','Commission','Status','Actions'].map(h => (
                   <th key={h} style={{ textAlign:'left',padding:'1rem 1.5rem',fontSize:'0.6875rem',fontWeight:500,color:'#8E8E93',textTransform:'uppercase',letterSpacing:'0.05em' }}>{h}</th>
                 ))}
               </tr>
@@ -112,6 +135,27 @@ export default function Vendors() {
                   </td>
                   <td style={{ padding:'1rem 1.5rem',color:'#3C3C43' }}>{v._count.products}</td>
                   <td style={{ padding:'1rem 1.5rem',color:'#3C3C43' }}>{v._count.orders}</td>
+                  <td style={{ padding:'1rem 1.5rem',color:'#3C3C43',whiteSpace:'nowrap' }}>
+                    {editing?.id === v.id ? (
+                      <span style={{ display:'inline-flex',alignItems:'center',gap:'0.375rem' }}>
+                        <input className="apple-input" type="number" min={0} max={50} step={1} aria-label="Commission percent"
+                          style={{ width:'4.5rem',padding:'0.25rem 0.5rem' }} value={editing.percent} autoFocus
+                          onChange={e => setEditing({ id: v.id, percent: e.target.value })}
+                          onKeyDown={e => { if (e.key === 'Enter') saveCommission(v); if (e.key === 'Escape') setEditing(null); }} />
+                        %
+                        <button className="apple-btn-primary" style={{ padding:'0.25rem 0.5rem',fontSize:'0.75rem' }}
+                          onClick={() => saveCommission(v)} disabled={actionId === v.id}>Save</button>
+                        <button style={{ background:'none',border:'none',color:'#8E8E93',cursor:'pointer',fontSize:'0.75rem' }}
+                          onClick={() => setEditing(null)}>Cancel</button>
+                      </span>
+                    ) : (
+                      <button title="Change commission (new orders only)"
+                        style={{ display:'inline-flex',alignItems:'center',gap:'0.375rem',background:'none',border:'none',cursor:'pointer',color:'#3C3C43',fontSize:'0.875rem' }}
+                        onClick={() => setEditing({ id: v.id, percent: String(Math.round(v.commissionRate * 100)) })}>
+                        {Math.round(v.commissionRate * 100)} % <Pencil style={{ width:'12px',height:'12px',color:'#0071E3' }} />
+                      </button>
+                    )}
+                  </td>
                   <td style={{ padding:'1rem 1.5rem' }}>
                     {v.isVerified
                       ? <span className="badge-green"><CheckCircle style={{width:'10px',height:'10px',marginRight:'4px'}} />Verified</span>

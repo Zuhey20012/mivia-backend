@@ -59,11 +59,20 @@ export function waitPayFor(waitMinutes: number, cfg: CourierPayConfig = env.cour
   return Math.min(paidMinutes * cfg.waitPerMinCents, cfg.waitMaxCents);
 }
 
-/** Pay for the ride to the shop (route km) beyond the free km. */
+/** Longest paid ride to the shop, in route km (COURIER_APPROACH_MAX_KM straight line × road factor). */
+export function maxApproachRouteKm(cfg: CourierPayConfig = env.courierPay) {
+  return routeKm(cfg.approachMaxKm ?? env.courierPay.approachMaxKm, cfg) ?? 0;
+}
+
+/** Pay for the ride to the shop (route km) beyond the free km, never for more than the maximum ride. */
 export function approachPayFor(approachKm: number | null, cfg: CourierPayConfig = env.courierPay) {
   if (approachKm === null) return 0;
-  return Math.round(Math.max(0, approachKm - cfg.approachFreeKm) * cfg.approachPerKmCents);
+  const paidKm = Math.min(approachKm, maxApproachRouteKm(cfg));
+  return Math.round(Math.max(0, paidKm - cfg.approachFreeKm) * cfg.approachPerKmCents);
 }
+
+/** Average speed used for the expected ride to the shop (waiting is not counted before it could have ended). */
+export const RIDE_SPEED_KMH = 15;
 
 /** The pay rule in one sentence, built from the current settings. */
 export function payRuleSummary(cfg: CourierPayConfig = env.courierPay, mode: CourierPayMode = cfg.mode): Text {
@@ -95,11 +104,16 @@ function waitPolicyFor(mode: CourierPayMode, cfg: CourierPayConfig): Text {
   if (mode === "fee_share" || cfg.waitPerMinCents === 0 || cfg.waitMaxCents === 0) {
     return { en: "Waiting at the shop is not paid separately.", fi: "Odotusta liikkeessä ei makseta erikseen." };
   }
+  const maxMin = cfg.waitFreeMinutes + Math.floor(cfg.waitMaxCents / cfg.waitPerMinCents);
   return {
-    en: `Waiting at the shop: the first ${cfg.waitFreeMinutes} min are included, then ${moneyEn(cfg.waitPerMinCents)}/min, ` +
-      `max ${moneyEn(cfg.waitMaxCents)}. Tap "Arrived at shop" when you get there; it is added at pickup.`,
-    fi: `Odotus liikkeessä: ensimmäiset ${cfg.waitFreeMinutes} min sisältyvät, sen jälkeen ${moneyFi(cfg.waitPerMinCents)}/min, ` +
-      `enintään ${moneyFi(cfg.waitMaxCents)}. Paina "Saavuin liikkeeseen" kun olet perillä; odotus lisätään noudettaessa.`,
+    en: `Waiting is paid only when the shop is not ready: tap "Arrived at shop" when you are at the shop (within 300 m). ` +
+      `Waiting counts from your arrival, but not from earlier than the expected ride time after you accepted, until the shop ` +
+      `marks the order ready or you pick it up. The first ${cfg.waitFreeMinutes} min are included, then ` +
+      `${moneyEn(cfg.waitPerMinCents)}/min, max ${moneyEn(cfg.waitMaxCents)} (${maxMin} min). It is added at pickup.`,
+    fi: `Odotus maksetaan vain, jos liike ei ole valmis: paina "Saavuin liikkeeseen" kun olet liikkeellä (300 m:n sisällä). ` +
+      `Odotus lasketaan saapumisestasi, aikaisintaan arvioidun ajoajan jälkeen hyväksymisestä, siihen asti kun liike merkitsee ` +
+      `tilauksen valmiiksi tai noudat sen. Ensimmäiset ${cfg.waitFreeMinutes} min sisältyvät, sen jälkeen ` +
+      `${moneyFi(cfg.waitPerMinCents)}/min, enintään ${moneyFi(cfg.waitMaxCents)} (${maxMin} min). Odotus lisätään noudettaessa.`,
   };
 }
 

@@ -73,6 +73,13 @@ enum ReturnReason {
   OTHER
 }
 
+// How the customer gets the order: a courier brings it, or the customer collects it from the store
+// ("Reserve & collect", since 2.8.0).
+enum Fulfilment {
+  DELIVERY
+  PICKUP
+}
+
 enum PaymentStatus {
   PENDING
   SUCCEEDED
@@ -158,6 +165,13 @@ model User {
   follows          StoreFollow[]
   launchAlert      LaunchAlert?
   promoRedemptions PromoRedemption[]
+
+  // Referrals (since 2.8.0): the customer's own invite code, created on first use of GET /me/referral
+  referralCode      String?     @unique
+  referralsMade     Referral[]  @relation("ReferralReferrer")
+  referredBy        Referral?   @relation("ReferralReferee")
+  personalPromos    PromoCode[] // one-time reward codes only this user can use
+  referredOrders    Order[]     @relation("OrderReferrer")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -266,6 +280,7 @@ model Product {
   externalId     String? // id in the source (Shopify product id, CSV external_id or name)
   gtin           String? // EAN/GTIN barcode, 8–14 digits
   importJobId    Int? // the import that last created or updated it (publish works per job)
+  importDraft    Boolean    @default(false) // created by an import and not yet published or hidden by the store
   importJob      ImportJob? @relation(fields: [importJobId], references: [id], onDelete: SetNull)
 
   // Flags
@@ -350,7 +365,8 @@ model Order {
   courierId Int?
   courier   Courier? @relation(fields: [courierId], references: [id])
 
-  status OrderStatus @default(PENDING)
+  status     OrderStatus @default(PENDING)
+  fulfilment Fulfilment  @default(DELIVERY)
 
   // Pricing (all in cents, server-calculated)
   subtotalCents     Int // sum of items
@@ -366,6 +382,11 @@ model Order {
   promoCodeId        Int?
   promoCode          PromoCode?       @relation(fields: [promoCodeId], references: [id])
   promoRedemption    PromoRedemption?
+  // Invite code of another customer used on this (first) order; the discount is platform-funded like a promo.
+  // Never shown to the store or courier (omitted from every order query, see lib/prisma.ts).
+  referrerId         Int?
+  referrer           User?            @relation("OrderReferrer", fields: [referrerId], references: [id])
+  referral           Referral?
 
   // Stripe
   stripePaymentIntentId String?
@@ -400,6 +421,14 @@ model Order {
   deliveredLat          Float?
   deliveredLng          Float?
 
+  // Reserve & collect: the customer shows this 6-digit code at the store. Created when the order is paid,
+  // shown to the customer only (omitted from every order query, see lib/prisma.ts).
+  pickupCode           String?
+  pickupFailedAttempts Int       @default(0) // wrong codes since the last lock
+  pickupLockedUntil    DateTime? // 5 wrong codes lock the handover for 15 minutes
+  readyAt              DateTime? // the store marked the order ready (PROCESSING)
+  pickupRemindedAt     DateTime? // "your order is waiting" push, sent once
+
   // Watchdog bookkeeping (see services/orderWatchdog.ts)
   storeRemindedAt         DateTime?
   lastOfferAt             DateTime?
@@ -421,6 +450,8 @@ model Order {
   @@index([courierId, status])
   @@index([status, paymentStatus, courierId])
   @@index([promoCodeId])
+  @@index([fulfilment, status, readyAt])
+  @@index([referrerId])
 }
 
 model OrderItem {
@@ -434,6 +465,8 @@ model OrderItem {
 
   quantity  Int
   unitCents Int // price snapshot at time of purchase
+
+  returnItems ReturnItem[]
 
   // Query-path indexes (Postgres does not index foreign keys automatically)
   @@index([orderId])
@@ -518,12 +551,28 @@ model Return {
 
   status ReturnStatus @default(REQUESTED)
 
+  // What is being returned (since 2.8.0). Returns made before have no rows and cover the whole order.
+  items ReturnItem[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Query-path indexes (Postgres does not index foreign keys automatically)
   @@index([userId, createdAt])
   @@index([orderId])
+}
+
+// One returned order line (and how many of it) of a return.
+model ReturnItem {
+  id          Int       @id @default(autoincrement())
+  returnId    Int
+  return      Return    @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  orderItemId Int
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id])
+  quantity    Int
+
+  @@unique([returnId, orderItemId])
+  @@index([orderItemId])
 }
 
 // ─────────────────────────────────────────────
@@ -541,8 +590,9 @@ model Courier {
   passwordHash String?
   isActive     Boolean @default(true)
 
-  latitude  Float?
-  longitude Float?
+  latitude   Float?
+  longitude  Float?
+  locationAt DateTime? // when latitude/longitude were last reported; older than 2 minutes = position unknown
 
   // Current assignment tracking
   currentOrderId  Int?
@@ -805,6 +855,7 @@ model Payout {
   status           PayoutStatus
   releaseAt        DateTime // earliest moment the transfer may be made
   stripeTransferId String?      @unique
+  linkedToCharge   Boolean      @default(false) // transfer was tied to the order's charge (source_transaction)
   failureReason    String?
   paidAt           DateTime?
   createdAt        DateTime     @default(now())
@@ -873,12 +924,17 @@ model PromoCode {
   startsAt         DateTime?
   endsAt           DateTime?
   active           Boolean   @default(true)
+  // Personal code: only this user can use it (referral rewards). null = anyone.
+  userId           Int?
+  user             User?     @relation(fields: [userId], references: [id])
   createdAt        DateTime  @default(now())
 
   orders      Order[]
   redemptions PromoRedemption[]
+  referral    Referral?
 
   @@index([active, createdAt])
+  @@index([userId])
 }
 
 // One row per PAID order that used a code; deleted again if that order is cancelled before delivery.
@@ -924,6 +980,7 @@ model ImportJob {
   created           Int          @default(0)
   updated           Int          @default(0)
   skipped           Int          @default(0)
+  uploads           Int          @default(0) // photos copied to Cloudinary by this job (daily cap per store)
   errors            Json         @default("[]") // [{ item, message, level: "error" | "warning" }], at most 200
   rightsConfirmedAt DateTime // the store confirmed it may use these photos and texts
   publishedAt       DateTime?
@@ -935,4 +992,43 @@ model ImportJob {
 
   @@index([storeId, createdAt])
   @@index([status, updatedAt])
+}
+
+// ─────────────────────────────────────────────
+// REFERRALS (off unless REFERRAL_DISCOUNT_CENTS is set)
+// ─────────────────────────────────────────────
+
+// A new customer's first order used another customer's invite code. Written when that order is paid,
+// deleted again if it is cancelled before delivery. One per new customer.
+model Referral {
+  id                Int        @id @default(autoincrement())
+  referrerId        Int
+  referrer          User       @relation("ReferralReferrer", fields: [referrerId], references: [id])
+  refereeId         Int        @unique
+  referee           User       @relation("ReferralReferee", fields: [refereeId], references: [id])
+  orderId           Int        @unique
+  order             Order      @relation(fields: [orderId], references: [id])
+  rewardedAt        DateTime? // the referrer's reward code was issued (the referee's order was delivered)
+  rewardPromoCodeId Int?       @unique
+  rewardPromoCode   PromoCode? @relation(fields: [rewardPromoCodeId], references: [id])
+  createdAt         DateTime   @default(now())
+
+  @@index([referrerId, createdAt])
+}
+
+// ─────────────────────────────────────────────
+// ADMIN AUDIT LOG (who changed what, when)
+// ─────────────────────────────────────────────
+
+model AdminAuditLog {
+  id        Int      @id @default(autoincrement())
+  adminId   Int // the admin user who made the change
+  action    String // e.g. "store.commission"
+  entity    String // e.g. "Store"
+  entityId  Int
+  oldValue  Json?
+  newValue  Json?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId, createdAt])
 }

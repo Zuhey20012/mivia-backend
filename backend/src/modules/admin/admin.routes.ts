@@ -2,7 +2,7 @@ import { Router } from "express";
 import { auth, requireRole } from "../../middleware/auth";
 import {
   getStats, getUsers, banUser,
-  getVendors, approveVendor, rejectVendor,
+  getVendors, approveVendor, rejectVendor, setVendorCommission, vendorCommissionHistory,
   getCouriers, approveCourier, suspendCourier,
   getOrders,
 } from "./admin.controller";
@@ -24,6 +24,8 @@ router.delete("/users/:id",           banUser);
 router.get("/vendors",                getVendors);
 router.patch("/vendors/:id/approve",  approveVendor);
 router.delete("/vendors/:id",         rejectVendor);
+router.patch("/vendors/:id/commission",  setVendorCommission);     // { commissionRate: 0–0.5 }, new orders only, audited
+router.get("/vendors/:id/commission-history", vendorCommissionHistory);
 router.get("/couriers",               getCouriers);
 router.patch("/couriers/:id/approve", approveCourier);
 router.patch("/couriers/:id/suspend", suspendCourier);

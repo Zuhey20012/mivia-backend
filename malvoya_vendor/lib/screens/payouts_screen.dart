@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
 import '../core/strings.dart';
+import '../widgets/loading_states.dart';
 
 /// Payouts through Stripe. Stripe collects identity and bank details on its own pages, so
 /// none of it passes through this app.
@@ -60,7 +62,14 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
     });
   }
 
+  void _retry() {
+    HapticFeedback.selectionClick();
+    setState(() => _loading = true);
+    _load();
+  }
+
   Future<void> _open(String path) async {
+    HapticFeedback.selectionClick();
     setState(() => _opening = true);
     final res = await _api.post(path);
     if (!mounted) return;
@@ -79,73 +88,83 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(title: Text(tr(context, 'Payouts', 'Tilitykset'))),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _load,
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  if (_error != null) Padding(padding: const EdgeInsets.only(bottom: 12), child: Text(_error!, style: const TextStyle(color: AppTheme.accent))),
-                  Container(
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppTheme.divider)),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(children: [
-                          Icon(enabled ? Icons.check_circle_rounded : Icons.account_balance_outlined, color: enabled ? AppTheme.primary : AppTheme.warning),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              enabled
-                                  ? tr(context, 'Payouts are on', 'Tilitykset ovat päällä')
-                                  : hasAccount
-                                      ? tr(context, 'Finish your payout setup', 'Viimeistele tilitysten käyttöönotto')
-                                      : tr(context, 'Set up payouts to get paid', 'Ota tilitykset käyttöön saadaksesi rahat'),
-                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+      body: RefreshIndicator(
+        onRefresh: _load,
+        child: _loading
+            ? const SkeletonList(count: 3, lines: 5, button: true)
+            : _error != null && _status == null
+                ? ListView(physics: const AlwaysScrollableScrollPhysics(), children: [ErrorState(message: _error, onRetry: _retry)])
+                : ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      if (_error != null) ErrorBanner(message: _error!, onRetry: _retry),
+                      Container(
+                        padding: const EdgeInsets.all(18),
+                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppTheme.divider)),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(children: [
+                              Icon(enabled ? Icons.check_circle_rounded : Icons.account_balance_outlined, color: enabled ? AppTheme.primary : AppTheme.warning),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  enabled
+                                      ? tr(context, 'Payouts are on', 'Tilitykset ovat päällä')
+                                      : hasAccount
+                                          ? tr(context, 'Finish your payout setup', 'Viimeistele tilitysten käyttöönotto')
+                                          : tr(context, 'Set up payouts to get paid', 'Ota tilitykset käyttöön saadaksesi rahat'),
+                                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                                ),
+                              ),
+                            ]),
+                            const SizedBox(height: 8),
+                            Text(
+                              tr(
+                                  context,
+                                  'Malvoya sends each sale to your Stripe account 15 days after delivery, when the 14-day return window has passed, and Stripe pays it into your bank account. Malvoya keeps a commission of ${commissionText(widget.commissionRate)} of the item price (not of the delivery fee); refunds are deducted. Stripe checks your identity (EU anti-money-laundering rules).',
+                                  'Malvoya siirtää jokaisen myynnin Stripe-tilillesi 15 päivää toimituksen jälkeen, kun 14 päivän palautusaika on päättynyt, ja Stripe maksaa sen pankkitilillesi. Malvoya pidättää provisiona ${commissionText(widget.commissionRate)} tuotteiden hinnasta (ei toimitusmaksusta); hyvitykset vähennetään. Stripe tarkistaa henkilöllisyytesi (EU:n rahanpesulainsäädäntö).'),
+                              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4),
                             ),
-                          ),
+                            if (!enabled && (asInt(_status?['requirementsDue']) ?? 0) > 0)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Text(tr(context, 'Stripe still needs ${_status!['requirementsDue']} detail(s) from you.', 'Stripe tarvitsee vielä ${_status!['requirementsDue']} tietoa.'),
+                                    style: const TextStyle(color: AppTheme.accent, fontSize: 13)),
+                              ),
+                            const SizedBox(height: 14),
+                            SizedBox(
+                              width: double.infinity,
+                              height: 50,
+                              child: FilledButton.icon(
+                                onPressed: _opening ? null : () => _open(enabled ? '/payouts/dashboard' : '/payouts/onboarding'),
+                                icon: const Icon(Icons.open_in_new_rounded),
+                                label: Text(enabled ? tr(context, 'Open Stripe dashboard', 'Avaa Stripe-hallinta') : tr(context, 'Set up payouts with Stripe', 'Ota tilitykset käyttöön Stripessä')),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (_summary != null) ...[
+                        const SizedBox(height: 16),
+                        Row(children: [
+                          _stat(tr(context, 'Sent to Stripe', 'Siirretty Stripeen'), _summary!['paidCents']),
+                          const SizedBox(width: 10),
+                          _stat(tr(context, 'Coming', 'Tulossa'), (asInt(_summary!['scheduledCents']) ?? 0) + (asInt(_summary!['waitingForAccountCents']) ?? 0)),
                         ]),
-                        const SizedBox(height: 8),
-                        Text(
-                          tr(context,
-                              'Malvoya sends each sale to your Stripe account 15 days after delivery, when the 14-day return window has passed, and Stripe pays it into your bank account. Malvoya keeps a commission of ${commissionText(widget.commissionRate)} of the item price (not of the delivery fee); refunds are deducted. Stripe checks your identity (EU anti-money-laundering rules).',
-                              'Malvoya siirtää jokaisen myynnin Stripe-tilillesi 15 päivää toimituksen jälkeen, kun 14 päivän palautusaika on päättynyt, ja Stripe maksaa sen pankkitilillesi. Malvoya pidättää provisiona ${commissionText(widget.commissionRate)} tuotteiden hinnasta (ei toimitusmaksusta); hyvitykset vähennetään. Stripe tarkistaa henkilöllisyytesi (EU:n rahanpesulainsäädäntö).'),
-                          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4),
-                        ),
-                        if (!enabled && (asInt(_status?['requirementsDue']) ?? 0) > 0)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: Text(tr(context, 'Stripe still needs ${_status!['requirementsDue']} detail(s) from you.', 'Stripe tarvitsee vielä ${_status!['requirementsDue']} tietoa.'),
-                                style: const TextStyle(color: AppTheme.accent, fontSize: 13)),
-                          ),
-                        const SizedBox(height: 14),
-                        SizedBox(
-                          width: double.infinity,
-                          height: 50,
-                          child: FilledButton.icon(
-                            onPressed: _opening ? null : () => _open(enabled ? '/payouts/dashboard' : '/payouts/onboarding'),
-                            icon: const Icon(Icons.open_in_new_rounded),
-                            label: Text(enabled ? tr(context, 'Open Stripe dashboard', 'Avaa Stripe-hallinta') : tr(context, 'Set up payouts with Stripe', 'Ota tilitykset käyttöön Stripessä')),
-                          ),
-                        ),
                       ],
-                    ),
+                      const SizedBox(height: 16),
+                      if (_payouts.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 24),
+                          child: Text(tr(context, 'No payouts yet. Each sale is listed here with its payout date.', 'Ei vielä tilityksiä. Jokainen myynti näkyy täällä tilityspäivineen.'),
+                              textAlign: TextAlign.center, style: const TextStyle(color: AppTheme.textSecondary, height: 1.4)),
+                        ),
+                      for (final p in _payouts) _row(p),
+                    ],
                   ),
-                  if (_summary != null) ...[
-                    const SizedBox(height: 16),
-                    Row(children: [
-                      _stat(tr(context, 'Sent to Stripe', 'Siirretty Stripeen'), _summary!['paidCents']),
-                      const SizedBox(width: 10),
-                      _stat(tr(context, 'Coming', 'Tulossa'), (asInt(_summary!['scheduledCents']) ?? 0) + (asInt(_summary!['waitingForAccountCents']) ?? 0)),
-                    ]),
-                  ],
-                  const SizedBox(height: 16),
-                  for (final p in _payouts) _row(p),
-                ],
-              ),
-            ),
+      ),
     );
   }
 

@@ -78,9 +78,9 @@ router.post("/courier/status", ...courierOnly, async (req: AuthRequest, res: Res
     const updated = await prisma.courier.update({
       where: { id: courier.id },
       data: isOnline
-        ? { isActive: true, ...(latitude != null && longitude != null ? { latitude, longitude } : {}) }
+        ? { isActive: true, ...(latitude != null && longitude != null ? { latitude, longitude, locationAt: new Date() } : {}) }
         // Going offline drops the stored location (data minimisation)
-        : { isActive: false, latitude: null, longitude: null },
+        : { isActive: false, latitude: null, longitude: null, locationAt: null },
       select: { id: true, isActive: true, isApproved: true, currentOrderId: true },
     });
     res.json({ ok: true, courier: updated });
@@ -105,7 +105,7 @@ router.post("/courier/telemetry", ...courierOnly, async (req: AuthRequest, res: 
     if (!courier.isActive) return res.status(409).json({ ok: false, error: "You are offline" });
     const { latitude, longitude, bearing, speed, accuracy, orderId } = parsed.data;
 
-    await prisma.courier.update({ where: { id: courier.id }, data: { latitude, longitude } });
+    await prisma.courier.update({ where: { id: courier.id }, data: { latitude, longitude, locationAt: new Date() } });
 
     if (orderId) {
       const assigned = await prisma.order.findFirst({

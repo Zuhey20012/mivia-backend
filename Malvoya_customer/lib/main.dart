@@ -16,6 +16,7 @@ import 'l10n.dart';
 import 'locale_provider.dart';
 import 'theme_provider.dart';
 import 'local_notification_service.dart';
+import 'core/deep_links.dart';
 import 'core/delivery_location.dart';
 import 'core/network_status.dart';
 import 'core/push_service.dart';
@@ -78,6 +79,9 @@ void main() async {
       navigatorKey.currentState?.push(MaterialPageRoute(builder: (_) => StoreDetailScreen(store: {'id': storeId})));
     }
   };
+
+  // Verified https links to drops, stores and invites (Android App Links)
+  DeepLinks.instance.start(navigatorKey);
 
   runApp(const MalvoyaApp());
 }

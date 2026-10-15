@@ -17,7 +17,10 @@ export function normalizeCode(code: string) {
 export async function checkPromo(db: Db, rawCode: string, userId: number, subtotalCents: number, now = new Date()): Promise<PromoCode> {
   const code = normalizeCode(rawCode);
   const promo = code ? await db.promoCode.findUnique({ where: { code } }) : null;
-  if (!promo || !promo.active) throw new ApiError("Tarjouskoodi ei ole voimassa. / This promo code is not valid.", 409);
+  // A personal code (referral reward) works only for its owner; for anyone else it does not exist
+  if (!promo || !promo.active || (promo.userId !== null && promo.userId !== userId)) {
+    throw new ApiError("Tarjouskoodi ei ole voimassa. / This promo code is not valid.", 409);
+  }
   if (promo.startsAt && promo.startsAt > now) throw new ApiError("Tarjouskoodi ei ole vielä voimassa. / This promo code is not active yet.", 409);
   if (promo.endsAt && promo.endsAt <= now) throw new ApiError("Tarjouskoodi on vanhentunut. / This promo code has expired.", 409);
   if (subtotalCents < promo.minSubtotalCents) {
@@ -63,6 +66,10 @@ export async function createPromoCode(input: {
 }) {
   const code = normalizeCode(input.code);
   if (await prisma.promoCode.findUnique({ where: { code } })) throw new ApiError("A promo code with this name already exists", 409);
+  // Customers' invite codes share the checkout field, so a promo code may not shadow one
+  if (await prisma.user.findUnique({ where: { referralCode: code }, select: { id: true } })) {
+    throw new ApiError("This code is already used as a customer's invite code", 409);
+  }
   if (input.startsAt && input.endsAt && new Date(input.endsAt) <= new Date(input.startsAt)) {
     throw new ApiError("The end date must be after the start date");
   }

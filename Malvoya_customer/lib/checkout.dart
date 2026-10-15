@@ -10,6 +10,7 @@ import 'config/constants.dart';
 import 'config/theme.dart';
 import 'core/api_client.dart';
 import 'core/delivery_location.dart';
+import 'core/pending_promo.dart';
 import 'core/store_hours.dart';
 import 'core/strings.dart';
 import 'local_notification_service.dart';
@@ -18,8 +19,9 @@ import 'realtime_notification_service.dart';
 import 'screens/location_selector_modal.dart';
 import 'screens/order_detail.dart';
 
-/// Checkout: address, items, an optional courier tip, a promo code and the exact price the
-/// server will charge. Payment details are only ever entered in Stripe's own payment sheet.
+/// Checkout: delivery or "collect from the shop", address, items, an optional courier tip, a promo
+/// code and the exact price the server will charge. Payment details are only ever entered in
+/// Stripe's own payment sheet.
 class CheckoutPage extends StatefulWidget {
   const CheckoutPage({super.key});
   @override
@@ -38,6 +40,17 @@ class _CheckoutPageState extends State<CheckoutPage> {
 
   /// The promo code the customer applied (the server validates it in every quote).
   String? _promoCode;
+
+  /// The code came from a friend's invite link (kept until it is used or removed).
+  bool _promoFromInvite = false;
+
+  /// "DELIVERY" (a courier brings it) or "PICKUP" (reserve & collect at the shop).
+  String _fulfilment = 'DELIVERY';
+  bool get _pickup => _fulfilment == 'PICKUP';
+
+  /// The server offers collecting from the shop: its quotes say which fulfilment they priced.
+  /// Older servers do not, and then the switch stays hidden.
+  bool _pickupSupported = false;
 
   // ── Price quote ──
   // Every line of the summary comes from the server's quote for exactly these inputs, so the
@@ -62,6 +75,19 @@ class _CheckoutPageState extends State<CheckoutPage> {
     super.initState();
     DeliveryLocation.instance.addListener(_onLocation);
     _loadSavedAddress();
+    _loadInviteCode();
+  }
+
+  /// Fills in a friend's invite code saved from an invite link.
+  Future<void> _loadInviteCode() async {
+    final code = await PendingPromo.instance.load();
+    if (!mounted || code == null || code.isEmpty || _promoCode != null) return;
+    setState(() {
+      _promoCode = code;
+      _promoCtrl.text = code;
+      _promoFromInvite = true;
+      _quoteNow = true;
+    });
   }
 
   @override
@@ -99,6 +125,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
   String _inputsKey(CartService cart) {
     final loc = DeliveryLocation.instance;
     final items = cart.items.map((i) => '${i.productId}:${i.variantId}:${i.quantity}').join(',');
+    if (_pickup) return [cart.storeId, items, 'PICKUP', _promoCode ?? ''].join('|');
     return [cart.storeId, items, _pinned ? '${loc.lat},${loc.lng}' : '-', _tipCents, _promoCode ?? ''].join('|');
   }
 
@@ -128,7 +155,8 @@ class _CheckoutPageState extends State<CheckoutPage> {
     final storeId = cart.storeId;
     if (storeId == null || cart.items.isEmpty) return;
     final loc = DeliveryLocation.instance;
-    final pinned = _pinned;
+    final pickup = _pickup;
+    final pinned = _pinned && !pickup;
     final api = ApiClient(auth);
     final fallbackError = tr(context, 'The price could not be calculated.', 'Hintaa ei voitu laskea.');
 
@@ -137,14 +165,28 @@ class _CheckoutPageState extends State<CheckoutPage> {
     if (!_legacy && auth.isAuthenticated) {
       final res = await api.post('/orders/quote', {
         'storeId': storeId,
+        if (pickup) 'fulfilment': 'PICKUP',
         if (pinned) ...{'deliveryLat': loc.lat, 'deliveryLng': loc.lng},
         'items': _orderItems(cart),
-        if (_tipCents > 0) 'tipCents': _tipCents,
+        if (_tipCents > 0 && !pickup) 'tipCents': _tipCents,
         if (_promoCode != null) 'promoCode': _promoCode,
       });
       if (!mounted || key != _wantedKey) return;
       if (res.ok && res.data['quote'] is Map) {
         quote = Map<String, dynamic>.from(res.data['quote']);
+        final priced = quote['fulfilment'];
+        if (priced is String) _pickupSupported = true;
+        if (pickup && priced != 'PICKUP') {
+          // This server priced a delivery: collecting from the shop is not available here yet
+          setState(() {
+            _pickupSupported = false;
+            _fulfilment = 'DELIVERY';
+            _errorMessage = tr(context, 'Collecting from the shop isn’t available yet, so your order will be delivered.',
+                'Noutoa kaupasta ei voi vielä valita, joten tilauksesi toimitetaan.');
+            _resetQuote();
+          });
+          return;
+        }
       } else if ((res.status == 404 && res.data['error'] == 'Not found') || res.status == 405) {
         _legacy = true; // this server does not have the quote endpoint yet
       } else {
@@ -181,8 +223,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
     };
   }
 
-  List<Map<String, dynamic>> _orderItems(CartService cart) =>
-      cart.items.map((i) => i.toOrderItem()..removeWhere((_, v) => v == null)).toList();
+  List<Map<String, dynamic>> _orderItems(CartService cart) => cart.items.map((i) => i.toOrderItem()..removeWhere((_, v) => v == null)).toList();
 
   /// The promo code the server accepted in the current quote, if any.
   String? get _validPromo {
@@ -204,7 +245,9 @@ class _CheckoutPageState extends State<CheckoutPage> {
 
   void _removePromo() {
     HapticFeedback.selectionClick();
+    if (_promoFromInvite) PendingPromo.instance.clear();
     setState(() {
+      _promoFromInvite = false;
       _promoCode = null;
       _promoCtrl.clear();
       _quoteNow = true;
@@ -228,9 +271,20 @@ class _CheckoutPageState extends State<CheckoutPage> {
     if (addr != null && addr.isNotEmpty) setState(() => _addressCtrl.text = addr);
   }
 
+  void _setFulfilment(String value) {
+    if (value == _fulfilment) return;
+    HapticFeedback.selectionClick();
+    setState(() {
+      _fulfilment = value;
+      _errorMessage = null;
+      _quoteNow = true;
+    });
+  }
+
   Future<void> _placeOrder(CartService cart, int quotedTotal) async {
+    final pickup = _pickup;
     final address = _addressCtrl.text.trim();
-    if (address.length < 5) {
+    if (!pickup && address.length < 5) {
       setState(() => _errorMessage = tr(context, 'Enter your delivery address.', 'Kirjoita toimitusosoitteesi.'));
       return;
     }
@@ -245,22 +299,34 @@ class _CheckoutPageState extends State<CheckoutPage> {
       _errorMessage = null;
     });
     HapticFeedback.mediumImpact();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('malvoya_active_address', address);
-    } catch (_) {}
+    if (!pickup) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('malvoya_active_address', address);
+      } catch (_) {}
+    }
 
     final loc = DeliveryLocation.instance;
     final promo = _legacy ? null : _validPromo;
-    final res = await ApiClient(auth).post('/orders', {
-      'storeId': cart.storeId,
-      'deliveryAddress': address,
-      // Coordinates only when this is the address that was pinned on the map
-      if (_pinned) ...{'deliveryLat': loc.lat, 'deliveryLng': loc.lng},
-      if (_tipCents > 0) 'tipCents': _tipCents,
-      if (promo != null) 'promoCode': promo,
-      'items': _orderItems(cart),
-    });
+    final res = await ApiClient(auth).post(
+      '/orders',
+      pickup
+          ? {
+              'storeId': cart.storeId,
+              'fulfilment': 'PICKUP',
+              if (promo != null) 'promoCode': promo,
+              'items': _orderItems(cart),
+            }
+          : {
+              'storeId': cart.storeId,
+              'deliveryAddress': address,
+              // Coordinates only when this is the address that was pinned on the map
+              if (_pinned) ...{'deliveryLat': loc.lat, 'deliveryLng': loc.lng},
+              if (_tipCents > 0) 'tipCents': _tipCents,
+              if (promo != null) 'promoCode': promo,
+              'items': _orderItems(cart),
+            },
+    );
     if (!mounted) return;
     if (!res.ok) {
       setState(() {
@@ -331,6 +397,8 @@ class _CheckoutPageState extends State<CheckoutPage> {
       email: auth.currentUser?.email ?? '',
       phone: auth.currentUser?.phone,
     );
+    // A friend's invite code works once; forget it after the order is paid
+    if (_promoFromInvite) unawaited(PendingPromo.instance.clear());
     cart.clear();
     // Straight to live tracking, like the big delivery apps
     Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: orderId)));
@@ -369,57 +437,77 @@ class _CheckoutPageState extends State<CheckoutPage> {
                             '${cart.storeName ?? tr(context, 'The store', 'Kauppa')}: $closed. ${tr(context, 'You can pay when it opens.', 'Voit maksaa, kun se aukeaa.')}'),
                         const SizedBox(height: 12),
                       ],
-                      _section(
-                        tr(context, 'Delivery address', 'Toimitusosoite'),
-                        [
-                          TextField(
-                            controller: _addressCtrl,
-                            onChanged: (_) => setState(() {}),
-                            textInputAction: TextInputAction.done,
-                            decoration: InputDecoration(
-                              hintText: tr(context, 'Street, number, apartment, postcode', 'Katu, numero, asunto, postinumero'),
-                              prefixIcon: const Icon(Icons.location_on_outlined),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Row(children: [
-                            Icon(_pinned ? Icons.check_circle_rounded : Icons.info_outline_rounded,
-                                size: 18, color: _pinned ? AppTheme.success : AppTheme.secondaryText(context)),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                _pinned
-                                    ? tr(context, 'Pinned on the map: exact fee and live tracking', 'Merkitty kartalle: tarkka hinta ja live-seuranta')
-                                    : tr(context, 'Pin it on the map for the exact fee and live tracking', 'Merkitse kartalle tarkkaa hintaa ja live-seurantaa varten'),
-                                style: TextStyle(fontSize: 12.5, color: AppTheme.secondaryText(context)),
+                      if (_pickupSupported && !_legacy) ...[
+                        _fulfilmentSwitch(),
+                        const SizedBox(height: 14),
+                      ],
+                      if (_pickup)
+                        _pickupSection(q, cart, loading: loading)
+                      else
+                        _section(
+                          tr(context, 'Delivery address', 'Toimitusosoite'),
+                          [
+                            TextField(
+                              controller: _addressCtrl,
+                              onChanged: (_) => setState(() {}),
+                              textInputAction: TextInputAction.done,
+                              decoration: InputDecoration(
+                                hintText: tr(context, 'Street, number, apartment, postcode', 'Katu, numero, asunto, postinumero'),
+                                prefixIcon: const Icon(Icons.location_on_outlined),
                               ),
                             ),
-                            TextButton(onPressed: _pickAddress, child: Text(tr(context, 'Map', 'Kartta'))),
-                          ]),
-                        ],
-                      ),
+                            const SizedBox(height: 8),
+                            Row(children: [
+                              Icon(_pinned ? Icons.check_circle_rounded : Icons.info_outline_rounded,
+                                  size: 18, color: _pinned ? AppTheme.success : AppTheme.secondaryText(context)),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  _pinned
+                                      ? tr(context, 'Pinned on the map: exact fee and live tracking', 'Merkitty kartalle: tarkka hinta ja live-seuranta')
+                                      : tr(context, 'Pin it on the map for the exact fee and live tracking',
+                                          'Merkitse kartalle tarkkaa hintaa ja live-seurantaa varten'),
+                                  style: TextStyle(fontSize: 12.5, color: AppTheme.secondaryText(context)),
+                                ),
+                              ),
+                              TextButton(onPressed: _pickAddress, child: Text(tr(context, 'Map', 'Kartta'))),
+                            ]),
+                          ],
+                        ),
                       const SizedBox(height: 14),
                       _section(
                         cart.storeName ?? tr(context, 'Your bag', 'Ostoskassi'),
                         [for (final item in cart.items) _itemRow(cart, item)],
                       ),
-                      const SizedBox(height: 14),
-                      _section(
-                        tr(context, 'Tip your courier', 'Tippi kuriirille'),
-                        [
-                          Text(tr(context, 'Optional. The whole tip goes to the courier.', 'Vapaaehtoinen. Koko tippi menee kuriirille.'),
-                              style: TextStyle(fontSize: 13, color: AppTheme.secondaryText(context))),
-                          const SizedBox(height: 10),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [for (final t in _tips) _tipChip(t)],
-                          ),
-                        ],
-                      ),
+                      if (!_pickup) ...[
+                        const SizedBox(height: 14),
+                        _section(
+                          tr(context, 'Tip your courier', 'Tippi kuriirille'),
+                          [
+                            Text(tr(context, 'Optional. The whole tip goes to the courier.', 'Vapaaehtoinen. Koko tippi menee kuriirille.'),
+                                style: TextStyle(fontSize: 13, color: AppTheme.secondaryText(context))),
+                            const SizedBox(height: 10),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [for (final t in _tips) _tipChip(t)],
+                            ),
+                          ],
+                        ),
+                      ],
                       if (showPromo) ...[
                         const SizedBox(height: 14),
-                        _section(tr(context, 'Promo code', 'Alennuskoodi'), [_promoRow(loading)]),
+                        _section(tr(context, 'Promo code', 'Alennuskoodi'), [
+                          _promoRow(loading),
+                          if (_promoFromInvite) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              tr(context, 'Filled in from a friend’s invite link. Invite codes work on a new customer’s first order.',
+                                  'Täytetty ystävän kutsulinkistä. Kutsukoodi toimii uuden asiakkaan ensimmäiseen tilaukseen.'),
+                              style: TextStyle(fontSize: 12, color: AppTheme.secondaryText(context)),
+                            ),
+                          ],
+                        ]),
                       ],
                       const SizedBox(height: 14),
                       _section(tr(context, 'Summary', 'Yhteenveto'), _summary(q, loading: loading, error: error)),
@@ -466,7 +554,11 @@ class _CheckoutPageState extends State<CheckoutPage> {
     final rows = <Widget>[
       _summaryRow(tr(context, 'Items', 'Tuotteet'), money('subtotalCents')),
       const SizedBox(height: 8),
-      _summaryRow(tr(context, 'Delivery', 'Toimitus'), money('deliveryFeeCents')),
+      if (_pickup)
+        _summaryRow(tr(context, 'Collect from the shop', 'Nouto kaupasta'),
+            cents('deliveryFeeCents') == 0 ? tr(context, 'Free', 'Maksuton') : money('deliveryFeeCents'))
+      else
+        _summaryRow(tr(context, 'Delivery', 'Toimitus'), money('deliveryFeeCents')),
       if (cents('serviceFeeCents') > 0) ...[
         const SizedBox(height: 8),
         _summaryRow(tr(context, 'Service fee', 'Palvelumaksu'), money('serviceFeeCents')),
@@ -478,8 +570,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
           Padding(
             padding: const EdgeInsets.only(top: 3),
             child: Text(
-              tr(context, 'Add ${euro(context, missing)} more to avoid it.',
-                  'Lisää ostoksia vielä ${euro(context, missing)}, niin lisää ei peritä.'),
+              tr(context, 'Add ${euro(context, missing)} more to avoid it.', 'Lisää ostoksia vielä ${euro(context, missing)}, niin lisää ei peritä.'),
               style: TextStyle(fontSize: 12, color: AppTheme.secondaryText(context)),
             ),
           ),
@@ -516,6 +607,74 @@ class _CheckoutPageState extends State<CheckoutPage> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows),
       ),
     ];
+  }
+
+  /// Delivery by courier, or reserve now and collect from the shop.
+  Widget _fulfilmentSwitch() => SizedBox(
+        width: double.infinity,
+        child: SegmentedButton<String>(
+          segments: [
+            ButtonSegment(
+              value: 'DELIVERY',
+              icon: const Icon(Icons.pedal_bike_rounded, size: 18),
+              label: Text(tr(context, 'Delivery', 'Toimitus')),
+            ),
+            ButtonSegment(
+              value: 'PICKUP',
+              icon: const Icon(Icons.storefront_rounded, size: 18),
+              label: Text(tr(context, 'Collect from shop', 'Nouto kaupasta')),
+            ),
+          ],
+          selected: {_fulfilment},
+          showSelectedIcon: false,
+          onSelectionChanged: _paying ? null : (s) => _setFulfilment(s.first),
+        ),
+      );
+
+  /// Where to collect the order (from the quote) and the honest rules for collecting.
+  Widget _pickupSection(Map<String, dynamic>? q, CartService cart, {required bool loading}) {
+    final pickup = q?['pickup'] is Map ? Map<String, dynamic>.from(q!['pickup']) : null;
+    final name = (pickup?['storeName'] ?? cart.storeName ?? '').toString();
+    final address = pickup?['address']?.toString();
+    final muted = AppTheme.secondaryText(context);
+    return _section(tr(context, 'Collect from', 'Noutopaikka'), [
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(color: AppTheme.pastel(context, AppTheme.lilac, AppTheme.primary), shape: BoxShape.circle),
+            child: Icon(Icons.storefront_rounded, color: AppTheme.isDarkMode(context) ? const Color(0xFFC9A3DD) : AppTheme.primary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: AppTheme.primaryText(context))),
+                const SizedBox(height: 2),
+                Text(
+                  address ??
+                      (loading
+                          ? tr(context, 'Loading the address…', 'Ladataan osoitetta…')
+                          : tr(context, 'The shop’s address is shown on your order.', 'Kaupan osoite näkyy tilauksessasi.')),
+                  style: TextStyle(fontSize: 13, color: muted, height: 1.35),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 14),
+      _notice(
+        Icons.schedule_rounded,
+        tr(
+            context,
+            'Pay now and the shop puts it aside. Your order page shows when it’s ready and a 6-digit code to show at the counter. Please collect it within 3 days of it being ready. If it isn’t collected by then, the order is cancelled and refunded.',
+            'Maksa nyt, niin kauppa varaa tuotteet sinulle. Tilaussivultasi näet, kun tilaus on valmis, ja 6-numeroisen koodin, jonka näytät kassalla. Nouda tilaus 3 päivän kuluessa siitä, kun se on valmis. Jos sitä ei noudeta siihen mennessä, tilaus perutaan ja rahat palautetaan.'),
+      ),
+    ]);
   }
 
   Widget _promoRow(bool loading) {
@@ -573,8 +732,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
         children: [
           loading
               ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-              : Icon(valid ? Icons.check_circle_rounded : Icons.error_outline_rounded,
-                  color: valid ? AppTheme.success : errorColor, size: 20),
+              : Icon(valid ? Icons.check_circle_rounded : Icons.error_outline_rounded, color: valid ? AppTheme.success : errorColor, size: 20),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -582,8 +740,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
               children: [
                 Text(code, style: TextStyle(fontWeight: FontWeight.w800, color: AppTheme.primaryText(context), letterSpacing: 0.4)),
                 const SizedBox(height: 2),
-                Text(message,
-                    style: TextStyle(fontSize: 12.5, color: valid || loading ? muted : errorColor, fontWeight: FontWeight.w600, height: 1.3)),
+                Text(message, style: TextStyle(fontSize: 12.5, color: valid || loading ? muted : errorColor, fontWeight: FontWeight.w600, height: 1.3)),
               ],
             ),
           ),
@@ -670,8 +827,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
             borderRadius: BorderRadius.circular(22),
             border: Border.all(color: selected ? AppTheme.sunshine : AppTheme.cardBorder(context), width: 1.5),
           ),
-          child: Text(label,
-              style: TextStyle(fontWeight: FontWeight.w800, color: selected ? AppTheme.ink : AppTheme.primaryText(context))),
+          child: Text(label, style: TextStyle(fontWeight: FontWeight.w800, color: selected ? AppTheme.ink : AppTheme.primaryText(context))),
         ),
       ),
     );
@@ -699,7 +855,8 @@ class _CheckoutPageState extends State<CheckoutPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(item.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
+                Text(item.name,
+                    maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
                 Text(
                   [if (item.variantLabel != null) item.variantLabel, euro(context, (item.price * 100).round())].join(' · '),
                   style: TextStyle(color: AppTheme.secondaryText(context), fontSize: 12.5),
@@ -824,7 +981,10 @@ class _QuantityControl extends StatelessWidget {
 
   Widget _btn(BuildContext context, IconData icon, String label, VoidCallback cb) => IconButton(
         tooltip: label,
-        onPressed: cb,
+        onPressed: () {
+          HapticFeedback.selectionClick();
+          cb();
+        },
         visualDensity: VisualDensity.compact,
         icon: Icon(icon, size: 18, color: AppTheme.primaryText(context)),
       );

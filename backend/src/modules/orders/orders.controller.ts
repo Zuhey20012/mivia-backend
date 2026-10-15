@@ -3,6 +3,7 @@ import { z } from "zod";
 import { AuthRequest } from "../../middleware/auth";
 import {
   createOrderSchema, quoteOrderSchema, createRentalSchema, createReturnSchema, updateReturnStatusSchema, updateOrderStatusSchema,
+  collectOrderSchema,
 } from "./orders.schema";
 import * as ordersService from "./orders.service";
 
@@ -12,6 +13,9 @@ function idParam(req: AuthRequest, name = "id") {
 }
 
 export function sendOrderError(res: Response, e: any) {
+  if (e instanceof ordersService.PickupCodeError) {
+    return res.status(e.status).json({ ok: false, error: e.message, attemptsLeft: e.attemptsLeft, ...(e.lockedUntil ? { lockedUntil: e.lockedUntil } : {}) });
+  }
   if (e instanceof ordersService.OrderError) return res.status(e.status).json({ ok: false, error: e.message });
   if (typeof e?.status === "number") return res.status(e.status).json({ ok: false, error: e.message });
   console.error(e);
@@ -68,6 +72,17 @@ export async function updateOrderStatus(req: AuthRequest, res: Response) {
   if (!result.success) return res.status(400).json({ ok: false, errors: result.error.flatten() });
   try {
     res.json({ ok: true, order: await ordersService.updateOrderStatus(id, req.user!, result.data.status) });
+  } catch (e) { sendOrderError(res, e); }
+}
+
+/** Reserve & collect: the store enters the customer's pickup code to hand the order over. */
+export async function collectOrder(req: AuthRequest, res: Response) {
+  const id = idParam(req);
+  const result = collectOrderSchema.safeParse(req.body);
+  if (!id) return res.status(404).json({ ok: false, error: "Order not found" });
+  if (!result.success) return res.status(400).json({ ok: false, error: "Enter the customer's 6-digit pickup code", errors: result.error.flatten() });
+  try {
+    res.json({ ok: true, order: await ordersService.collectOrder(id, req.user!.id, result.data.code) });
   } catch (e) { sendOrderError(res, e); }
 }
 

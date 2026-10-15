@@ -9,6 +9,7 @@ import '../core/strings.dart';
 import '../widgets/add_to_bag_sheet.dart';
 import '../widgets/price_tag.dart';
 import '../widgets/product_gallery.dart';
+import '../widgets/skeleton.dart';
 import 'store_detail.dart';
 
 class ProductDetailScreen extends StatefulWidget {
@@ -40,7 +41,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         _favorite = _product!['isFavorite'] == true;
         _error = null;
       } else {
-        _error = res.error;
+        _error = res.errorText(context);
       }
     });
   }
@@ -70,17 +71,24 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     return Scaffold(
       backgroundColor: AppTheme.scaffoldBackground(context),
       body: p == null
-          ? Center(
-              child: _error == null
-                  ? const CircularProgressIndicator()
-                  : Padding(
-                      padding: const EdgeInsets.all(32),
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
-                        Text(_error!, textAlign: TextAlign.center),
-                        const SizedBox(height: 12),
-                        OutlinedButton(onPressed: _load, child: Text(tr(context, 'Try again', 'Yritä uudelleen'))),
-                      ]),
-                    ),
+          ? SafeArea(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(padding: EdgeInsets.all(4), child: BackButton()),
+                  Expanded(
+                    child: _error == null
+                        ? SkeletonDetail(heroHeight: MediaQuery.of(context).size.width)
+                        : StateMessage.error(
+                            message: _error!,
+                            onRetry: () {
+                              setState(() => _error = null);
+                              _load();
+                            },
+                          ),
+                  ),
+                ],
+              ),
             )
           : CustomScrollView(
               slivers: [
@@ -180,7 +188,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         const SizedBox(height: 14),
         InkWell(
           borderRadius: BorderRadius.circular(AppTheme.radiusMd + 2),
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => StoreDetailScreen(store: store))),
+          onTap: () {
+            HapticFeedback.selectionClick();
+            Navigator.push(context, MaterialPageRoute(builder: (_) => StoreDetailScreen(store: store)));
+          },
           child: Ink(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
@@ -224,7 +235,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   }
 
   Widget _row(IconData icon, String label, VoidCallback onTap) => InkWell(
-        onTap: onTap,
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 10),
           child: Row(children: [

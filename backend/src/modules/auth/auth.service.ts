@@ -140,6 +140,9 @@ function exportUser(userId: number) {
       dropComments: { where: { status: { not: "REMOVED" } }, select: { dropId: true, body: true, status: true, createdAt: true } },
       follows: { select: { storeId: true, createdAt: true } },
       launchAlert: { select: { latitude: true, longitude: true, area: true, notifiedAt: true, createdAt: true } },
+      referralCode: true,
+      referralsMade: { select: { createdAt: true, rewardedAt: true } },
+      personalPromos: { select: { code: true, description: true, value: true, active: true, createdAt: true } },
     },
   });
 }
@@ -182,6 +185,8 @@ export async function deleteUserAccount(userId: number) {
     await tx.deviceToken.deleteMany({ where: { userId } });
     await tx.storeFollow.deleteMany({ where: { userId } });
     await tx.launchAlert.deleteMany({ where: { userId } });
+    // The invite code stops working; unused personal reward codes are switched off
+    await tx.promoCode.updateMany({ where: { userId }, data: { active: false } });
     // Comments are personal data: remove them and keep each drop's visible-comment count right
     const visible = await tx.dropComment.groupBy({ by: ["dropId"], where: { userId, status: "VISIBLE" }, _count: { _all: true } });
     for (const v of visible) {
@@ -210,6 +215,7 @@ export async function deleteUserAccount(userId: number) {
         longitude: null,
         passwordHash: crypto.randomBytes(32).toString("hex"),
         googleSub: null,
+        referralCode: null,
         isActive: false,
         deletedAt: new Date(),
       },

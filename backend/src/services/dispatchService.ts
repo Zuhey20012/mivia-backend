@@ -4,6 +4,8 @@ import { haversineKm } from "../utils/distance";
 import { emitToAllCouriers, emitToCourier } from "../lib/socket";
 import { pushToUsers } from "../lib/push";
 import { presentCourierPay } from "../utils/courierPay";
+import { freshPosition } from "../utils/courierPosition";
+import { env } from "../config/env";
 
 const logger = pino({ name: "dispatch" });
 
@@ -25,9 +27,11 @@ function approximate(value: number | null) {
 export async function offerOrderToCouriers(orderId: number) {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
+    omit: { courierPay: false },
     include: { store: { select: { id: true, name: true, address: true, latitude: true, longitude: true } } },
   });
-  if (!order || order.courierId || order.paymentStatus !== "SUCCEEDED") return;
+  // Pickup orders are collected by the customer: couriers never see them
+  if (!order || order.courierId || order.paymentStatus !== "SUCCEEDED" || order.fulfilment !== "DELIVERY") return;
   if (!["CONFIRMED", "PROCESSING"].includes(order.status)) return;
 
   const offer = {
@@ -45,6 +49,8 @@ export async function offerOrderToCouriers(orderId: number) {
     // Before the courier accepts (Platform Work Directive). Ride to the shop: estimated per nearby courier,
     // fixed on acceptance; waiting at the shop is added at pickup.
     courierPay: presentCourierPay(order),
+    // When the job was first offered (the store accepted it)
+    offeredAt: order.confirmedAt ?? order.lastOfferAt ?? new Date(),
     createdAt: order.createdAt,
   };
 
@@ -52,22 +58,26 @@ export async function offerOrderToCouriers(orderId: number) {
 
   const couriers = await prisma.courier.findMany({
     where: { isApproved: true, isActive: true, currentOrderId: null },
-    select: { id: true, userId: true, latitude: true, longitude: true, updatedAt: true },
+    select: { id: true, userId: true, latitude: true, longitude: true, locationAt: true, updatedAt: true },
   });
 
   const nearby =
     order.store.latitude !== null && order.store.longitude !== null
       ? couriers
           .filter((c) => c.latitude !== null && c.longitude !== null && Date.now() - c.updatedAt.getTime() < LOCATION_FRESH_MS)
-          .map((c) => ({ id: c.id, userId: c.userId, km: haversineKm(order.store.latitude!, order.store.longitude!, c.latitude!, c.longitude!) }))
+          .map((c) => ({
+            id: c.id, userId: c.userId, fresh: !!freshPosition(c),
+            km: haversineKm(order.store.latitude!, order.store.longitude!, c.latitude!, c.longitude!),
+          }))
           .filter((c) => c.km <= OFFER_RADIUS_KM)
           .sort((a, b) => a.km - b.km)
       : [];
 
   if (nearby.length) {
     for (const c of nearby) {
-      // This courier's ride to the shop is part of their pay estimate (fixed when they accept)
-      const courierPay = presentCourierPay(order, { approachStraightKm: c.km });
+      // This courier's ride to the shop is part of their pay estimate (fixed when they accept); only a fresh
+      // position counts, as on acceptance
+      const courierPay = presentCourierPay(order, { approachStraightKm: c.fresh && c.km <= env.courierPay.approachMaxKm ? c.km : null });
       emitToCourier(c.id, "courier:dispatch_offer", {
         ...offer, courierPay, courierFeeCents: courierPay.totalCents, pickupDistanceKm: Number(c.km.toFixed(2)),
       });

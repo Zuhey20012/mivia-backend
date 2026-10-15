@@ -332,6 +332,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   labelText: l10n.translate('password'),
                   prefixIcon: const Icon(Icons.lock_outline_rounded),
                   suffixIcon: IconButton(
+                    tooltip: _obscurePass ? tr(context, 'Show password', 'Näytä salasana') : tr(context, 'Hide password', 'Piilota salasana'),
                     icon: Icon(_obscurePass ? Icons.visibility_off_outlined : Icons.visibility_outlined),
                     onPressed: () => setState(() => _obscurePass = !_obscurePass),
                   ),

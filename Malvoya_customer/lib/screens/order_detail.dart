@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
@@ -12,6 +13,7 @@ import '../core/reorder.dart';
 import '../core/network_status.dart';
 import '../core/strings.dart';
 import '../services/socket_service.dart';
+import '../widgets/skeleton.dart';
 import 'returns_screen.dart';
 
 /// One order: live map while it is on its way, a timeline with real times, chat with the
@@ -142,6 +144,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
 
   // ── Derived values ──────────────────────────────────────────────────────
 
+  /// Reserve & collect: the customer picks the order up at the shop (no courier, no map).
+  bool get _isPickup => _order?['fulfilment'] == 'PICKUP';
+
   LatLng? get _storePos {
     final s = _order?['store'];
     if (s?['latitude'] == null || s?['longitude'] == null) return null;
@@ -166,6 +171,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
   String? _etaText() {
     final o = _order!;
     final status = o['status'];
+    if (_isPickup) {
+      if (status == 'DELIVERED') {
+        final t = _time('deliveredAt');
+        return t == null ? tr(context, 'Collected', 'Noudettu') : tr(context, 'Collected at ${_clock(t)}', 'Noudettu klo ${_clock(t)}');
+      }
+      if (status == 'PROCESSING') return tr(context, 'Ready for pickup', 'Valmis noudettavaksi');
+      if (status == 'CONFIRMED') return tr(context, 'The shop is getting it ready', 'Kauppa valmistelee tilausta');
+      return null;
+    }
     if (status == 'DELIVERED') {
       final t = _time('deliveredAt');
       return t == null ? null : tr(context, 'Delivered at ${_clock(t)}', 'Toimitettu klo ${_clock(t)}');
@@ -255,6 +269,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                 children: List.generate(
                   5,
                   (i) => IconButton(
+                    tooltip: tr(context, '${i + 1} of 5 stars', '${i + 1}/5 tähteä'),
                     iconSize: 36,
                     icon: Icon(i < value ? Icons.star_rounded : Icons.star_outline_rounded, color: const Color(0xFFE08A00)),
                     onPressed: () {
@@ -403,7 +418,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                           decoration: InputDecoration(counterText: '', hintText: tr(context, 'Message', 'Viesti')),
                         ),
                       ),
-                      IconButton(icon: const Icon(Icons.send_rounded, color: AppTheme.primary), onPressed: () => send(input.text)),
+                      IconButton(
+                        tooltip: tr(context, 'Send', 'Lähetä'),
+                        icon: const Icon(Icons.send_rounded, color: AppTheme.primary),
+                        onPressed: () {
+                          HapticFeedback.selectionClick();
+                          send(input.text);
+                        },
+                      ),
                     ],
                   ),
                 ),
@@ -423,21 +445,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
     return Scaffold(
       appBar: AppBar(title: Text(tr(context, 'Order #${widget.orderId}', 'Tilaus #${widget.orderId}'))),
       body: o == null
-          ? Center(
-              child: _error == null
-                  ? const CircularProgressIndicator()
-                  : Column(mainAxisSize: MainAxisSize.min, children: [
-                      Text(_error!),
-                      TextButton(onPressed: _load, child: Text(tr(context, 'Try again', 'Yritä uudelleen'))),
-                    ]),
-            )
+          ? (_error == null ? const SkeletonDetail(heroHeight: 240) : StateMessage.error(message: _error!, onRetry: _load))
           : RefreshIndicator(
               onRefresh: _load,
               child: ListView(
                 padding: const EdgeInsets.only(bottom: 32),
                 children: [
-                  if (_active.contains(o['status']) && (_storePos != null || _homePos != null)) _mapCard(),
+                  if (!_isPickup && _active.contains(o['status']) && (_storePos != null || _homePos != null)) _mapCard(),
                   _statusCard(o),
+                  if (_isPickup && o['status'] != 'CANCELLED' && o['status'] != 'REFUNDED') _pickupCard(o),
                   _itemsCard(o),
                   _actions(o),
                 ],
@@ -487,6 +503,136 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
     );
   }
 
+  void _tap(VoidCallback action) {
+    HapticFeedback.selectionClick();
+    action();
+  }
+
+  /// Opens the shop in the phone's maps app (geo: link), or OpenStreetMap in the browser.
+  Future<void> _openMaps(Map<String, dynamic> store) async {
+    HapticFeedback.selectionClick();
+    final lat = (store['latitude'] as num?)?.toDouble();
+    final lng = (store['longitude'] as num?)?.toDouble();
+    final address = (store['address'] ?? '').toString();
+    final name = (store['name'] ?? '').toString();
+    final geo = lat != null && lng != null
+        ? Uri.parse('geo:$lat,$lng?q=${Uri.encodeComponent('$lat,$lng($name)')}')
+        : Uri.parse('geo:0,0?q=${Uri.encodeComponent(address)}');
+    final web = lat != null && lng != null
+        ? Uri.parse('https://www.openstreetmap.org/?mlat=$lat&mlon=$lng#map=17/$lat/$lng')
+        : Uri.parse('https://www.openstreetmap.org/search?query=${Uri.encodeComponent(address)}');
+    try {
+      if (await launchUrl(geo, mode: LaunchMode.externalApplication)) return;
+    } catch (_) {}
+    try {
+      if (await launchUrl(web, mode: LaunchMode.externalApplication)) return;
+    } catch (_) {}
+    if (mounted) _snack(tr(context, 'Could not open maps.', 'Karttaa ei voitu avata.'));
+  }
+
+  /// Reserve & collect: the pickup code (while it can be used), the shop and how to get there.
+  Widget _pickupCard(Map<String, dynamic> o) {
+    final status = o['status'];
+    final store = o['store'] is Map ? Map<String, dynamic>.from(o['store']) : <String, dynamic>{};
+    final code = o['pickupCode']?.toString() ?? '';
+    final showCode = code.isNotEmpty && (status == 'CONFIRMED' || status == 'PROCESSING');
+    final muted = AppTheme.secondaryText(context);
+    final brand = AppTheme.isDarkMode(context) ? const Color(0xFFC9A3DD) : AppTheme.primary;
+    final ready = _time('readyAt');
+    final hasPlace = (store['address'] ?? '').toString().isNotEmpty || store['latitude'] != null;
+    final spaced = code.length == 6 ? '${code.substring(0, 3)} ${code.substring(3)}' : code;
+
+    return _card(Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (showCode) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+            decoration: BoxDecoration(
+              color: AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine),
+              borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+            ),
+            child: Column(children: [
+              Text(tr(context, 'Show this code at the shop', 'Näytä tämä koodi kaupassa'),
+                  style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
+              const SizedBox(height: 8),
+              Semantics(
+                label: '${tr(context, 'Pickup code', 'Noutokoodi')} ${code.split('').join(' ')}',
+                excludeSemantics: true,
+                child: FittedBox(
+                  child: SelectableText(
+                    spaced,
+                    style: AppTheme.display(context, size: 44, color: AppTheme.primaryText(context)).copyWith(letterSpacing: 6),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                status == 'PROCESSING'
+                    ? tr(context, 'Your order is ready. Please collect it within 3 days.', 'Tilauksesi on valmis. Nouda se 3 päivän kuluessa.')
+                    : tr(context, 'Wait until the shop marks it ready before you go.', 'Odota, että kauppa merkitsee tilauksen valmiiksi, ennen kuin lähdet.'),
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: AppTheme.primaryText(context), height: 1.35),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 16),
+        ],
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(color: AppTheme.pastel(context, AppTheme.lilac, AppTheme.primary), shape: BoxShape.circle),
+              child: Icon(Icons.storefront_rounded, color: brand),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(store['name']?.toString() ?? '', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: AppTheme.primaryText(context))),
+                  if ((store['address'] ?? '').toString().isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(store['address'].toString(), style: TextStyle(fontSize: 13, color: muted, height: 1.35)),
+                    ),
+                  if (status == 'PROCESSING' && ready != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        tr(context, 'Ready since ${ready.day}.${ready.month}. ${_clock(ready)}', 'Valmiina ${ready.day}.${ready.month}. klo ${_clock(ready)} alkaen'),
+                        style: TextStyle(fontSize: 12.5, color: muted),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        if (hasPlace) ...[
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => _openMaps(store),
+              icon: const Icon(Icons.map_outlined, size: 18),
+              label: Text(tr(context, 'Open in maps', 'Avaa kartalla')),
+            ),
+          ),
+        ],
+        if (status == 'CONFIRMED' || status == 'PROCESSING')
+          Text(
+            tr(context, 'If it isn’t collected within 3 days of being ready, the order is cancelled and refunded.',
+                'Jos tilausta ei noudeta 3 päivän kuluessa valmistumisesta, se perutaan ja rahat palautetaan.'),
+            style: TextStyle(fontSize: 12, color: muted, height: 1.35),
+          ),
+      ],
+    ));
+  }
+
   Widget _card(Widget child) => Container(
         margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
         padding: const EdgeInsets.all(18),
@@ -501,8 +647,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
   Widget _statusCard(Map<String, dynamic> o) {
     final status = o['status'];
     final eta = _etaText();
-    final steps = <(String, DateTime?, bool)>[
-      (tr(context, 'Order paid', 'Tilaus maksettu'), _time('paidAt'), o['paymentStatus'] == 'SUCCEEDED' || o['paymentStatus'] == 'REFUNDED'),
+    final paid = o['paymentStatus'] == 'SUCCEEDED' || o['paymentStatus'] == 'REFUNDED';
+    final steps = _isPickup
+        ? <(String, DateTime?, bool)>[
+            (tr(context, 'Paid', 'Maksettu'), _time('paidAt'), paid),
+            (tr(context, 'Accepted', 'Hyväksytty'), _time('confirmedAt'), ['CONFIRMED', 'PROCESSING', 'DELIVERED'].contains(status)),
+            (tr(context, 'Ready for pickup', 'Valmis noudettavaksi'), _time('readyAt'), ['PROCESSING', 'DELIVERED'].contains(status)),
+            (tr(context, 'Collected', 'Noudettu'), _time('deliveredAt'), status == 'DELIVERED'),
+          ]
+        : <(String, DateTime?, bool)>[
+      (tr(context, 'Order paid', 'Tilaus maksettu'), _time('paidAt'), paid),
       (tr(context, 'Store accepted', 'Kauppa hyväksyi'), null, ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'].contains(status)),
       (tr(context, 'Courier on the way to the store', 'Kuriiri matkalla kauppaan'), _time('acceptedAt'), o['courier'] != null),
       (tr(context, 'Picked up', 'Noudettu'), _time('pickedUpAt'), ['SHIPPED', 'DELIVERED'].contains(status)),
@@ -514,7 +668,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
 
     final done = steps.where((s) => s.$3).length;
     final brand = AppTheme.isDarkMode(context) ? const Color(0xFFC9A3DD) : AppTheme.primary;
-    final showCourier = courierName.isNotEmpty && _active.contains(status);
+    final showCourier = !_isPickup && courierName.isNotEmpty && _active.contains(status);
 
     return _card(Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -583,7 +737,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                         shape: const CircleBorder(),
                         child: InkWell(
                           customBorder: const CircleBorder(),
-                          onTap: _openChat,
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            _openChat();
+                          },
                           child: const SizedBox(width: 44, height: 44, child: Icon(Icons.chat_bubble_outline_rounded, color: Colors.white, size: 20)),
                         ),
                       ),
@@ -650,7 +807,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(o['store']?['name'] ?? '', style: AppTheme.display(context, size: 18)),
-        if (o['deliveryAddress'] != null) Text(o['deliveryAddress'], style: TextStyle(color: muted, fontSize: 13)),
+        if (_isPickup)
+          Text(tr(context, 'Collect from the shop', 'Nouto kaupasta'), style: TextStyle(color: muted, fontSize: 13))
+        else if (o['deliveryAddress'] != null)
+          Text(o['deliveryAddress'], style: TextStyle(color: muted, fontSize: 13)),
         const Divider(height: 24),
         for (final i in items)
           Padding(
@@ -667,7 +827,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
           ),
         const Divider(height: 20),
         line(tr(context, 'Items', 'Tuotteet'), o['subtotalCents']),
-        line(tr(context, 'Delivery', 'Toimitus'), o['deliveryFeeCents']),
+        if (!_isPickup || (asInt(o['deliveryFeeCents']) ?? 0) > 0) line(tr(context, 'Delivery', 'Toimitus'), o['deliveryFeeCents']),
         if ((asInt(o['serviceFeeCents']) ?? 0) > 0) line(tr(context, 'Service fee', 'Palvelumaksu'), o['serviceFeeCents']),
         if ((asInt(o['smallOrderFeeCents']) ?? 0) > 0) line(tr(context, 'Small-order fee', 'Pientilauslisä'), o['smallOrderFeeCents']),
         if ((asInt(o['discountCents']) ?? 0) > 0)
@@ -711,7 +871,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
         _button(Icons.replay_rounded, tr(context, 'Order again', 'Tilaa uudelleen'), () => reorder(context, o), primary: status == 'DELIVERED' && _review != null),
       if (status == 'DELIVERED' && withinReturn)
         _button(Icons.assignment_return_outlined, tr(context, 'Return items', 'Palauta tuotteita'),
-            () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ReturnsScreen()))),
+            () async {
+          await Navigator.push(context, MaterialPageRoute(builder: (_) => ReturnsScreen(order: o)));
+          if (mounted) _load();
+        }),
     ];
     if (buttons.isEmpty) return const SizedBox.shrink();
     return Padding(padding: const EdgeInsets.fromLTRB(16, 16, 16, 0), child: Column(children: buttons));
@@ -723,8 +886,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
           width: double.infinity,
           height: 54,
           child: primary
-              ? FilledButton.icon(onPressed: onTap, icon: Icon(icon), label: Text(label))
-              : OutlinedButton.icon(onPressed: onTap, icon: Icon(icon), label: Text(label)),
+              ? FilledButton.icon(onPressed: () => _tap(onTap), icon: Icon(icon), label: Text(label))
+              : OutlinedButton.icon(onPressed: () => _tap(onTap), icon: Icon(icon), label: Text(label)),
         ),
       );
 }

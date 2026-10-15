@@ -126,6 +126,10 @@ export async function createPayoutsForOrder(orderId: number) {
   if (!order || order.status !== "DELIVERED" || !order.deliveredAt || order.paymentStatus !== "SUCCEEDED") return;
 
   const storeRelease = new Date(order.deliveredAt.getTime() + env.storePayoutHoldDays * 86_400_000);
+  if (order.sellerPayoutCents + order.courierFeeCents > order.totalCents) {
+    // Possible with formula courier pay or a big promo discount: Malvoya covers the difference from its balance
+    logger.warn({ orderId, store: order.sellerPayoutCents, courier: order.courierFeeCents, charge: order.totalCents }, "Payouts exceed the charge");
+  }
   const rows = [
     {
       orderId, party: "STORE" as const, storeId: order.storeId, amountCents: order.sellerPayoutCents,
@@ -159,7 +163,7 @@ export async function processDuePayouts() {
       NOT: { party: "STORE", order: { returns: { some: { status: { in: ["REQUESTED", "APPROVED", "IN_TRANSIT", "RECEIVED"] } } } } },
     },
     include: {
-      order: { select: { stripePaymentIntentId: true } },
+      order: { select: { stripePaymentIntentId: true, totalCents: true, refundedCents: true, sellerPayoutCents: true } },
       store: { select: { stripeAccountId: true, payoutsEnabled: true, ownerId: true } },
       courier: { select: { stripeAccountId: true, payoutsEnabled: true, userId: true } },
     },
@@ -182,19 +186,26 @@ export async function processDuePayouts() {
     try {
       const intent = await stripe.paymentIntents.retrieve(p.order.stripePaymentIntentId!);
       const charge = typeof intent.latest_charge === "string" ? intent.latest_charge : intent.latest_charge?.id;
+      // A succeeded payment always has a charge; the share is counted against it either way
+      const link = p.amountCents <= await linkableCents(p.orderId, p.party, p.order);
       const transfer = await stripe.transfers.create(
         {
           amount: p.amountCents,
           currency: "eur",
           destination: account.stripeAccountId,
-          ...(charge ? { source_transaction: charge } : {}),
+          // Tied to the charge only while the transfers tied to it stay within it (Stripe refuses more);
+          // anything else is paid from Malvoya's balance
+          ...(link && charge ? { source_transaction: charge } : {}),
           transfer_group: `order_${p.orderId}`,
           description: `Malvoya order #${p.orderId} – ${p.party === "STORE" ? "sale" : "delivery"}`,
           metadata: { payoutId: String(p.id), orderId: String(p.orderId), party: p.party },
         },
         { idempotencyKey: `payout-${p.id}` }
       );
-      await prisma.payout.update({ where: { id: p.id }, data: { status: "PAID", stripeTransferId: transfer.id, paidAt: new Date(), failureReason: null } });
+      await prisma.payout.update({
+        where: { id: p.id },
+        data: { status: "PAID", stripeTransferId: transfer.id, paidAt: new Date(), failureReason: null, linkedToCharge: link },
+      });
       const userId = p.party === "STORE" ? p.store?.ownerId : p.courier?.userId;
       if (userId) {
         pushToUser(userId, {
@@ -211,11 +222,40 @@ export async function processDuePayouts() {
 }
 
 /**
- * A refund before the store has been paid reduces the store's payout by the refunded amount,
- * minus the commission Malvoya gives back on refunded items.
+ * How much of an order's charge a transfer may still be tied to (source_transaction): the charge, less refunds,
+ * less transfers already tied to it. A courier transfer also leaves room for the store's payout, which is
+ * released later, so the store's money can always come from the charge.
  */
-export async function adjustStorePayoutForRefund(orderId: number, refundCents: number) {
-  const order = await prisma.order.findUnique({ where: { id: orderId }, include: { store: { select: { commissionRate: true } } } });
+async function linkableCents(
+  orderId: number, party: "STORE" | "COURIER",
+  order: { totalCents: number; refundedCents: number; sellerPayoutCents: number },
+) {
+  const linked = await prisma.payout.aggregate({ where: { orderId, status: "PAID", linkedToCharge: true }, _sum: { amountCents: true } });
+  const store = party === "COURIER"
+    ? (await prisma.payout.findUnique({ where: { orderId_party: { orderId, party: "STORE" } }, select: { amountCents: true, status: true } }))
+    : null;
+  const reserved = party === "COURIER" ? (store && store.status !== "PAID" && store.status !== "CANCELLED" ? store.amountCents : 0) : 0;
+  return order.totalCents - order.refundedCents - (linked._sum.amountCents ?? 0) - reserved;
+}
+
+/** Orders whose store payout + courier pay is more than the customer paid (Malvoya covers the rest). */
+export async function ordersPayingOutMoreThanCharged() {
+  const rows = await prisma.$queryRaw<{ n: bigint }[]>`
+    SELECT count(*)::bigint AS n FROM "Order"
+    WHERE "paymentStatus" = 'SUCCEEDED' AND status = 'DELIVERED' AND "sellerPayoutCents" + "courierFeeCents" > "totalCents"`;
+  return Number(rows[0]?.n ?? 0);
+}
+
+/**
+ * A refund before the store has been paid reduces the store's payout by the refunded goods, minus the
+ * commission Malvoya gives back on them. `goodsCents` (returns) is the undiscounted value of the returned
+ * goods; without it the refund itself is scaled back to goods value (a promo discount is paid by Malvoya, not
+ * the store), so a full withdrawal takes back the whole store payout and a partial one its fair share.
+ * The commission rate is the order's own (commissionCents / subtotalCents), so a later change of the store's
+ * rate never touches existing orders.
+ */
+export async function adjustStorePayoutForRefund(orderId: number, refundCents: number, goodsCents?: number) {
+  const order = await prisma.order.findUnique({ where: { id: orderId } });
   const payout = await prisma.payout.findUnique({ where: { orderId_party: { orderId, party: "STORE" } } });
   if (!order || !payout) return;
   if (payout.status === "PAID") {
@@ -223,13 +263,17 @@ export async function adjustStorePayoutForRefund(orderId: number, refundCents: n
     return;
   }
   if (!["SCHEDULED", "WAITING_FOR_ACCOUNT", "FAILED"].includes(payout.status)) return;
-  // A promo discount is paid by Malvoya, not the store: scale the refund back up to the undiscounted
-  // value, so a full withdrawal takes back the whole store payout and a partial one its fair share.
-  const paidExTip = order.totalCents - order.tipCents;
-  const value = order.discountCents > 0 && paidExTip > 0
-    ? Math.round((refundCents * (paidExTip + order.discountCents)) / paidExTip)
-    : refundCents;
-  const commissionBack = Math.round(Math.min(value, order.subtotalCents) * order.store.commissionRate);
+  let value: number;
+  if (goodsCents !== undefined) {
+    value = goodsCents;
+  } else {
+    const paidExTip = order.totalCents - order.tipCents;
+    value = order.discountCents > 0 && paidExTip > 0
+      ? Math.round((refundCents * (paidExTip + order.discountCents)) / paidExTip)
+      : refundCents;
+  }
+  const goods = Math.min(value, order.subtotalCents);
+  const commissionBack = order.subtotalCents > 0 ? Math.round((goods * order.commissionCents) / order.subtotalCents) : 0;
   const next = Math.max(0, payout.amountCents - (value - commissionBack));
   await prisma.payout.update({ where: { id: payout.id }, data: { amountCents: next, ...(next === 0 ? { status: "CANCELLED" } : {}) } });
 }

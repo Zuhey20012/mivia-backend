@@ -11,4 +11,9 @@ export const prisma = new PrismaClient({
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 10_000,
   }),
+  // Never part of an order payload unless asked for: the pickup code belongs to the customer only, who invited
+  // the customer is nobody else's business, and the courier's pay breakdown (ride km, waiting minutes, rates) is
+  // for the courier, admins and payouts. Queries that need them ask with `omit: { …: false }` or `select`
+  // (orders.service.ts: customer views, the store's code check, courier views; referrals; dispatch; admin).
+  omit: { order: { pickupCode: true, referrerId: true, courierPay: true } },
 });

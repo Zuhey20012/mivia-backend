@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
-import '../config/theme.dart';
 import '../core/api_client.dart';
 import '../core/strings.dart';
 import '../widgets/product_tile.dart';
+import '../widgets/skeleton.dart';
 
 /// Items you saved with the heart button.
 class FavoritesScreen extends StatefulWidget {
@@ -35,7 +35,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     if (!mounted) return;
     setState(() {
       _loading = false;
-      _error = res.ok ? null : res.error;
+      _error = res.ok ? null : res.errorText(context);
       if (res.ok) _items = ((res.data['products'] as List?) ?? []).map((p) => Map<String, dynamic>.from(p)).toList();
     });
   }
@@ -43,30 +43,26 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
   @override
   Widget build(BuildContext context) {
     final signedIn = Provider.of<AuthService>(context).isAuthenticated;
-    final muted = AppTheme.secondaryText(context);
     return Scaffold(
       appBar: AppBar(title: Text(tr(context, 'Favourites', 'Suosikit'))),
       body: !signedIn
-          ? Center(child: Text(tr(context, 'Sign in to save favourites.', 'Kirjaudu sisään tallentaaksesi suosikkeja.'), style: TextStyle(color: muted)))
+          ? StateMessage(icon: Icons.favorite_border_rounded, message: tr(context, 'Sign in to save favourites.', 'Kirjaudu sisään tallentaaksesi suosikkeja.'))
           : _loading
-              ? const Center(child: CircularProgressIndicator())
+              ? const SkeletonProductGrid(padding: EdgeInsets.fromLTRB(16, 16, 16, 40))
               : RefreshIndicator(
                   onRefresh: _load,
-                  child: _items.isEmpty
-                      ? ListView(children: [
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(40, 120, 40, 40),
-                            child: Column(children: [
-                              Icon(Icons.favorite_border_rounded, size: 56, color: muted),
-                              const SizedBox(height: 12),
-                              Text(
-                                _error ?? tr(context, 'Tap the heart on any item to save it here.', 'Tallenna tuotteita tänne sydämellä.'),
-                                textAlign: TextAlign.center,
-                                style: TextStyle(color: muted, fontSize: 15),
-                              ),
-                            ]),
-                          ),
-                        ])
+                  child: _error != null && _items.isEmpty
+                      ? StateMessage.error(
+                          message: _error!,
+                          onRetry: () {
+                            setState(() => _loading = true);
+                            _load();
+                          })
+                      : _items.isEmpty
+                      ? StateMessage(
+                          icon: Icons.favorite_border_rounded,
+                          message: tr(context, 'Tap the heart on any item to save it here.', 'Tallenna tuotteita tänne sydämellä.'),
+                        )
                       : GridView.builder(
                           padding: const EdgeInsets.fromLTRB(16, 16, 16, 40),
                           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisSpacing: 18, crossAxisSpacing: 14, childAspectRatio: 0.56),

@@ -1,4 +1,4 @@
-// End-to-end test for API v2.7 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
+// End-to-end test for API v2.8 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
 const { execSync, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -45,6 +45,10 @@ const FEE_BASE = "http://localhost:4556";
 const FEE_API = `${FEE_BASE}/api/v1`;
 let feeApi = null;
 async function startFeeApi(extraEnv) {
+  // A previous instance may still be shutting down: wait until the port is free
+  for (let i = 0; i < 40; i++) {
+    try { await fetch(`${FEE_BASE}/health`); await new Promise((r) => setTimeout(r, 250)); } catch { break; }
+  }
   feeApi = spawn(process.execPath, ["dist/index.js"], {
     cwd: path.join(__dirname, "..", ".."),
     env: { ...process.env, ...testEnv, PORT: "4556", PUBLIC_API_URL: FEE_BASE, DISABLE_SCHEDULER: "true", ...extraEnv },
@@ -556,6 +560,12 @@ async function register(name, role, extra = {}) {
   const lateStoreId = mk("PENDING", { tag: "late", paidAt: "now() - interval '11 minutes'", cols: "", vals: "" });
   const delayId = mk("CONFIRMED", { tag: "delay", paidAt: "now() - interval '20 minutes'", cols: `,"confirmedAt"`, vals: `,now() - interval '16 minutes'` });
   const noCourierId = mk("CONFIRMED", { tag: "nocourier", paidAt: "now() - interval '55 minutes'", cols: `,"confirmedAt"`, vals: `,now() - interval '50 minutes'` });
+  // Reserve & collect: ready but not collected (reminder at 24 h, refund at 72 h); accepted pickup orders never wait for couriers
+  const mkPickup = (status, tag, cols, vals) => Number(sql(`insert into "Order" ("userId","storeId","status","fulfilment","subtotalCents","deliveryFeeCents","courierFeeCents","commissionCents","sellerPayoutCents","totalCents","stripePaymentIntentId","paymentStatus","paidAt","pickupCode","updatedAt"${cols}) values (${otherCust.user.id},${storeId},'${status}','PICKUP',5000,0,0,500,4500,5000,'pi_wd_${tag}_${uniq}','SUCCEEDED',now() - interval '4 days','123456',now()${vals}) returning id`).split("\n")[0]);
+  const pickupRemindId = mkPickup("PROCESSING", "pkremind", `,"confirmedAt","readyAt"`, `,now() - interval '26 hours',now() - interval '25 hours'`);
+  const pickupLateId = mkPickup("PROCESSING", "pklate", `,"confirmedAt","readyAt"`, `,now() - interval '74 hours',now() - interval '73 hours'`);
+  const pickupWaitId = mkPickup("CONFIRMED", "pkwait", `,"confirmedAt"`, `,now() - interval '50 minutes'`);
+  const pickupNeverReadyId = mkPickup("CONFIRMED", "pknever", `,"confirmedAt"`, `,now() - interval '25 hours'`);
   let watched = "";
   for (let i = 0; i < 45 && watched !== "CANCELLED"; i++) {
     await sleep(3000);
@@ -568,12 +578,18 @@ async function register(name, role, extra = {}) {
   check("watchdog: an order the store never answered is refunded", row(lateStoreId, `status || '|' || "paymentStatus" || '|' || "cancelReason"`) === "CANCELLED|REFUNDED|The store did not respond in time");
   check("watchdog: jobs nobody took are offered again and the customer hears about the delay", row(delayId, `status || '|' || ("lastOfferAt" is not null) || '|' || ("courierSearchNotifiedAt" is not null)`) === "CONFIRMED|true|true");
   check("watchdog: with no courier at all the order is refunded", row(noCourierId, `status || '|' || "paymentStatus" || '|' || "cancelReason"`) === "CANCELLED|REFUNDED|No courier was available");
+  for (let i = 0; i < 10 && sql(`select status from "Order" where id=${pickupLateId}`) !== "CANCELLED"; i++) await sleep(1000);
+  await sleep(500);
+  check("watchdog: a pickup order not collected after 24 h gets one reminder and stays ready", row(pickupRemindId, `status || '|' || ("pickupRemindedAt" is not null)`) === "PROCESSING|true");
+  check("watchdog: a pickup order not collected within 72 h is cancelled and refunded", row(pickupLateId, `status || '|' || "paymentStatus" || '|' || "cancelReason"`) === "CANCELLED|REFUNDED|Not collected in time", row(pickupLateId, `status || '|' || coalesce("cancelReason",'')`));
+  check("watchdog: a pickup order accepted but never marked ready within 24 h is refunded", row(pickupNeverReadyId, `status || '|' || "paymentStatus" || '|' || "cancelReason"`) === "CANCELLED|REFUNDED|The store did not get the order ready in time", row(pickupNeverReadyId, `status || '|' || coalesce("cancelReason",'')`));
+  check("watchdog: an accepted pickup order is never offered to couriers or cancelled for lack of one", row(pickupWaitId, `status || '|' || ("lastOfferAt" is null)`) === "CONFIRMED|true");
   check("store acceptance records when it happened", sql(`select "confirmedAt" is not null from "Order" where id=${orderId}`) === "t");
 
   console.log("\n— Tips and app updates");
   const tipped = await call("POST", "/orders", { ...orderBody, tipCents: 200 }, otherCust.accessToken);
   const to = tipped.body.order;
-  check("a tip is added to the total and paid to the courier in full", tipped.status === 201 && to.tipCents === 200 && to.totalCents === 5000 + to.deliveryFeeCents + 200 && to.courierFeeCents === 650 + 200 && to.courierPay?.tipCents === 200 && to.commissionCents === 500, to);
+  check("a tip is added to the total and paid to the courier in full", tipped.status === 201 && to.tipCents === 200 && to.totalCents === 5000 + to.deliveryFeeCents + 200 && to.courierFeeCents === 650 + 200 && sql(`select ("courierPay"->>'tipCents')::int from "Order" where id=${to?.id}`) === "200" && to.commissionCents === 500 && !("courierPay" in to), to);
   check("tips are capped at 20 €", (await call("POST", "/orders", { ...orderBody, tipCents: 5000 }, otherCust.accessToken)).status === 400);
   const cfg = await call("GET", "/app-config?app=customer&build=5");
   check("apps learn whether their build is still supported", cfg.status === 200 && cfg.body.updateRequired === false && cfg.body.maintenance?.active === false && cfg.body.storeUrl.includes("com.malvoya.customer"), cfg.body);
@@ -594,7 +610,7 @@ async function register(name, role, extra = {}) {
   }));
 
   const sysDefault = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.7.0", sysDefault.pricing);
+  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.8.0", sysDefault.pricing);
   const stockBeforeQuote = stockOf(productId);
   const ordersBeforeQuote = sql(`select count(*) from "Order" where "userId"=${otherCust.user.id}`);
   const q0 = await quote(quoteBody, otherCust.accessToken);
@@ -690,6 +706,89 @@ async function register(name, role, extra = {}) {
   const capped = engine.calcCheckoutPricing({ subtotalCents: 20000, commissionRate: 0.1, deliveryFeeCents: 190, promo: { kind: "PERCENT", value: 50, maxDiscountCents: 1500 }, config: zeroFees, courierFeeShare: 1 });
   check("a percentage code respects its maximum discount", capped.discountCents === 1500 && capped.totalCents === 20000 + 190 - 1500, capped);
 
+  console.log("\n— Reserve & collect (pickup)");
+  const payNow = (o, api = API) => callAt(api, "POST", "/payments/webhook", null, null, signedWebhook({
+    id: `evt_pk_${o.id}_${uniq}`, type: "payment_intent.succeeded",
+    data: { object: { id: o.stripePaymentIntentId, amount_received: o.totalCents, metadata: { type: "ORDER", orderId: String(o.id) } } },
+  }));
+  const pickupBody = { storeId, fulfilment: "PICKUP", items: [{ productId, quantity: 1 }] };
+  const pq = await call("POST", "/orders/quote", pickupBody, otherCust.accessToken);
+  check("pickup quote: no delivery fee, with the store's name and address", pq.status === 200 && pq.body.quote.fulfilment === "PICKUP" && pq.body.quote.deliveryFeeCents === 0 && pq.body.quote.tipCents === 0 && pq.body.quote.totalCents === 5000 && pq.body.quote.pickup?.storeName === `Vera Vintage ${uniq}` && pq.body.quote.pickup?.address === "Mannerheimintie 1, Helsinki", pq.body);
+  const dq = (await call("POST", "/orders/quote", { storeId, deliveryLat: 60.18, deliveryLng: 24.95, items: [{ productId, quantity: 1 }] }, otherCust.accessToken)).body.quote;
+  check("delivery quotes say DELIVERY and have no pickup block", dq?.fulfilment === "DELIVERY" && !("pickup" in dq) && dq.deliveryFeeCents > 0, dq);
+  const tipQ = await call("POST", "/orders/quote", { ...pickupBody, tipCents: 100 }, otherCust.accessToken);
+  const tipO = await call("POST", "/orders", { ...pickupBody, tipCents: 100 }, otherCust.accessToken);
+  check("a pickup order cannot carry a tip (400)", tipQ.status === 400 && tipO.status === 400 && /tip/i.test(tipO.body.error || ""), [tipQ.body, tipO.body]);
+  check("a delivery order still needs an address", (await call("POST", "/orders", { storeId, items: [{ productId, quantity: 1 }] }, otherCust.accessToken)).status === 400);
+  const poRes = await call("POST", "/orders", { ...pickupBody, notes: "I'll come at five" }, otherCust.accessToken);
+  const po = poRes.body.order;
+  check("pickup order without an address: no delivery fee, no courier pay, same commission", poRes.status === 201 && po.fulfilment === "PICKUP" && po.deliveryFeeCents === 0 && po.courierFeeCents === 0 && po.deliveryAddress === null && po.totalCents === 5000 && po.commissionCents === 500 && sql(`select "courierPay" is null from "Order" where id=${po.id}`) === "t", poRes.body);
+  check("no pickup code before payment", !po.pickupCode && sql(`select "pickupCode" is null from "Order" where id=${po.id}`) === "t");
+  await payNow(po);
+  check("payment creates a 6-digit pickup code", sql(`select "pickupCode" ~ '^[0-9]{6}$' from "Order" where id=${po.id}`) === "t");
+  const pkCode = sql(`select "pickupCode" from "Order" where id=${po.id}`);
+  check("the customer does not see the code before the store accepts", (await call("GET", `/orders/${po.id}`, null, otherCust.accessToken)).body.order?.pickupCode === null);
+  c1Sock.events.length = 0;
+  check("store accepts the pickup order", (await call("PATCH", `/orders/${po.id}/status`, { status: "CONFIRMED" }, vendor.accessToken)).status === 200);
+  await sleep(500);
+  check("couriers are never offered pickup orders", !c1Sock.events.some((e) => e.ev === "courier:dispatch_offer" && e.data.orderId === po.id) && sql(`select "lastOfferAt" is null from "Order" where id=${po.id}`) === "t" && !(await call("GET", "/orders/available", null, c1.accessToken)).body.orders?.some((o) => o.id === po.id));
+  check("a courier cannot take a pickup order", (await call("PATCH", `/orders/${po.id}/assign-courier`, null, c2.accessToken)).status === 409);
+  const custView = (await call("GET", `/orders/${po.id}`, null, otherCust.accessToken)).body.order;
+  const custListed = (await call("GET", "/orders", null, otherCust.accessToken)).body.orders?.find((o) => o.id === po.id);
+  check("the customer sees the pickup code (order and list) once accepted", custView?.pickupCode === pkCode && custView.fulfilment === "PICKUP" && custListed?.pickupCode === pkCode, [custView?.pickupCode, custListed?.pickupCode]);
+  const vendView = (await call("GET", `/orders/${po.id}`, null, vendor.accessToken)).body.order;
+  const vendListed = (await call("GET", "/orders", null, vendor.accessToken)).body.orders?.find((o) => o.id === po.id);
+  const adminListed = (await call("GET", "/admin/orders", null, adminToken)).body.orders?.find((o) => o.id === po.id);
+  check("store and admin get the order with its fulfilment but never the code", vendView?.fulfilment === "PICKUP" && !("pickupCode" in vendView) && vendListed?.fulfilment === "PICKUP" && !("pickupCode" in vendListed) && !!adminListed && !("pickupCode" in adminListed) && !JSON.stringify([vendView, vendListed, adminListed]).includes(`"${pkCode}"`), [vendView, vendListed]);
+  check("handing over before the order is ready is refused", (await call("POST", `/orders/${po.id}/collect`, { code: pkCode }, vendor.accessToken)).status === 409);
+  const ready = await call("PATCH", `/orders/${po.id}/status`, { status: "PROCESSING" }, vendor.accessToken);
+  check("store marks the order ready; readyAt is set", ready.status === 200 && !!ready.body.order?.readyAt && !("pickupCode" in ready.body.order), ready.body);
+  check("a pickup order cannot be shipped", (await call("PATCH", `/orders/${po.id}/status`, { status: "SHIPPED" }, vendor.accessToken)).status === 409);
+  check("another store cannot hand it over; a customer cannot either", (await call("POST", `/orders/${po.id}/collect`, { code: pkCode }, otherVendor.accessToken)).status === 404 && (await call("POST", `/orders/${po.id}/collect`, { code: pkCode }, otherCust.accessToken)).status === 403);
+  const wrongCode = pkCode === "000000" ? "111111" : "000000";
+  const tries = [];
+  for (let i = 0; i < 5; i++) tries.push(await call("POST", `/orders/${po.id}/collect`, { code: wrongCode }, vendor.accessToken));
+  check("wrong codes: 400 with the attempts left (4, 3, 2, 1)", tries.slice(0, 4).every((t, i) => t.status === 400 && t.body.ok === false && t.body.attemptsLeft === 4 - i && typeof t.body.error === "string"), tries.map((t) => t.body));
+  check("the fifth wrong code locks the handover for 15 minutes", tries[4].status === 400 && tries[4].body.attemptsLeft === 0 && !!tries[4].body.lockedUntil && sql(`select "pickupLockedUntil" > now() + interval '14 minutes' from "Order" where id=${po.id}`) === "t", tries[4].body);
+  const whileLocked = await call("POST", `/orders/${po.id}/collect`, { code: pkCode }, vendor.accessToken);
+  check("while locked even the right code is refused", whileLocked.status === 400 && whileLocked.body.attemptsLeft === 0 && sql(`select status from "Order" where id=${po.id}`) === "PROCESSING", whileLocked.body);
+  sql(`update "Order" set "pickupLockedUntil" = now() - interval '1 minute' where id=${po.id}`);
+  const collected = await call("POST", `/orders/${po.id}/collect`, { code: ` ${pkCode} ` }, vendor.accessToken);
+  check("the right code hands the order over: DELIVERED, handover PICKUP, withdrawal period starts", collected.status === 200 && collected.body.order?.status === "DELIVERED" && collected.body.order.handoverMethod === "PICKUP" && !!collected.body.order.deliveredAt && !("pickupCode" in collected.body.order), collected.body);
+  await sleep(700);
+  check("collection schedules the store payout after the return window; no courier payout", sql(`select status || '|' || "amountCents" || '|' || ("releaseAt" > now() + interval '14 days') from "Payout" where "orderId"=${po.id} and party='STORE'`) === "SCHEDULED|4500|true" && sql(`select count(*) from "Payout" where "orderId"=${po.id} and party='COURIER'`) === "0");
+  check("after collection the customer no longer gets the code", (await call("GET", `/orders/${po.id}`, null, otherCust.accessToken)).body.order?.pickupCode === null);
+  check("a collected order cannot be collected again", (await call("POST", `/orders/${po.id}/collect`, { code: pkCode }, vendor.accessToken)).status === 409);
+
+  console.log("\n— Returning some items");
+  // A delivered order: 2 × 30 € + 1 × 40 €, 3 € delivery, 10 € promo discount (paid by Malvoya), store payout 90 € pending
+  const p2stock = () => Number(sql(`select "stockQuantity" from "Product" where id=${p2.id}`));
+  const pStock = () => Number(sql(`select "stockQuantity" from "Product" where id=${productId}`));
+  const rOrder = Number(sql(`insert into "Order" ("userId","storeId","status","subtotalCents","deliveryFeeCents","courierFeeCents","commissionCents","sellerPayoutCents","totalCents","discountCents","stripePaymentIntentId","paymentStatus","paidAt","deliveredAt","deliveryAddress","updatedAt") values (${otherCust.user.id},${storeId},'DELIVERED',10000,300,300,1000,9000,9300,1000,'pi_ret_${uniq}','SUCCEEDED',now(),now(),'Aleksanterinkatu 5, Helsinki',now()) returning id`).split("\n")[0]);
+  const lineA = Number(sql(`insert into "OrderItem" ("orderId","productId","quantity","unitCents") values (${rOrder},${productId},2,3000) returning id`).split("\n")[0]);
+  const lineB = Number(sql(`insert into "OrderItem" ("orderId","productId","quantity","unitCents") values (${rOrder},${p2.id},1,4000) returning id`).split("\n")[0]);
+  sql(`insert into "Payout" ("orderId","party","storeId","amountCents","status","releaseAt","updatedAt") values (${rOrder},'STORE',${storeId},9000,'SCHEDULED',now() + interval '15 days',now())`);
+  check("you cannot return more than you bought", (await call("POST", "/returns", { orderId: rOrder, reason: "CHANGED_MIND", items: [{ orderItemId: lineA, quantity: 3 }] }, otherCust.accessToken)).status === 400);
+  check("you cannot return a line of another order", (await call("POST", "/returns", { orderId: rOrder, reason: "CHANGED_MIND", items: [{ orderItemId: 999999, quantity: 1 }] }, otherCust.accessToken)).status === 400);
+  check("someone else cannot return your items", (await call("POST", "/returns", { orderId: rOrder, reason: "CHANGED_MIND", items: [{ orderItemId: lineA, quantity: 1 }] }, pirjo.accessToken)).status === 404);
+  const ret1 = await call("POST", "/returns", { orderId: rOrder, reason: "CHANGED_MIND", items: [{ orderItemId: lineA, quantity: 1 }] }, otherCust.accessToken);
+  const r1i = ret1.body.return?.items?.[0];
+  check("customer returns one of two coats; the return lists the item and the expected refund (30 € − 3 € discount share)", ret1.status === 201 && ret1.body.return.items.length === 1 && r1i?.orderItemId === lineA && r1i.quantity === 1 && r1i.name === "Wool coat" && r1i.unitCents === 3000 && ret1.body.return.refundCents === null && ret1.body.return.expectedRefundCents === 2700, ret1.body);
+  check("only what is left can be returned again", (await call("POST", "/returns", { orderId: rOrder, reason: "CHANGED_MIND", items: [{ orderItemId: lineA, quantity: 2 }] }, otherCust.accessToken)).status === 400);
+  const stockA0 = pStock(), stockB0 = p2stock();
+  const ref1 = await call("PATCH", `/returns/${ret1.body.return?.id}/status`, { status: "REFUNDED" }, vendor.accessToken);
+  check("partial refund: the item price less its share of the discount, no delivery fee", ref1.status === 200 && ref1.body.return?.refundCents === 2700 && ref1.body.return.items?.length === 1 && sql(`select "refundedCents" || '|' || status from "Order" where id=${rOrder}`) === "2700|DELIVERED", ref1.body);
+  check("partial refund: the store payout drops by the item less its commission (90 € − 27 €); only that item goes back into stock", sql(`select status || '|' || "amountCents" from "Payout" where "orderId"=${rOrder} and party='STORE'`) === "SCHEDULED|6300" && pStock() === stockA0 + 1 && p2stock() === stockB0);
+  const ret2 = await call("POST", "/returns", { orderId: rOrder, reason: "CHANGED_MIND" }, otherCust.accessToken);
+  const r2items = (ret2.body.return?.items || []).map((i) => `${i.orderItemId}x${i.quantity}`).sort().join();
+  check("a return without items covers what is left of the order", ret2.status === 201 && r2items === [`${lineA}x1`, `${lineB}x1`].sort().join() && ret2.body.return.expectedRefundCents === 6600, ret2.body);
+  check("nothing left to return: 409", (await call("POST", "/returns", { orderId: rOrder, reason: "CHANGED_MIND" }, otherCust.accessToken)).status === 409);
+  const vendRet = (await call("GET", "/returns", null, vendor.accessToken)).body.returns?.find((r) => r.id === ret2.body.return?.id);
+  check("the store's return list shows the items and the order", vendRet?.items?.length === 2 && vendRet.order?.id === rOrder && !("returns" in vendRet.order), vendRet);
+  const ref2 = await call("PATCH", `/returns/${ret2.body.return?.id}/status`, { status: "REFUNDED" }, vendor.accessToken);
+  check("the return that completes the order also refunds the delivery fee: total refunded = everything paid", ref2.status === 200 && ref2.body.return?.refundCents === 6600 && sql(`select "refundedCents" || '|' || status || '|' || "paymentStatus" from "Order" where id=${rOrder}`) === "9300|REFUNDED|REFUNDED", ref2.body);
+  check("the store payout is fully taken back; the rest goes back into stock", sql(`select status || '|' || "amountCents" from "Payout" where "orderId"=${rOrder} and party='STORE'`) === "CANCELLED|0" && pStock() === stockA0 + 2 && p2stock() === stockB0 + 1);
+
   console.log("\n— Transparent courier pay (formula)");
   const cpEngine = require(path.join(__dirname, "..", "..", "dist", "utils", "courierPay.js"));
   const payCfg = { mode: "formula", baseCents: 450, perKmCents: 110, minCents: 650, roadFactor: 1.3, approachFreeKm: 2, approachPerKmCents: 50, waitFreeMinutes: 5, waitPerMinCents: 20, waitMaxCents: 400, feeShare: 1 };
@@ -711,7 +810,7 @@ async function register(name, role, extra = {}) {
 
   const farRes = await call("POST", "/orders", { storeId, deliveryAddress: "Kauppakatu 1, Helsinki", deliveryLat: 60.2, deliveryLng: 24.98, items: [{ productId, quantity: 1 }], tipCents: 100 }, otherCust.accessToken);
   const far = farRes.body.order;
-  check("a 4 km order: the customer pays 3.15 € delivery; courier pay 4.50 € + 5.2 km × 1.10 € + tip", farRes.status === 201 && far.deliveryFeeCents === 315 && far.courierPay?.distanceKm === 5.2 && far.courierPay.distanceCents === 572 && far.courierPay.topUpCents === 0 && far.courierFeeCents === 1022 + 100 && far.totalCents === 5000 + 315 + 100, far);
+  check("a 4 km order: the customer pays 3.15 € delivery; courier pay 4.50 € + 5.2 km × 1.10 € + tip", farRes.status === 201 && far.deliveryFeeCents === 315 && sql(`select ("courierPay"->>'distanceKm') || '|' || ("courierPay"->>'distanceCents') || '|' || ("courierPay"->>'topUpCents') from "Order" where id=${far?.id}`) === "5.2|572|0" && far.courierFeeCents === 1022 + 100 && far.totalCents === 5000 + 315 + 100, far);
   await payOrder(far);
   await call("POST", "/courier/status", { isOnline: true, latitude: 60.171, longitude: 24.941 }, c1.accessToken);
   await call("POST", "/courier/status", { isOnline: true, latitude: 60.2, longitude: 24.9 }, c2.accessToken);
@@ -722,16 +821,31 @@ async function register(name, role, extra = {}) {
   const farOffer1 = c1Sock.events.find((e) => e.ev === "courier:dispatch_offer" && e.data.orderId === far.id)?.data;
   const farOffer2 = c2Sock.events.find((e) => e.ev === "courier:dispatch_offer" && e.data.orderId === far.id)?.data;
   check("offers show the pay breakdown and explanation before accepting (courier at the shop: no ride pay)", farOffer1?.courierPay?.totalCents === 1122 && farOffer1.courierFeeCents === 1122 && farOffer1.courierPay.approachCents === 0 && farOffer1.courierPay.waitCents === 0 && farOffer1.courierPay.explanation?.en.includes("5.2 km × 1.10 €/km") && farOffer1.courierPay.explanation?.fi.includes("5,2 km × 1,10 €/km"), farOffer1?.courierPay);
+  check("offers say when the job was first offered", !!farOffer1?.offeredAt && Math.abs(new Date(farOffer1.offeredAt).getTime() - Date.now()) < 60_000, farOffer1?.offeredAt);
   check("a courier 4 km from the shop sees the ride to the shop in their offer", farOffer2?.courierPay?.approachKm === 5.2 && farOffer2.courierPay.approachCents === 160 && farOffer2.courierPay.totalCents === 1282 && farOffer2.courierFeeCents === 1282, farOffer2?.courierPay);
   const farJob = (await call("GET", "/orders/available", null, c2.accessToken)).body.orders?.find((o) => o.id === far.id);
-  check("the job list shows the same breakdown, the pay rule and the waiting policy", farJob?.courierPay?.totalCents === 1282 && farJob.courierFeeCents === 1282 && farJob.courierPay.summary?.en === payRule.en && /5 min/.test(farJob.courierPay.waitPolicy?.en || "") && !("deliveryAddress" in farJob), farJob);
+  check("the job list shows the same breakdown, the pay rule and the waiting policy", farJob?.courierPay?.totalCents === 1282 && farJob.courierFeeCents === 1282 && farJob.courierPay.summary?.en === payRule.en && /5 min/.test(farJob.courierPay.waitPolicy?.en || "") && /not ready/.test(farJob.courierPay.waitPolicy?.en || "") && /ei ole valmis/.test(farJob.courierPay.waitPolicy?.fi || "") && !!farJob.offeredAt && !("deliveryAddress" in farJob), farJob);
+  // Ride-to-shop pay cannot be inflated with a made-up or old position
+  await call("POST", "/courier/status", { isOnline: true, latitude: 69.9, longitude: 27.0 }, c1.accessToken);
+  const tooFar = await call("PATCH", `/orders/${far.id}/assign-courier`, null, c1.accessToken);
+  check("a courier far away (fresh position beyond 7.5 km) cannot take the job", tooFar.status === 409 && /too far/.test(tooFar.body.error || "") && sql(`select "courierId" is null from "Order" where id=${far.id}`) === "t", tooFar.body);
+  await call("POST", "/courier/status", { isOnline: true, latitude: 60.171, longitude: 24.941 }, c1.accessToken);
+  const engineCfg = { mode: "formula", baseCents: 450, perKmCents: 110, minCents: 650, roadFactor: 1.3, approachFreeKm: 2, approachPerKmCents: 50, approachMaxKm: 7.5, waitFreeMinutes: 5, waitPerMinCents: 20, waitMaxCents: 400, feeShare: 1 };
+  const farRide = require(path.join(__dirname, "..", "..", "dist", "utils", "courierPay.js")).calcCourierPay({ straightKm: 3, deliveryFeeCents: 0, approachStraightKm: 900, config: engineCfg });
+  check("the paid ride to the shop is capped at 7.5 km straight (9.8 km route): at most 3.90 €", farRide.approachCents === Math.round((9.8 - 2) * 50), farRide.approachCents);
+  c2Sock.events.length = 0;
   const farAcc = await call("PATCH", `/orders/${far.id}/assign-courier`, null, c2.accessToken);
   check("on acceptance the ride to the shop is fixed from the courier's position", farAcc.status === 200 && sql(`select "courierFeeCents" from "Order" where id=${far.id}`) === "1282", farAcc.body);
+  await sleep(300);
+  check("other couriers hear that the job is taken", c1Sock.events.some((e) => e.ev === "courier:offer_closed" && e.data.orderId === far.id && e.data.reason === "taken"));
+  check("checking in far from the shop is refused (the waiting clock needs a position at the shop)", (await call("POST", `/orders/${far.id}/arrived-at-store`, null, c2.accessToken)).status === 409);
+  await call("POST", "/courier/status", { isOnline: true, latitude: 60.1702, longitude: 24.9402 }, c2.accessToken);
   check("only the assigned courier can check in at the shop", (await call("POST", `/orders/${far.id}/arrived-at-store`, null, c1.accessToken)).status === 404);
   const arrived1 = await call("POST", `/orders/${far.id}/arrived-at-store`, null, c2.accessToken);
   const arrived2 = await call("POST", `/orders/${far.id}/arrived-at-store`, null, c2.accessToken);
   check("the courier checks in at the shop (idempotent)", arrived1.status === 200 && !!arrived1.body.order?.courierArrivedAt && arrived2.status === 200 && arrived2.body.order?.courierArrivedAt === arrived1.body.order.courierArrivedAt, [arrived1.body, arrived2.body]);
-  sql(`update "Order" set "courierArrivedAt" = now() - interval '12 minutes' where id=${far.id}`);
+  // Accepted 40 min ago (expected ride 5.2 km at 15 km/h ≈ 21 min), at the shop for the last 12 min, store never marked it ready
+  sql(`update "Order" set "courierArrivedAt" = now() - interval '12 minutes', "acceptedAt" = now() - interval '40 minutes' where id=${far.id}`);
   check("pickup after waiting at the shop", (await call("PATCH", `/orders/${far.id}/status`, { status: "SHIPPED" }, c2.accessToken)).status === 200);
   const farMine = (await call("GET", "/orders/courier/mine", null, c2.accessToken)).body.orders?.find((o) => o.id === far.id);
   check("waiting beyond 5 min is added at pickup: 12 min → 7 × 0.20 € = 1.40 €", farMine?.courierPay?.waitMinutes === 12 && farMine.courierPay.waitCents === 140 && farMine.courierPay.totalCents === 1422 && farMine.courierFeeCents === 1422 && !!farMine.courierArrivedAt && farMine.courierPay.explanation.en.includes("waiting 12 min = 1.40 €"), farMine?.courierPay);
@@ -739,6 +853,33 @@ async function register(name, role, extra = {}) {
   const farDone = await call("POST", `/orders/${far.id}/deliver`, { method: "IN_PERSON" }, c2.accessToken);
   await sleep(800);
   check("the courier payout is exactly the explained total", farDone.status === 200 && sql(`select "amountCents" from "Payout" where "orderId"=${far.id} and party='COURIER'`) === "1422");
+  // Charge 54.15 €: the store's 45.00 € is reserved on it, so the courier's 14.22 € (> 9.15 € left) is paid from Malvoya's balance
+  const farCp = sql(`select id from "Payout" where "orderId"=${far.id} and party='COURIER'`);
+  if (sql(`select status from "Payout" where id=${farCp}`) !== "PAID") {
+    sql(`update "Courier" set "stripeAccountId" = coalesce("stripeAccountId", 'acct_e2e_${uniq}'), "payoutsEnabled" = true where "userId"=${c2.user.id}; update "Payout" set status='FAILED' where id=${farCp}`);
+    await call("POST", `/admin/payouts/${farCp}/retry`, null, adminToken);
+  }
+  check("payout above what is left of the charge is not tied to it (Stripe would refuse the store's transfer)", sql(`select status || '|' || "amountCents" || '|' || "linkedToCharge" from "Payout" where id=${farCp}`) === "PAID|1422|false");
+  check("a payout that fits in the charge is tied to it", sql(`select "linkedToCharge" from "Payout" where id=${cpId}`) === "t");
+  const sysOver = (await call("GET", "/admin/system", null, adminToken)).body;
+  check("system status flags orders that pay out more than was charged", sysOver.attention?.some((a) => /more than the customer paid/.test(a)), sysOver.attention);
+  // An old position gives no ride pay
+  const stale = (await call("POST", "/orders", { storeId, deliveryAddress: "Kauppakatu 1, Helsinki", deliveryLat: 60.2, deliveryLng: 24.98, items: [{ productId, quantity: 1 }] }, otherCust.accessToken)).body.order;
+  await payOrder(stale);
+  await call("PATCH", `/orders/${stale.id}/status`, { status: "CONFIRMED" }, vendor.accessToken);
+  await call("POST", "/courier/status", { isOnline: true, latitude: 60.2, longitude: 24.9 }, c1.accessToken);
+  sql(`update "Courier" set "locationAt" = now() - interval '10 minutes' where "userId"=${c1.user.id}`);
+  const staleAcc = await call("PATCH", `/orders/${stale.id}/assign-courier`, null, c1.accessToken);
+  check("a courier whose position is old gets no ride-to-shop pay", staleAcc.status === 200 && sql(`select ("courierPay"->>'approachCents')::int || '|' || coalesce("courierPay"->>'approachKm', 'null') from "Order" where id=${stale.id}`) === "0|null", staleAcc.body);
+  check("the customer's order view has no courier pay breakdown", !("courierPay" in ((await call("GET", `/orders/${stale.id}`, null, otherCust.accessToken)).body.order || { courierPay: 1 })) && !("courierPay" in ((await call("GET", `/orders/${stale.id}`, null, vendor.accessToken)).body.order || { courierPay: 1 })) && !!(await call("GET", "/orders/courier/mine", null, c1.accessToken)).body.orders?.find((o) => o.id === stale.id)?.courierPay);
+  // Store ready 3 min after the courier checked in: waiting stops when the store marks it ready
+  await call("POST", "/courier/status", { isOnline: true, latitude: 60.1702, longitude: 24.9402 }, c1.accessToken);
+  await call("POST", `/orders/${stale.id}/arrived-at-store`, null, c1.accessToken);
+  await call("PATCH", `/orders/${stale.id}/status`, { status: "PROCESSING" }, vendor.accessToken);
+  sql(`update "Order" set "acceptedAt" = now() - interval '60 minutes', "courierArrivedAt" = now() - interval '20 minutes', "readyAt" = now() - interval '11 minutes' where id=${stale.id}`);
+  await call("PATCH", `/orders/${stale.id}/status`, { status: "SHIPPED" }, c1.accessToken);
+  check("waiting counts only until the store marked the order ready (20 min at the shop, ready after 9 → 9 min)", sql(`select ("courierPay"->>'waitMinutes') || '|' || ("courierPay"->>'waitCents') from "Order" where id=${stale.id}`) === "9|80");
+  await call("POST", `/orders/${stale.id}/deliver`, { method: "IN_PERSON" }, c1.accessToken);
 
   console.log("\n— Catalogue import: Shopify feed");
   let shopPrice = "49.90", shopStock = 3;
@@ -761,8 +902,10 @@ async function register(name, role, extra = {}) {
     { id: 1003, title: "", variants: [{ id: 4, price: "5.00" }] },
     { id: 1004, title: "No photo bag", product_type: "Bags", variants: [{ id: 5, option1: "Default Title", price: "20", inventory_quantity: 2 }], images: [] },
   ];
+  let shopCurrency = "EUR";
   const shopSrv = require("http").createServer((req, res) => {
     const u = new URL(req.url, "http://localhost");
+    if (u.pathname === "/meta.json") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ name: "Mock shop", currency: shopCurrency })); }
     if (u.pathname !== "/products.json") { res.writeHead(404); return res.end(); }
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ products: Number(u.searchParams.get("page") || 1) === 1 ? shopFeed() : [] }));
@@ -782,6 +925,8 @@ async function register(name, role, extra = {}) {
   const ownList = async () => (await call("GET", `/stores/${impStore.id}/products?limit=50`, null, importer.accessToken)).body.products;
   const shopImport = (body, tok = importer.accessToken) => call("POST", "/products/import/shopify", body, tok);
   check("import needs the store's rights confirmation (literally true)", (await shopImport({ shopUrl: "http://localhost:12223" })).status === 400 && (await shopImport({ shopUrl: "http://localhost:12223", rightsConfirmed: "yes" })).status === 400);
+  const unapprovedImport = await shopImport({ shopUrl: "http://localhost:12223", rightsConfirmed: true }, otherVendor.accessToken);
+  check("a store that is not approved yet cannot import", unapprovedImport.status === 403, unapprovedImport.body);
   check("customers cannot import", (await shopImport({ shopUrl: "http://localhost:12223", rightsConfirmed: true }, otherCust.accessToken)).status === 403);
   const ssrf = [];
   for (const u of ["http://127.0.0.1:5432", "https://localhost", "https://169.254.169.254/latest/meta-data", "https://10.0.0.5", "https://[::1]", "https://shop.internal", "https://user:pw@example.com", "http://example.com", "https://example.com:8443", "localhost:4555", "file:///etc/passwd"]) {
@@ -803,6 +948,7 @@ async function register(name, role, extra = {}) {
   const uploads1 = await (await fetch("http://localhost:12222/__uploads")).json();
   check("the copies are signed server-side uploads of the shop's photo URLs", uploads1.some((u) => u.file === "https://cdn.shopify.test/files/dress1.jpg?v=1") && uploads1.some((u) => u.file === "https://cdn.shopify.test/files/dress2.jpg") && uploads1.every((u) => u.public_id.startsWith(`malvoya/products/s${impStore.id}/imp-`)), uploads1);
   check("imported prices start the 30-day price history", sql(`select count(*) from "PriceChange" where "productId"=${dress?.id}`) === "1");
+  check("a draft cannot be opened by anyone but its store", (await call("GET", `/products/${dress?.id}`)).status === 404 && (await call("GET", `/products/${dress?.id}`, null, otherCust.accessToken)).status === 404 && (await call("GET", `/products/${dress?.id}`, null, importer.accessToken)).status === 200);
   check("drafts are not public", (await call("GET", `/stores/${impStore.id}/products`)).body.products.length === 0 && !(await call("GET", `/products/search?q=${encodeURIComponent("Linen Dress")}`)).body.products.some((p) => p.id === dress?.id));
   const pub1 = await call("POST", `/products/import/${sj.body.job.id}/publish`, null, importer.accessToken);
   const publicNow = (await call("GET", `/stores/${impStore.id}/products`)).body.products.map((p) => p.id).sort();
@@ -817,9 +963,19 @@ async function register(name, role, extra = {}) {
   check("the new price joins the price history; published products stay published", sql(`select count(*) from "PriceChange" where "productId"=${dress?.id}`) === "2" && dress2?.isAvailable === true);
   check("photos already copied are not uploaded again", (await (await fetch("http://localhost:12222/__uploads")).json()).length === uploads1.length && dress2?.images.join() === dress?.images.join());
   check("publishing the re-import changes nothing that is already public", (await call("POST", `/products/import/${sj2.body.job?.id}/publish`, null, importer.accessToken)).body.published === 0);
+  check("the store deletes (hides) a published imported product", (await call("DELETE", `/products/${boots?.id}`, null, importer.accessToken)).status === 200);
+  const sj3 = await shopImport({ shopUrl: "http://localhost:12223", rightsConfirmed: true });
+  const job3 = await waitJob(sj3.body.job?.id);
+  const pubAgain = await call("POST", `/products/import/${sj3.body.job?.id}/publish`, null, importer.accessToken);
+  check("re-importing and publishing never brings back a product the store deleted", job3?.status === "DONE" && pubAgain.body.published === 0 && sql(`select "isAvailable" from "Product" where id=${boots?.id}`) === "f", [job3?.status, pubAgain.body]);
+  shopCurrency = "SEK";
+  const sjSek = await shopImport({ shopUrl: "http://localhost:12223", rightsConfirmed: true });
+  const jobSek = await waitJob(sjSek.body.job?.id);
+  check("a shop that prices in another currency is refused with a clear job error", jobSek?.status === "FAILED" && jobSek.errors.some((e) => /SEK/.test(e.message) && /euros/.test(e.message)) && jobSek.created === 0, jobSek);
+  shopCurrency = "EUR";
   check("another store cannot see or publish the import", (await call("GET", `/products/import/${sj.body.job.id}`, null, vendor.accessToken)).status === 404 && (await call("POST", `/products/import/${sj.body.job.id}/publish`, null, vendor.accessToken)).status === 404);
   const impJobs = await call("GET", "/products/import", null, importer.accessToken);
-  check("the store lists its recent imports, newest first", impJobs.status === 200 && impJobs.body.jobs?.length === 2 && impJobs.body.jobs[0].id === sj2.body.job?.id, impJobs.body);
+  check("the store lists its recent imports, newest first", impJobs.status === 200 && impJobs.body.jobs?.length === 4 && impJobs.body.jobs[0].id === sjSek.body.job?.id && impJobs.body.jobs[3].id === sj.body.job?.id, impJobs.body);
   shopSrv.close();
 
   console.log("\n— Catalogue import: CSV");
@@ -852,6 +1008,13 @@ async function register(name, role, extra = {}) {
   const cjob2 = await waitJob(cj2.body.job?.id);
   check("re-importing the same CSV updates, never duplicates", cjob2?.created === 0 && cjob2.updated === 3 && (await ownList()).length === 6, cjob2);
   check("publishing the CSV import shows only the products with a photo", (await call("POST", `/products/import/${cj2.body.job?.id}/publish`, null, importer.accessToken)).body.published === 2);
+  const cj3 = await csvImport({ csv: "name,price\nShirt,12,90\nCap,15\n", rightsConfirmed: true });
+  const cjob3 = await waitJob(cj3.body.job?.id);
+  check("a row with more cells than the header (unquoted 12,90) is reported with how to fix it", cjob3?.status === "DONE" && cjob3.created === 1 && cjob3.errors.some((e) => e.item === "row 2" && /quotes/.test(e.message)), cjob3);
+  const imported = Number(sql(`select count(*) from "ImportJob" where "storeId"=${impStore.id} and "createdAt" > now() - interval '1 day'`));
+  sql(`insert into "ImportJob" ("storeId","source","status","rightsConfirmedAt","updatedAt") select ${impStore.id}, 'CSV', 'DONE', now(), now() from generate_series(1, ${Math.max(0, 10 - imported)})`);
+  const limited = await csvImport({ csv: "name,price\nX,1", rightsConfirmed: true });
+  check("at most 10 imports per store per day (429)", limited.status === 429, limited.body);
 
   console.log("\n— Fees switched on (second API instance with fee env vars, old courier pay rule, no Cloudinary)");
   const feeUp = await startFeeApi({ SERVICE_FEE_PERCENT: "5", SERVICE_FEE_MIN_CENTS: "49", SERVICE_FEE_MAX_CENTS: "300", SMALL_ORDER_THRESHOLD_CENTS: "6000", SMALL_ORDER_FEE_CENTS: "150", COURIER_PAY_MODE: "fee_share", CLOUDINARY_CLOUD_NAME: "" });
@@ -860,7 +1023,7 @@ async function register(name, role, extra = {}) {
   check("service fee (5 %) and small-order fee are added below the threshold", qF?.serviceFeeCents === 250 && qF.smallOrderFeeCents === 150 && qF.smallOrderThresholdCents === 6000 && qF.totalCents === 5000 + fee + 250 + 150, qF);
   const oF = await order({ ...quoteBody, tipCents: 0 }, otherCust.accessToken, FEE_API);
   check("the order with fees charges exactly the quoted price; fees are Malvoya's, not the store's", oF.status === 201 && sameMoney(qF, oF.body.order) && oF.body.order.commissionCents === 500 && oF.body.order.sellerPayoutCents === 4500, oF.body);
-  check("fee_share mode still works: the courier gets the delivery fee (plus tip), with a breakdown", oF.body.order?.courierFeeCents === fee && oF.body.order?.courierPay?.mode === "fee_share" && oF.body.order.courierPay.baseCents === fee, oF.body.order?.courierPay);
+  check("fee_share mode still works: the courier gets the delivery fee (plus tip), with a breakdown", oF.body.order?.courierFeeCents === fee && sql(`select ("courierPay"->>'mode') || '|' || ("courierPay"->>'baseCents') from "Order" where id=${oF.body.order?.id}`) === `fee_share|${fee}`, oF.body.order);
   const qF2 = (await quote({ ...quoteBody, tipCents: 0, items: [{ productId, quantity: 2 }] }, otherCust.accessToken, FEE_API)).body.quote;
   check("service fee is capped at its maximum; no small-order fee above the threshold", qF2?.serviceFeeCents === 300 && qF2.smallOrderFeeCents === 0, qF2);
   const qF3 = (await quote({ ...quoteBody, tipCents: 0, items: [{ productId: socks.id, quantity: 1 }] }, otherCust.accessToken, FEE_API)).body.quote;
@@ -879,6 +1042,86 @@ async function register(name, role, extra = {}) {
   check("admin stats show Malvoya's revenue", rev.serviceFeeCents >= 250 && rev.smallOrderFeeCents >= 150 && rev.discountCents >= 200 && rev.commissionCents > 0 && rev.netPlatformRevenueCents === rev.commissionCents + rev.serviceFeeCents + rev.smallOrderFeeCents + rev.deliveryMarginCents - rev.discountCents, rev);
   const marginSql = Number(sql(`select coalesce(sum("deliveryFeeCents" - ("courierFeeCents" - "tipCents")), 0) from "Order" where "paymentStatus" = 'SUCCEEDED' and status <> 'CANCELLED'`));
   check("delivery margin = delivery fees − courier pay without tips (may be negative)", rev.deliveryMarginCents === marginSql, [rev.deliveryMarginCents, marginSql]);
+
+  console.log("\n— Per-store commission (admin)");
+  const setRate = (rate, tok = adminToken) => call("PATCH", `/admin/vendors/${storeId}/commission`, { commissionRate: rate }, tok);
+  check("only admins change commission", (await setRate(0.15, otherCust.accessToken)).status === 403 && (await setRate(0.15, vendor.accessToken)).status === 403 && (await call("PATCH", `/admin/vendors/${storeId}/commission`, { commissionRate: 0.15 })).status === 401);
+  check("commission must be 0–50 % with at most two decimals", (await setRate(0.6)).status === 400 && (await setRate(-0.1)).status === 400 && (await setRate(0.125)).status === 400 && (await setRate("0.15")).status === 400);
+  check("unknown store is 404", (await call("PATCH", "/admin/vendors/999999/commission", { commissionRate: 0.1 }, adminToken)).status === 404);
+  const oldCommission = sql(`select "commissionCents" from "Order" where id=${o0.body.order.id}`);
+  const rateRes = await setRate(0.15);
+  check("admin sets a store's commission to 15 %; the change is logged with who and the old value", rateRes.status === 200 && rateRes.body.store?.commissionRate === 0.15 && rateRes.body.change?.adminId === adminUser.user.id && rateRes.body.change?.oldValue?.commissionRate === 0.1 && rateRes.body.change?.newValue?.commissionRate === 0.15, rateRes.body);
+  const listedRate = (await call("GET", "/admin/vendors", null, adminToken)).body.stores?.find((s) => s.id === storeId)?.commissionRate;
+  const hist = await call("GET", `/admin/vendors/${storeId}/commission-history`, null, adminToken);
+  check("the vendor list shows the rate; the history names the admin", listedRate === 0.15 && hist.body.history?.[0]?.admin?.email === `admin${uniq}@example.fi`, [listedRate, hist.body]);
+  const newRateOrder = (await order({ ...quoteBody, tipCents: 0 }, otherCust.accessToken)).body.order;
+  check("new orders use the new rate; existing orders keep theirs", newRateOrder?.commissionCents === 750 && newRateOrder.sellerPayoutCents === 4250 && sql(`select "commissionCents" from "Order" where id=${o0.body.order.id}`) === oldCommission && oldCommission === "500", [newRateOrder, oldCommission]);
+  await setRate(0.1);
+
+  console.log("\n— Referrals (off by default; on in a second API instance)");
+  const refOff = await call("GET", "/me/referral", null, otherCust.accessToken);
+  const myCode = refOff.body.code;
+  check("every customer gets an invite code and link, but invites are off by default", refOff.status === 200 && refOff.body.enabled === false && refOff.body.discountCents === 0 && refOff.body.rewardCents === 0 && /^[A-HJKMNP-Z2-9]{8}$/.test(myCode || "") && refOff.body.shareUrl === `${BASE}/r/${myCode}` && refOff.body.invited === 0 && typeof refOff.body.terms?.fi === "string", refOff.body);
+  check("the code stays the same", (await call("GET", "/me/referral", null, otherCust.accessToken)).body.code === myCode);
+  check("invite codes are for customers", (await call("GET", "/me/referral", null, vendor.accessToken)).status === 403 && (await call("GET", "/me/referral")).status === 401);
+  const newbie = await register("Noora");
+  const offQuote = (await quote({ ...quoteBody, promoCode: myCode }, newbie.accessToken)).body.quote;
+  check("while invites are off an invite code gives nothing", offQuote?.discountCents === 0 && /not valid/.test(offQuote.promoError || ""), offQuote);
+  const offPage = await fetch(`${BASE}/r/${myCode}`);
+  check("while invites are off the invite page says it is not valid", offPage.status === 404 && /no longer valid/.test(await offPage.text()));
+  check("a promo code cannot take a customer's invite code", (await mkPromo({ code: myCode, description: "shadow", kind: "AMOUNT", value: 100 })).status === 409);
+
+  const refUp = await startFeeApi({ REFERRAL_DISCOUNT_CENTS: "500", REFERRAL_REWARD_CENTS: "300", ANDROID_APP_SHA256: `${"ab:".repeat(31)}cd, ${"12:".repeat(31)}EF, not-a-fingerprint` });
+  check("API starts with invites switched on", refUp);
+  const refOn = (await callAt(FEE_API, "GET", "/me/referral", null, otherCust.accessToken)).body;
+  check("with invites on: same code, 5 € for the friend, 3 € reward, honest terms", refOn.enabled === true && refOn.code === myCode && refOn.discountCents === 500 && refOn.rewardCents === 300 && refOn.shareUrl === `${FEE_BASE}/r/${myCode}` && refOn.terms?.en.includes("5.00 €") && refOn.terms.en.includes("3.00 €") && refOn.terms.fi.includes("5,00"), refOn);
+  const selfQ = (await quote({ ...quoteBody, promoCode: myCode }, otherCust.accessToken, FEE_API)).body.quote;
+  check("you cannot use your own invite code", selfQ?.discountCents === 0 && /own invite/.test(selfQ.promoError || "") && (await order({ ...quoteBody, promoCode: myCode }, otherCust.accessToken, FEE_API)).status === 409, selfQ);
+  check("an existing customer cannot use an invite code", /first order/.test((await quote({ ...quoteBody, promoCode: myCode }, pirjo.accessToken, FEE_API)).body.quote?.promoError || ""));
+  const inviteQ = (await quote({ storeId, fulfilment: "PICKUP", items: [{ productId, quantity: 1 }], promoCode: myCode.toLowerCase() }, newbie.accessToken, FEE_API)).body.quote;
+  check("a new customer gets 5 € off with the invite code", inviteQ?.discountCents === 500 && inviteQ.totalCents === 4500 && inviteQ.promo?.code === myCode && inviteQ.promoError === null, inviteQ);
+  const inviteO = await order({ storeId, fulfilment: "PICKUP", items: [{ productId, quantity: 1 }], promoCode: myCode }, newbie.accessToken, FEE_API);
+  const io = inviteO.body.order;
+  check("the order charges the quoted price; Malvoya pays the discount; who invited is not in the payload", inviteO.status === 201 && io.discountCents === 500 && io.totalCents === 4500 && io.commissionCents === 500 && io.sellerPayoutCents === 4500 && io.promoCodeId === null && !("referrerId" in io), inviteO.body);
+  check("nothing is recorded before payment", sql(`select count(*) from "Referral" where "refereeId"=${newbie.user.id}`) === "0");
+  await payNow(io, FEE_API);
+  check("payment records one referral", sql(`select count(*) || '|' || max("referrerId") from "Referral" where "refereeId"=${newbie.user.id}`) === `1|${otherCust.user.id}`);
+  const invitePage = await fetch(`${FEE_BASE}/r/${myCode.toLowerCase()}`);
+  const invHtml = await invitePage.text();
+  check("the invite page explains the offer and shows the code", invitePage.status === 200 && invHtml.includes("5,00 €") && invHtml.includes(myCode) && !/<script/i.test(invHtml) && /img-src https:\/\/res\.cloudinary\.com/.test(invitePage.headers.get("content-security-policy") || ""), invHtml.slice(0, 300));
+  const badInvite = await fetch(`${FEE_BASE}/r/${encodeURIComponent("<script>alert(1)</script>")}`);
+  check("an unknown invite code shows 'no longer valid' and echoes nothing", badInvite.status === 404 && !/<script/i.test(await badInvite.text()));
+  await callAt(FEE_API, "PATCH", `/orders/${io.id}/status`, { status: "CONFIRMED" }, vendor.accessToken);
+  await callAt(FEE_API, "PATCH", `/orders/${io.id}/status`, { status: "PROCESSING" }, vendor.accessToken);
+  const ioCode = sql(`select "pickupCode" from "Order" where id=${io.id}`);
+  const ioDone = await callAt(FEE_API, "POST", `/orders/${io.id}/collect`, { code: ioCode }, vendor.accessToken);
+  await sleep(800);
+  const reward = sql(`select p.code || '|' || p.value || '|' || p."maxRedemptions" || '|' || p."perUserLimit" || '|' || p."userId" || '|' || (r."rewardedAt" is not null) from "Referral" r join "PromoCode" p on p.id = r."rewardPromoCodeId" where r."orderId"=${io.id}`);
+  const rewardCode = reward.split("|")[0];
+  check("when the friend's first order is collected, the referrer gets a personal one-time 3 € code", ioDone.status === 200 && /^KIITOS-[A-HJKMNP-Z2-9]{6}\|300\|1\|1\|/.test(reward) && reward.endsWith(`|${otherCust.user.id}|true`), reward);
+  const refAfter = (await callAt(FEE_API, "GET", "/me/referral", null, otherCust.accessToken)).body;
+  check("the referrer sees one invited friend and one reward", refAfter.invited === 1 && refAfter.rewarded === 1, refAfter);
+  check("only the referrer can use the reward code", /not valid/.test((await quote({ ...quoteBody, promoCode: rewardCode }, pirjo.accessToken)).body.quote?.promoError || "") && (await quote({ ...quoteBody, promoCode: rewardCode }, otherCust.accessToken)).body.quote?.discountCents === 300);
+  check("one invite per new customer: the friend cannot use another invite", /first order/.test((await quote({ ...quoteBody, promoCode: myCode }, newbie.accessToken, FEE_API)).body.quote?.promoError || ""));
+  const sysRef = (await callAt(FEE_API, "GET", "/admin/system", null, adminToken)).body;
+  check("system status shows referral settings and counts", sysRef.referrals?.enabled === true && sysRef.referrals.discountCents === 500 && sysRef.referrals.rewardCents === 300 && sysRef.referrals.referrals >= 1 && sysRef.referrals.rewarded >= 1 && sysRef.referrals.discountGivenCents >= 500 && sysRef.appLinks?.fingerprints === 2 && sysRef.pickup?.holdHours === 72, sysRef.referrals);
+  const links = await fetch(`${FEE_BASE}/.well-known/assetlinks.json`);
+  const linksJson = await links.json();
+  check("assetlinks.json lists the customer app with its valid fingerprints (upper case)", links.status === 200 && /application\/json/.test(links.headers.get("content-type") || "") && linksJson.length === 1 && linksJson[0].relation[0] === "delegate_permission/common.handle_all_urls" && linksJson[0].target.namespace === "android_app" && linksJson[0].target.package_name === "com.malvoya.customer" && linksJson[0].target.sha256_cert_fingerprints.join() === [`${"AB:".repeat(31)}CD`, `${"12:".repeat(31)}EF`].join(), linksJson);
+  feeApi.kill();
+  feeApi = null;
+  const sysRefOff = (await call("GET", "/admin/system", null, adminToken)).body;
+  check("system status: invites off by default, pickup timers listed", sysRefOff.referrals?.enabled === false && sysRefOff.pickup?.reminderHours === 24 && sysRefOff.pickup?.holdHours === 72 && sysRefOff.appLinks?.fingerprints === 0, [sysRefOff.referrals, sysRefOff.pickup]);
+  const noLinks = await fetch(`${BASE}/.well-known/assetlinks.json`);
+  check("without ANDROID_APP_SHA256 assetlinks.json is an empty list", noLinks.status === 200 && JSON.stringify(await noLinks.json()) === "[]");
+
+  console.log("\n— Store share page");
+  const evilProd = await call("POST", "/products", { name: "Tee <script>alert(1)</script>", category: "Shirt", salePriceCents: 2500, images: [ownImage(storeId, "tee")] }, vendor.accessToken);
+  const sPageRes = await fetch(`${BASE}/s/${storeId}`);
+  const sHtml = await sPageRes.text();
+  check("store share page: name, products with prices, open-in-app and Play links, everything escaped", evilProd.status === 201 && sPageRes.status === 200 && sHtml.includes(`Vera Vintage ${uniq}`) && sHtml.includes("Tee &lt;script&gt;alert(1)&lt;/script&gt;") && !/<script/i.test(sHtml) && sHtml.includes("25,00 €") && sHtml.includes("intent://") && sHtml.includes("package=com.malvoya.customer") && sHtml.includes("play.google.com/store/apps/details?id=com.malvoya.customer"), sHtml.slice(0, 400));
+  check("store share page allows only Cloudinary images and no scripts", (sPageRes.headers.get("content-security-policy") || "").startsWith("default-src 'none'; img-src https://res.cloudinary.com"));
+  check("unknown or unapproved stores have no share page", (await fetch(`${BASE}/s/999999`)).status === 404 && (await fetch(`${BASE}/s/abc`)).status === 404 && (await fetch(`${BASE}/s/${privSeller.body.store.id}`)).status === 404);
 
   console.log("\n— Launch alerts and system status");
   check("launch alert needs a location", (await call("PUT", "/me/launch-alert", { area: "Tampere" }, otherCust.accessToken)).status === 400);
@@ -908,7 +1151,7 @@ async function register(name, role, extra = {}) {
   check("huge search input rejected", (await call("GET", `/products/search?q=${"a".repeat(200)}`)).status === 400);
   const cors = await fetch(`${API}/stores`, { headers: { Origin: "https://evil.example" } });
   check("CORS does not allow unknown origins", !cors.headers.get("access-control-allow-origin"));
-  check("health reports v2.7.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.7.0");
+  check("health reports v2.8.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.8.0");
 
   [vendorSock, custSock, otherSock, c1Sock, c2Sock].forEach((s) => s.close());
   console.log(`\n${pass} passed, ${fail} failed`);

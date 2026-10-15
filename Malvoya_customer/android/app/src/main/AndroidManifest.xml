@@ -25,9 +25,21 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
+            <!-- Links are handled by app_links (lib/core/deep_links.dart), not Flutter's named routes -->
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="false" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!-- Android App Links: drop (/d/), store (/s/) and invite (/r/) share links open in the app.
+                 Verified through https://malvoya-api-eu.onrender.com/.well-known/assetlinks.json -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https" android:host="malvoya-api-eu.onrender.com" android:pathPrefix="/d/"/>
+                <data android:scheme="https" android:host="malvoya-api-eu.onrender.com" android:pathPrefix="/s/"/>
+                <data android:scheme="https" android:host="malvoya-api-eu.onrender.com" android:pathPrefix="/r/"/>
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.

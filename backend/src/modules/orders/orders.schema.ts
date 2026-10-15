@@ -1,14 +1,16 @@
 import { z } from "zod";
 
-export const createOrderSchema = z.object({
+// The basket and how it reaches the customer; shared by the quote and the order
+const checkoutSchema = z.object({
   storeId:         z.number().int().positive(),
-  deliveryAddress: z.string().trim().min(5).max(300),
+  // DELIVERY (default): a courier brings it. PICKUP ("Reserve & collect"): the customer collects it from the
+  // store with a 6-digit code, no delivery fee, no courier and no tip.
+  fulfilment:      z.enum(["DELIVERY", "PICKUP"]).default("DELIVERY"),
   deliveryLat:     z.number().min(-90).max(90).optional(),
   deliveryLng:     z.number().min(-180).max(180).optional(),
-  notes:           z.string().max(500).optional(),
   // Optional courier tip in cents (max 20 €); it is added to the total and paid to the courier in full
   tipCents:        z.number().int().min(0).max(2000).optional(),
-  // Optional promo code (platform-funded discount); an unusable code is refused with 409
+  // Optional promo code or a friend's invite code (platform-funded discount); an unusable code is refused with 409
   promoCode:       z.string().trim().max(40).optional(),
   items: z.array(z.object({
     productId: z.number().int().positive(),
@@ -17,8 +19,18 @@ export const createOrderSchema = z.object({
   })).min(1).max(50),
 });
 
+export const createOrderSchema = checkoutSchema.extend({
+  // Required for delivery; not used for pickup
+  deliveryAddress: z.string().trim().min(5).max(300).optional(),
+  notes:           z.string().max(500).optional(),
+}).superRefine((d, ctx) => {
+  if (d.fulfilment === "DELIVERY" && !d.deliveryAddress) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["deliveryAddress"], message: "Enter a delivery address" });
+  }
+});
+
 // Exact price before payment: the same basket as an order, without the address
-export const quoteOrderSchema = createOrderSchema.omit({ deliveryAddress: true, notes: true });
+export const quoteOrderSchema = checkoutSchema;
 
 export const createRentalSchema = z.object({
   startDate: z.string().datetime(),
@@ -40,6 +52,11 @@ export const createReturnSchema = z.object({
   rentalId: z.number().int().positive().optional(),
   reason:   z.enum(["WRONG_ITEM","DAMAGED_ON_ARRIVAL","NOT_AS_DESCRIBED","CHANGED_MIND","RENTAL_RETURN","OTHER"]),
   conditionNote: z.string().max(500).optional(),
+  // Only some of the items (order lines and how many of each); without it the whole order (what is left of it)
+  items: z.array(z.object({
+    orderItemId: z.number().int().positive(),
+    quantity:    z.number().int().min(1).max(100),
+  })).min(1).max(50).optional(),
 }).refine(d => d.orderId || d.rentalId, {
   message: "Must provide either orderId or rentalId",
 }).refine(d => !(d.orderId && d.rentalId), {
@@ -55,4 +72,9 @@ export const updateReturnStatusSchema = z.object({
 
 export const updateOrderStatusSchema = z.object({
   status: z.enum(["CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"]),
+});
+
+// The store types in the customer's 6-digit pickup code at the counter
+export const collectOrderSchema = z.object({
+  code: z.string().trim().min(1).max(20),
 });

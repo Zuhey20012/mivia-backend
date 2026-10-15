@@ -12,6 +12,7 @@ import 'terms_legal_screen.dart';
 import 'privacy_gdpr_screen.dart';
 import 'orders.dart';
 import 'favorites_screen.dart';
+import 'invite_screen.dart';
 import '../core/strings.dart';
 import '../locale_provider.dart';
 import '../l10n.dart';
@@ -29,9 +30,18 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
+  /// The invite programme, when the server offers it (null hides "Invite a friend").
+  Map<String, dynamic>? _referral;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadReferral());
+  }
+
+  Future<void> _loadReferral() async {
+    final data = await loadReferral(Provider.of<AuthService>(context, listen: false));
+    if (mounted) setState(() => _referral = data);
   }
 
   void _nav(BuildContext context, Widget screen) {
@@ -74,6 +84,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               title: Text(l10n.translate('themeCrispDaylight'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
               trailing: themeProvider.mode == AppThemeMode.light ? const Icon(Icons.check_circle_rounded, color: AppTheme.primary) : null,
               onTap: () {
+                HapticFeedback.selectionClick();
                 themeProvider.setTheme(AppThemeMode.light);
                 Navigator.pop(ctx);
               },
@@ -84,6 +95,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               title: Text(l10n.translate('themeOledMidnight'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
               trailing: themeProvider.mode == AppThemeMode.dark ? const Icon(Icons.check_circle_rounded, color: AppTheme.primary) : null,
               onTap: () {
+                HapticFeedback.selectionClick();
                 themeProvider.setTheme(AppThemeMode.dark);
                 Navigator.pop(ctx);
               },
@@ -94,6 +106,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               title: Text(l10n.translate('themeEyeComfort'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
               trailing: themeProvider.mode == AppThemeMode.eyeComfort ? const Icon(Icons.check_circle_rounded, color: AppTheme.primary) : null,
               onTap: () {
+                HapticFeedback.selectionClick();
                 themeProvider.setTheme(AppThemeMode.eyeComfort);
                 Navigator.pop(ctx);
               },
@@ -153,6 +166,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ],
                       ),
                       IconButton(
+                        tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
                         icon: const Icon(Icons.close_rounded),
                         onPressed: () => Navigator.pop(ctx),
                       ),
@@ -518,6 +532,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
 
               const SizedBox(height: 16),
+
+              if (_referral != null && auth.isAuthenticated)
+                _buildMenuGroup(
+                  context: context,
+                  title: tr(context, 'Invite', 'Kutsu'),
+                  children: [
+                    _buildTile(
+                      context: context,
+                      icon: Icons.card_giftcard_rounded,
+                      iconColor: const Color(0xFFB86E00),
+                      title: tr(context, 'Invite a friend', 'Kutsu ystävä'),
+                      subtitle: tr(context, 'Share your code: ${_referral!['code']}', 'Jaa koodisi: ${_referral!['code']}'),
+                      onTap: () async {
+                        HapticFeedback.lightImpact();
+                        await Navigator.push(context, MaterialPageRoute(builder: (_) => InviteScreen(initial: _referral)));
+                        _loadReferral();
+                      },
+                    ),
+                  ],
+                ),
 
               // Menu Group 1: Experience & Interface
               _buildMenuGroup(
