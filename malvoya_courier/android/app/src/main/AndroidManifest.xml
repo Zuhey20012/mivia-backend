@@ -37,6 +37,8 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Status-bar icon for notifications shown by Firebase while the app is in the background -->
+        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_stat_malvoya" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

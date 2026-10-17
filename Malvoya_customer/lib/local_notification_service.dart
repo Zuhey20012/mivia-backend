@@ -9,7 +9,7 @@ class LocalNotificationService {
   static Future<void> initialize() async {
     if (_initialized) return;
     const AndroidInitializationSettings androidSettings =
-        AndroidInitializationSettings('@mipmap/launcher_icon');
+        AndroidInitializationSettings('@drawable/ic_stat_malvoya');
 
     const InitializationSettings initSettings = InitializationSettings(
       android: androidSettings,
@@ -53,7 +53,7 @@ class LocalNotificationService {
         importance: Importance.max,
         priority: Priority.high,
         showWhen: true,
-        icon: '@mipmap/launcher_icon',
+        icon: '@drawable/ic_stat_malvoya',
       );
 
       const NotificationDetails details = NotificationDetails(android: androidDetails);

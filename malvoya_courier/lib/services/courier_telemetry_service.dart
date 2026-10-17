@@ -49,7 +49,7 @@ class CourierTelemetryService extends ChangeNotifier {
               notificationTitle: ServerMessages.pick('Malvoya Courier is online', 'Malvoya Courier on linjoilla'),
               notificationText: ServerMessages.pick('Your location is shared while you are online. Go offline to stop.',
                   'Sijaintisi jaetaan, kun olet linjoilla. Lopeta poistumalla linjoilta.'),
-              notificationIcon: const AndroidResource(name: 'launcher_icon', defType: 'mipmap'),
+              notificationIcon: const AndroidResource(name: 'ic_stat_malvoya', defType: 'drawable'),
               enableWakeLock: true,
               setOngoing: true,
             ),

@@ -47,7 +47,7 @@ class PushService {
     try {
       await _local.initialize(
         const InitializationSettings(
-          android: AndroidInitializationSettings('@mipmap/launcher_icon'),
+          android: AndroidInitializationSettings('@drawable/ic_stat_malvoya'),
           iOS: DarwinInitializationSettings(
             requestAlertPermission: false,
             requestBadgePermission: false,
@@ -161,7 +161,7 @@ class PushService {
           channelDescription: _channel.description,
           importance: Importance.high,
           priority: Priority.high,
-          icon: '@mipmap/launcher_icon',
+          icon: '@drawable/ic_stat_malvoya',
         ),
         iOS: const DarwinNotificationDetails(),
       ),
