@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../auth_service.dart';
 import '../config/constants.dart';
+import '../locale_provider.dart';
 import 'connectivity.dart';
 import 'server_errors.dart';
 
@@ -28,6 +29,13 @@ class ApiClient {
 
   static const _timeout = Duration(seconds: 15);
 
+  /// Headers for every request to the Malvoya API. `Accept-Language` lets the server answer, and
+  /// send push notifications and emails, in the app's language.
+  static Map<String, String> get baseHeaders => {
+        'Content-Type': 'application/json',
+        'Accept-Language': LocaleProvider.currentCode,
+      };
+
   Future<ApiResult> get(String path, {Map<String, String>? query}) => _send('GET', path, query: query);
   Future<ApiResult> post(String path, [Object? body]) => _send('POST', path, body: body);
   Future<ApiResult> put(String path, [Object? body]) => _send('PUT', path, body: body);
@@ -39,7 +47,7 @@ class ApiClient {
       queryParameters: query == null || query.isEmpty ? null : query,
     );
     final headers = <String, String>{
-      'Content-Type': 'application/json',
+      ...baseHeaders,
       if (auth?.accessToken != null) 'Authorization': 'Bearer ${auth!.accessToken}',
     };
     try {

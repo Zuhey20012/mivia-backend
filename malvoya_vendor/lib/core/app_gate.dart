@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/constants.dart';
+import '../locale_provider.dart';
 import 'strings.dart';
 
 /// Asks the server on start-up (and whenever the app comes back to the front) whether this build
@@ -48,7 +49,7 @@ class _AppGateState extends State<AppGate> with WidgetsBindingObserver {
     try {
       final info = await PackageInfo.fromPlatform();
       final uri = Uri.parse('${AppConstants.apiBase}/app-config').replace(queryParameters: {'app': widget.app, 'build': info.buildNumber});
-      final res = await http.get(uri).timeout(const Duration(seconds: 8));
+      final res = await http.get(uri, headers: {'Accept-Language': LocaleProvider.currentCode}).timeout(const Duration(seconds: 8));
       if (res.statusCode != 200 || !mounted) return;
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       final maintenance = data['maintenance'] as Map?;

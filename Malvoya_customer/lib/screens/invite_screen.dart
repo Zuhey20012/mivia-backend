@@ -7,6 +7,7 @@ import '../config/theme.dart';
 import '../core/api_client.dart';
 import '../core/strings.dart';
 import '../widgets/skeleton.dart';
+import '../core/haptics.dart';
 
 /// Loads the customer's invite programme (`GET /me/referral`). Returns null when the server has
 /// no referral endpoint, the programme is switched off or the request fails, so callers can hide
@@ -70,14 +71,14 @@ class _InviteScreenState extends State<InviteScreen> {
   }
 
   Future<void> _copy(String text, String done) async {
-    HapticFeedback.selectionClick();
+    Haptics.selection();
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(done), behavior: SnackBarBehavior.floating));
   }
 
   Future<void> _share() async {
-    HapticFeedback.mediumImpact();
+    Haptics.medium();
     final discount = asInt(_data?['discountCents']) ?? 0;
     final link = _link;
     final text = [

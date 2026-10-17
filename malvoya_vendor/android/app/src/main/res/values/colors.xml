@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Launcher icon background and launch screen: the app's brand colour -->
     <color name="ic_launcher_background">#2E6B4F</color>
+    <color name="splash_background">#2E6B4F</color>
+    <!-- Window behind the Flutter UI: the app background (Birch light, Night dark) -->
+    <color name="window_background">#F6F3EE</color>
 </resources>

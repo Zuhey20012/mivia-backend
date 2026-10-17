@@ -17,6 +17,9 @@ class AppTheme {
   /// Darker green for white text on green (≈6.5:1 contrast), e.g. the online bar.
   static const Color successDark = Color(0xFF1B6B40);
   static const Color warning = Color(0xFFE08A00);
+  /// Status red, for problems and destructive actions.
+  static const Color danger = Color(0xFFD93025);
+  static const Color dangerLight = Color(0xFFFFF0F0);
   static const Color primaryColor = primary;
 
   // ── Market accents ───────────────────────────────────────────────────────
@@ -40,6 +43,26 @@ class AppTheme {
   /// Headline style in the display face.
   static TextStyle display({double size = 22, FontWeight weight = FontWeight.w800, Color color = textPrimary}) =>
       TextStyle(fontFamily: displayFont, fontSize: size, fontWeight: weight, height: 1.1, letterSpacing: -0.4, color: color);
+
+  /// Used when the phone asks for more contrast (Android "high contrast text", iOS "Increase
+  /// contrast"): darker secondary text and lines, and visible field borders.
+  static ThemeData get highContrastTheme {
+    final base = lightTheme;
+    const strongLine = Color(0xFF7A7268);
+    return base.copyWith(
+      colorScheme: base.colorScheme.copyWith(onSurfaceVariant: textPrimary, outlineVariant: strongLine, outline: textPrimary),
+      dividerTheme: const DividerThemeData(color: strongLine, thickness: 1.2, space: 1.2),
+      textTheme: base.textTheme.copyWith(
+        bodyMedium: base.textTheme.bodyMedium?.copyWith(color: textPrimary),
+        bodySmall: base.textTheme.bodySmall?.copyWith(color: textPrimary),
+      ),
+      inputDecorationTheme: base.inputDecorationTheme.copyWith(
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(radiusMd), borderSide: const BorderSide(color: strongLine, width: 1.4)),
+        labelStyle: const TextStyle(color: textPrimary, fontSize: 15),
+        hintStyle: const TextStyle(color: textPrimary, fontSize: 15),
+      ),
+    );
+  }
 
   static ThemeData get lightTheme {
     const buttonText = TextStyle(fontFamily: bodyFont, fontSize: 16, fontWeight: FontWeight.w700);

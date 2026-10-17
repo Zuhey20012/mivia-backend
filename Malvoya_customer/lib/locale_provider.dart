@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'core/app_language.dart';
 
 class LocaleProvider extends ChangeNotifier {
   Locale _locale = const Locale('fi');
@@ -17,6 +18,7 @@ class LocaleProvider extends ChangeNotifier {
     if (!supportedCodes.contains(locale.languageCode)) return;
     if (_locale.languageCode == locale.languageCode) return;
     _locale = locale;
+    AppLanguage.set(locale.languageCode);
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('languageCode', locale.languageCode);
@@ -32,6 +34,7 @@ class LocaleProvider extends ChangeNotifier {
     final languageCode = prefs.getString('languageCode');
     if (languageCode != null && supportedCodes.contains(languageCode)) {
       _locale = Locale(languageCode);
+      AppLanguage.set(languageCode);
       notifyListeners();
     } else {
       try {
@@ -41,6 +44,7 @@ class LocaleProvider extends ChangeNotifier {
         } else {
           _locale = const Locale('fi');
         }
+        AppLanguage.set(_locale.languageCode);
         notifyListeners();
       } catch (_) {
         _locale = const Locale('fi');

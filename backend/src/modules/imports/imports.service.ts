@@ -236,6 +236,8 @@ async function importItem(
     where: { storeId, externalSource: source, externalId: item.externalId },
     include: { variants: true },
   });
+  // The store deleted it: a re-import never brings it back
+  if (existing?.deletedAt) throw new ApiError("Deleted from your store earlier, so it was not imported again", 400);
   const images: string[] = [];
   const known = new Set(existing?.images ?? []);
   const settled = await Promise.allSettled(item.imageUrls.map((u) => rehost(storeId, u, cache, known, budget)));

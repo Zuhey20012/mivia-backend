@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../cart.dart';
 import '../config/theme.dart';
@@ -12,9 +11,29 @@ import 'orders.dart';
 import 'profile.dart';
 import '../checkout.dart';
 import '../l10n.dart';
+import '../widgets/motion.dart';
+import '../core/haptics.dart';
 
 /// Lets the main screen notice when a screen pushed over it (checkout, an order, a store) closes.
 final mainRouteObserver = RouteObserver<ModalRoute<void>>();
+
+/// Main tabs, for empty states that point somewhere ("Start shopping" opens Home).
+class MainTab {
+  static const home = 0;
+  static const search = 1;
+  static const drops = 2;
+  static const orders = 3;
+  static const profile = 4;
+}
+
+final _tabRequest = ValueNotifier<int?>(null);
+
+/// Closes any screens on top of the main one and shows [tab].
+void openMainTab(BuildContext context, int tab) {
+  Navigator.of(context).popUntil((r) => r.isFirst);
+  _tabRequest.value = null;
+  _tabRequest.value = tab;
+}
 
 /// Five tabs: Home, Search, Drops (shoppable videos), Orders and Profile, in a floating pill bar.
 /// A floating bag bar appears whenever the bag has items (hidden on Drops, which has its own buy
@@ -42,6 +61,12 @@ class _MainNavigationState extends State<MainNavigation> with RouteAware {
     super.initState();
     // Links to a drop, store or invite open once the main screen is up
     DeepLinks.instance.attach();
+    _tabRequest.addListener(_onTabRequest);
+  }
+
+  void _onTabRequest() {
+    final tab = _tabRequest.value;
+    if (tab != null && mounted) _go(tab);
   }
 
   @override
@@ -60,6 +85,7 @@ class _MainNavigationState extends State<MainNavigation> with RouteAware {
   @override
   void dispose() {
     mainRouteObserver.unsubscribe(this);
+    _tabRequest.removeListener(_onTabRequest);
     DeepLinks.instance.detach();
     _homeVisible.dispose();
     super.dispose();
@@ -67,7 +93,7 @@ class _MainNavigationState extends State<MainNavigation> with RouteAware {
 
   void _go(int index) {
     if (index == _index) return;
-    HapticFeedback.selectionClick();
+    Haptics.selection();
     setState(() {
       _index = index;
       _opened.add(index);
@@ -190,14 +216,16 @@ class _MainNavigationState extends State<MainNavigation> with RouteAware {
   Widget _bagBar(AppLocalizations l10n) {
     return Consumer<CartService>(
       builder: (ctx, cart, _) {
-        if (cart.items.isEmpty) return const SizedBox.shrink();
-        return Semantics(
+        final Widget bar = cart.items.isEmpty
+            ? const SizedBox.shrink(key: ValueKey('no-bag'))
+            : Semantics(
+          key: const ValueKey('bag'),
           button: true,
           label: '${l10n.translate('viewBag')}, ${cart.itemCount}, ${euro(ctx, (cart.total * 100).round())}',
           excludeSemantics: true,
-          child: GestureDetector(
+          child: Pressable(
             onTap: () {
-              HapticFeedback.mediumImpact();
+              Haptics.selection();
               Navigator.push(context, MaterialPageRoute(builder: (_) => const CheckoutPage()));
             },
             child: Container(
@@ -212,13 +240,17 @@ class _MainNavigationState extends State<MainNavigation> with RouteAware {
               ),
               child: Row(
                 children: [
-                  Container(
-                    width: 46,
-                    height: 46,
-                    decoration: const BoxDecoration(color: AppTheme.sunshine, shape: BoxShape.circle),
-                    alignment: Alignment.center,
-                    child: Text('${cart.itemCount}',
-                        style: const TextStyle(color: AppTheme.ink, fontWeight: FontWeight.w800, fontSize: 17)),
+                  // Pops each time something is added, so the customer sees where it went
+                  Bump(
+                    trigger: cart.itemCount,
+                    child: Container(
+                      width: 46,
+                      height: 46,
+                      decoration: const BoxDecoration(color: AppTheme.sunshine, shape: BoxShape.circle),
+                      alignment: Alignment.center,
+                      child: Text('${cart.itemCount}',
+                          style: const TextStyle(color: AppTheme.ink, fontWeight: FontWeight.w800, fontSize: 17)),
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -230,7 +262,7 @@ class _MainNavigationState extends State<MainNavigation> with RouteAware {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
-                        Text(euro(ctx, (cart.total * 100).round()),
+                        AnimatedEuro((cart.total * 100).round(),
                             style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 17)),
                       ],
                     ),
@@ -253,6 +285,17 @@ class _MainNavigationState extends State<MainNavigation> with RouteAware {
               ),
             ),
           ),
+        );
+        // The bar rises in when the first item goes in the bag and sinks away when it is emptied
+        return AnimatedSwitcher(
+          duration: Duration(milliseconds: reduceMotion(ctx) ? 0 : 280),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, a) => FadeTransition(
+            opacity: a,
+            child: SlideTransition(position: Tween(begin: const Offset(0, 0.6), end: Offset.zero).animate(a), child: child),
+          ),
+          child: bar,
         );
       },
     );

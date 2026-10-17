@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Malvoya screenshot kit</title>
+<!--
+  Frames REAL phone screenshots for Google Play and the App Store: caption band + brand background.
+  Everything runs locally in this page; nothing is uploaded. See README.md in this folder.
+-->
+<link rel="stylesheet" href="../shared/fonts.css">
+<script src="../shared/brand.js"></script>
+<style>
+  :root { --birch: #F6F3EE; --ink: #1C1820; --ink2: #6B6472; --line: #E4DCD0; --sun: #F2C14E; --card: #FFFFFF; --brand: #6D2E8C; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--birch); color: var(--ink); font: 15px/1.45 'Hanken Grotesk', system-ui, sans-serif; }
+  header { padding: 20px 16px 8px; max-width: 1200px; margin: 0 auto; }
+  h1 { font: 700 28px/1.1 'Bricolage Grotesque', sans-serif; margin: 0 0 6px; letter-spacing: -0.5px; }
+  p.lead { margin: 0; color: var(--ink2); max-width: 760px; }
+  .bar { position: sticky; top: 0; z-index: 2; background: var(--birch); border-bottom: 1px solid var(--line); }
+  .controls { max-width: 1200px; margin: 0 auto; padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: end; }
+  label.f { display: flex; flex-direction: column; gap: 4px; font-weight: 600; font-size: 13px; }
+  select, input[type=text] { font: inherit; padding: 9px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--ink); min-width: 0; }
+  button { font: 700 14px 'Hanken Grotesk', sans-serif; border: 0; border-radius: 999px; padding: 11px 18px; cursor: pointer; background: var(--ink); color: var(--birch); }
+  button.sec { background: var(--card); color: var(--ink); border: 1px solid var(--line); }
+  button:disabled { opacity: .45; cursor: default; }
+  .note { max-width: 1200px; margin: 10px auto 0; padding: 0 16px; }
+  .note div { background: #FDF1D8; border-radius: 14px; padding: 10px 14px; font-size: 14px; }
+  main { max-width: 1200px; margin: 0 auto; padding: 16px; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+  .slot { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .slot h3 { margin: 0; font: 700 15px 'Bricolage Grotesque', sans-serif; }
+  .slot small { color: var(--ink2); }
+  .drop { position: relative; border: 2px dashed var(--line); border-radius: 14px; background: var(--birch); min-height: 120px; display: grid; place-items: center; cursor: pointer; overflow: hidden; }
+  .drop.over { border-color: var(--brand); }
+  .drop canvas { width: 100%; height: auto; display: block; }
+  .drop .hint { padding: 18px; text-align: center; color: var(--ink2); font-size: 14px; }
+  .drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .row > * { flex: 1 1 auto; }
+  .warn { color: #B3261E; font-size: 13px; }
+  @media (max-width: 560px) { main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Malvoya screenshot kit</h1>
+  <p class="lead">Drop real screenshots from your phone into the six slots, check the caption, then download. Captions come from <code>docs/play-store-listing.md</code>. Nothing leaves this page.</p>
+</header>
+<div class="bar"><div class="controls">
+  <label class="f">App <select id="app"><option value="customer">Malvoya (customer)</option><option value="store">Malvoya Store</option><option value="courier">Malvoya Courier</option></select></label>
+  <label class="f">Language <select id="lang"><option value="en">English</option><option value="fi">Suomi</option></select></label>
+  <label class="f">Size <select id="size"></select></label>
+  <label class="f">Background <select id="bg"><option value="brand">Brand colour</option><option value="pastel">Pastel</option><option value="birch">Birch</option><option value="night">Night</option></select></label>
+  <label class="f">Frame <select id="frame"><option value="none">Screenshot only (rounded)</option><option value="phone">Simple phone outline</option></select></label>
+  <button id="all" disabled>Download all</button>
+</div></div>
+<div class="note"><div id="note"></div></div>
+<main id="slots"></main>
+
+<script>
+const { C, APPS } = window.MALVOYA;
+// Sizes checked 2026-10-16 against Google Play Console help (answer 9866151) and Apple's screenshot specifications.
+const SIZES = [
+  { id: 'play', w: 1080, h: 1920, label: 'Google Play phone 1080 × 1920', store: 'play' },
+  { id: 'ios61', w: 1206, h: 2622, label: 'App Store iPhone 6.1" 1206 × 2622 (required)', store: 'apple' },
+  { id: 'ios69', w: 1320, h: 2868, label: 'App Store iPhone 6.9" 1320 × 2868', store: 'apple' },
+  { id: 'ios67', w: 1290, h: 2796, label: 'App Store iPhone 6.9"/6.7" 1290 × 2796', store: 'apple' },
+  { id: 'ios55', w: 1242, h: 2208, label: 'App Store iPhone 5.5" 1242 × 2208 (optional)', store: 'apple' },
+  { id: 'ipad13', w: 2064, h: 2752, label: 'App Store iPad 13" 2064 × 2752 (only if iPad stays enabled)', store: 'apple' },
+];
+const $ = (id) => document.getElementById(id);
+$('size').innerHTML = SIZES.map((s) => `<option value="${s.id}">${s.label}</option>`).join('');
+
+const state = { images: [], captions: {} };
+const pastelFor = { customer: C.lilac, store: C.mint, courier: C.peach };
+
+function settings() {
+  const app = $('app').value, lang = $('lang').value, size = SIZES.find((s) => s.id === $('size').value);
+  return { app, lang, size, a: APPS[app], bg: $('bg').value, frame: $('frame').value };
+}
+function colours(s) {
+  if (s.bg === 'brand') return { bg: s.a.brand, text: C.birch, sub: 'rgba(246,243,238,.75)' };
+  if (s.bg === 'night') return { bg: C.night, text: C.birch, sub: 'rgba(246,243,238,.7)' };
+  if (s.bg === 'birch') return { bg: C.birch, text: C.ink, sub: C.inkSecondary };
+  return { bg: pastelFor[s.app], text: C.ink, sub: C.inkSecondary };
+}
+function captionText(i, s) {
+  const k = `${s.app}.${s.lang}.${i}`;
+  return state.captions[k] ?? s.a.captions[i][s.lang];
+}
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+function wrap(ctx, text, maxW) {
+  const words = text.split(/\s+/), lines = [];
+  let line = '';
+  for (const w of words) {
+    const t = line ? line + ' ' + w : w;
+    if (ctx.measureText(t).width > maxW && line) { lines.push(line); line = w; } else line = t;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+/** Draws one store screenshot: caption band at the top (max 20 % of the height), the real screenshot below. */
+function draw(canvas, img, caption, s) {
+  const { w, h } = s.size, col = colours(s);
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = col.bg; ctx.fillRect(0, 0, w, h);
+  // Caption band
+  const band = Math.round(h * 0.18), pad = Math.round(w * 0.08);
+  let size = Math.round(w * 0.072);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = col.text;
+  let lines;
+  do { ctx.font = `700 ${size}px "Bricolage Grotesque"`; lines = wrap(ctx, caption, w - 2 * pad); size -= 2; }
+  while ((lines.length > 2 || lines.length * size * 1.12 > band * 0.78) && size > 24);
+  const lh = (size + 2) * 1.12, top = (band - lines.length * lh) / 2 + lh * 0.82 + h * 0.012;
+  lines.forEach((l, i) => ctx.fillText(l, w / 2, top + i * lh));
+  // Screenshot area
+  const areaTop = band, areaBottom = h - Math.round(h * 0.035), maxW = w * (s.frame === 'phone' ? 0.80 : 0.84), maxH = areaBottom - areaTop;
+  if (!img) {
+    ctx.fillStyle = col.sub; ctx.font = `600 ${Math.round(w * 0.035)}px "Hanken Grotesk"`;
+    ctx.fillText('Drop a real screenshot here', w / 2, areaTop + maxH / 2);
+    return;
+  }
+  const bezel = s.frame === 'phone' ? Math.round(w * 0.022) : 0;
+  const scale = Math.min((maxW - 2 * bezel) / img.width, (maxH - 2 * bezel) / img.height);
+  const iw = Math.round(img.width * scale), ih = Math.round(img.height * scale);
+  const x = Math.round((w - iw) / 2), y = Math.round(areaTop + (maxH - ih) / 2);
+  const r = Math.round(iw * 0.06);
+  if (bezel) { ctx.fillStyle = C.ink; roundRect(ctx, x - bezel, y - bezel, iw + 2 * bezel, ih + 2 * bezel, r + bezel); ctx.fill(); }
+  ctx.save(); roundRect(ctx, x, y, iw, ih, r); ctx.clip(); ctx.drawImage(img, x, y, iw, ih); ctx.restore();
+}
+
+function render() {
+  const s = settings();
+  document.documentElement.style.setProperty('--brand', s.a.brand);
+  const play = s.size.store === 'play';
+  $('note').innerHTML = play
+    ? 'Google Play: up to 8 screenshots, JPEG or 24-bit PNG without alpha, 9:16. Google asks for <b>no device frames</b>, so keep “Screenshot only”. Use screenshots from a release build with your own test data.'
+    : 'App Store: 1 to 10 screenshots per size, JPEG or PNG without alpha. Screenshots must show the app as it really works (Guideline 2.3.3). The 6.1" size is required; others are optional or scaled.';
+  if (play && s.frame === 'phone') $('note').innerHTML += ' <span class="warn">Switch the frame off for Play.</span>';
+  $('slots').innerHTML = s.a.captions.map((c, i) => `
+    <section class="slot" data-i="${i}">
+      <h3>${i + 1}. ${c.screen}</h3>
+      <div class="drop" id="drop${i}"><canvas id="cv${i}"></canvas><input type="file" accept="image/png,image/jpeg" aria-label="Choose screenshot ${i + 1}"></div>
+      <input type="text" id="cap${i}" value="${captionText(i, s).replace(/"/g, '&quot;')}" aria-label="Caption ${i + 1}">
+      <div class="row"><button class="sec" id="dl${i}" ${state.images[i] ? '' : 'disabled'}>Download</button><button class="sec" id="rm${i}" ${state.images[i] ? '' : 'disabled'}>Remove</button></div>
+      <small>${s.size.w} × ${s.size.h} px, JPEG</small>
+    </section>`).join('');
+  s.a.captions.forEach((_, i) => {
+    draw($(`cv${i}`), state.images[i], captionText(i, s), s);
+    const drop = $(`drop${i}`), inp = drop.querySelector('input');
+    inp.addEventListener('change', () => load(inp.files, i));
+    drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+    drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); load(e.dataTransfer.files, i); });
+    $(`cap${i}`).addEventListener('input', (e) => { state.captions[`${s.app}.${s.lang}.${i}`] = e.target.value; draw($(`cv${i}`), state.images[i], e.target.value, s); });
+    $(`dl${i}`).addEventListener('click', () => download(i));
+    $(`rm${i}`).addEventListener('click', () => { state.images[i] = null; render(); });
+  });
+  $('all').disabled = !state.images.some(Boolean);
+}
+
+/** Several files dropped on one slot fill that slot and the ones after it, in file-name order. */
+function load(files, start) {
+  const list = [...files].filter((f) => /image\/(png|jpeg)/.test(f.type)).sort((a, b) => a.name.localeCompare(b.name));
+  let pending = list.length;
+  list.forEach((f, k) => {
+    const idx = start + k; if (idx > 5) { pending--; return; }
+    const img = new Image();
+    img.onload = () => { state.images[idx] = img; if (--pending === 0) render(); };
+    img.onerror = () => { if (--pending === 0) render(); };
+    img.src = URL.createObjectURL(f);
+  });
+}
+function download(i) {
+  const s = settings();
+  $(`cv${i}`).toBlob((b) => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(b);
+    a.download = `${s.app}-${s.lang}-${s.size.id}-${String(i + 1).padStart(2, '0')}.jpg`;
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }, 'image/jpeg', 0.95);
+}
+$('all').addEventListener('click', () => state.images.forEach((img, i) => img && setTimeout(() => download(i), i * 400)));
+for (const id of ['app', 'lang', 'size', 'bg', 'frame']) $(id).addEventListener('change', () => {
+  if (id === 'size' && settings().size.store === 'play') $('frame').value = 'none';
+  render();
+});
+Promise.all([document.fonts.load('700 40px "Bricolage Grotesque"'), document.fonts.load('600 20px "Hanken Grotesk"')]).finally(render);
+</script>
+</body>
+</html>

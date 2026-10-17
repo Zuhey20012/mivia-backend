@@ -167,11 +167,23 @@ model User {
   promoRedemptions PromoRedemption[]
 
   // Referrals (since 2.8.0): the customer's own invite code, created on first use of GET /me/referral
-  referralCode      String?     @unique
-  referralsMade     Referral[]  @relation("ReferralReferrer")
-  referredBy        Referral?   @relation("ReferralReferee")
-  personalPromos    PromoCode[] // one-time reward codes only this user can use
-  referredOrders    Order[]     @relation("OrderReferrer")
+  referralCode   String?     @unique
+  referralsMade  Referral[]  @relation("ReferralReferrer")
+  referredBy     Referral?   @relation("ReferralReferee")
+  personalPromos PromoCode[] // one-time reward codes only this user can use
+  referredOrders Order[]     @relation("OrderReferrer")
+
+  // Language for push notifications and emails ("fi" | "en"), from the apps' Accept-Language or PATCH /me.
+  // null = never told: messages go out in English.
+  locale           String?
+  // Access tokens issued before this moment are refused (a password reset signs every device out)
+  tokensValidAfter DateTime?
+  // Agreement accepted at registration (customer terms / seller terms / courier agreement) and its version
+  termsAcceptedAt  DateTime?
+  termsVersion     String?
+  // Users this user blocked (their comments and reviews are hidden for this user), and who blocked this user
+  blocks           UserBlock[] @relation("Blocker")
+  blockedBy        UserBlock[] @relation("Blocked")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -240,6 +252,11 @@ model Store {
   importJobs ImportJob[]
   taxInfo    StoreTaxInfo?
 
+  // DAC7 reminders to stores with sales this year and incomplete tax data: at most every 30 days, 2 per year
+  taxReminderAt    DateTime?
+  taxReminderCount Int       @default(0) // reminders sent in taxReminderYear
+  taxReminderYear  Int?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -306,6 +323,10 @@ model Product {
   importDraft    Boolean    @default(false) // created by an import and not yet published or hidden by the store
   importJob      ImportJob? @relation(fields: [importJobId], references: [id], onDelete: SetNull)
 
+  // Deleted by the store but kept, because orders, rentals, drops or a catalogue import still point at it.
+  // A deleted product is hidden everywhere, also from the store's own lists.
+  deletedAt DateTime?
+
   // Flags
   isEcoFriendly Boolean @default(false)
   isHandmade    Boolean @default(false)
@@ -327,6 +348,7 @@ model Product {
   @@unique([storeId, externalSource, externalId])
   @@index([storeId, isAvailable])
   @@index([importJobId])
+  @@index([storeId, deletedAt])
 }
 
 // Every sale price a product has had. A "was" price may only be shown when it is the lowest
@@ -431,6 +453,7 @@ model Order {
   deliveredAt      DateTime? // start of the 14-day withdrawal period (Kuluttajansuojalaki 6:14)
   cancelledAt      DateTime?
   cancelReason     String?
+  cancelledBy      String? // "STORE" when the store declined or cancelled it (cancelReason is then the store's own words)
 
   // Delivery
   deliveryAddress String?
@@ -464,11 +487,20 @@ model Order {
   courierSearchNotifiedAt DateTime?
   arrivingNotifiedAt      DateTime? // "your courier is arriving" push, sent once
 
-  notes   String?
-  items   OrderItem[]
-  returns Return[]
-  review  Review?
-  payouts Payout[]
+  // The courier is at the address and cannot hand the order over (since 2.10.0). From 10 minutes later the courier
+  // may take it back to the shop: the order is cancelled and the items refunded; delivery fee and tip are not.
+  deliveryProblemAt     DateTime?
+  deliveryProblemReason String? // "CUSTOMER_UNAVAILABLE" | "WRONG_ADDRESS" | "OTHER"
+  deliveryProblemNote   String?
+  returnedToStoreAt     DateTime? // the courier took the order back to the shop (items refunded, courier paid)
+  returnReceivedAt      DateTime? // the store confirmed it has the items back
+
+  notes    String?
+  items    OrderItem[]
+  returns  Return[]
+  review   Review?
+  payouts  Payout[]
+  messages OrderMessage[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -484,6 +516,8 @@ model Order {
   @@index([deliveredAt])
   @@index([paidAt])
   @@index([scheduledStart])
+  @@index([deliveryProblemAt])
+  @@index([cancelledAt])
 }
 
 model OrderItem {
@@ -577,7 +611,8 @@ model Return {
   courier   Courier? @relation(fields: [courierId], references: [id])
 
   reason         ReturnReason
-  conditionNote  String? // vendor fills this on receipt
+  conditionNote  String? // the customer's note on the return; the store may add to it on receipt
+  storeNote      String? // the store's reason or notes (required when it rejects), shown to the customer
   refundCents    Int? // calculated after inspection
   damageDedCents Int?         @default(0) // deducted if damaged
 
@@ -855,8 +890,51 @@ model Review {
   isHidden      Boolean  @default(false) // hidden by moderation
   createdAt     DateTime @default(now())
 
+  reports ReviewReport[]
+
   @@index([storeId, createdAt])
   @@index([courierId])
+}
+
+// Someone reported a review (DSA notice-and-action, Google Play UGC policy). An admin hides it or keeps it.
+model ReviewReport {
+  id         Int       @id @default(autoincrement())
+  reviewId   Int
+  review     Review    @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  reporterId Int
+  reason     String
+  resolvedAt DateTime? // an admin decided
+  resolution String? // "HIDDEN" | "KEPT"
+  createdAt  DateTime  @default(now())
+
+  @@unique([reviewId, reporterId])
+  @@index([resolvedAt, createdAt])
+}
+
+// A user blocked another user: the blocked user's drop comments and reviews are hidden for the blocker.
+model UserBlock {
+  blockerId Int
+  blocker   User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockedId Int
+  blocked   User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([blockerId, blockedId])
+  @@index([blockedId])
+}
+
+// Order chat (customer and courier). Deleted 30 days after the order was completed or cancelled.
+model OrderMessage {
+  id         Int      @id @default(autoincrement())
+  orderId    Int
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  senderRole String // CUSTOMER | COURIER | VENDOR | ADMIN
+  senderId   Int // the sender's user id
+  text       String
+  createdAt  DateTime @default(now())
+
+  @@index([orderId, createdAt])
+  @@index([senderId])
 }
 
 model DeviceToken {

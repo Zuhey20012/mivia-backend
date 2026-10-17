@@ -25,10 +25,10 @@ export function signRefreshToken(userId: number): string {
   } as jwt.SignOptions);
 }
 
-export function verifyAccessToken(token: string): AccessTokenPayload {
+export function verifyAccessToken(token: string): AccessTokenPayload & { iat: number } {
   const payload = jwt.verify(token, env.jwtSecret, { algorithms: [ALGORITHM] }) as jwt.JwtPayload;
   if (payload.typ !== "access") throw new Error("Wrong token type");
-  return { id: Number(payload.id), role: String(payload.role), email: String(payload.email) };
+  return { id: Number(payload.id), role: String(payload.role), email: String(payload.email), iat: Number(payload.iat ?? 0) };
 }
 
 export function verifyRefreshToken(token: string): { id: number } {

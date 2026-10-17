@@ -33,6 +33,12 @@ http.createServer((req, res) => {
       resources.set(publicId, { public_id: publicId, format: "jpg", bytes: 1000, width: 800, height: 1000 });
       return send(200, { public_id: publicId, version: 1700000000, format: "jpg", secure_url: `https://res.cloudinary.com/testcloud/image/upload/v1700000000/${publicId}.jpg` });
     }
+    // Admin API delete by folder prefix (account deletion); recorded as "prefix:<prefix>"
+    const del = req.url.match(/^\/v1_1\/[^/]+\/resources\/(image|video)\/upload\?prefix=(.+)$/);
+    if (del && req.method === "DELETE") {
+      destroyed.push(`prefix:${decodeURIComponent(del[2])}`);
+      return send(200, { deleted: {}, partial: false });
+    }
     const m = req.url.match(/^\/v1_1\/[^/]+\/resources\/(image|video)\/(upload|authenticated)\/(.+)$/);
     if (m && req.method === "GET") {
       const id = decodeURIComponent(m[3]);

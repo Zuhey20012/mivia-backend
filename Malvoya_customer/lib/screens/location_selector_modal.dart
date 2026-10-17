@@ -1,11 +1,11 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/theme.dart';
 import '../core/delivery_location.dart';
 import '../core/strings.dart';
 import 'map_address_picker.dart';
+import '../core/haptics.dart';
 
 class LocationSelectorModal extends StatefulWidget {
   final String currentLocation;
@@ -64,7 +64,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
 
   /// Opens the map (centred on the phone's position with [locate]), then saves and uses the pin.
   Future<void> _fromMap({bool locate = false}) async {
-    HapticFeedback.lightImpact();
+    Haptics.light();
     final res = await Navigator.push<AddressResult>(
       context,
       MaterialPageRoute(builder: (_) => MapAddressPickerScreen(locateOnOpen: locate)),
@@ -96,7 +96,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr(context, 'Please enter the street.', 'Kirjoita katuosoite.'))));
       return;
     }
-    HapticFeedback.mediumImpact();
+    Haptics.medium();
     final aptPart = _aptCtrl.text.isNotEmpty ? ' ' + _aptCtrl.text.trim() : '';
     final addressText = '${_streetCtrl.text.trim()}$aptPart, ${_postalCtrl.text.trim()} ${_cityCtrl.text.trim()}';
     final newAddress = {

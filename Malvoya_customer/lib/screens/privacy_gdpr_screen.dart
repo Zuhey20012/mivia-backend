@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
+import '../core/app_language.dart';
 import '../core/api_client.dart';
 import '../core/strings.dart';
 import '../core/legal_links.dart';
@@ -16,6 +17,7 @@ import '../local_notification_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'address_management_screen.dart';
 import 'support_hub_screen.dart';
+import '../core/haptics.dart';
 
 /// Privacy: download your data (GDPR art. 15), correct it, ask about it, and delete the account
 /// (art. 17; the server anonymises the user and keeps order records for the Accounting Act).
@@ -43,14 +45,14 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
 
 
   Future<void> _exportUserData(AuthService auth, AppLocalizations l10n) async {
-    HapticFeedback.mediumImpact();
+    Haptics.medium();
     if (auth.accessToken == null) return;
     
     String prettyJson = '{}';
     try {
       final res = await http.get(
         Uri.parse('${AppConstants.apiBase}/auth/me/data'),
-        headers: {'Authorization': 'Bearer ${auth.accessToken}'},
+        headers: {'Authorization': 'Bearer ${auth.accessToken}', ...AppLanguage.header},
       );
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
@@ -177,7 +179,7 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
   }
 
   void _confirmDeleteAccount(AuthService auth, AppLocalizations l10n) {
-    HapticFeedback.heavyImpact();
+    Haptics.warning();
 
     showDialog(
       context: context,
@@ -310,6 +312,7 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
             backgroundColor: cardBg,
             elevation: 0,
             leading: IconButton(
+              tooltip: MaterialLocalizations.of(context).backButtonTooltip,
               icon: Icon(Icons.arrow_back_rounded, color: textPrimary),
               onPressed: () => Navigator.pop(context),
             ),

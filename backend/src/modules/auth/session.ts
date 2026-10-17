@@ -10,7 +10,12 @@ export interface SessionUser {
   email: string;
   role: string;
   googleSub?: string | null;
+  /** Only used to tell the app whether the account has a password (bcrypt hash); never sent anywhere. */
+  passwordHash?: string | null;
 }
+
+/** Accounts made by /register (or that set one) sign in with a password; Google/phone/code accounts have none. */
+export const hasPassword = (passwordHash?: string | null) => !!passwordHash && passwordHash.startsWith("$2");
 
 /** Refresh tokens are stored hashed so a database leak does not leak live sessions. */
 export function hashToken(token: string): string {
@@ -19,7 +24,10 @@ export function hashToken(token: string): string {
 
 /** Single place where access + refresh tokens are issued for every login method. */
 export async function issueSession(user: SessionUser) {
-  const safeUser = { id: user.id, name: user.name, email: user.email, role: user.role, googleLinked: Boolean(user.googleSub) };
+  const safeUser = {
+    id: user.id, name: user.name, email: user.email, role: user.role, googleLinked: Boolean(user.googleSub),
+    hasPassword: hasPassword(user.passwordHash),
+  };
   const accessToken = signAccessToken(safeUser);
   const refreshToken = signRefreshToken(user.id);
 

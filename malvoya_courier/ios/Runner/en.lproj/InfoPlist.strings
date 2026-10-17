@@ -1,0 +1,5 @@
+/* Purpose strings shown by iOS permission prompts (English). Keep in sync with Info.plist. */
+"NSLocationWhenInUseUsageDescription" = "While you are online, Malvoya Courier uses your location to offer you nearby jobs, check that you are at the store and show the customer and the store of your order where you are. Sharing stops when you go offline.";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "While you are online, Malvoya Courier keeps using your location when the app is in the background or the screen is off, so the customer and the store can follow your delivery. It stops when you go offline.";
+"NSCameraUsageDescription" = "Malvoya Courier uses the camera when you take a photo of where you left an order, as proof of delivery.";
+"NSPhotoLibraryUsageDescription" = "Malvoya Courier only uses a photo you choose yourself, as proof of delivery. It does not browse your photo library.";

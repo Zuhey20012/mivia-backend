@@ -1,20 +1,27 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
 import '../core/strings.dart';
 import '../widgets/add_to_bag_sheet.dart';
+import '../widgets/app_image.dart';
 import '../widgets/price_tag.dart';
 import '../widgets/product_gallery.dart';
 import '../widgets/skeleton.dart';
 import 'store_detail.dart';
+import '../core/haptics.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   final int productId;
-  const ProductDetailScreen({super.key, required this.productId});
+
+  /// Set when opened from a product tile: its photo flies into place (shown while loading too).
+  final String? heroTag;
+  final String? heroImage;
+
+  /// The exact copy the tile drew (already on the phone): flies, and shows until the sharp one loads.
+  final String? heroPreview;
+  const ProductDetailScreen({super.key, required this.productId, this.heroTag, this.heroImage, this.heroPreview});
 
   @override
   State<ProductDetailScreen> createState() => _ProductDetailScreenState();
@@ -52,7 +59,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       _snack(tr(context, 'Sign in to save favourites', 'Kirjaudu sisään tallentaaksesi suosikkeja'));
       return;
     }
-    HapticFeedback.lightImpact();
+    Haptics.light();
     final next = !_favorite;
     setState(() => _favorite = next);
     final api = ApiClient(auth);
@@ -70,7 +77,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     final p = _product;
     return Scaffold(
       backgroundColor: AppTheme.scaffoldBackground(context),
-      body: p == null
+      body: p == null && _error == null && widget.heroTag != null && widget.heroImage != null
+          ? _loadingWithPhoto()
+          : p == null
           ? SafeArea(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -143,7 +152,57 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     );
   }
 
-  Widget _gallery(Map<String, dynamic> p) => ProductGallery(items: GalleryItem.forProduct(p));
+  Widget _gallery(Map<String, dynamic> p) => ProductGallery(items: GalleryItem.forProduct(p), heroTag: widget.heroTag, heroImage: widget.heroImage, heroPreview: widget.heroPreview);
+
+  /// While the product loads: the tile's photo at the size the gallery will have, then placeholders.
+  Widget _loadingWithPhoto() {
+    final width = MediaQuery.of(context).size.width;
+    return Stack(
+      children: [
+        ListView(
+          physics: const NeverScrollableScrollPhysics(),
+          padding: EdgeInsets.zero,
+          children: [
+            SizedBox(
+              height: width * 1.2,
+              child: Hero(
+                tag: widget.heroTag!,
+                flightShuttleBuilder: widget.heroPreview == null ? null : photoShuttle(widget.heroPreview!),
+                child: AppImage(widget.heroImage, previewUrl: widget.heroPreview),
+              ),
+            ),
+            const Skeleton(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(20, 20, 20, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonBox(width: 220, height: 26),
+                    SizedBox(height: 12),
+                    SkeletonBox(width: 90, height: 20),
+                    SizedBox(height: 22),
+                    SkeletonBox(height: 14),
+                    SizedBox(height: 8),
+                    SkeletonBox(width: 240, height: 14),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+        SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: _circleButton(
+              icon: Icons.arrow_back_rounded,
+              tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+              onTap: () => Navigator.maybePop(context),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 
   List<Widget> _details(Map<String, dynamic> p) {
     final store = (p['store'] as Map?)?.cast<String, dynamic>();
@@ -190,7 +249,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         InkWell(
           borderRadius: BorderRadius.circular(AppTheme.radiusMd + 2),
           onTap: () {
-            HapticFeedback.selectionClick();
+            Haptics.selection();
             Navigator.push(context, MaterialPageRoute(builder: (_) => StoreDetailScreen(store: store)));
           },
           child: Ink(
@@ -205,7 +264,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                 CircleAvatar(
                   radius: 22,
                   backgroundColor: AppTheme.primaryLight,
-                  backgroundImage: store['logoUrl'] != null ? CachedNetworkImageProvider(store['logoUrl']) : null,
+                  backgroundImage: store['logoUrl'] != null ? sizedImageProvider(context, store['logoUrl'], 44) : null,
                   child: store['logoUrl'] == null ? const Icon(Icons.storefront_rounded, color: AppTheme.primary) : null,
                 ),
                 const SizedBox(width: 12),
@@ -237,7 +296,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
   Widget _row(IconData icon, String label, VoidCallback onTap) => InkWell(
         onTap: () {
-          HapticFeedback.selectionClick();
+          Haptics.selection();
           onTap();
         },
         child: Padding(

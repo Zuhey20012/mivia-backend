@@ -6,6 +6,28 @@ import { revokeAllSessions } from "../auth/session";
 import { notifyLaunchAlertsNear } from "../me/launchAlerts";
 import { platformRevenue } from "./revenue";
 import { taxInfoComplete, taxRowSelect } from "../sellers/taxInfo";
+import { forgetSessionState } from "../../middleware/auth";
+import { pushToUser } from "../../lib/push";
+import { localeOfUser, t } from "../../lib/i18n";
+import { sendApprovalEmail } from "../../services/notificationDeliveryService";
+
+/** "You're approved": push and email, sent on the first approval only (never on a repeated click). */
+async function tellApproved(userId: number, kind: "store" | "courier") {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+  if (!user) return;
+  await pushToUser(userId, kind === "store"
+    ? {
+        title: t("You're approved", "Sinut on hyväksytty"),
+        body: t("Your store is live on Malvoya: you can start selling.", "Kauppasi on nyt Malvoyassa: voit aloittaa myynnin."),
+        data: { type: "approval", kind },
+      }
+    : {
+        title: t("You're approved", "Sinut on hyväksytty"),
+        body: t("You can start delivering: go online in Malvoya Courier to get offers.", "Voit aloittaa toimitukset: siirry linjoille Malvoya Courierissa saadaksesi tarjouksia."),
+        data: { type: "approval", kind },
+      });
+  await sendApprovalEmail(user.email, kind, await localeOfUser(userId));
+}
 
 function idParam(req: Request) {
   const id = Number(req.params.id);
@@ -82,6 +104,7 @@ export async function banUser(req: Request, res: Response) {
   await prisma.courier.updateMany({ where: { userId: id }, data: { isActive: false, isApproved: false } });
   await prisma.store.updateMany({ where: { ownerId: id }, data: { isVerified: false } });
   await revokeAllSessions(id);
+  forgetSessionState(id);
   res.json({ ok: true, message: "User deactivated" });
 }
 
@@ -110,7 +133,8 @@ export async function approveVendor(req: Request, res: Response) {
   const store = await prisma.store.update({ where: { id }, data: { isVerified: true } });
   // First time live: tell customers who asked to hear when Malvoya opens near them
   const notified = before.isVerified ? 0 : await notifyLaunchAlertsNear(store).catch(() => 0);
-  res.json({ ok: true, store, launchAlertsSent: notified });
+  if (!before.isVerified) tellApproved(store.ownerId, "store").catch(() => {});
+  res.json({ ok: true, store, launchAlertsSent: notified, approvalSent: !before.isVerified });
 }
 
 // Commission is a fraction of the item subtotal with two decimals (0.12 = 12 %), at most 50 %
@@ -201,9 +225,11 @@ export async function getCouriers(req: Request, res: Response) {
 export async function approveCourier(req: Request, res: Response) {
   const id = idParam(req);
   if (!id) return res.status(404).json({ ok: false, error: "Courier not found" });
-  const courier = await prisma.courier.update({ where: { id }, data: { isApproved: true } }).catch(() => null);
-  if (!courier) return res.status(404).json({ ok: false, error: "Courier not found" });
-  res.json({ ok: true, courier });
+  const before = await prisma.courier.findUnique({ where: { id }, select: { isApproved: true } });
+  if (!before) return res.status(404).json({ ok: false, error: "Courier not found" });
+  const courier = await prisma.courier.update({ where: { id }, data: { isApproved: true } });
+  if (!before.isApproved && courier.userId) tellApproved(courier.userId, "courier").catch(() => {});
+  res.json({ ok: true, courier, approvalSent: !before.isApproved && !!courier.userId });
 }
 
 export async function suspendCourier(req: Request, res: Response) {
@@ -227,6 +253,7 @@ export async function getOrders(_req: Request, res: Response) {
       courier: { select: { id: true, name: true } },
       items: { include: { product: { select: { name: true } } } },
     },
+    // scheduledStart/scheduledEnd (delivery window) and deliveryProblemAt/Reason/Note, returnedToStoreAt are columns
     orderBy: { createdAt: "desc" },
     take: 200,
   });

@@ -1,6 +1,4 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../cart.dart';
 import '../checkout.dart';
@@ -8,13 +6,15 @@ import '../config/theme.dart';
 import '../core/strings.dart';
 import '../models.dart';
 import 'price_tag.dart';
+import '../core/haptics.dart';
+import 'app_image.dart';
 
 String variantLabel(Map v) => [v['size'], v['color']].where((x) => x != null && '$x'.isNotEmpty).join(' · ');
 
 /// Choose a size/colour and add the product to the bag. Returns true when something was added.
 /// A product without sizes or colours is added straight away (no sheet).
 Future<bool> showAddToBagSheet(BuildContext context, Map<String, dynamic> product, {Map<String, dynamic>? store}) async {
-  HapticFeedback.selectionClick();
+  Haptics.selection();
   final shop = store ?? (product['store'] as Map?)?.cast<String, dynamic>();
   final variants = product['variants'];
   // Only when the payload says so: a product sent without its options still gets the sheet
@@ -61,7 +61,7 @@ Future<bool> addProductToBag(BuildContext context, Map<String, dynamic> product,
   if (clear == null || !context.mounted) return false;
   final price = asInt(variant?['priceCents']) ?? asInt(product['pricing']?['priceCents']) ?? 0;
   final images = (product['images'] as List?)?.cast<String>() ?? const [];
-  HapticFeedback.mediumImpact();
+  Haptics.light();
   Provider.of<CartService>(context, listen: false).add(
     CartItem(
       productId: asInt(product['id'])!,
@@ -164,7 +164,7 @@ class _AddToBagSheetState extends State<_AddToBagSheet> {
                           color: AppTheme.pastel(context, AppTheme.clay, AppTheme.clayInk),
                           child: const Icon(Icons.checkroom_outlined, color: AppTheme.clayInk),
                         )
-                      : CachedNetworkImage(imageUrl: images.first, fit: BoxFit.cover),
+                      : AppImage(images.first),
                 ),
               ),
               const SizedBox(width: 14),
@@ -205,7 +205,7 @@ class _AddToBagSheetState extends State<_AddToBagSheet> {
                   child: GestureDetector(
                     onTap: available
                         ? () {
-                            HapticFeedback.selectionClick();
+                            Haptics.selection();
                             setState(() => _variantId = id);
                           }
                         : null,

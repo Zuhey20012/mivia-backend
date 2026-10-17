@@ -8,8 +8,11 @@ import 'package:flutter_stripe/flutter_stripe.dart';
 import 'config/constants.dart';
 import 'core/font_licenses.dart';
 import 'core/app_gate.dart';
+import 'core/app_language.dart';
+import 'core/blocked_users.dart';
 import 'screens/main_navigation.dart';
 import 'screens/login.dart';
+import 'screens/onboarding.dart';
 import 'cart.dart';
 import 'auth_service.dart';
 import 'l10n.dart';
@@ -46,11 +49,12 @@ void main() async {
     debugPrint('Local notifications init: $e');
   }
 
-  // Stripe — initialize only if a real key is set
+  // Stripe — initialize only if a real key is set. Only checkout needs it, so the first frame
+  // does not wait for it.
   try {
     if (!AppConstants.stripePublishableKey.contains('REPLACE')) {
       Stripe.publishableKey = AppConstants.stripePublishableKey;
-      await Stripe.instance.applySettings();
+      unawaited(Stripe.instance.applySettings().catchError((Object e) => debugPrint('Stripe init skipped: $e')));
     }
   } catch (e) {
     debugPrint('Stripe init skipped: $e');
@@ -63,12 +67,15 @@ void main() async {
     debugPrint('Firebase init error: $e');
   }
 
+  await AppLanguage.load();
+  await Onboarding.load();
   await DeliveryLocation.instance.load();
   unawaited(NetworkStatus.instance.start());
   // Live order updates belong to the signed-in account; close the connection on sign-out
   AuthService.beforeLogout.add((_) async => CustomerSocketService().disconnect());
   // Saved and active delivery addresses belong to the account holder, not to the next person
   AuthService.beforeLogout.add((_) => DeliveryLocation.instance.clear());
+  AuthService.beforeLogout.add((_) async => BlockedUsers.instance.clear());
 
   PushService.instance.onOpen = (data) {
     final orderId = asInt(data['orderId']);
@@ -98,6 +105,10 @@ class MalvoyaApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) {
           final auth = AuthService();
           PushService.instance.attach(auth);
+          // The account's language for pushes and emails, saved after each sign-in
+          AppLanguage.attach(auth);
+          // People this customer blocked: their comments and reviews stay hidden
+          auth.addListener(() => BlockedUsers.instance.load(auth));
           return auth;
         }),
         ChangeNotifierProvider(create: (_) => CartService()),
@@ -131,11 +142,23 @@ class MalvoyaApp extends StatelessWidget {
               // A slim "no internet" notice above every screen while the phone is offline
               child: OfflineBanner(child: child ?? const SizedBox.shrink()),
             ),
-            home: Consumer<AuthService>(
-              builder: (context, auth, child) {
-                final screen = !auth.canBrowse ? const LoginScreen() : const MainNavigation();
-                return screen;
-              },
+            home: ValueListenableBuilder<bool>(
+              valueListenable: Onboarding.seen,
+              builder: (context, seen, _) => Consumer<AuthService>(
+                builder: (context, auth, child) {
+                  if (!seen) {
+                    // Someone already signed in has used the app before: no intro for them
+                    if (auth.isAuthenticated) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) => Onboarding.markSeen());
+                    } else {
+                      // A plain screen for the moment the saved session is read, so nothing flashes
+                      return auth.isReady ? const OnboardingScreen() : const Scaffold();
+                    }
+                  }
+                  final screen = !auth.canBrowse ? const LoginScreen() : const MainNavigation();
+                  return screen;
+                },
+              ),
             ),
           );
         },

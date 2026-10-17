@@ -17,6 +17,9 @@ class PushService {
   /// Called when the user taps a notification. `data` holds e.g. {type: order, orderId: 12}.
   void Function(Map<String, dynamic> data)? onOpen;
 
+  /// Called for every push that arrives while the app is open (e.g. to re-check the approval state).
+  void Function(Map<String, dynamic> data)? onReceive;
+
   static const _channel = AndroidNotificationChannel(
     'orders', // the backend sends every push on this channel
     'Orders and deliveries',
@@ -116,6 +119,9 @@ class PushService {
   /// Android does not show notifications for an app that is open, so show them ourselves.
   /// A job offer is announced once, whether the push or the live connection brings it first.
   void _showWhileOpen(RemoteMessage m) {
+    try {
+      onReceive?.call(Map<String, dynamic>.from(m.data));
+    } catch (_) {}
     final n = m.notification;
     if (n == null) return;
     if (m.data['type'] == 'offer') {

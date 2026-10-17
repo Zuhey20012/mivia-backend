@@ -85,6 +85,14 @@ const Map<String, String> _finnish = {
   'Google can only be unlinked from accounts that sign in with a password.': 'Google-yhteyden voi poistaa vain tileiltä, joille kirjaudutaan salasanalla.',
   'You have orders in progress. Your account can be deleted once they are completed or cancelled.':
       'Sinulla on keskeneräisiä tilauksia. Tilin voi poistaa, kun ne on toimitettu tai peruttu.',
+  'Accept the Seller Terms to create a store account': 'Hyväksy myyjän ehdot luodaksesi kauppatilin.',
+  'Password must be at least 8 characters': 'Salasanassa on oltava vähintään 8 merkkiä.',
+  // Forgotten password
+  'Enter a valid email address': 'Anna kelvollinen sähköpostiosoite.',
+  'Enter the 6-digit code from the email': 'Anna sähköpostin 6-numeroinen koodi.',
+  'The code is wrong or has expired. Request a new one.': 'Koodi on väärä tai vanhentunut. Pyydä uusi koodi.',
+  'Too many wrong codes. Request a new one.': 'Liian monta väärää koodia. Pyydä uusi koodi.',
+  'Password reset by email is not available yet. Contact support.': 'Salasanan vaihto sähköpostilla ei ole vielä käytössä. Ota yhteyttä tukeen.',
   // Support and limits
   'Give an email address we can reply to': 'Anna sähköpostiosoite, johon voimme vastata.',
   'Write a short description of what you need help with': 'Kirjoita lyhyesti, missä tarvitset apua.',

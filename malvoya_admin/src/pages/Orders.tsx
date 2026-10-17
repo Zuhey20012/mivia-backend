@@ -6,9 +6,49 @@ import api from '../utils/api';
 interface Order {
   id: number; status: string; totalCents: number; paymentStatus: string;
   deliveryAddress: string | null; createdAt: string;
+  fulfilment?: 'DELIVERY' | 'PICKUP';
+  scheduledStart?: string | null; scheduledEnd?: string | null;
+  deliveryProblemAt?: string | null; deliveryProblemReason?: string | null; deliveryProblemNote?: string | null;
+  returnedToStoreAt?: string | null; returnReceivedAt?: string | null;
+  cancelReason?: string | null;
   user: { name: string; email: string };
   store: { name: string };
   items: { quantity: number; product: { name: string } }[];
+}
+
+const PROBLEM_TEXT: Record<string, string> = {
+  CUSTOMER_UNAVAILABLE: 'Courier cannot reach the customer',
+  WRONG_ADDRESS: 'Courier cannot find the address',
+  OTHER: 'Courier cannot deliver',
+};
+
+/** Finnish wall-clock time, e.g. "16.10. 17:00" */
+const hel = (iso: string, withDay = true) => new Date(iso).toLocaleString('fi-FI', {
+  timeZone: 'Europe/Helsinki', hour: '2-digit', minute: '2-digit', ...(withDay ? { day: 'numeric', month: 'numeric' } : {}),
+});
+
+/** The delivery window (scheduled slot), pickup, or "as soon as possible", plus any delivery problem. */
+function DeliveryCell({ o }: { o: Order }) {
+  return (
+    <div>
+      <p style={{ color:'#3C3C43' }}>
+        {o.fulfilment === 'PICKUP' ? 'Pickup at the store'
+          : o.scheduledStart && o.scheduledEnd ? `${hel(o.scheduledStart)}–${hel(o.scheduledEnd, false)}`
+          : 'As soon as possible'}
+      </p>
+      {o.deliveryProblemAt && !o.returnedToStoreAt && (
+        <p style={{ marginTop:'0.25rem' }}>
+          <span className="badge-red">{PROBLEM_TEXT[o.deliveryProblemReason ?? 'OTHER'] ?? 'Delivery problem'}</span>
+          <span style={{ color:'#8E8E93',fontSize:'0.75rem',display:'block' }}>since {hel(o.deliveryProblemAt)}{o.deliveryProblemNote ? ` · ${o.deliveryProblemNote}` : ''}</span>
+        </p>
+      )}
+      {o.returnedToStoreAt && (
+        <p style={{ color:'#8E8E93',fontSize:'0.75rem',marginTop:'0.25rem' }}>
+          Taken back to the shop {hel(o.returnedToStoreAt)} · {o.returnReceivedAt ? `store got it ${hel(o.returnReceivedAt)}` : 'store has not confirmed yet'}
+        </p>
+      )}
+    </div>
+  );
 }
 
 const statusBadge: Record<string,string> = {
@@ -34,7 +74,8 @@ export default function Orders() {
   const filtered = orders.filter(o => {
     const matchSearch = o.user.name.toLowerCase().includes(search.toLowerCase()) ||
                         o.store.name.toLowerCase().includes(search.toLowerCase());
-    const matchStatus = statusFilter === 'ALL' || o.status === statusFilter;
+    const matchStatus = statusFilter === 'ALL' || o.status === statusFilter
+      || (statusFilter === 'PROBLEM' && !!o.deliveryProblemAt && !o.returnedToStoreAt);
     return matchSearch && matchStatus;
   });
 
@@ -60,6 +101,7 @@ export default function Orders() {
         <select className="apple-input" style={{ width:'160px' }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
           <option value="ALL">All Statuses</option>
           {Object.keys(statusBadge).map(s => <option key={s} value={s}>{s}</option>)}
+          <option value="PROBLEM">Delivery problem</option>
         </select>
       </div>
 
@@ -77,7 +119,7 @@ export default function Orders() {
           <table style={{ width:'100%',fontSize:'0.875rem',borderCollapse:'collapse' }}>
             <thead>
               <tr style={{ borderBottom:'1px solid #F5F5F7' }}>
-                {['Order #','Customer','Vendor','Items','Total','Payment','Status','Date'].map(h => (
+                {['Order #','Customer','Vendor','Items','Delivery','Total','Payment','Status','Date'].map(h => (
                   <th key={h} style={{ textAlign:'left',padding:'1rem 1.5rem',fontSize:'0.6875rem',fontWeight:500,color:'#8E8E93',textTransform:'uppercase',letterSpacing:'0.05em' }}>{h}</th>
                 ))}
               </tr>
@@ -92,7 +134,8 @@ export default function Orders() {
                   </td>
                   <td style={{ padding:'1rem 1.5rem',color:'#3C3C43' }}>{o.store.name}</td>
                   <td style={{ padding:'1rem 1.5rem',color:'#3C3C43' }}>{o.items.reduce((s,i)=>s+i.quantity,0)}</td>
-                  <td style={{ padding:'1rem 1.5rem',fontWeight:600 }}>${(o.totalCents/100).toFixed(2)}</td>
+                  <td style={{ padding:'1rem 1.5rem' }}><DeliveryCell o={o} /></td>
+                  <td style={{ padding:'1rem 1.5rem',fontWeight:600 }}>{(o.totalCents/100).toFixed(2).replace('.', ',')} €</td>
                   <td style={{ padding:'1rem 1.5rem' }}>
                     <span className={o.paymentStatus === 'SUCCEEDED' ? 'badge-green' : o.paymentStatus === 'FAILED' ? 'badge-red' : 'badge-yellow'}>
                       {o.paymentStatus}
@@ -100,6 +143,7 @@ export default function Orders() {
                   </td>
                   <td style={{ padding:'1rem 1.5rem' }}>
                     <span className={statusBadge[o.status] || 'badge-gray'}>{o.status}</span>
+                    {o.status === 'CANCELLED' && o.cancelReason && <p style={{ color:'#8E8E93',fontSize:'0.75rem',marginTop:'0.25rem',maxWidth:'14rem' }}>{o.cancelReason}</p>}
                   </td>
                   <td style={{ padding:'1rem 1.5rem',color:'#8E8E93',fontSize:'0.75rem' }}>
                     {new Date(o.createdAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}

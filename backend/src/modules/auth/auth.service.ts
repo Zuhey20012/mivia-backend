@@ -4,6 +4,9 @@ import { prisma } from "../../lib/prisma";
 import { verifyRefreshToken } from "../../utils/jwt";
 import { RegisterInput, LoginInput } from "./auth.schema";
 import { issueSession, hashToken, revokeAllSessions } from "./session";
+import { termsVersionFor } from "../legal/legal.routes";
+import { forgetSessionState } from "../../middleware/auth";
+import { deleteFirebaseUser, deleteStoreMedia } from "./accountCleanup";
 
 export class AuthError extends Error {
   constructor(message: string, public status: number) {
@@ -63,8 +66,11 @@ export async function registerUser(input: RegisterInput) {
 
   const passwordHash = await bcrypt.hash(input.password, 12);
   const user = await prisma.user.create({
-    data: { name: input.name, email, phone, passwordHash, role: input.role },
-    select: { id: true, name: true, email: true, role: true },
+    data: {
+      name: input.name, email, phone, passwordHash, role: input.role,
+      ...(input.acceptTerms ? { termsAcceptedAt: new Date(), termsVersion: termsVersionFor(input.role) } : {}),
+    },
+    select: { id: true, name: true, email: true, role: true, passwordHash: true },
   });
 
   if (input.role === "COURIER") {
@@ -109,6 +115,24 @@ export async function refreshTokens(refreshToken: string) {
   return issueSession(stored.user);
 }
 
+/**
+ * Signed-in password change. Wrong current password → 400. Every other session ends (refresh tokens revoked, older
+ * access tokens refused); the caller gets a fresh session in the same shape as login and stays signed in.
+ */
+export async function changePassword(userId: number, currentPassword: string, newPassword: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user || !user.isActive) throw new AuthError("Account not found", 404);
+  if (!user.passwordHash.startsWith("$2")) {
+    throw new AuthError("This account signs in without a password (Google, phone or email code), so there is no password to change.", 400);
+  }
+  if (!(await bcrypt.compare(currentPassword, user.passwordHash))) throw new AuthError("The current password is wrong", 400);
+  const passwordHash = await bcrypt.hash(newPassword, 12);
+  const updated = await prisma.user.update({ where: { id: userId }, data: { passwordHash, tokensValidAfter: new Date() } });
+  await revokeAllSessions(userId);
+  forgetSessionState(userId);
+  return issueSession(updated);
+}
+
 export async function logoutUser(refreshToken: string) {
   await prisma.refreshToken.deleteMany({ where: { token: hashToken(refreshToken) } });
 }
@@ -116,10 +140,12 @@ export async function logoutUser(refreshToken: string) {
 // ─── GDPR: access (Art. 15/20) and erasure (Art. 17) ────────────────────────
 
 export async function exportUserData(userId: number) {
-  const [user, supportRequests] = await Promise.all([exportUser(userId), prisma.supportRequest.findMany({
+  const [user, supportRequests, chatMessages] = await Promise.all([exportUser(userId), prisma.supportRequest.findMany({
     where: { userId }, select: { id: true, topic: true, message: true, status: true, createdAt: true },
+  }), prisma.orderMessage.findMany({
+    where: { senderId: userId }, select: { orderId: true, text: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 5000,
   })]);
-  return user && { ...user, supportRequests };
+  return user && { ...user, supportRequests, chatMessages };
 }
 
 function exportUser(userId: number) {
@@ -128,6 +154,8 @@ function exportUser(userId: number) {
     select: {
       id: true, email: true, name: true, phone: true, role: true, avatarUrl: true, googleSub: true,
       address: true, latitude: true, longitude: true, createdAt: true, updatedAt: true,
+      locale: true, termsAcceptedAt: true, termsVersion: true,
+      blocks: { select: { blockedId: true, createdAt: true } },
       orders: { include: { items: true } },
       rentals: { include: { items: true } },
       returns: true,
@@ -170,6 +198,8 @@ export async function deleteUserAccount(userId: number) {
   if (openOrders > 0) {
     throw new AuthError("You have orders in progress. Your account can be deleted once they are completed or cancelled.", 409);
   }
+  // Needed for the clean-up outside the database once the account is anonymised
+  const before = await prisma.user.findUnique({ where: { id: userId }, select: { email: true, phone: true, store: { select: { id: true } } } });
 
   await prisma.$transaction(async (tx) => {
     // Delivery addresses and notes are not needed for bookkeeping once an order is closed
@@ -201,6 +231,10 @@ export async function deleteUserAccount(userId: number) {
       await tx.drop.update({ where: { id: v.dropId }, data: { commentCount: { decrement: v._count._all } } });
     }
     await tx.dropComment.deleteMany({ where: { userId } });
+    // Chat messages, blocks and review reports are personal data too
+    await tx.orderMessage.deleteMany({ where: { senderId: userId } });
+    await tx.userBlock.deleteMany({ where: { OR: [{ blockerId: userId }, { blockedId: userId }] } });
+    await tx.reviewReport.deleteMany({ where: { reporterId: userId } });
     await tx.review.updateMany({ where: { userId }, data: { comment: null } });
     if (store) {
       await tx.drop.updateMany({ where: { storeId: store.id, status: { in: ["READY", "PROCESSING"] } }, data: { status: "REMOVED", removedReason: "Store account deleted" } });
@@ -224,6 +258,7 @@ export async function deleteUserAccount(userId: number) {
         passwordHash: crypto.randomBytes(32).toString("hex"),
         googleSub: null,
         referralCode: null,
+        locale: null,
         isActive: false,
         deletedAt: new Date(),
       },
@@ -231,4 +266,11 @@ export async function deleteUserAccount(userId: number) {
   });
 
   await revokeAllSessions(userId);
+  forgetSessionState(userId);
+  // Outside the database (best effort, logged on failure, never blocks the deletion): the Firebase sign-in user
+  // and, for a store, its photos, videos and drops on Cloudinary
+  if (before) {
+    deleteFirebaseUser({ email: before.email, phone: before.phone }).catch(() => {});
+    deleteStoreMedia(before.store?.id ?? null, userId).catch(() => {});
+  }
 }

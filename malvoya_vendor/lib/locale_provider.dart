@@ -16,11 +16,17 @@ class LocaleProvider extends ChangeNotifier {
     _loadLocale();
   }
 
+  /// Called when the user picks another language (main.dart passes it on to the server, so push
+  /// notifications and emails follow it).
+  static void Function(String code)? onUserChange;
+
   void setLocale(Locale locale) async {
     if (!supportedCodes.contains(locale.languageCode)) return;
+    final changed = locale.languageCode != currentCode;
     _locale = locale;
     currentCode = locale.languageCode;
     notifyListeners();
+    if (changed) onUserChange?.call(currentCode);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('languageCode', locale.languageCode);
   }

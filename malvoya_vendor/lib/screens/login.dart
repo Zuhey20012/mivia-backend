@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import '../widgets/brand_mark.dart';
+import '../widgets/language_sheet.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../l10n.dart';
 import '../locale_provider.dart';
 import '../core/strings.dart';
+import 'forgot_password_sheet.dart';
 import 'register.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -21,6 +23,8 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _loading = false;
   bool _obscurePass = true;
   String? _error;
+  /// The last sign-in was refused for a wrong email/phone or password: offer a reset next to the error.
+  bool _wrongPassword = false;
 
   @override
   void initState() {
@@ -42,16 +46,28 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() => _error = tr(context, 'Please enter your email or phone number and your password.', 'Anna sähköpostiosoitteesi tai puhelinnumerosi ja salasanasi.'));
       return;
     }
-    setState(() { _loading = true; _error = null; });
+    setState(() { _loading = true; _error = null; _wrongPassword = false; });
     final auth = Provider.of<AuthService>(context, listen: false);
     final err = await auth.login(_emailCtrl.text.trim(), _passCtrl.text);
     if (mounted && err != null) {
-      setState(() { _error = err; _loading = false; });
+      setState(() { _error = err; _loading = false; _wrongPassword = auth.lastLoginRejected; });
     }
   }
 
+  Future<void> _forgotPassword() async {
+    final result = await showForgotPasswordSheet(context, email: _emailCtrl.text.trim());
+    // Signed in with the new password: the app has already switched to the store
+    if (!mounted || result == null) return;
+    setState(() {
+      if (result.email.isNotEmpty) _emailCtrl.text = result.email;
+      _passCtrl.clear();
+      _error = result.message;
+      _wrongPassword = false;
+    });
+  }
+
   Future<void> _handleGoogle() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() { _loading = true; _error = null; _wrongPassword = false; });
     final auth = Provider.of<AuthService>(context, listen: false);
     final err = await auth.loginWithGoogle();
     if (mounted && err != null) {
@@ -180,69 +196,6 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  void _showLanguageSelector(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: false, // the sheet draws its own handle
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) {
-        return Consumer<LocaleProvider>(
-          builder: (context, provider, _) {
-            return Container(
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.of(context).size.height * 0.75,
-              ),
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40, height: 4,
-                      decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(tr(context, 'Choose language', 'Valitse kieli'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 12),
-                  const Divider(height: 1),
-                  Expanded(
-                    child: ListView(
-                      physics: const BouncingScrollPhysics(),
-                      children: AppLocalizations.languages.entries.map((entry) {
-                        final isSelected = provider.locale.languageCode == entry.key;
-                        return ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-                          title: Text(
-                            entry.value,
-                            style: TextStyle(
-                              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                              fontSize: 16,
-                              color: isSelected ? Theme.of(context).primaryColor : Colors.black87,
-                            ),
-                          ),
-                          trailing: isSelected ? Icon(Icons.check_circle_rounded, color: Theme.of(context).primaryColor) : null,
-                          onTap: () {
-                            provider.setLocale(Locale(entry.key));
-                            Navigator.pop(ctx);
-                          },
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -263,7 +216,7 @@ class _LoginScreenState extends State<LoginScreen> {
               Align(
                 alignment: Alignment.topRight,
                 child: GestureDetector(
-                  onTap: () => _showLanguageSelector(context),
+                  onTap: () => showLanguageSheet(context),
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
@@ -340,6 +293,14 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
               ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                  onPressed: _loading ? null : _forgotPassword,
+                  child: Text(tr(context, 'Forgot password?', 'Unohditko salasanan?')),
+                ),
+              ),
 
               // Error message
               if (_error != null) ...[
@@ -351,11 +312,23 @@ class _LoginScreenState extends State<LoginScreen> {
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: const Color(0xFFFFCDD2)),
                   ),
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.error_outline, color: Color(0xFFD93025), size: 18),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFD93025), fontSize: 13))),
+                      Row(
+                        children: [
+                          const Icon(Icons.error_outline, color: Color(0xFFD93025), size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFD93025), fontSize: 13))),
+                        ],
+                      ),
+                      if (_wrongPassword)
+                        TextButton.icon(
+                          style: TextButton.styleFrom(minimumSize: const Size(48, 48), foregroundColor: const Color(0xFFD93025)),
+                          onPressed: _loading ? null : _forgotPassword,
+                          icon: const Icon(Icons.lock_reset_rounded, size: 20),
+                          label: Text(tr(context, 'Forgot password? Reset it', 'Unohditko salasanan? Vaihda se')),
+                        ),
                     ],
                   ),
                 ),

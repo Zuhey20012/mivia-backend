@@ -75,7 +75,7 @@ export async function getSystemStatus(_req: Request, res: Response) {
     const [
       liveStores, pendingStores, approvedCouriers, onlineCouriers, pendingCouriers, waitlist,
       waitingForStore, waitingForCourier, refundProblems, failedPayouts, openSupport, openReports, jobs,
-      waitingForPickup, referrals, overPaid, taxStores, scheduledUpcoming,
+      waitingForPickup, referrals, overPaid, taxStores, scheduledUpcoming, deliveryProblems, reportedReviews,
     ] = await Promise.all([
       prisma.store.findMany({ where: { isVerified: true }, select: { acceptingOrders: true, openingHours: true } }),
       prisma.store.count({ where: { isVerified: false } }),
@@ -85,8 +85,12 @@ export async function getSystemStatus(_req: Request, res: Response) {
       prisma.launchAlert.count({ where: { notifiedAt: null } }),
       prisma.order.count({ where: { status: "PENDING", paymentStatus: "SUCCEEDED" } }),
       prisma.order.count({ where: { status: { in: ["CONFIRMED", "PROCESSING"] }, paymentStatus: "SUCCEEDED", courierId: null, fulfilment: "DELIVERY", OR: [{ scheduledStart: null }, { dispatchStartedAt: { not: null } }] } }),
-      // Cancelled but the money was not given back automatically (refund call failed)
-      prisma.order.count({ where: { status: "CANCELLED", paymentStatus: "SUCCEEDED" } }),
+      // Cancelled but the money was not given back automatically (refund call failed). An order taken back to the
+      // shop keeps the delivery fee and tip, so it counts only while its items have not been refunded.
+      prisma.$queryRaw<{ n: bigint }[]>`
+        SELECT count(*)::bigint AS n FROM "Order" WHERE status = 'CANCELLED' AND "paymentStatus" = 'SUCCEEDED'
+          AND ("returnedToStoreAt" IS NULL OR "refundedCents" < GREATEST(0, LEAST("subtotalCents" - "discountCents", "totalCents")))`
+        .then((r) => Number(r[0]?.n ?? 0)),
       prisma.payout.count({ where: { status: "FAILED" } }),
       prisma.supportRequest.count({ where: { status: "OPEN" } }).catch(() => 0),
       prisma.dropReport.count({ where: { status: "OPEN" } }),
@@ -98,6 +102,14 @@ export async function getSystemStatus(_req: Request, res: Response) {
       prisma.store.findMany({ where: { isVerified: true }, select: { sellerType: true, businessId: true, taxInfo: { select: taxRowSelect } }, take: 5000 }),
       // Scheduled deliveries whose courier search has not started yet
       prisma.order.count({ where: { status: { in: ["CONFIRMED", "PROCESSING"] }, paymentStatus: "SUCCEEDED", courierId: null, fulfilment: "DELIVERY", dispatchStartedAt: null, scheduledStart: { gt: new Date() } } }),
+      // Couriers at the address who cannot reach the customer right now
+      prisma.order.findMany({
+        where: { status: "SHIPPED", deliveryProblemAt: { not: null } },
+        select: { id: true, deliveryProblemAt: true, deliveryProblemReason: true },
+        orderBy: { deliveryProblemAt: "asc" },
+        take: 20,
+      }),
+      prisma.review.count({ where: { reports: { some: { resolvedAt: null } } } }),
     ]);
     const missingTax = taxStores.filter((st) => !taxInfoComplete(st, st.taxInfo)).length;
     const storesOpenNow = liveStores.filter((s) => storeAvailability(s).openNow).length;
@@ -121,6 +133,12 @@ export async function getSystemStatus(_req: Request, res: Response) {
     if (failedPayouts) attention.push(`${failedPayouts} failed payout(s)`);
     if (openSupport) attention.push(`${openSupport} open support request(s)`);
     if (openReports) attention.push(`${openReports} open content report(s)`);
+    if (reportedReviews) attention.push(`${reportedReviews} reported review(s) to look at (Moderation → Reported reviews)`);
+    for (const p of deliveryProblems) {
+      const min = Math.max(0, Math.round((Date.now() - p.deliveryProblemAt!.getTime()) / 60_000));
+      const why = p.deliveryProblemReason === "WRONG_ADDRESS" ? "cannot find the address" : p.deliveryProblemReason === "CUSTOMER_UNAVAILABLE" ? "cannot reach the customer" : "cannot deliver";
+      attention.push(`Order #${p.id}: the courier ${why} (reported ${min} min ago)`);
+    }
     if (missingTax) attention.push(`${missingTax} store(s) missing tax data (DAC7): they are asked for it in the store app; the yearly report to Vero is due by 31 January`);
     if (integrations.dataEncryption.status === "missing") attention.push("Sellers' tax IDs cannot be saved: add DATA_ENCRYPTION_KEY (32 random bytes, base64, e.g. openssl rand -base64 32) on Render. Keep a copy: without it saved tax IDs cannot be read.");
     if (integrations.dataEncryption.status === "invalid") attention.push("DATA_ENCRYPTION_KEY is set but is not 32 bytes of base64: tax IDs cannot be saved or read until it is fixed.");
@@ -128,7 +146,7 @@ export async function getSystemStatus(_req: Request, res: Response) {
 
     res.json({
       ok: true,
-      version: "2.9.0",
+      version: "2.10.0",
       region: "frankfurt",
       startedAt,
       readyForOrders: blockers.length === 0,
@@ -140,7 +158,7 @@ export async function getSystemStatus(_req: Request, res: Response) {
         approvedCouriers, onlineCouriers, pendingCouriers,
         waitlist,
       },
-      ordersInFlight: { waitingForStore, waitingForCourier, waitingForPickup, scheduledUpcoming },
+      ordersInFlight: { waitingForStore, waitingForCourier, waitingForPickup, scheduledUpcoming, deliveryProblems: deliveryProblems.length },
       timers: t,
       // Reserve & collect (PICKUP_REMINDER_HOURS / PICKUP_HOLD_HOURS), counted from "ready for pickup"
       pickup: env.pickupTimers,

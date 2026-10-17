@@ -5,6 +5,8 @@ import { ApiError, positiveId, sendError } from "../../lib/errors";
 import { pushToUser } from "../../lib/push";
 import { auth, optionalAuth, requireRole, AuthRequest } from "../../middleware/auth";
 import { REPORT_REASONS } from "./drops.service";
+import { blockedIdsFor } from "../me/safety";
+import { t } from "../../lib/i18n";
 
 const MAX_COMMENT_LENGTH = 300;
 const COMMENTS_PER_WINDOW = 20; // per user, per 10 minutes
@@ -33,6 +35,8 @@ function presentComment(c: CommentRow, viewer: Viewer, dropOwnerId: number) {
     body: c.body,
     createdAt: c.createdAt,
     author: byStore ? c.user.store!.name : (c.user.name.trim().split(/\s+/)[0] || "Customer"),
+    // The author’s user id, so the app can offer Report and Block user
+    authorId: c.userId,
     byStore,
     mine: viewer?.id === c.userId,
     canDelete: !!viewer && (viewer.id === c.userId || viewer.id === dropOwnerId || viewer.role === "ADMIN"),
@@ -46,8 +50,10 @@ const commentSelect = {
 
 export async function listComments(dropId: number, viewer: Viewer, before?: number, limit = 30) {
   const drop = await visibleDrop(dropId);
+  // Comments by users the viewer blocked are hidden for the viewer only
+  const blocked = await blockedIdsFor(viewer?.id);
   const rows = await prisma.dropComment.findMany({
-    where: { dropId, status: "VISIBLE", ...(before ? { id: { lt: before } } : {}) },
+    where: { dropId, status: "VISIBLE", ...(before ? { id: { lt: before } } : {}), ...(blocked.length ? { userId: { notIn: blocked } } : {}) },
     select: commentSelect,
     orderBy: { id: "desc" },
     take: limit + 1,
@@ -73,7 +79,7 @@ export async function addComment(dropId: number, user: { id: number; role: strin
   ]);
   if (user.id !== drop.store.ownerId) {
     pushToUser(drop.store.ownerId, {
-      title: "New comment on your drop",
+      title: t("New comment on your drop", "Uusi kommentti droppiisi"),
       body: body.length > 80 ? `${body.slice(0, 79)}…` : body,
       data: { type: "drop_comment", dropId: String(dropId) },
     }).catch(() => {});

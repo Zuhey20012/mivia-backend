@@ -2,8 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 	<dict>
+		<key>NSPhotoLibraryUsageDescription</key>
+		<string>Malvoya Courier only uses a photo you choose yourself, as proof of delivery. It does not browse your photo library.</string>
+		<key>NSCameraUsageDescription</key>
+		<string>Malvoya Courier uses the camera when you take a photo of where you left an order, as proof of delivery.</string>
+		<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+		<string>While you are online, Malvoya Courier keeps using your location when the app is in the background or the screen is off, so the customer and the store can follow your delivery. It stops when you go offline.</string>
 		<key>NSLocationWhenInUseUsageDescription</key>
-		<string>Malvoya shares your location with the customer and store only while you are online and delivering an order.</string>
+		<string>While you are online, Malvoya Courier uses your location to offer you nearby jobs, check that you are at the store and show the customer and the store of your order where you are. Sharing stops when you go offline.</string>
 		<key>CADisableMinimumFrameDurationOnPhone</key>
 		<true/>
 		<key>CFBundleDevelopmentRegion</key>

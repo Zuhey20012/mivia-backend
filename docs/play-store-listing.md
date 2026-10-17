@@ -386,7 +386,8 @@ Do not show a real customer's address. Use a test order to a public place.
 | Contact email | [SUPPORT EMAIL] (a mailbox you control, not @malvoya.com) | same | same |
 | Website | optional; leave empty until you have one | | |
 | Privacy policy URL | https://malvoya-api-eu.onrender.com/legal/privacy | same | same |
-| App icon | 512 × 512 PNG from `assets/brand/icon.png` (32-bit, ≤1 MB) | own colour | own colour |
+| App icon | `docs/store-assets/customer/play-icon-512.png` (512 × 512, 32-bit, ≤1 MB) | `docs/store-assets/store/play-icon-512.png` | `docs/store-assets/courier/play-icon-512.png` |
+| Feature graphic | `docs/store-assets/customer/feature-graphic-{en,fi}.png` (1024 × 500, no alpha) | `docs/store-assets/store/…` | `docs/store-assets/courier/…` |
 
 ## Sources
 

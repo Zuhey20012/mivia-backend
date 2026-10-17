@@ -8,6 +8,7 @@ import 'core/font_licenses.dart';
 import 'core/app_gate.dart';
 import 'core/connectivity.dart';
 import 'screens/login.dart';
+import 'screens/returns_manager.dart';
 import 'screens/vendor_home.dart';
 import 'auth_service.dart';
 import 'l10n.dart';
@@ -25,6 +26,7 @@ void main() async {
 }
 
 final _navigatorKey = GlobalKey<NavigatorState>();
+final _messengerKey = GlobalKey<ScaffoldMessengerState>();
 
 /// Signing in, out or deleting the account switches the home screen; screens pushed on top of the
 /// old home (e.g. registration, a settings page) are closed so they never cover the new one.
@@ -32,9 +34,25 @@ void _closeStackOnAuthChange(AuthService auth) {
   bool? signedIn;
   auth.addListener(() {
     final now = auth.isAuthenticated;
-    if (signedIn != null && signedIn != now) _navigatorKey.currentState?.popUntil((r) => r.isFirst);
+    if (signedIn != null && signedIn != now) {
+      _navigatorKey.currentState?.popUntil((r) => r.isFirst);
+      // e.g. a "New return request" banner from the signed-out account
+      _messengerKey.currentState?.clearMaterialBanners();
+    }
     signedIn = now;
   });
+}
+
+/// A return notification opens the Returns screen on top of whatever is open (nothing is closed, so
+/// unsaved edits stay). Other notifications just bring the app forward; the dashboard refreshes itself.
+void _openFromNotification(AuthService auth, Map<String, dynamic> data) {
+  final nav = _navigatorKey.currentState;
+  if (nav == null || !auth.isAuthenticated) return;
+  final type = '${data['type'] ?? ''}'.toLowerCase();
+  final isReturn = type.contains('return') || data['returnId'] != null;
+  if (isReturn && auth.storeState != StoreState.none) {
+    nav.push(MaterialPageRoute(builder: (_) => const ReturnsManager()));
+  }
 }
 
 class MalvoyaVendorApp extends StatelessWidget {
@@ -48,6 +66,10 @@ class MalvoyaVendorApp extends StatelessWidget {
           _closeStackOnAuthChange(auth);
           // New orders and payouts arrive as notifications even when the app is closed
           PushService.instance.attach(auth);
+          // Tapping a notification opens the matching screen
+          PushService.instance.onOpen = (data) => _openFromNotification(auth, data);
+          // A new language also changes the language of the account's notifications and emails
+          LocaleProvider.onUserChange = (_) => auth.syncLocale();
           return auth;
         }),
         ChangeNotifierProvider(create: (_) => LocaleProvider()),
@@ -56,8 +78,10 @@ class MalvoyaVendorApp extends StatelessWidget {
         builder: (context, localeProvider, child) => MaterialApp(
           title: 'Malvoya Store',
           navigatorKey: _navigatorKey,
+          scaffoldMessengerKey: _messengerKey,
           debugShowCheckedModeBanner: false,
           theme: AppTheme.lightTheme,
+          highContrastTheme: AppTheme.highContrastTheme,
           locale: localeProvider.locale,
           localizationsDelegates: const [
             AppLocalizations.delegate,

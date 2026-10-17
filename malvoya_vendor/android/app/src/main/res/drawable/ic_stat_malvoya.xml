@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Malvoya notification icon: white silhouette of the Thread M (status bar icons must be single-colour). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+    <path
+        android:pathData="M20,82 L20,36 C20,21 36,18 43,30 L50,43 L57,30 C64,18 80,21 80,36 L80,62"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="10"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M74,73.5 h12 a5.5,5.5 0 0 1 5.5,5.5 v12 a5.5,5.5 0 0 1 -5.5,5.5 h-12 a5.5,5.5 0 0 1 -5.5,-5.5 v-12 a5.5,5.5 0 0 1 5.5,-5.5 Z"
+        android:fillColor="#FFFFFFFF" />
+</vector>

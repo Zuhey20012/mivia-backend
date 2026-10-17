@@ -1,12 +1,12 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
 import '../core/strings.dart';
 import '../widgets/skeleton.dart';
+import '../core/haptics.dart';
 
 /// Returns. Purchases from business sellers have the 14-day right of withdrawal (Kuluttajansuojalaki
 /// 6 luku); purchases from private sellers do not, but a request can still be sent to the seller.
@@ -87,7 +87,12 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
 
   /// Where approved returns go back to: the store's details as the order shows them.
   Future<void> _loadReturnStores() async {
-    final ids = _returns.where((r) => r['status'] == 'APPROVED').map((r) => asInt(r['orderId'])).whereType<int>().toSet();
+    // Newer servers send the store's details with each return; only older ones need the order
+    final ids = _returns
+        .where((r) => r['status'] == 'APPROVED' && _storeOf(r).isEmpty)
+        .map((r) => asInt(r['orderId']))
+        .whereType<int>()
+        .toSet();
     if (ids.isEmpty) return;
     final stores = <int, Map<String, dynamic>>{};
     for (final id in ids.take(5)) {
@@ -182,7 +187,7 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
   Future<void> _startReturn({Map<String, dynamic>? preselected}) async {
     final auth = Provider.of<AuthService>(context, listen: false);
     if (!auth.isAuthenticated) return;
-    HapticFeedback.selectionClick();
+    Haptics.selection();
 
     List<Map<String, dynamic>> orders;
     String? loadError;
@@ -240,7 +245,7 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                   onPressed: next == null
                       ? null
                       : () {
-                          HapticFeedback.selectionClick();
+                          Haptics.selection();
                           setSheet(() => picked[id] = next);
                         },
                   icon: Icon(icon, size: 18),
@@ -313,7 +318,7 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                       if (perItem)
                         TextButton(
                           onPressed: () {
-                            HapticFeedback.selectionClick();
+                            Haptics.selection();
                             setSheet(() => picked = everything ? {for (final k in remaining.keys) k: 0} : Map.of(remaining));
                           },
                           child: Text(everything ? tr(context, 'Clear', 'Tyhjennä') : tr(context, 'Everything', 'Kaikki')),
@@ -403,7 +408,7 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                         onPressed: submitting || pickedQty == 0
                             ? null
                             : () async {
-                                HapticFeedback.mediumImpact();
+                                Haptics.medium();
                                 setSheet(() {
                                   submitting = true;
                                   sheetError = null;
@@ -509,9 +514,24 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
     );
   }
 
+  /// The store's name, address and phone as the return itself carries them (newer servers).
+  Map<String, dynamic> _storeOf(Map<String, dynamic> r) {
+    final s = r['store'];
+    if (s is Map && ('${s['address'] ?? ''}'.trim().isNotEmpty || '${s['phone'] ?? ''}'.trim().isNotEmpty)) {
+      return Map<String, dynamic>.from(s);
+    }
+    return const {};
+  }
+
+  String _storeName(Map<String, dynamic> r) =>
+      '${(r['store'] is Map ? r['store']['name'] : null) ?? r['order']?['store']?['name'] ?? ''}';
+
   /// After approval: send or bring the items back to the store, using the store's own details.
   Widget _nextSteps(Map<String, dynamic> r) {
-    final store = _stores[asInt(r['orderId'])] ?? (r['order']?['store'] is Map ? Map<String, dynamic>.from(r['order']['store']) : const {});
+    final own = _storeOf(r);
+    final store = own.isNotEmpty
+        ? own
+        : _stores[asInt(r['orderId'])] ?? (r['order']?['store'] is Map ? Map<String, dynamic>.from(r['order']['store']) : const {});
     final name = '${store['name'] ?? ''}'.trim();
     final address = '${store['address'] ?? ''}'.trim();
     final phone = '${store['phone'] ?? ''}'.trim();
@@ -586,7 +606,7 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
             children: [
               Expanded(
                 child: Text(
-                  '${tr(context, 'Order', 'Tilaus')} #${r['orderId'] ?? '-'} · ${r['order']?['store']?['name'] ?? ''}',
+                  '${tr(context, 'Order', 'Tilaus')} #${r['orderId'] ?? '-'} · ${_storeName(r)}',
                   style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppTheme.primaryText(context)),
                 ),
               ),
@@ -599,11 +619,39 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
           ),
           const SizedBox(height: 6),
           Text(_reasons(context)[r['reason']] ?? '${r['reason'] ?? ''}', style: TextStyle(color: secondary, fontSize: 13)),
+          // Newer servers keep the store's words in storeNote and the customer's own in conditionNote;
+          // on older ones conditionNote may hold either, so it is shown as a plain note.
           if ('${r['conditionNote'] ?? ''}'.trim().isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 4),
-              child: Text('${tr(context, 'Note', 'Huomautus')}: ${'${r['conditionNote']}'.trim()}',
+              child: Text(
+                  '${r.containsKey('storeNote') ? tr(context, 'Your note', 'Oma huomautuksesi') : tr(context, 'Note', 'Huomautus')}: ${'${r['conditionNote']}'.trim()}',
                   style: TextStyle(fontSize: 13, color: AppTheme.primaryText(context), height: 1.35)),
+            ),
+          if ('${r['storeNote'] ?? ''}'.trim().isNotEmpty)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(top: 8),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: status == 'REJECTED'
+                    ? AppTheme.pastel(context, AppTheme.peach, const Color(0xFFD93025))
+                    : AppTheme.pastel(context, AppTheme.lilac, AppTheme.primary),
+                borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    status == 'REJECTED'
+                        ? tr(context, 'Why the store declined', 'Miksi kauppa hylkäsi')
+                        : tr(context, 'From the store', 'Kaupalta'),
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppTheme.primaryText(context)),
+                  ),
+                  const SizedBox(height: 2),
+                  Text('${r['storeNote']}'.trim(), style: TextStyle(fontSize: 13, height: 1.35, color: AppTheme.primaryText(context))),
+                ],
+              ),
             ),
           if (lines.isNotEmpty) ...[
             const SizedBox(height: 8),

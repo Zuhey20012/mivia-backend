@@ -29,6 +29,10 @@ Malvoya is a marketplace. Stores that sell through Malvoya are independent selle
 | Push notification token of your phone | Send order, delivery and payout updates. No marketing. | Contract (6(1)(b)) |
 | Photos and videos stores upload (products, drops) | Show them in the app | Contract with the store |
 | Payout details (for stores and couriers) — collected by Stripe, not by Malvoya | Pay stores and couriers | Contract; legal obligation (anti-money-laundering) |
+| Order chat messages between the customer and the courier | Let you and your courier agree on the handover, also after a lost connection | Contract (6(1)(b)) |
+| Your language choice (Finnish or English), from your app's language setting | Send notifications and emails in your language | Contract (6(1)(b)) |
+| When you accepted our terms, and which version | Show which agreement applies to you | Contract; legitimate interest (6(1)(f)) |
+| Users you blocked, and reports you make about comments or reviews | Hide blocked users' content for you; let our team review reported content | Legitimate interest (6(1)(f)); legal obligation (Digital Services Act) |
 | Technical logs (IP address, error logs) | Security and abuse prevention | Legitimate interest (6(1)(f)) |
 
 We do not sell personal data, and we do not use your data for advertising profiling.
@@ -76,6 +80,9 @@ Hosting is provided by Render. [STATE REGION: "in Frankfurt, Germany (EU)" once 
 | Drop views | Counted per day; the daily record keeps no content beyond the viewer key |
 | Push tokens | Until you sign out or uninstall the app |
 | Sign-in codes | 10 minutes |
+| Password reset codes | 15 minutes |
+| Order chat messages | 30 days after the order is completed or cancelled (deleted with your account) |
+| Blocks and reports you made | Until you remove the block or delete your account |
 | Refresh tokens (sessions) | 7 days |
 | Security logs | [30] days |
 
@@ -84,7 +91,7 @@ Hosting is provided by Render. [STATE REGION: "in Frankfurt, Germany (EU)" once 
 You can:
 - **access** your data and **export** it (Profile → Privacy → Download my data);
 - **correct** your data;
-- **delete** your account (Profile → Privacy → Delete account). Order records we must keep by law are anonymised rather than deleted;
+- **delete** your account (Profile → Privacy → Delete account; how in each app: [malvoya-api-eu.onrender.com/legal/delete-account](https://malvoya-api-eu.onrender.com/legal/delete-account)). Order records we must keep by law are anonymised rather than deleted. Your sign-in record at Google Firebase and, for a store, its photos and videos at Cloudinary are deleted too;
 - **object** to processing based on legitimate interest;
 - **restrict** processing.
 

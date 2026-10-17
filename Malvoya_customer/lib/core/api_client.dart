@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 import '../auth_service.dart';
 import '../config/constants.dart';
+import 'app_language.dart';
 import 'strings.dart';
 
 /// Result of an API call. [error] is always a sentence that can be shown to the user.
@@ -37,6 +38,7 @@ class ApiClient {
     );
     final headers = <String, String>{
       'Content-Type': 'application/json',
+      ...AppLanguage.header,
       if (auth?.accessToken != null) 'Authorization': 'Bearer ${auth!.accessToken}',
     };
     try {
@@ -133,6 +135,19 @@ const _fiMessages = {
   'Deliveries can be scheduled for today or tomorrow.': 'Toimituksen voi ajastaa tälle päivälle tai huomiselle.',
   'The store is closed at that time. Pick another delivery time.': 'Kauppa on silloin kiinni. Valitse toinen toimitusaika.',
   'Pickup orders have no delivery time': 'Noutotilauksella ei ole toimitusaikaa.',
+  // Password reset, blocking and reports
+  'Enter a valid email address': 'Kirjoita kelvollinen sähköpostiosoite.',
+  'Password reset by email is not available yet. Contact support.': 'Salasanan palautus sähköpostilla ei ole vielä käytössä. Ota yhteyttä tukeen.',
+  'The code is wrong or has expired. Request a new one.': 'Koodi on väärä tai vanhentunut. Pyydä uusi koodi.',
+  'Too many wrong codes. Request a new one.': 'Liian monta väärää koodia. Pyydä uusi koodi.',
+  'Enter the 6-digit code from the email': 'Kirjoita sähköpostissa tullut 6-numeroinen koodi.',
+  'Password must be at least 8 characters': 'Salasanassa on oltava vähintään 8 merkkiä.',
+  'Your session has ended. Please sign in again.': 'Istuntosi on päättynyt. Kirjaudu sisään uudelleen.',
+  'You cannot block yourself': 'Et voi estää itseäsi.',
+  'User not found': 'Käyttäjää ei löytynyt.',
+  'Review not found': 'Arviota ei löytynyt.',
+  'You cannot report your own review': 'Et voi ilmoittaa omasta arviostasi.',
+  'Choose or write a reason': 'Valitse tai kirjoita syy.',
 };
 
 /// Server messages with a changing part (a product name, an amount, a time).

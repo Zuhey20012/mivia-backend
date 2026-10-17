@@ -81,12 +81,22 @@ export const createReturnSchema = z.object({
 export const updateReturnStatusSchema = z.object({
   status:         z.enum(["APPROVED","IN_TRANSIT","RECEIVED","REFUNDED","REJECTED"]),
   conditionNote:  z.string().max(500).optional(),
+  // The store's reason or notes, shown to the customer; required when the return is rejected
+  storeNote:      z.string().trim().max(500).optional(),
   refundCents:    z.number().int().min(0).optional(),
   damageDedCents: z.number().int().min(0).optional(),
 });
 
 export const updateOrderStatusSchema = z.object({
   status: z.enum(["CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"]),
+  // Only used when the store cancels: its reason, stored as the cancel reason and shown to the customer
+  reason: z.string().trim().max(200).optional(),
+});
+
+// The courier is at the address and cannot hand the order over
+export const deliveryProblemSchema = z.object({
+  reason: z.enum(["CUSTOMER_UNAVAILABLE", "WRONG_ADDRESS", "OTHER"]),
+  note: z.string().trim().max(300).optional(),
 });
 
 // The store types in the customer's 6-digit pickup code at the counter

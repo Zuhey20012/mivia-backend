@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import '../config/constants.dart';
@@ -10,6 +11,11 @@ class VendorSocketService extends ChangeNotifier {
   io.Socket? _socket;
   bool _connected = false;
   bool get isConnected => _connected;
+
+  /// A customer asked to return something (socket `return:new`, API 2.10). The payload is whatever the
+  /// server sends (e.g. returnId, orderId); listeners refresh from the API rather than trusting it.
+  final StreamController<Map<String, dynamic>> _returnsNew = StreamController.broadcast();
+  Stream<Map<String, dynamic>> get returnsNew => _returnsNew.stream;
 
   final List<Map<String, dynamic>> _pendingOrders = [];
   List<Map<String, dynamic>> get pendingOrders => List.unmodifiable(_pendingOrders);
@@ -53,6 +59,11 @@ class VendorSocketService extends ChangeNotifier {
         _pendingOrders.insert(0, data);
       }
       notifyListeners();
+    });
+
+    _socket!.on('return:new', (data) {
+      debugPrint('[VendorSocket] New return request');
+      _returnsNew.add(data is Map ? Map<String, dynamic>.from(data) : const {});
     });
 
     // Listen for order status changes

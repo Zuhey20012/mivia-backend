@@ -11,6 +11,7 @@ import '../locale_provider.dart';
 import 'register.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import '../realtime_notification_service.dart';
+import '../widgets/forgot_password_sheet.dart';
 
 class LoginScreen extends StatefulWidget {
   /// Opened from inside the app (a guest going to pay, Profile…): closes itself once signed in,
@@ -28,6 +29,8 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _loading = false;
   bool _obscurePass = true;
   String? _error;
+  // The last sign-in failed on the email/password check: offer the reset right there
+  bool _wrongPassword = false;
 
   AuthService? _auth;
   bool _returned = false;
@@ -71,12 +74,16 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() => _error = tr(context, 'Please enter your email and password.', 'Kirjoita sähköpostiosoitteesi ja salasanasi.'));
       return;
     }
-    setState(() { _loading = true; _error = null; });
+    setState(() { _loading = true; _error = null; _wrongPassword = false; });
     final auth = Provider.of<AuthService>(context, listen: false);
     final err = await auth.login(_emailCtrl.text.trim(), _passCtrl.text);
     if (mounted) {
       if (err != null) {
-        setState(() { _error = localizeServerMessage(context, err); _loading = false; });
+        setState(() {
+          _error = localizeServerMessage(context, err);
+          _wrongPassword = err == 'Invalid credentials' || err == 'Invalid email or password.';
+          _loading = false;
+        });
       } else {
         RealtimeNotificationService.notifyCustomerJoined(
           context,
@@ -85,6 +92,21 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
     }
+  }
+
+  /// Email → code → new password. Signs in at the end, so the customer carries on where they were.
+  Future<void> _openForgotPassword() async {
+    final typed = _emailCtrl.text.trim();
+    final outcome = await showForgotPasswordSheet(context, email: typed.contains('@') ? typed : null);
+    if (outcome == null || !mounted) return;
+    _emailCtrl.text = outcome.email;
+    _passCtrl.clear();
+    setState(() { _error = null; _wrongPassword = false; });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(outcome.signedIn
+          ? tr(context, 'New password saved. You are signed in.', 'Uusi salasana tallennettu. Olet kirjautunut sisään.')
+          : tr(context, 'New password saved. Sign in with it now.', 'Uusi salasana tallennettu. Kirjaudu sillä nyt sisään.')),
+    ));
   }
 
   Future<void> _handleGoogle() async {
@@ -862,9 +884,18 @@ class _LoginScreenState extends State<LoginScreen> {
                   labelText: l10n.translate('password'),
                   prefixIcon: const Icon(Icons.lock_outline_rounded),
                   suffixIcon: IconButton(
+                    tooltip: _obscurePass ? tr(context, 'Show password', 'Näytä salasana') : tr(context, 'Hide password', 'Piilota salasana'),
                     icon: Icon(_obscurePass ? Icons.visibility_off_outlined : Icons.visibility_outlined),
                     onPressed: () => setState(() => _obscurePass = !_obscurePass),
                   ),
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: _openForgotPassword,
+                  style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                  child: Text(tr(context, 'Forgot password?', 'Unohditko salasanan?'), style: const TextStyle(fontSize: 14)),
                 ),
               ),
 
@@ -886,6 +917,16 @@ class _LoginScreenState extends State<LoginScreen> {
                     ],
                   ),
                 ),
+                if (_wrongPassword)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: TextButton.icon(
+                      onPressed: _openForgotPassword,
+                      style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                      icon: const Icon(Icons.key_rounded, size: 18),
+                      label: Text(tr(context, 'Forgot password? Reset it by email', 'Unohditko salasanan? Vaihda se sähköpostilla')),
+                    ),
+                  ),
               ],
 
               const SizedBox(height: 24),

@@ -4,6 +4,9 @@ import '../config/constants.dart';
 
 typedef SocketEventListener = void Function(Map<String, dynamic> data);
 
+/// Recent chat messages of an order, from the server's answer to `chat:join` (newer servers).
+typedef ChatHistoryListener = void Function(int orderId, List<Map<String, dynamic>> messages);
+
 /// One shared Socket.io connection for the customer app. Several screens can listen at the same
 /// time (the Orders tab and an open order, for example): listeners are added and removed, never
 /// overwritten, and order rooms are reference-counted so one screen closing does not stop
@@ -26,6 +29,28 @@ class CustomerSocketService extends ChangeNotifier {
   final List<SocketEventListener> _statusListeners = [];
   final List<SocketEventListener> _chatListeners = [];
   final List<VoidCallback> _reconnectListeners = [];
+  final List<ChatHistoryListener> _historyListeners = [];
+
+  void addChatHistoryListener(ChatHistoryListener l) => _historyListeners.add(l);
+  void removeChatHistoryListener(ChatHistoryListener l) => _historyListeners.remove(l);
+
+  /// Joins an order's chat room. Newer servers answer with the recent messages; older ones do
+  /// not answer at all, which is fine.
+  void _emitJoinChat(io.Socket socket, int orderId) {
+    socket.emitWithAck('chat:join', orderId, ack: (dynamic data) {
+      final raw = data is List && data.isNotEmpty && data.first is Map ? data.first : data;
+      final list = raw is Map ? (raw['messages'] ?? raw['history']) : raw;
+      if (list is! List) return;
+      final messages = list.whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList();
+      for (final l in List<ChatHistoryListener>.of(_historyListeners)) {
+        try {
+          l(orderId, messages);
+        } catch (e) {
+          debugPrint('[CustomerSocket] history listener error: $e');
+        }
+      }
+    });
+  }
 
   void addCourierLocationListener(SocketEventListener l) => _locationListeners.add(l);
   void removeCourierLocationListener(SocketEventListener l) => _locationListeners.remove(l);
@@ -79,7 +104,7 @@ class CustomerSocketService extends ChangeNotifier {
         socket.emit('track:order', id);
       }
       for (final id in _chats.keys) {
-        socket.emit('chat:join', id);
+        _emitJoinChat(socket, id);
       }
       if (connectedBefore) {
         for (final l in List<VoidCallback>.of(_reconnectListeners)) {
@@ -125,7 +150,8 @@ class CustomerSocketService extends ChangeNotifier {
   void joinChat(int orderId) {
     final first = !_chats.containsKey(orderId);
     _chats[orderId] = (_chats[orderId] ?? 0) + 1;
-    if (first) _socket?.emit('chat:join', orderId);
+    final socket = _socket;
+    if (first && socket != null) _emitJoinChat(socket, orderId);
   }
 
   void leaveChat(int orderId) {
@@ -137,8 +163,12 @@ class CustomerSocketService extends ChangeNotifier {
     }
   }
 
-  void sendChatMessage(int orderId, String message, String senderName) {
-    _socket?.emit('chat:send', {'orderId': orderId, 'text': message, 'sender': senderName});
+  /// Sends over the live connection. Returns false when there is none (then send it over HTTP).
+  bool sendChatMessage(int orderId, String message, String senderName) {
+    final socket = _socket;
+    if (socket == null || !_connected) return false;
+    socket.emit('chat:send', {'orderId': orderId, 'text': message, 'sender': senderName});
+    return true;
   }
 
   void _closeSocket() {

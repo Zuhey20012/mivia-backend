@@ -1,0 +1,3 @@
+/* Purpose strings shown by iOS permission prompts (English). Keep in sync with Info.plist. */
+"NSLocationWhenInUseUsageDescription" = "Malvoya uses your location only when you tap \"Use my location\", to put the delivery pin on the map.";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "Malvoya uses your location only while you use the app, when you tap \"Use my location\". It does not use your location in the background.";

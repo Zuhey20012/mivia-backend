@@ -354,6 +354,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
             backgroundColor: cardBg,
             elevation: 0,
             leading: IconButton(
+              tooltip: MaterialLocalizations.of(context).backButtonTooltip,
               icon: Icon(Icons.arrow_back_rounded, color: textPrimary),
               onPressed: () => Navigator.pop(context),
             ),

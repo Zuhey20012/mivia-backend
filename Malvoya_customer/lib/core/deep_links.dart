@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
@@ -10,6 +9,7 @@ import '../screens/store_detail.dart';
 import 'api_client.dart';
 import 'pending_promo.dart';
 import 'strings.dart';
+import 'haptics.dart';
 
 /// Android App Links (verified https links on the API host, see AndroidManifest.xml):
 ///   /d/<dropId>  → that drop in its store's drops
@@ -115,7 +115,7 @@ class DeepLinks {
   }
 
   void _showInvite(BuildContext context, String code) {
-    HapticFeedback.lightImpact();
+    Haptics.light();
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
@@ -150,7 +150,7 @@ class DeepLinks {
                 height: 54,
                 child: FilledButton(
                   onPressed: () {
-                    HapticFeedback.selectionClick();
+                    Haptics.selection();
                     Navigator.pop(ctx);
                   },
                   child: Text(tr(ctx, 'Start shopping', 'Aloita ostokset')),

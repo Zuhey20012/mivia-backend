@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../core/strings.dart';
 import '../config/theme.dart';
@@ -8,6 +7,7 @@ import '../locale_provider.dart';
 import 'chatbot.dart';
 import '../auth_service.dart';
 import '../core/api_client.dart';
+import '../core/haptics.dart';
 
 /// Contact: messages are stored by the server (admin panel → Support) and answered by email.
 /// There is no phone line, live chat or SMS channel, so none is offered here.
@@ -112,7 +112,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
       ];
 
   void _openMessageSheet(_Topic topic) {
-    HapticFeedback.lightImpact();
+    Haptics.light();
     final l10n = AppLocalizations.of(context);
     final auth = Provider.of<AuthService>(context, listen: false);
     final messageCtrl = TextEditingController();
@@ -290,6 +290,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
             backgroundColor: cardBg,
             elevation: 0,
             leading: IconButton(
+              tooltip: MaterialLocalizations.of(context).backButtonTooltip,
               icon: Icon(Icons.arrow_back_rounded, color: textPrimary),
               onPressed: () => Navigator.pop(context),
             ),
@@ -317,6 +318,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
                         prefixIcon: const Icon(Icons.search, color: AppTheme.primary),
                         suffixIcon: _searchQuery.isNotEmpty
                             ? IconButton(
+                                tooltip: tr(context, 'Clear', 'Tyhjennä'),
                                 icon: const Icon(Icons.clear, size: 18),
                                 onPressed: () {
                                   _searchCtrl.clear();

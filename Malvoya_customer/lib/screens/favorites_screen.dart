@@ -6,6 +6,7 @@ import '../core/sign_in.dart';
 import '../core/strings.dart';
 import '../widgets/product_tile.dart';
 import '../widgets/skeleton.dart';
+import 'main_navigation.dart';
 
 /// Items you saved with the heart button.
 class FavoritesScreen extends StatefulWidget {
@@ -72,7 +73,11 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                       : _items.isEmpty
                       ? StateMessage(
                           icon: Icons.favorite_border_rounded,
+                          title: tr(context, 'No favourites yet', 'Ei vielä suosikkeja'),
                           message: tr(context, 'Tap the heart on any item to save it here.', 'Tallenna tuotteita tänne sydämellä.'),
+                          actionLabel: tr(context, 'Discover items', 'Löydä tuotteita'),
+                          actionIcon: Icons.search_rounded,
+                          onRetry: () => openMainTab(context, MainTab.search),
                         )
                       : GridView.builder(
                           padding: const EdgeInsets.fromLTRB(16, 16, 16, 40),

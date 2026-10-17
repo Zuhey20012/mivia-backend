@@ -37,6 +37,7 @@ class PushService {
 
   final _local = FlutterLocalNotificationsPlugin();
   bool _ringing = false;
+  int _ringingFor = 0;
   AuthService? _auth;
   String? _token;
   int? _registeredFor;
@@ -54,6 +55,8 @@ class PushService {
     _auth = auth;
     auth.addListener(_onAuthChanged);
     AuthService.beforeLogout.add(_unregister);
+    // Signed out: nobody can answer the orders on this phone any more
+    AuthService.beforeLogout.add((_) => stopRinging());
     await _start();
     _onAuthChanged();
   }
@@ -185,8 +188,11 @@ class PushService {
   /// "insistent" flag) until every paid order is accepted or declined, or the alert is tapped.
   Future<void> ringNewOrders(int waiting) async {
     if (waiting <= 0) return stopRinging();
-    if (_ringing) return;
+    // Already ringing for at least this many: leave it. A further order rings again (the count in
+    // the alert changes and Android plays the sound anew).
+    if (_ringing && waiting <= _ringingFor) return;
     _ringing = true;
+    _ringingFor = waiting;
     try {
       await _local.show(
         _alarmId,
@@ -211,13 +217,16 @@ class PushService {
       );
     } catch (e) {
       _ringing = false;
+      _ringingFor = 0;
       debugPrint('New-order alert failed: $e');
     }
   }
 
+  /// Always cancels, even when this run of the app never rang: an insistent alert can outlive the
+  /// app process that showed it (e.g. the app was swiped away while an order was waiting).
   Future<void> stopRinging() async {
-    if (!_ringing) return;
     _ringing = false;
+    _ringingFor = 0;
     try {
       await _local.cancel(_alarmId);
     } catch (_) {}

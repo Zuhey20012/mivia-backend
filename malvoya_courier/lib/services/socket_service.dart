@@ -20,6 +20,8 @@ class CourierSocketService extends ChangeNotifier {
   void Function(Map<String, dynamic>)? onChatMessage;
   /// An offered job is gone: `{orderId, reason: "taken" | "cancelled"}`.
   void Function(Map<String, dynamic>)? onOfferClosed;
+  /// Stored chat history sent back when a chat room is joined (API 2.10; older servers send none).
+  void Function(int orderId, List<Map<String, dynamic>> messages)? onChatHistory;
 
   void connect(String accessToken) {
     if (_socket != null) return;
@@ -40,7 +42,7 @@ class CourierSocketService extends ChangeNotifier {
       _connected = true;
       for (final id in _orders) {
         _socket?.emit('track:order', id);
-        _socket?.emit('chat:join', id);
+        _joinChat(id);
       }
       notifyListeners();
     });
@@ -84,7 +86,17 @@ class CourierSocketService extends ChangeNotifier {
   void trackOrder(int orderId) {
     _orders.add(orderId);
     _socket?.emit('track:order', orderId);
-    _socket?.emit('chat:join', orderId);
+    _joinChat(orderId);
+  }
+
+  /// Joins the order's chat. A server that stores chat answers with the recent history
+  /// (`[...]` or `{messages: [...]}`), which fills in anything missed while disconnected.
+  void _joinChat(int orderId) {
+    _socket?.emitWithAck('chat:join', orderId, ack: (dynamic data) {
+      final list = data is List ? data : (data is Map ? data['messages'] : null);
+      if (list is! List) return;
+      onChatHistory?.call(orderId, list.whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList());
+    });
   }
 
   void sendChat(int orderId, String text, String senderName) =>

@@ -4,7 +4,8 @@ import { z } from "zod";
 import { optionalAuth, auth, requireRole, AuthRequest } from "../../middleware/auth";
 import { prisma } from "../../lib/prisma";
 import { sendError, ApiError } from "../../lib/errors";
-import { sendEmail, escapeHtml } from "../../services/notificationDeliveryService";
+import { sendEmail, escapeHtml, sendSupportAck } from "../../services/notificationDeliveryService";
+import { localeFromHeader, localeOfUser } from "../../lib/i18n";
 import { isSyntheticEmail } from "../auth/auth.service";
 
 // Requests are always saved for the admin panel; they are also emailed when a support mailbox is set.
@@ -43,8 +44,8 @@ router.post("/support", supportLimiter, optionalAuth, async (req: AuthRequest, r
     const text = `Support request #${request.id} (${body.data.app})\nFrom: ${email}${req.user ? ` (user ${req.user.id})` : ""}\n` +
       `${body.data.orderId ? `Order: #${body.data.orderId}\n` : ""}Topic: ${body.data.topic}\n\n${body.data.message}`;
     if (SUPPORT_EMAIL) sendEmail(SUPPORT_EMAIL, `Malvoya support #${request.id}: ${body.data.topic}`, `<pre style="font-family:inherit;white-space:pre-wrap">${escapeHtml(text)}</pre>`, text).catch(() => {});
-    const ack = `We received your message (#${request.id}) and will reply to ${email}.\n\nViestisi (#${request.id}) on vastaanotettu. Vastaamme osoitteeseen ${email}.`;
-    sendEmail(email, `Malvoya – we got your message #${request.id}`, `<p>${escapeHtml(ack).replace(/\n/g, "<br>")}</p>`, ack).catch(() => {});
+    const locale = req.user ? await localeOfUser(req.user.id) : localeFromHeader(req.headers["accept-language"]) ?? "en";
+    sendSupportAck(email, request.id, locale).catch(() => {});
 
     res.status(201).json({ ok: true, id: request.id, replyTo: email });
   } catch (e) { sendError(res, e); }

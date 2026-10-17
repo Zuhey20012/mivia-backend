@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -8,19 +7,25 @@ import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
 import '../core/connectivity.dart';
+import '../core/haptics.dart';
+import '../core/images.dart';
 import '../core/legal_links.dart';
 import '../core/strings.dart';
 import '../core/google_link_tile.dart';
 import '../core/delete_account_tile.dart';
 import '../services/socket_service.dart';
 import '../core/push_service.dart';
+import '../widgets/language_sheet.dart';
 import '../widgets/loading_states.dart';
+import '../widgets/setup_checklist.dart';
 import 'chatbot.dart';
 import 'drops_manager.dart';
 import 'import_products_screen.dart';
+import 'incoming_order_sheet.dart';
 import 'payouts_screen.dart';
 import 'pickup_code_sheet.dart';
 import 'product_editor.dart';
+import 'product_quick_edit.dart';
 import 'returns_manager.dart';
 import 'statements_screen.dart';
 import 'store_setup.dart';
@@ -57,6 +62,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       PushService.instance.refreshPermission();
     });
     VendorSocketService().addListener(_onSocket);
+    _returnsSub = VendorSocketService().returnsNew.listen(_onNewReturn);
     WidgetsBinding.instance.addObserver(this);
     // Safety net if the live connection drops: look for new orders every 30 s while open
     _poll = Timer.periodic(const Duration(seconds: 30), (_) => _loadOrders());
@@ -75,9 +81,11 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
   Timer? _poll;
   Timer? _tick;
   StreamSubscription<void>? _restored;
+  StreamSubscription<Map<String, dynamic>>? _returnsSub;
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
     if (state == AppLifecycleState.resumed) {
       _loadOrders();
       _loadReturns();
@@ -91,11 +99,14 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     _poll?.cancel();
     _tick?.cancel();
     _restored?.cancel();
+    _returnsSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     PushService.instance.stopRinging();
+    _waitingIds.dispose();
     VendorSocketService().removeListener(_onSocket);
     _tabs.dispose();
     _productSearch.dispose();
+    _searchDebounce?.cancel();
     super.dispose();
   }
 
@@ -123,13 +134,14 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       _loadNormalPrep();
       _loadImports();
       _loadReturns();
+      _loadProductPage(reset: true);
     }
     await _loadOrders();
   }
 
   // ── Open returns (badge on the Store tab) ───────────────────────────────
-  // Returns have no push of their own yet, so the count is refreshed on load, on resume and with
-  // pull to refresh.
+  // The count is refreshed on load, on resume, with pull to refresh and when the server announces a
+  // new return request (socket `return:new`; the store also gets a push).
 
   static const _openReturnStatuses = {'REQUESTED', 'APPROVED', 'IN_TRANSIT', 'RECEIVED'};
   int _openReturns = 0;
@@ -139,6 +151,46 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     if (!mounted || !res.ok) return;
     final open = ((res.data['returns'] as List?) ?? const []).whereType<Map>().where((r) => _openReturnStatuses.contains(r['status'])).length;
     if (open != _openReturns) setState(() => _openReturns = open);
+  }
+
+  void _onNewReturn(Map<String, dynamic> data) {
+    if (!mounted) return;
+    HapticFeedback.mediumImpact();
+    _loadReturns();
+    // The Returns screen refreshes itself when it is open
+    if (ReturnsManager.openCount > 0) return;
+    final orderId = data['orderId'] ?? (data['order'] is Map ? data['order']['id'] : null);
+    final messenger = ScaffoldMessenger.of(context)..hideCurrentMaterialBanner();
+    messenger.showMaterialBanner(MaterialBanner(
+      backgroundColor: AppTheme.sunshineLight,
+      leading: const Icon(Icons.assignment_return_outlined, color: Color(0xFF6A4500)),
+      content: Text(
+        orderId != null
+            ? tr(context, 'New return request for order #$orderId', 'Uusi palautuspyyntö tilaukselle #$orderId')
+            : tr(context, 'New return request', 'Uusi palautuspyyntö'),
+        style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.textPrimary),
+      ),
+      actions: [
+        TextButton(
+          style: TextButton.styleFrom(minimumSize: const Size(48, 48), foregroundColor: AppTheme.textSecondary),
+          onPressed: () => ScaffoldMessenger.of(context).hideCurrentMaterialBanner(),
+          child: Text(tr(context, 'Later', 'Myöhemmin')),
+        ),
+        TextButton(
+          style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+          onPressed: () {
+            ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+            _openReturnsScreen();
+          },
+          child: Text(tr(context, 'Open', 'Avaa')),
+        ),
+      ],
+    ));
+  }
+
+  Future<void> _openReturnsScreen() async {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => const ReturnsManager()));
+    if (mounted) _loadReturns();
   }
 
   Widget _countBadge(int n) => Container(
@@ -415,11 +467,36 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       _ordersError = null;
     });
     // Ring while any paid order is waiting for an answer; stop as soon as none is
-    final waiting = _orders.where((o) => o['status'] == 'PENDING' && o['paymentStatus'] == 'SUCCEEDED').length;
-    PushService.instance.ringNewOrders(waiting);
+    final waiting = _orders.where(_isWaiting).toList();
+    PushService.instance.ringNewOrders(waiting.length);
+    _waitingIds.value = waiting.map((o) => o['id'] as Object?).toSet();
+    _showNextIncoming();
   }
 
-  Future<void> _setStatus(Map<String, dynamic> order, String status) async {
+  // ── New-order moment ────────────────────────────────────────────────────
+  // Each paid order that waits for an answer is shown once as a full-screen sheet (while the app is
+  // on screen). Closing it ("answer later") keeps the alert ringing and the order on top of the list.
+
+  final _waitingIds = ValueNotifier<Set<Object?>>({});
+  final Set<Object?> _announced = {};
+  bool _showingIncoming = false;
+  bool _foreground = true;
+
+  Future<void> _showNextIncoming() async {
+    if (_showingIncoming || !_foreground || !mounted) return;
+    final next = _orders.where((o) => _isWaiting(o) && !_announced.contains(o['id'])).toList();
+    if (next.isEmpty) return;
+    final order = next.last; // the oldest first (the list is newest first)
+    _announced.add(order['id']);
+    _showingIncoming = true;
+    if (_tabs.index != 0) _tabs.animateTo(0);
+    await showIncomingOrder(context, order: order, waitingIds: _waitingIds, onAnswer: (status) => _setStatus(order, status));
+    _showingIncoming = false;
+    if (mounted) _showNextIncoming();
+  }
+
+  /// True when the server took the change (the incoming-order sheet closes then).
+  Future<bool> _setStatus(Map<String, dynamic> order, String status) async {
     if (status == 'CANCELLED') {
       final ok = await showDialog<bool>(
         context: context,
@@ -436,13 +513,21 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           ],
         ),
       );
-      if (ok != true) return;
+      if (ok != true) return false;
     }
-    HapticFeedback.mediumImpact();
+    Haptics.tap();
     final res = await _api.patch('/orders/${order['id']}/status', {'status': status});
-    if (!mounted) return;
-    if (!res.ok) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.errorMessage)));
+    if (!mounted) return res.ok;
+    if (!res.ok) {
+      Haptics.warning();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.errorMessage)));
+    } else if (status == 'CONFIRMED') {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(tr(context, 'Order #${order['id']} accepted', 'Tilaus #${order['id']} hyväksytty'))));
+    }
     _loadOrders();
+    return res.ok;
   }
 
   static const _red = Color(0xFFD93025);
@@ -450,6 +535,13 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
   // ── "Can't fulfil": cancel an accepted order with a full refund ─────────
   // The API lets the store cancel CONFIRMED and PROCESSING orders (not once the courier has it);
   // cancelOrderInternal restocks and refunds the whole payment.
+
+  /// What the customer reads as the reason (≤ 200 characters, "Finnish / English").
+  static const _customerReasons = {
+    'DAMAGED': 'Kauppa peruutti tilauksen: tuote on vaurioitunut. / The store cancelled the order: the item is damaged.',
+    'OUT_OF_STOCK': 'Kauppa peruutti tilauksen: tuote on loppunut. / The store cancelled the order: the item is out of stock.',
+    'OTHER': 'Kauppa ei pysty toimittamaan tilausta. / The store cannot fulfil the order.',
+  };
 
   bool _canCancelAccepted(Map<String, dynamic> o) => ['CONFIRMED', 'PROCESSING'].contains(o['status']) && !_isCollected(o);
 
@@ -500,8 +592,9 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     );
     if (ok != true || !mounted) return;
     HapticFeedback.mediumImpact();
-    // `reason` is sent for the server's records; servers that do not store it yet ignore it
-    final res = await _api.patch('/orders/${o['id']}/status', {'status': 'CANCELLED', 'reason': reason});
+    // The server stores `reason` as the cancel reason and shows it to the customer, whose language the
+    // store does not know, so it is written in Finnish and English (servers before 2.10 ignore it)
+    final res = await _api.patch('/orders/${o['id']}/status', {'status': 'CANCELLED', 'reason': _customerReasons[reason] ?? _customerReasons['OTHER']!});
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(res.ok
@@ -509,6 +602,167 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           : res.errorMessage),
     ));
     _loadOrders();
+  }
+
+  // ── Setup checklist ────────────────────────────────────────────────────
+
+  /// Products the store has: /stores/my's list (newest 100), or the paged list's total when it was
+  /// loaded without a search or filter. Null until the store is known.
+  int? get _productCount {
+    final embedded = (_store?['products'] as List?)?.length;
+    final pagedAll = _paged == true && _pageItemsKey == 'all|' ? _pageTotal : null;
+    if (embedded == null) return pagedAll;
+    return pagedAll != null && pagedAll > embedded ? pagedAll : embedded;
+  }
+
+  Future<void> _openSetupStep(SetupStep step) async {
+    switch (step) {
+      case SetupStep.details:
+      case SetupStep.pin:
+        // The store details screen holds the address, the map pin, the description and the logo
+        await Navigator.push(context, MaterialPageRoute(builder: (_) => const StoreSetupScreen()));
+        if (mounted) _load();
+      case SetupStep.hours:
+        final id = asInt(_store?['id']);
+        if (id == null) return;
+        final saved = await Navigator.push<bool>(context, MaterialPageRoute(
+            builder: (_) => OpeningHoursScreen(storeId: id, initial: (_store?['openingHours'] as Map?)?.cast<String, dynamic>())));
+        if (saved == true && mounted) _load();
+      case SetupStep.payouts:
+        await Navigator.push(context, MaterialPageRoute(builder: (_) => PayoutsScreen(commissionRate: _store?['commissionRate'] as num?)));
+        // Stripe's status is saved on the store when the payouts screen checks it
+        if (mounted) _load();
+      case SetupStep.product:
+        await _editProduct();
+      case SetupStep.tax:
+        await _openTaxInfo();
+      case SetupStep.approval:
+        break;
+    }
+  }
+
+  // ── Today ──────────────────────────────────────────────────────────────
+  // Worked out from the order list the server sent (its latest 200 orders): paid orders placed
+  // today, their item totals, and how many need the store right now. Nothing is estimated.
+
+  Widget _todayHeader() {
+    final now = DateTime.now();
+    bool isToday(Map o) {
+      final d = DateTime.tryParse('${o['paidAt'] ?? o['createdAt'] ?? ''}')?.toLocal();
+      return d != null && d.year == now.year && d.month == now.month && d.day == now.day;
+    }
+
+    final today = _orders.where((o) => o['paymentStatus'] == 'SUCCEEDED' && o['status'] != 'CANCELLED' && isToday(o)).toList();
+    final sales = today.fold<int>(0, (s, o) => s + (asInt(o['subtotalCents']) ?? 0));
+    // Waiting for the store: new paid orders to answer, accepted orders to pack or get ready
+    final needYou = _orders.where((o) => _isWaiting(o) || o['status'] == 'CONFIRMED').length;
+    Widget tile(String label, String value, {bool highlight = false}) => Expanded(
+          child: Semantics(
+            label: '$label: $value',
+            excludeSemantics: true,
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              decoration: BoxDecoration(
+                color: highlight ? AppTheme.sunshine : Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: highlight ? null : Border.all(color: AppTheme.divider),
+              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(label, maxLines: 2, style: const TextStyle(fontSize: 12, color: AppTheme.textPrimary, fontWeight: FontWeight.w600, height: 1.2)),
+                const SizedBox(height: 4),
+                FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(value, style: AppTheme.display(size: 22))),
+              ]),
+            ),
+          ),
+        );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: IntrinsicHeight(
+        child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          tile(tr(context, 'Orders today', 'Tilauksia tänään'), '${today.length}'),
+          const SizedBox(width: 8),
+          tile(tr(context, 'Sales today', 'Myynti tänään'), euro(context, sales)),
+          const SizedBox(width: 8),
+          tile(tr(context, 'Waiting for you', 'Odottaa sinua'), '$needYou', highlight: needYou > 0),
+        ]),
+      ),
+    );
+  }
+
+  // ── Quick edit and undo ────────────────────────────────────────────────
+
+  /// Every copy of a product the dashboard shows (the paged list and /stores/my's list).
+  List<Map> _copiesOf(Object? id) => [
+        ...((_store?['products'] as List?) ?? []).whereType<Map>().where((x) => x['id'] == id),
+        ..._pageItems.where((x) => x['id'] == id),
+      ];
+
+  Future<void> _quickEdit(Map<String, dynamic> p) async {
+    Haptics.select();
+    final result = await showProductQuickEdit(context, product: p, api: _api);
+    if (!mounted || result == null) return;
+    switch (result) {
+      case QuickEditOpenEditor():
+        await _editProduct(p);
+      case QuickEditRemove():
+        await _removeWithUndo(p);
+      case QuickEditSaved(:final product, :final sent):
+        setState(() {
+          for (final t in _copiesOf(p['id'])) {
+            t.addAll(product ?? sent);
+          }
+        });
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text(tr(context, '${p['name']} saved', '${p['name']} tallennettu')), duration: const Duration(seconds: 2)));
+    }
+  }
+
+  /// Takes the product out of the list at once and removes it on the server only when the
+  /// snackbar closes without "Undo", so a slip of the finger costs nothing.
+  Future<void> _removeWithUndo(Map<String, dynamic> p) async {
+    final id = p['id'];
+    // Taken now: the screen may be gone when the undo time is over
+    final api = _api;
+    final storeList = _store?['products'] as List?;
+    final storeIndex = storeList?.indexWhere((x) => x is Map && x['id'] == id) ?? -1;
+    final pageIndex = _pageItems.indexWhere((x) => x['id'] == id);
+    final storeCopy = storeIndex >= 0 ? storeList![storeIndex] : null;
+    final pageCopy = pageIndex >= 0 ? _pageItems[pageIndex] : null;
+    Haptics.tap();
+    setState(() {
+      if (storeIndex >= 0) storeList!.removeAt(storeIndex);
+      if (pageIndex >= 0) {
+        _pageItems.removeAt(pageIndex);
+        if (_pageTotal > 0) _pageTotal--;
+      }
+    });
+    void restore() {
+      if (!mounted) return;
+      setState(() {
+        if (storeCopy != null) storeList!.insert(storeIndex.clamp(0, storeList.length), storeCopy);
+        if (pageCopy != null) {
+          _pageItems.insert(pageIndex.clamp(0, _pageItems.length), pageCopy);
+          _pageTotal++;
+        }
+      });
+    }
+
+    final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
+    final removed = tr(context, '${p['name']} removed', '${p['name']} poistettu');
+    final undo = tr(context, 'Undo', 'Kumoa');
+    final reason = await messenger
+        .showSnackBar(SnackBar(content: Text(removed), duration: const Duration(seconds: 5), action: SnackBarAction(label: undo, onPressed: () {})))
+        .closed;
+    if (reason == SnackBarClosedReason.action) {
+      Haptics.select();
+      restore();
+      return;
+    }
+    final res = await api.delete('/products/$id');
+    if (res.ok) return;
+    restore();
+    messenger.showSnackBar(SnackBar(content: Text(res.errorMessage)));
   }
 
   Future<void> _editProduct([Map<String, dynamic>? p]) async {
@@ -533,7 +787,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           CircleAvatar(
             radius: 22,
             backgroundColor: AppTheme.primaryLight,
-            backgroundImage: _store?['logoUrl'] != null ? CachedNetworkImageProvider(_store!['logoUrl']) : null,
+            backgroundImage: _store?['logoUrl'] != null ? netImageProvider(context, '${_store!['logoUrl']}', size: 44) : null,
             child: _store?['logoUrl'] == null ? const Icon(Icons.storefront_outlined, color: AppTheme.primary, size: 20) : null,
           ),
           const SizedBox(width: 10),
@@ -635,7 +889,8 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
   }
 
   Widget _ordersTab() {
-    final active = _orders.where((o) => ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED'].contains(o['status'])).toList();
+    // Orders the courier is bringing back stay on top for a while, so the store expects them at the counter
+    final active = _orders.where((o) => ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED'].contains(o['status']) || _isBringingBack(o)).toList();
     final done = _orders.where((o) => !active.contains(o)).take(30).toList();
     return RefreshIndicator(
       onRefresh: () => Future.wait([_loadOrders(), _loadReturns(), PushService.instance.refreshPermission()]),
@@ -644,8 +899,12 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
         padding: const EdgeInsets.all(16),
         children: [
           _notificationsOffBar(),
+          if (_store != null)
+            SetupChecklist(store: _store!, productCount: _productCount, onOpen: _openSetupStep),
           _availabilityCard(),
-          _taxInfoBanner(),
+          if (_ordersLoaded) _todayHeader(),
+          // The checklist already lists the tax step while it is shown
+          if (_store == null || SetupChecklist.isComplete(_store!, _productCount)) _taxInfoBanner(),
           // First load: placeholders, or what went wrong. Later failures keep the list and show a strip.
           if (!_ordersLoaded && _ordersError != null) ErrorState(message: _ordersError, onRetry: _retryOrders, top: 24),
           if (!_ordersLoaded && _ordersError == null) ...[for (var i = 0; i < 3; i++) SkeletonCard(lines: 4, button: i == 0)],
@@ -851,6 +1110,91 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
         ]),
       );
 
+  // ── Courier cannot deliver (API 2.10: deliveryProblemAt / return-to-store) ────
+  // The courier reports a problem at the door (the customer gets a push to answer in the chat). After
+  // 10 minutes the courier may bring the order back; the server then cancels it with the reason
+  // "Customer could not be reached". Older servers send neither field.
+
+  static final _notReachedReason = RegExp(r'could not be reached|ei tavoitettu|ei saatu kiinni', caseSensitive: false);
+
+  bool _notDeliveredCustomerAway(Map<String, dynamic> o) =>
+      o['status'] == 'CANCELLED' && (o['deliveryProblemAt'] != null || _notReachedReason.hasMatch('${o['cancelReason'] ?? ''}'));
+
+  /// Cancelled because the customer could not be reached, within the last 3 hours: the courier is
+  /// probably on the way back with the items.
+  bool _isBringingBack(Map<String, dynamic> o) {
+    if (!_notDeliveredCustomerAway(o)) return false;
+    final at = DateTime.tryParse('${o['cancelledAt'] ?? o['updatedAt'] ?? ''}')?.toLocal();
+    return at != null && DateTime.now().difference(at) < const Duration(hours: 3);
+  }
+
+  String _problemReason(Map<String, dynamic> o) => switch ('${o['deliveryProblemReason'] ?? ''}') {
+        'CUSTOMER_UNAVAILABLE' => tr(context, 'The customer is not answering.', 'Asiakas ei vastaa.'),
+        'WRONG_ADDRESS' => tr(context, 'The address seems to be wrong.', 'Osoite näyttää olevan väärä.'),
+        'OTHER' => tr(context, 'Another problem at the address.', 'Muu ongelma osoitteessa.'),
+        _ => '',
+      };
+
+  Widget? _deliveryProblemNote(Map<String, dynamic> o) {
+    final problemAt = DateTime.tryParse('${o['deliveryProblemAt'] ?? ''}')?.toLocal();
+    if (o['status'] == 'SHIPPED' && problemAt != null) {
+      final returnFrom = problemAt.add(const Duration(minutes: 10));
+      final reason = _problemReason(o);
+      return _problemBox(
+        icon: Icons.report_problem_rounded,
+        bg: const Color(0xFFFDECEA),
+        fg: _red,
+        title: tr(context, "The courier can't reach the customer", 'Kuriiri ei tavoita asiakasta'),
+        body: [
+          if (reason.isNotEmpty) reason,
+          tr(context,
+              'The customer has been asked to answer in the chat. If they cannot be reached, the courier may bring the order back to your shop from ${_hhmm(returnFrom)}.',
+              'Asiakasta on pyydetty vastaamaan chatissa. Jos asiakasta ei tavoiteta, kuriiri voi tuoda tilauksen takaisin kauppaasi klo ${_hhmm(returnFrom)} alkaen.'),
+        ].join(' '),
+      );
+    }
+    if (_isBringingBack(o)) {
+      return _problemBox(
+        icon: Icons.keyboard_return_rounded,
+        bg: AppTheme.sunshine,
+        fg: AppTheme.textPrimary,
+        title: tr(context, 'Courier is bringing order #${o['id']} back', 'Kuriiri tuo tilauksen #${o['id']} takaisin'),
+        body: tr(context,
+            'The customer could not be reached, so the order was cancelled. Take the items back from the courier at the counter and check them.',
+            'Asiakasta ei tavoitettu, joten tilaus peruttiin. Ota tuotteet kuriirilta vastaan tiskillä ja tarkista ne.'),
+      );
+    }
+    if (_notDeliveredCustomerAway(o)) {
+      return _problemBox(
+        icon: Icons.keyboard_return_rounded,
+        bg: AppTheme.sand,
+        fg: AppTheme.textSecondary,
+        title: tr(context, 'Not delivered: the customer could not be reached', 'Ei toimitettu: asiakasta ei tavoitettu'),
+      );
+    }
+    return null;
+  }
+
+  Widget _problemBox({required IconData icon, required Color bg, required Color fg, required String title, String? body}) => Container(
+        margin: const EdgeInsets.only(top: 10),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(14)),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(icon, size: 20, color: fg),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(title, style: TextStyle(fontWeight: FontWeight.w800, color: fg)),
+              if (body != null && body.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(body, style: TextStyle(fontSize: 12.5, color: fg, height: 1.35)),
+                ),
+            ]),
+          ),
+        ]),
+      );
+
   String _hhmm(DateTime d) => '${d.hour.toString().padLeft(2, '0')}.${d.minute.toString().padLeft(2, '0')}';
 
   Widget _orderCard(Map<String, dynamic> o, {bool earlier = false}) {
@@ -874,6 +1218,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           AppTheme.textSecondary
         ),
       'DELIVERED' => (tr(context, 'Delivered', 'Toimitettu'), AppTheme.sand, AppTheme.textSecondary),
+      _ when _isBringingBack(o) => (tr(context, 'Cancelled — coming back to the shop', 'Peruttu — palautuu kauppaan'), AppTheme.sunshine, AppTheme.textPrimary),
       _ => (tr(context, 'Cancelled / refunded', 'Peruttu / hyvitetty'), AppTheme.sand, AppTheme.textSecondary),
     };
     return Container(
@@ -931,6 +1276,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             ),
           ]),
           if (_isWaiting(o)) _waitingNote(o),
+          if (_deliveryProblemNote(o) case final note?) note,
           if (courierArrived != null && !pickup && ['CONFIRMED', 'PROCESSING'].contains(status)) _courierAtCounter(o, courierArrived),
           const Divider(height: 20),
           for (final i in items) _itemLine(i as Map),
@@ -1001,23 +1347,36 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
   /// back if the server refuses.
   Future<void> _setProductAvailable(Map<String, dynamic> p, bool value) async {
     final id = p['id'];
-    final stored = ((_store?['products'] as List?) ?? []).whereType<Map>().where((x) => x['id'] == id).firstOrNull;
-    if (stored == null || _savingProducts.contains(id)) return;
+    // The same product may be in the paged list and in the /stores/my list
+    final targets = <Map>[
+      ...((_store?['products'] as List?) ?? []).whereType<Map>().where((x) => x['id'] == id),
+      ..._pageItems.where((x) => x['id'] == id),
+    ];
+    if (targets.isEmpty || _savingProducts.contains(id)) return;
     HapticFeedback.selectionClick();
-    final before = stored['isAvailable'] != false;
+    final before = targets.first['isAvailable'] != false;
     final wasDraft = _isDraft(p);
     setState(() {
-      stored['isAvailable'] = value;
+      for (final t in targets) {
+        t['isAvailable'] = value;
+      }
       _savingProducts.add(id);
     });
     final res = await _api.patch('/products/$id', {'isAvailable': value});
     if (!mounted) return;
     setState(() {
       _savingProducts.remove(id);
-      if (!res.ok) stored['isAvailable'] = before;
+      if (!res.ok) {
+        for (final t in targets) {
+          t['isAvailable'] = before;
+        }
+      }
     });
     final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
+    if (!res.ok) Haptics.warning();
     messenger.showSnackBar(SnackBar(
+      // Hiding is one tap away from a mistake: offer to put it straight back
+      action: res.ok && !value ? SnackBarAction(label: tr(context, 'Undo', 'Kumoa'), onPressed: () => _setProductAvailable(p, true)) : null,
       content: Text(!res.ok
           ? (res.error ?? tr(context, 'Could not change it', 'Muutos epäonnistui'))
           : value && wasDraft
@@ -1025,7 +1384,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           : value
               ? tr(context, '${p['name']} is available again', '${p['name']} on taas saatavilla')
               : tr(context, '${p['name']} is sold out and hidden from shoppers', '${p['name']} on loppu ja piilotettu asiakkailta')),
-      duration: const Duration(seconds: 2),
+      duration: Duration(seconds: res.ok && !value ? 4 : 2),
     ));
   }
 
@@ -1049,10 +1408,99 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     return p['salePriceCents'] == null || ((p['images'] as List?) ?? const []).isEmpty;
   }
 
-  // Search and filters work on the list /stores/my returns (all of the store's products; paging would need
-  // a paged product endpoint for owners).
+  // Products tab. From API 2.10 it pages through GET /stores/my/products (30 at a time, more while
+  // scrolling) and the server searches and filters. Older servers answer 404: then search and filters
+  // work on the products embedded in /stores/my, as before.
   final _productSearch = TextEditingController();
   String _productFilter = 'all';
+  Timer? _searchDebounce;
+
+  /// null = not known yet (the /stores/my list is shown meanwhile), false = older server.
+  bool? _paged;
+  final List<Map<String, dynamic>> _pageItems = [];
+  int _pageTotal = 0;
+  int _page = 0;
+  bool _pageLoading = false;
+  bool _pageHasMore = false;
+  String? _pageError;
+  int _pageGeneration = 0;
+  static const _pageSize = 30;
+
+  /// The search and filter the listed products were loaded for.
+  String _pageItemsKey = '';
+  String get _pageQueryKey => '$_productFilter|${_productSearch.text.trim()}';
+
+  Future<void> _loadProductPage({bool reset = false}) async {
+    if (_paged == false) return;
+    if (!reset && (_pageLoading || !_pageHasMore)) return;
+    final generation = reset ? ++_pageGeneration : _pageGeneration;
+    final page = reset ? 1 : _page + 1;
+    final q = _productSearch.text.trim();
+    final key = _pageQueryKey;
+    setState(() => _pageLoading = true);
+    final res = await _api.get('/stores/my/products', query: {
+      'page': '$page',
+      'limit': '$_pageSize',
+      'filter': _productFilter,
+      if (q.isNotEmpty) 'q': q,
+    });
+    // A newer search or filter has started meanwhile
+    if (!mounted || generation != _pageGeneration) return;
+    if (res.status == 404) {
+      setState(() {
+        _paged = false;
+        _pageLoading = false;
+        _pageItems.clear();
+      });
+      return;
+    }
+    if (!res.ok || res.data['products'] is! List) {
+      setState(() {
+        _pageLoading = false;
+        _pageError = res.errorMessage;
+        // Never show the products of the previous search under the new one
+        if (key != _pageItemsKey) {
+          _pageItems.clear();
+          _pageTotal = 0;
+          _pageHasMore = false;
+        }
+      });
+      return;
+    }
+    final items = (res.data['products'] as List).whereType<Map>().map((p) => Map<String, dynamic>.from(p)).toList();
+    setState(() {
+      _paged = true;
+      if (reset) _pageItems.clear();
+      final seen = _pageItems.map((p) => p['id']).toSet();
+      _pageItems.addAll(items.where((p) => seen.add(p['id'])));
+      _page = page;
+      _pageTotal = asInt(res.data['total']) ?? _pageItems.length;
+      _pageHasMore = items.isNotEmpty && _pageItems.length < _pageTotal;
+      _pageLoading = false;
+      _pageError = null;
+      _pageItemsKey = key;
+    });
+  }
+
+  void _retryProductPage() {
+    HapticFeedback.selectionClick();
+    setState(() => _pageError = null);
+    _loadProductPage(reset: _pageItems.isEmpty || _pageItemsKey != _pageQueryKey);
+  }
+
+  /// New search text or filter: the server is asked again (after a short pause while typing).
+  void _productQueryChanged({bool debounce = false}) {
+    setState(() {});
+    if (_paged == false) return;
+    _searchDebounce?.cancel();
+    if (debounce) {
+      _searchDebounce = Timer(const Duration(milliseconds: 350), () {
+        if (mounted) _loadProductPage(reset: true);
+      });
+    } else {
+      _loadProductPage(reset: true);
+    }
+  }
 
   int _stockOf(Map p) {
     final variants = (p['variants'] as List?) ?? const [];
@@ -1070,7 +1518,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     };
   }
 
-  Widget _productFilters(int shown, int total) {
+  Widget _productFilters(String? countText) {
     final filters = {
       'all': tr(context, 'All', 'Kaikki'),
       'visible': tr(context, 'Visible', 'Näkyvillä'),
@@ -1081,7 +1529,8 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       TextField(
         controller: _productSearch,
         textInputAction: TextInputAction.search,
-        onChanged: (_) => setState(() {}),
+        onChanged: (_) => _productQueryChanged(debounce: true),
+        onSubmitted: (_) => _productQueryChanged(),
         decoration: InputDecoration(
           hintText: tr(context, 'Search your products', 'Hae tuotteistasi'),
           prefixIcon: const Icon(Icons.search_rounded),
@@ -1090,7 +1539,10 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
               : IconButton(
                   tooltip: tr(context, 'Clear', 'Tyhjennä'),
                   icon: const Icon(Icons.close_rounded),
-                  onPressed: () => setState(_productSearch.clear),
+                  onPressed: () {
+                    _productSearch.clear();
+                    _productQueryChanged();
+                  },
                 ),
         ),
       ),
@@ -1102,24 +1554,24 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             selected: _productFilter == f.key,
             showCheckmark: false,
             materialTapTargetSize: MaterialTapTargetSize.padded,
-            onSelected: (_) => setState(() => _productFilter = f.key),
+            onSelected: (_) {
+              if (_productFilter == f.key) return;
+              _productFilter = f.key;
+              _productQueryChanged();
+            },
           ),
       ]),
-      if (shown != total)
+      if (countText != null)
         Padding(
           padding: const EdgeInsets.only(top: 6, left: 4),
-          child: Text(tr(context, '$shown of $total products', '$shown/$total tuotetta'), style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary)),
+          child: Text(countText, style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary)),
         ),
       const SizedBox(height: 6),
     ]);
   }
 
-  Widget _productsTab() {
-    final all = ((_store?['products'] as List?) ?? []).whereType<Map>().map((p) => Map<String, dynamic>.from(p)).toList();
-    final products = all.where(_matchesFilter).toList();
-    if (all.isEmpty) {
-      // Pull to refresh works here too (e.g. after importing on another phone)
-      return RefreshIndicator(
+  Widget _productsEmpty() => RefreshIndicator(
+        // Pull to refresh works here too (e.g. after importing on another phone)
         onRefresh: _load,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -1154,92 +1606,128 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           ],
         ),
       );
-    }
+
+  Widget _productsTab() {
+    final paged = _paged == true;
+    final embedded = ((_store?['products'] as List?) ?? []).whereType<Map>().map((p) => Map<String, dynamic>.from(p)).toList();
+    final products = paged ? _pageItems : embedded.where(_matchesFilter).toList();
+    final narrowed = _productSearch.text.trim().isNotEmpty || _productFilter != 'all';
+    final storeHasNone = paged ? (_pageItems.isEmpty && _pageTotal == 0 && !narrowed && !_pageLoading && _pageError == null) : embedded.isEmpty;
+    if (storeHasNone) return _productsEmpty();
+
+    final countText = paged
+        ? (narrowed ? tr(context, '$_pageTotal products', '$_pageTotal tuotetta') : null)
+        : (products.length != embedded.length ? tr(context, '${products.length} of ${embedded.length} products', '${products.length}/${embedded.length} tuotetta') : null);
+    final footer = paged && (_pageHasMore || _pageLoading || _pageError != null);
+    final noMatch = products.isEmpty && !(paged && (_pageLoading || _pageError != null));
+    final count = 1 + products.length + (noMatch ? 1 : 0) + (footer ? 1 : 0);
+
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView.separated(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-        itemCount: products.length + 1 + (products.isEmpty ? 1 : 0),
+        itemCount: count,
         separatorBuilder: (_, __) => const SizedBox(height: 10),
         itemBuilder: (_, index) {
-          if (index == 0) return _productFilters(products.length, all.length);
-          if (products.isEmpty) {
+          if (index == 0) return _productFilters(countText);
+          final i = index - 1;
+          if (i < products.length) {
+            // Close to the end: fetch the next page
+            if (paged && _pageHasMore && !_pageLoading && _pageError == null && i >= products.length - 5) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) _loadProductPage();
+              });
+            }
+            return _productTile(products[i]);
+          }
+          if (noMatch) {
             return Padding(
               padding: const EdgeInsets.symmetric(vertical: 32),
               child: Text(tr(context, 'No products match.', 'Ei osuvia tuotteita.'), textAlign: TextAlign.center, style: const TextStyle(color: AppTheme.textSecondary)),
             );
           }
-          final p = products[index - 1];
-          final images = ((p['images'] as List?) ?? const []).map((e) => '$e').toList();
-          final variants = (p['variants'] as List?) ?? [];
-          final stock = _stockOf(p);
-          final available = p['isAvailable'] != false;
-          final draft = _isDraft(p);
-          final noPrice = p['salePriceCents'] == null;
-          final saving = _savingProducts.contains(p['id']);
-          return InkWell(
-            onTap: () => _editProduct(p),
-            borderRadius: BorderRadius.circular(16),
-            child: Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.divider)),
-              child: Row(children: [
-                Opacity(
-                  opacity: available ? 1 : 0.45,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: SizedBox(
-                      width: 64,
-                      height: 78,
-                      child: images.isEmpty ? Container(color: AppTheme.primaryLight, child: const Icon(Icons.image_outlined, color: AppTheme.primary)) : CachedNetworkImage(imageUrl: images.first, fit: BoxFit.cover, placeholder: (_, __) => const Shimmering(child: SkeletonBox(height: double.infinity, radius: 0))),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    if (draft)
-                      Container(
-                        margin: const EdgeInsets.only(bottom: 4),
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(8)),
-                        child: Text(tr(context, 'Draft — not published yet', 'Luonnos — ei vielä julkaistu'),
-                            style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: Color(0xFF6A4500))),
-                      ),
-                    Text(p['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w700)),
-                    Text(noPrice ? tr(context, 'No price yet', 'Ei vielä hintaa') : euro(context, p['salePriceCents']),
-                        style: TextStyle(fontWeight: FontWeight.w600, color: noPrice ? AppTheme.accent : AppTheme.textPrimary)),
-                    Text(
-                      [
-                        stock == 0 ? tr(context, 'Out of stock', 'Ei varastossa') : '$stock ${tr(context, 'in stock', 'varastossa')}',
-                        if (variants.isNotEmpty) '${variants.length} ${tr(context, 'options', 'vaihtoehtoa')}',
-                        if (images.isEmpty) tr(context, 'No photo', 'Ei kuvaa'),
-                      ].join(' · '),
-                      style: TextStyle(fontSize: 12.5, color: stock == 0 || images.isEmpty ? AppTheme.accent : AppTheme.textSecondary),
-                    ),
-                  ]),
-                ),
-                const SizedBox(width: 6),
-                // Wolt-style quick switch: off = sold out, hidden from shoppers until switched back on
-                Column(mainAxisSize: MainAxisSize.min, children: [
-                  Semantics(
-                    label: tr(context, 'Available to shoppers', 'Saatavilla asiakkaille'),
-                    child: Switch(value: available, onChanged: saving ? null : (v) => _setProductAvailable(p, v)),
-                  ),
-                  Text(
-                    available
-                        ? tr(context, 'Available', 'Saatavilla')
-                        : draft
-                            ? tr(context, 'Hidden', 'Piilossa')
-                            : tr(context, 'Sold out', 'Loppu'),
-                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: available ? AppTheme.primary : draft ? const Color(0xFF6A4500) : AppTheme.accent),
-                  ),
-                ]),
-              ]),
-            ),
+          if (_pageError != null) return ErrorBanner(message: _pageError!, onRetry: _retryProductPage);
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 20),
+            child: Center(child: SizedBox(width: 26, height: 26, child: CircularProgressIndicator(strokeWidth: 2.5))),
           );
         },
+      ),
+    );
+  }
+
+  Widget _productTile(Map<String, dynamic> p) {
+    final images = ((p['images'] as List?) ?? const []).map((e) => '$e').toList();
+    final variants = (p['variants'] as List?) ?? [];
+    final stock = _stockOf(p);
+    final available = p['isAvailable'] != false;
+    final draft = _isDraft(p);
+    final noPrice = p['salePriceCents'] == null;
+    final saving = _savingProducts.contains(p['id']);
+    return InkWell(
+      // Tap: price, stock and visibility in a sheet. Long press: the full editor.
+      onTap: () => _quickEdit(p),
+      onLongPress: () => _editProduct(p),
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.divider)),
+        child: Row(children: [
+          Opacity(
+            opacity: available ? 1 : 0.45,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: SizedBox(
+                width: 64,
+                height: 78,
+                child: images.isEmpty
+                    ? Container(color: AppTheme.primaryLight, child: const Icon(Icons.image_outlined, color: AppTheme.primary))
+                    : NetImage(images.first, width: 64, height: 78),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              if (draft)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(8)),
+                  child: Text(tr(context, 'Draft — not published yet', 'Luonnos — ei vielä julkaistu'),
+                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: Color(0xFF6A4500))),
+                ),
+              Text(p['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w700)),
+              Text(noPrice ? tr(context, 'No price yet', 'Ei vielä hintaa') : euro(context, p['salePriceCents']),
+                  style: TextStyle(fontWeight: FontWeight.w600, color: noPrice ? AppTheme.accent : AppTheme.textPrimary)),
+              Text(
+                [
+                  stock == 0 ? tr(context, 'Out of stock', 'Ei varastossa') : '$stock ${tr(context, 'in stock', 'varastossa')}',
+                  if (variants.isNotEmpty) '${variants.length} ${tr(context, 'options', 'vaihtoehtoa')}',
+                  if (images.isEmpty) tr(context, 'No photo', 'Ei kuvaa'),
+                ].join(' · '),
+                style: TextStyle(fontSize: 12.5, color: stock == 0 || images.isEmpty ? AppTheme.accent : AppTheme.textSecondary),
+              ),
+            ]),
+          ),
+          const SizedBox(width: 6),
+          // Wolt-style quick switch: off = sold out, hidden from shoppers until switched back on
+          Column(mainAxisSize: MainAxisSize.min, children: [
+            Semantics(
+              label: tr(context, 'Available to shoppers', 'Saatavilla asiakkaille'),
+              child: Switch(value: available, onChanged: saving ? null : (v) => _setProductAvailable(p, v)),
+            ),
+            Text(
+              available
+                  ? tr(context, 'Available', 'Saatavilla')
+                  : draft
+                      ? tr(context, 'Hidden', 'Piilossa')
+                      : tr(context, 'Sold out', 'Loppu'),
+              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: available ? AppTheme.primary : draft ? const Color(0xFF6A4500) : AppTheme.accent),
+            ),
+          ]),
+        ]),
       ),
     );
   }
@@ -1289,10 +1777,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
               _openReturns > 0
                   ? tr(context, '$_openReturns open — answer them in the app', '$_openReturns avointa — käsittele ne sovelluksessa')
                   : tr(context, 'Approve and refund returns', 'Hyväksy ja hyvitä palautukset'),
-              () async {
-                await Navigator.push(context, MaterialPageRoute(builder: (_) => const ReturnsManager()));
-                if (mounted) _loadReturns();
-              },
+              _openReturnsScreen,
               badge: _openReturns > 0 ? _countBadge(_openReturns) : null,
             ),
             const Divider(height: 1),
@@ -1324,6 +1809,9 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
               await Navigator.push(context, MaterialPageRoute(builder: (_) => const StoreSetupScreen()));
               _load();
             }),
+            const Divider(height: 1),
+            tile(Icons.language_rounded, tr(context, 'Language', 'Kieli'),
+                tr(context, 'English — also for your notifications and emails', 'Suomi — myös ilmoituksissa ja sähköposteissa'), () => showLanguageSheet(context)),
             const Divider(height: 1),
             const GoogleLinkTile(leading: CircleAvatar(backgroundColor: AppTheme.primaryLight, child: Icon(Icons.link_rounded, color: AppTheme.primary))),
             const Divider(height: 1),

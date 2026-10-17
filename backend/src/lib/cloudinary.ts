@@ -184,3 +184,18 @@ export async function uploadRemoteImage(remoteUrl: string, publicId: string): Pr
   if (json.public_id !== publicId) throw new Error("upload stored under an unexpected name");
   return { publicId: json.public_id, version: Number(json.version) || 0 };
 }
+
+/**
+ * Deletes every upload under a folder prefix (Admin API, max 1000 per call; repeated while Cloudinary says there
+ * is more). Used when an account is deleted: the store's product photos and videos, store pictures and drops.
+ */
+export async function deleteByPrefix(prefix: string, resourceType: ResourceType) {
+  if (!mediaConfigured()) return;
+  for (let round = 0; round < 10; round++) {
+    const url = `${API_BASE}/v1_1/${cloudName}/resources/${resourceType}/upload?prefix=${encodeURIComponent(prefix)}`;
+    const res = await fetch(url, { method: "DELETE", headers: { Authorization: adminAuthHeader() }, signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) throw new Error(`Cloudinary delete by prefix failed (${res.status})`);
+    const json = (await res.json().catch(() => ({}))) as { partial?: boolean };
+    if (!json.partial) return;
+  }
+}

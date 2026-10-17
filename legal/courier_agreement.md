@@ -48,6 +48,7 @@ Documents are checked through [VERIFICATION METHOD], not collected in the app.
 - Each completed delivery is paid to the Courier's own Stripe account right after delivery (Stripe Connect). Stripe verifies the Courier's identity and bank account on its own pages.
 - The Courier is responsible for their own taxes and insurance as an independent contractor.
 - Each job's final pay breakdown stays visible in the app. Malvoya provides a monthly statement of completed jobs and pay.
+- **Customer not reached.** If the Courier is at the delivery address and cannot reach the customer (or cannot find the address), the Courier reports it in the app ("Can't deliver?"). The customer is told at once and can answer in the order chat. If the customer has not been reached 10 minutes after the report, the Courier may take the order back to the store and hand the items over at the counter. The Courier is then paid as for a completed delivery: the job pay shown (including any ride-to-store and waiting pay) and the tip in full. The Courier must hand the items back; the store confirms in its app that it received them.
 
 ## 6. Location data
 

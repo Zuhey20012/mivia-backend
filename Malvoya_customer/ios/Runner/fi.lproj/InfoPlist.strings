@@ -1,0 +1,3 @@
+/* Purpose strings shown by iOS permission prompts (Finnish). Keep in sync with Info.plist. */
+"NSLocationWhenInUseUsageDescription" = "Malvoya käyttää sijaintiasi vain, kun napautat \"Käytä sijaintiani\", jotta toimituksen merkki asettuu kartalle.";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "Malvoya käyttää sijaintiasi vain sovellusta käyttäessäsi, kun napautat \"Käytä sijaintiani\". Sijaintiasi ei käytetä taustalla.";

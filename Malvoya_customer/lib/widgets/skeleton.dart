@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:shimmer/shimmer.dart';
 import '../config/theme.dart';
 import '../core/strings.dart';
+import 'empty_art.dart';
+import '../core/haptics.dart';
 
 /// Shimmering placeholder shapes shown while a screen loads, in the shape of what is coming
 /// (instead of a bare spinner). Children are painted with plain white boxes; the shimmer tints them.
@@ -161,14 +162,29 @@ class StateMessage extends StatelessWidget {
   final String message;
   final VoidCallback? onRetry;
   final String? actionLabel;
+  final IconData? actionIcon;
   final double top;
 
-  const StateMessage({super.key, required this.icon, required this.message, this.onRetry, this.actionLabel, this.top = 110});
+  /// A short heading above [message] (optional).
+  final String? title;
+
+  const StateMessage({
+    super.key,
+    required this.icon,
+    required this.message,
+    this.onRetry,
+    this.actionLabel,
+    this.actionIcon,
+    this.title,
+    this.top = 110,
+  });
 
   /// The standard error state with a retry button.
   const StateMessage.error({super.key, required this.message, required this.onRetry, this.top = 110})
       : icon = Icons.cloud_off_rounded,
-        actionLabel = null;
+        actionLabel = null,
+        actionIcon = null,
+        title = null;
 
   @override
   Widget build(BuildContext context) {
@@ -180,22 +196,30 @@ class StateMessage extends StatelessWidget {
           padding: EdgeInsets.fromLTRB(40, top, 40, 40),
           child: Column(
             children: [
-              Container(
-                width: 84,
-                height: 84,
-                decoration: BoxDecoration(color: AppTheme.pastel(context, AppTheme.lilac, AppTheme.primary), shape: BoxShape.circle),
-                child: Icon(icon, size: 38, color: AppTheme.isDarkMode(context) ? const Color(0xFFC9A3DD) : AppTheme.primary),
-              ),
+              if (EmptyArt.forIcon(icon) case final art?)
+                EmptyArt(art)
+              else
+                Container(
+                  width: 84,
+                  height: 84,
+                  decoration: BoxDecoration(color: AppTheme.pastel(context, AppTheme.lilac, AppTheme.primary), shape: BoxShape.circle),
+                  child: Icon(icon, size: 38, color: AppTheme.isDarkMode(context) ? const Color(0xFFC9A3DD) : AppTheme.primary),
+                ),
               const SizedBox(height: 16),
+              if (title != null) ...[
+                Text(title!, textAlign: TextAlign.center, style: AppTheme.display(context, size: 20)),
+                const SizedBox(height: 6),
+              ],
               Text(message, textAlign: TextAlign.center, style: TextStyle(color: muted, fontSize: 15, height: 1.4)),
               if (onRetry != null) ...[
                 const SizedBox(height: 18),
                 FilledButton.tonalIcon(
                   onPressed: () {
-                    HapticFeedback.selectionClick();
+                    Haptics.selection();
                     onRetry!();
                   },
-                  icon: const Icon(Icons.refresh_rounded, size: 20),
+                  // A plain retry shows the refresh arrow; a named next step shows its own icon (or none)
+                  icon: Icon(actionIcon ?? (actionLabel == null ? Icons.refresh_rounded : Icons.arrow_forward_rounded), size: 20),
                   label: Text(actionLabel ?? tr(context, 'Try again', 'Yritä uudelleen')),
                 ),
               ],

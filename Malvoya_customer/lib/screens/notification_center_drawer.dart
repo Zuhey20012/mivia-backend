@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
 import '../core/strings.dart';
 import 'order_detail.dart';
+import '../core/haptics.dart';
 
 /// Latest status of your orders. Only real events are listed — nothing is shown as "sent"
 /// unless Malvoya actually sent it.
@@ -13,7 +13,7 @@ class NotificationCenterDrawer extends StatefulWidget {
   const NotificationCenterDrawer({super.key});
 
   static void show(BuildContext context) {
-    HapticFeedback.mediumImpact();
+    Haptics.selection();
     showModalBottomSheet(
       showDragHandle: false,
       context: context,

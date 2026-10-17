@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1024">
+<title>Malvoya feature graphic</title>
+<!--
+  Google Play feature graphic, 1024 x 500. Brief: docs/play-store-listing.md.
+  Parameters: ?app=customer|store|courier&lang=en|fi[&shot=customer/screens/drops.png]
+  Without `shot`, the phone shows the app's real launch screen. With `shot`, it shows a real screenshot
+  you took yourself (path relative to this file). Render with the script described in
+  screenshot-kit/README.md, or open in a browser and take a 1024 x 500 screenshot of the frame.
+-->
+<link rel="stylesheet" href="shared/fonts.css">
+<script src="shared/brand.js"></script>
+<style>
+  html, body { margin: 0; background: #F6F3EE; }
+  #fg { position: relative; width: 1024px; height: 500px; overflow: hidden; background: #F6F3EE; font-family: 'Hanken Grotesk', sans-serif; color: #1C1820; }
+  .blob { position: absolute; }
+  .left { position: absolute; left: 92px; top: 0; height: 500px; width: 520px; display: flex; flex-direction: column; justify-content: center; }
+  .tile { width: 96px; height: 96px; border-radius: 24px; display: grid; place-items: center; }
+  .tile svg { width: 62px; height: 62px; }
+  .word { font-family: 'Bricolage Grotesque', sans-serif; font-weight: 700; font-size: 58px; letter-spacing: -1.2px; line-height: 1; margin-top: 26px; white-space: nowrap; }
+  .tag { font-weight: 500; font-size: 26px; line-height: 1.25; color: #6B6472; margin-top: 14px; max-width: 470px; }
+  .back { position: absolute; width: 250px; height: 446px; border-radius: 125px; left: 650px; top: 27px; transform: rotate(10deg); }
+  .phone { position: absolute; width: 216px; height: 440px; left: 667px; top: 30px; border-radius: 36px; background: #1C1820; padding: 9px; box-sizing: border-box; transform: rotate(-7deg); }
+  .screen { width: 100%; height: 100%; border-radius: 28px; overflow: hidden; display: grid; place-items: center; }
+  .screen img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+  .screen svg { width: 92px; height: 92px; }
+  .badge { position: absolute; left: 586px; top: 96px; transform: rotate(-7deg); background: #F2C14E; color: #1C1820; font-weight: 700; font-size: 21px; padding: 12px 22px 12px 18px; border-radius: 999px; display: flex; align-items: center; gap: 10px; }
+  .badge i { width: 12px; height: 12px; border-radius: 50%; background: #1C1820; display: block; }
+</style>
+</head>
+<body>
+<div id="fg"></div>
+<script>
+  const q = new URLSearchParams(location.search);
+  const key = q.get('app') || 'customer', lang = q.get('lang') === 'fi' ? 'fi' : 'en', shot = q.get('shot');
+  const { C, APPS, markSvg } = window.MALVOYA;
+  const a = APPS[key];
+  const blob = (x, y, w, h, color, r) => `<div class="blob" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px;background:${color};border-radius:${r}"></div>`;
+  document.getElementById('fg').innerHTML =
+    blob(-110, -120, 330, 280, a.blobs[0], '58% 42% 55% 45% / 52% 48% 52% 48%') +
+    blob(-80, 372, 300, 230, a.blobs[1], '45% 55% 40% 60% / 55% 45% 55% 45%') +
+    blob(860, -110, 260, 250, a.blobs[2], '50% 50% 45% 55% / 45% 55% 45% 55%') +
+    `<div class="left">
+       <div class="tile" style="background:${a.brand}">${markSvg(a.accent)}</div>
+       <div class="word">${a.name}</div>
+       <div class="tag">${a.tagline[lang]}</div>
+     </div>
+     <div class="back" style="background:${a.back}"></div>
+     <div class="phone"><div class="screen" style="background:${a.brand}">
+       ${shot ? `<img src="${shot.replace(/"/g, '')}" alt="">` : markSvg(a.accent)}
+     </div></div>` +
+    (a.badge ? `<div class="badge"><i></i>${a.badge[lang]}</div>` : '');
+  document.title = `${a.name} feature graphic (${lang})`;
+</script>
+</body>
+</html>

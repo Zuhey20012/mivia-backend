@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
@@ -8,8 +9,9 @@ import '../core/strings.dart';
 import '../widgets/loading_states.dart';
 
 /// Monthly statement (GET /stores/my/statements?month=YYYY-MM): every order delivered or collected in
-/// the month, with sales, refunds, commission and payout. Shown in the app; the printable HTML version
-/// needs the sign-in token, so it is not opened in a browser.
+/// the month, with sales, refunds, commission and payout. The printable version opens in the phone's
+/// browser through a 10-minute signed link (GET /stores/my/statements/:month/link, API 2.10), never with
+/// the sign-in token; older servers do not have the link and the button is hidden.
 class StatementsScreen extends StatefulWidget {
   const StatementsScreen({super.key});
 
@@ -23,6 +25,10 @@ class _StatementsScreenState extends State<StatementsScreen> {
   bool _loading = true;
   String? _error;
 
+  /// Whether the server makes printable links (null = not known yet, false = older server).
+  bool? _printable;
+  bool _opening = false;
+
   ApiClient get _api => ApiClient(Provider.of<AuthService>(context, listen: false));
   String get _monthKey => '${_month.year}-${_month.month.toString().padLeft(2, '0')}';
   bool get _isCurrentMonth => _month.year == DateTime.now().year && _month.month == DateTime.now().month;
@@ -31,6 +37,46 @@ class _StatementsScreenState extends State<StatementsScreen> {
   void initState() {
     super.initState();
     _load();
+    _checkPrintable();
+  }
+
+  Future<ApiResult> _link(String month) => _api.get('/stores/my/statements/$month/link');
+
+  /// Asks once whether this server has printable links, so the button only shows when it works.
+  Future<void> _checkPrintable() async {
+    final res = await _link(_monthKey);
+    if (!mounted) return;
+    if (res.status == 404) {
+      setState(() => _printable = false);
+    } else if (res.ok) {
+      setState(() => _printable = true);
+    }
+  }
+
+  /// A fresh link each time (they expire after 10 minutes), opened outside the app.
+  Future<void> _openPrintable() async {
+    HapticFeedback.selectionClick();
+    setState(() => _opening = true);
+    final res = await _link(_monthKey);
+    if (!mounted) return;
+    setState(() => _opening = false);
+    if (res.status == 404) {
+      setState(() => _printable = false);
+      return;
+    }
+    final uri = Uri.tryParse('${res.data['url'] ?? ''}');
+    var opened = false;
+    if (res.ok && uri != null && uri.scheme == 'https') {
+      try {
+        opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } catch (_) {}
+    }
+    if (!mounted || opened) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(res.ok
+          ? tr(context, 'Could not open the browser. Please try again.', 'Selainta ei voitu avata. Yritä uudelleen.')
+          : res.errorMessage),
+    ));
   }
 
   Future<void> _load() async {
@@ -129,6 +175,27 @@ class _StatementsScreenState extends State<StatementsScreen> {
             'Tässä kuussa toimitetut tai noudetut tilaukset (Suomen aikaa). Myynti on tuotteiden täysi hinta: Malvoya maksaa tarjouskoodien alennukset. Toimitusmaksut ja tipit eivät ole myyntiäsi. Tämä on yhteenveto kirjanpitoasi varten, ei ALV-lasku.'),
         style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary, height: 1.4),
       ),
+      if (_printable == true) ...[
+        const SizedBox(height: 14),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: _opening ? null : _openPrintable,
+            icon: _opening
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.print_outlined),
+            label: Text(tr(context, 'Open printable statement', 'Avaa tulostettava raportti')),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 6, left: 4, right: 4),
+          child: Text(
+            tr(context, 'Opens in your browser, where you can print it or save it as a PDF. The link works for 10 minutes.',
+                'Avautuu selaimeen, jossa voit tulostaa sen tai tallentaa PDF:ksi. Linkki toimii 10 minuuttia.'),
+            style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary, height: 1.4),
+          ),
+        ),
+      ],
       const SizedBox(height: 16),
       Text(tr(context, 'Orders', 'Tilaukset'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
       const SizedBox(height: 8),

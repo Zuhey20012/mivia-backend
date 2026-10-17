@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { ApiError } from "../../lib/errors";
-import { isOwnImageUrl, mediaConfigured } from "../../lib/cloudinary";
+import { destroyResource, isOwnImageUrl, mediaConfigured } from "../../lib/cloudinary";
 import { priceInfoFor, presentProduct, productInclude, recordPrice } from "./pricing";
 
 type VariantInput = { id?: number; size?: string; color?: string; sku?: string; stock: number; priceAdjustCents: number };
@@ -29,8 +29,8 @@ export async function getProductsByStore(storeId: number, query: Record<string, 
   const store = await prisma.store.findUnique({ where: { id: storeId }, select: { isVerified: true, ownerId: true } });
   const isOwner = !!store && store.ownerId === viewerId;
   if (!store || (!store.isVerified && !isOwner)) return { products: [], total: 0, page, limit };
-  // Owners also see their hidden products so they can re-enable them
-  const where: Prisma.ProductWhereInput = isOwner ? { storeId } : { storeId, isAvailable: true };
+  // Owners also see their hidden products so they can re-enable them; deleted products are gone for everyone
+  const where: Prisma.ProductWhereInput = isOwner ? { storeId, deletedAt: null } : { storeId, isAvailable: true, deletedAt: null };
 
   if (query.canBeSold)     where.canBeSold     = query.canBeSold === "true";
   if (query.canBeRented)   where.canBeRented   = query.canBeRented === "true";
@@ -58,7 +58,7 @@ export async function getProductsByStore(storeId: number, query: Record<string, 
 
 export async function getProductById(id: number, viewerId?: number) {
   const product = await prisma.product.findFirst({
-    where: { id },
+    where: { id, deletedAt: null },
     include: { ...productInclude, store: { select: { ...publicStoreSelect, ownerId: true } } },
   });
   const isOwner = !!product && product.store.ownerId === viewerId;
@@ -78,7 +78,7 @@ export async function searchProducts(q: {
   eco?: string; handmade?: string; storeId?: number;
   minPrice?: number; maxPrice?: number; sort: string; page: number; limit: number;
 }) {
-  const and: Prisma.ProductWhereInput[] = [{ isAvailable: true, canBeSold: true, store: { isVerified: true } }];
+  const and: Prisma.ProductWhereInput[] = [{ isAvailable: true, deletedAt: null, canBeSold: true, store: { isVerified: true } }];
   if (q.q) {
     const term = q.q;
     and.push({
@@ -172,7 +172,7 @@ export async function createProductRecord(storeId: number, data: any, extra: Par
 
 export async function updateProduct(id: number, ownerId: number, data: any) {
   const product = await prisma.product.findUnique({ where: { id }, include: { store: true, variants: true } });
-  if (!product) throw new ApiError("Product not found", 404);
+  if (!product || product.deletedAt) throw new ApiError("Product not found", 404);
   if (product.store.ownerId !== ownerId) throw new ApiError("Forbidden", 403);
   assertOwnImages(data.images, product.storeId);
   // Once the store shows or hides a product itself, publishing an import never changes it again
@@ -228,10 +228,52 @@ export async function applyProductUpdate(
   });
 }
 
-export async function deleteProduct(id: number, ownerId: number) {
-  const product = await prisma.product.findUnique({ where: { id }, include: { store: true } });
-  if (!product) throw new ApiError("Product not found", 404);
+/**
+ * Deletes a product. A product nobody ever ordered or rented, with no drops and not from a catalogue import, is
+ * deleted for good (with its options, price history and videos). Anything else is kept for the records but
+ * marked deleted (deletedAt): it disappears everywhere, also from the store's own lists, and its drops are taken
+ * down. Imported products are kept that way so a re-import never brings back what the store deleted.
+ */
+export async function deleteProduct(id: number, ownerId: number): Promise<"hard" | "soft"> {
+  const product = await prisma.product.findUnique({
+    where: { id },
+    include: { store: true, videos: { select: { publicId: true } }, _count: { select: { orderItems: true, rentalItems: true, drops: true } } },
+  });
+  if (!product || product.deletedAt) throw new ApiError("Product not found", 404);
   if (product.store.ownerId !== ownerId) throw new ApiError("Forbidden", 403);
-  // Hidden, not deleted: past orders still point at it
-  await prisma.product.update({ where: { id }, data: { isAvailable: false, importDraft: false } });
+  const keep = product._count.orderItems + product._count.rentalItems + product._count.drops > 0 || !!product.externalSource;
+  if (!keep) {
+    try {
+      await prisma.product.delete({ where: { id } });
+      for (const v of product.videos) destroyResource(v.publicId, "video").catch(() => {});
+      return "hard";
+    } catch (e: any) {
+      // Something started pointing at it in the meantime (e.g. an order): keep it instead
+      if (e?.code !== "P2003") throw e;
+    }
+  }
+  await prisma.$transaction([
+    prisma.product.update({ where: { id }, data: { isAvailable: false, importDraft: false, deletedAt: new Date() } }),
+    prisma.drop.updateMany({ where: { productId: id, status: { in: ["READY", "PROCESSING"] } }, data: { status: "REMOVED", removedReason: "Product deleted by the store" } }),
+    prisma.favorite.deleteMany({ where: { productId: id } }),
+  ]);
+  return "soft";
+}
+
+export type MyProductsFilter = "all" | "visible" | "drafts" | "soldout";
+
+/** The store's own catalogue, paginated and searchable (deleted products are never listed). */
+export async function listMyProducts(ownerId: number, q: { page: number; limit: number; q?: string; filter: MyProductsFilter }) {
+  const store = await storeForOwner(ownerId);
+  const where: Prisma.ProductWhereInput = {
+    storeId: store.id,
+    deletedAt: null,
+    ...(q.q ? { name: { contains: q.q, mode: "insensitive" } } : {}),
+    ...(q.filter === "visible" ? { isAvailable: true } : q.filter === "drafts" ? { isAvailable: false } : q.filter === "soldout" ? { stockQuantity: { lte: 0 } } : {}),
+  };
+  const [products, total] = await Promise.all([
+    prisma.product.findMany({ where, include: productInclude, orderBy: [{ createdAt: "desc" }, { id: "desc" }], skip: (q.page - 1) * q.limit, take: q.limit }),
+    prisma.product.count({ where }),
+  ]);
+  return { products: await present(products, { owner: true }), total, page: q.page, pageSize: q.limit };
 }

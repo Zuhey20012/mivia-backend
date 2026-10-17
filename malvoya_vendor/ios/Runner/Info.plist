@@ -2,6 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 	<dict>
+		<key>NSPhotoLibraryUsageDescription</key>
+		<string>Malvoya Store uses the photos and videos you choose for your products, drops, logo and banner.</string>
+		<key>NSMicrophoneUsageDescription</key>
+		<string>Malvoya Store uses the microphone only while you record a product or drop video, so the video has sound.</string>
+		<key>NSCameraUsageDescription</key>
+		<string>Malvoya Store uses the camera when you take product photos or record a video for a product or a drop.</string>
+		<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+		<string>Malvoya Store uses your location only while you use the app, to place your store on the map. It does not use your location in the background.</string>
 		<key>NSLocationWhenInUseUsageDescription</key>
 		<string>Malvoya uses your location once to place your store on the map for customers and couriers.</string>
 		<key>CADisableMinimumFrameDurationOnPhone</key>

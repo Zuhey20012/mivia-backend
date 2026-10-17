@@ -6,6 +6,8 @@ import { env } from "../config/env";
 import { getOrderRelation, getRentalRelation, getCourierForUser } from "../modules/orders/access";
 import { haversineKm } from "../utils/distance";
 import { pushToUser } from "./push";
+import { t } from "./i18n";
+import { canReadChat, chatHistory, postMessage } from "../modules/orders/chat";
 
 let io: SocketServer | null = null;
 
@@ -46,23 +48,26 @@ export function initSocket(httpServer: HttpServer): SocketServer {
     const user = socket.data.user as SocketUser;
     socket.join(`user:${user.id}`);
 
-    // Role-specific rooms are joined server-side, never on the client's say-so.
-    try {
-      if (user.role === "VENDOR") {
-        const store = await prisma.store.findUnique({ where: { ownerId: user.id }, select: { id: true } });
-        if (store) socket.join(`store:${store.id}`);
-      }
-      if (user.role === "COURIER") {
-        const courier = await getCourierForUser(user.id);
-        if (courier?.isApproved) {
-          socket.data.courierId = courier.id;
-          socket.join(`courier:${courier.id}`);
-          socket.join("couriers");
+    // Role-specific rooms are joined server-side, never on the client's say-so. The handlers below are registered
+    // at once (an app emits chat:join right after connecting) and wait for this where they need it.
+    const ready = (async () => {
+      try {
+        if (user.role === "VENDOR") {
+          const store = await prisma.store.findUnique({ where: { ownerId: user.id }, select: { id: true } });
+          if (store) socket.join(`store:${store.id}`);
         }
+        if (user.role === "COURIER") {
+          const courier = await getCourierForUser(user.id);
+          if (courier?.isApproved) {
+            socket.data.courierId = courier.id;
+            socket.join(`courier:${courier.id}`);
+            socket.join("couriers");
+          }
+        }
+      } catch {
+        // DB hiccup: the client can still join per-order rooms below
       }
-    } catch {
-      // DB hiccup: the client can still join per-order rooms below
-    }
+    })();
 
     // Kept for app compatibility: only lets a vendor into their own store room.
     socket.on("track:store", async (storeId: unknown) => {
@@ -89,6 +94,7 @@ export function initSocket(httpServer: HttpServer): SocketServer {
     let lastDbWrite = 0;
 
     const handleLocation = async (data: any) => {
+      await ready;
       const courierId = socket.data.courierId as number | undefined;
       const orderId = toId(data?.orderId);
       const lat = toCoord(data?.lat ?? data?.latitude, 90);
@@ -128,8 +134,8 @@ export function initSocket(httpServer: HttpServer): SocketServer {
           .then((r) => {
             if (!r.count) { dest.notified = false; return; }
             pushToUser(dest.userId, {
-              title: "Your courier is arriving",
-              body: `Order #${orderId} is almost at your door.`,
+              title: t("Your courier is arriving", "Lähetti on pian perillä"),
+              body: t(`Order #${orderId} is almost at your door.`, `Tilaus #${orderId} on melkein ovellasi.`),
               data: { type: "order", orderId: String(orderId) },
             }).catch(() => {});
             io!.to(`order:${orderId}`).emit("order:status", { orderId, arriving: true, timestamp: new Date().toISOString() });
@@ -145,24 +151,30 @@ export function initSocket(httpServer: HttpServer): SocketServer {
     socket.on("courier:telemetry", handleLocation);
     socket.on("courier:update_location", handleLocation);
 
-    // ── In-delivery chat (relayed, not stored) ─────────────────────────────
-    socket.on("chat:join", async (orderId: unknown) => {
+    // ── In-delivery chat (stored; see modules/orders/chat.ts) ──────────────
+    // The ack (when the app passes one) carries the recent history: { ok, messages }
+    socket.on("chat:join", async (orderId: unknown, ack?: unknown) => {
       const id = toId(orderId);
-      if (id && (await getOrderRelation(id, user).catch(() => null))) socket.join(`chat:${id}`);
+      const reply = typeof ack === "function" ? (ack as (r: unknown) => void) : null;
+      const relation = id ? await getOrderRelation(id, user).catch(() => null) : null;
+      if (!id || !relation) return reply?.({ ok: false, error: "Order not found" });
+      socket.join(`chat:${id}`);
+      if (!reply) return;
+      const readable = await canReadChat(id, user).catch(() => false);
+      reply({ ok: true, messages: readable ? await chatHistory(id).catch(() => []) : [] });
     });
 
-    socket.on("chat:send", (data: any) => {
+    socket.on("chat:send", async (data: any, ack?: unknown) => {
+      const reply = typeof ack === "function" ? (ack as (r: unknown) => void) : null;
       const orderId = toId(data?.orderId);
-      const text = typeof data?.text === "string" ? data.text.trim().slice(0, 1000) : "";
-      if (!orderId || !text || !socket.rooms.has(`chat:${orderId}`)) return;
-      io!.to(`chat:${orderId}`).emit("chat:message", {
-        orderId,
-        text,
-        senderId: user.id,
-        role: user.role,
-        sender: typeof data?.sender === "string" ? data.sender.slice(0, 60) : user.role,
-        timestamp: new Date().toISOString(),
-      });
+      const text = typeof data?.text === "string" ? data.text : "";
+      if (!orderId || !text.trim() || !socket.rooms.has(`chat:${orderId}`)) return reply?.({ ok: false, error: "Join the order chat first" });
+      try {
+        const message = await postMessage(orderId, user, text, typeof data?.sender === "string" ? data.sender : undefined);
+        reply?.({ ok: true, message });
+      } catch (e: any) {
+        reply?.({ ok: false, error: typeof e?.status === "number" && e.status < 500 ? e.message : "Message not sent" });
+      }
     });
   });
 

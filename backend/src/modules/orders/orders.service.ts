@@ -13,7 +13,7 @@ import { pushToUser } from "../../lib/push";
 import { authenticatedImageUrl, destroyResource } from "../../lib/cloudinary";
 import { estimateDelivery } from "../../utils/distance";
 import { verifyOwnedUpload, UploadProof } from "../media/media.service";
-import { adjustStorePayoutForRefund, createPayoutsForOrder } from "../payouts/payouts.service";
+import { adjustStorePayoutForRefund, createCourierPayoutForReturnedOrder, createPayoutsForOrder } from "../payouts/payouts.service";
 import { Actor, getCourierForUser, getOrderRelation } from "./access";
 import { storeAvailability } from "../../utils/openingHours";
 import { ApiError } from "../../lib/errors";
@@ -22,6 +22,7 @@ import { CheckoutDiscount, checkReferralCode, rewardReferralForOrder } from "../
 import { RIDE_SPEED_KMH, calcCourierPay, courierPayOf, presentCourierPay, withApproach, withWaiting } from "../../utils/courierPay";
 import { freshPosition } from "../../utils/courierPosition";
 import { Slot, SlotInput, availableSlots, beforeDispatch, checkSlot, scheduledDispatchHorizon, scheduledFee, windowText } from "../../utils/deliverySlots";
+import { Text, euros, joinText, lowerFirst, t } from "../../lib/i18n";
 
 const logger = pino({ name: "orders" });
 
@@ -32,6 +33,9 @@ export class OrderError extends Error {
 }
 
 type ItemInput = { productId: number; variantId?: number; quantity: number };
+
+/** Not enough stock for the basket (the customer's own unpaid checkout may be holding it). */
+class StockError extends OrderError {}
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -83,7 +87,7 @@ async function priceItems(db: Db, storeId: number, items: ItemInput[], reserve: 
     if (item.variantId) {
       const variant = await db.productVariant.findUnique({ where: { id: item.variantId } });
       if (!variant || variant.productId !== product.id) throw new OrderError(`Invalid option for ${product.name}`);
-      const outOfStock = new OrderError(`${product.name} (${variant.size ?? variant.color ?? "option"}) is out of stock`);
+      const outOfStock = new StockError(`${product.name} (${variant.size ?? variant.color ?? "option"}) is out of stock`);
       if (reserve) {
         const reserved = await db.productVariant.updateMany({
           where: { id: variant.id, stock: { gte: item.quantity } },
@@ -105,11 +109,11 @@ async function priceItems(db: Db, storeId: number, items: ItemInput[], reserve: 
         where: { id: product.id, stockQuantity: { gte: item.quantity } },
         data: { stockQuantity: { decrement: item.quantity } },
       });
-      if (reserved.count === 0) throw new OrderError(`Insufficient stock for ${product.name}`);
+      if (reserved.count === 0) throw new StockError(`Insufficient stock for ${product.name}`);
     } else {
       const key = `p${product.id}`;
       const total = (wanted.get(key) ?? 0) + item.quantity;
-      if (product.stockQuantity < total) throw new OrderError(`Insufficient stock for ${product.name}`);
+      if (product.stockQuantity < total) throw new StockError(`Insufficient stock for ${product.name}`);
       wanted.set(key, total);
     }
 
@@ -255,57 +259,84 @@ export async function createOrder(userId: number, input: CheckoutInput & { deliv
   const pickup = input.fulfilment === "PICKUP";
   const slot = resolveSlot(store, input);
 
-  // Price is always computed server-side from the database.
-  const order = await prisma.$transaction(async (tx) => {
-    const { subtotalCents, lines } = await priceItems(tx, store.id, input.items, true);
-    // A code that cannot be used is refused (409), so the customer never pays a different price than quoted.
-    const promo = await promoForCheckout(tx, input.promoCode, userId, subtotalCents);
-    const { pricing, distanceKm, courierPay } = priceCheckout(store, input, subtotalCents, promo, slot);
-    if (pricing.totalCents < MIN_CHARGE_CENTS) throw new OrderError(`The minimum order is ${formatCents(MIN_CHARGE_CENTS)}`);
-    // A scheduled order is promised its window (scheduledStart–scheduledEnd), not a "minutes from now" estimate
-    const etaMinutes = distanceKm === null || slot ? null : estimateDelivery(distanceKm, store.prepMinutes).etaMinutes;
-
-    return tx.order.create({
-      data: {
-        userId,
-        storeId: store.id,
-        fulfilment: pickup ? "PICKUP" : "DELIVERY",
-        deliveryAddress: pickup ? null : input.deliveryAddress,
-        deliveryLat: pickup ? null : input.deliveryLat,
-        deliveryLng: pickup ? null : input.deliveryLng,
-        notes: input.notes,
-        ...pricing, // includes tipCents and courierFeeCents (the tip goes to the courier in full, no commission)
-        // the breakdown behind courierFeeCents; none for pickup (no courier)
-        ...(courierPay ? { courierPay: courierPay as unknown as Prisma.InputJsonValue } : {}),
-        promoCodeId: promo?.promoCodeId ?? null,
-        referrerId: promo?.referrerId ?? null,
-        etaMinutes,
-        scheduledStart: slot?.startAt ?? null,
-        scheduledEnd: slot?.endAt ?? null,
-        items: { createMany: { data: lines } },
-      },
-      include: { items: true, promoCode: { select: { code: true, description: true } } },
+  // The customer's own earlier checkouts that were never paid (e.g. the payment sheet was closed) are cancelled
+  // quietly when a new one is made, and their reserved stock is released. If the new basket only fails for lack of
+  // stock, they are released first and the basket is tried once more, so retrying never fails on stock.
+  const releaseUnpaid = async (except?: number) => {
+    const unpaid = await prisma.order.findMany({
+      where: { userId, status: "PENDING", paymentStatus: { in: ["PENDING", "FAILED"] }, ...(except ? { id: { not: except } } : {}) },
+      select: { id: true },
+      take: 20,
     });
-  });
-
+    for (const o of unpaid) await cancelOrderInternal(o.id, "Replaced by a new checkout", { notifyCustomer: false });
+    return unpaid.length;
+  };
+  let order: Awaited<ReturnType<typeof reserveOrder>>;
   try {
-    // Automatic payment methods lets the Stripe PaymentSheet offer card, Apple/Google Pay,
-    // MobilePay and SEPA — whatever is enabled in the Stripe dashboard. SCA/3DS is handled by Stripe.
-    const paymentIntent = await getStripe().paymentIntents.create(
-      {
-        amount: order.totalCents,
-        currency: "eur",
-        automatic_payment_methods: { enabled: true },
-        metadata: { type: "ORDER", orderId: String(order.id), userId: String(userId), storeId: String(store.id) },
-        description: `Malvoya order #${order.id} – ${store.name}`,
-      },
-      { idempotencyKey: `order-${order.id}` }
-    );
-    await prisma.order.update({ where: { id: order.id }, data: { stripePaymentIntentId: paymentIntent.id } });
-    return { order: { ...order, stripePaymentIntentId: paymentIntent.id }, clientSecret: paymentIntent.client_secret };
-  } catch (err) {
-    await cancelOrderInternal(order.id, "Payment could not be started", { notifyCustomer: false });
-    throw err;
+    order = await reserveOrder();
+  } catch (e) {
+    if (!(e instanceof StockError) || (await releaseUnpaid()) === 0) throw e;
+    order = await reserveOrder();
+  }
+  await releaseUnpaid(order.id);
+
+  return startPayment(order);
+
+  async function reserveOrder() {
+    // Price is always computed server-side from the database.
+    return prisma.$transaction(async (tx) => {
+      const { subtotalCents, lines } = await priceItems(tx, store.id, input.items, true);
+      // A code that cannot be used is refused (409), so the customer never pays a different price than quoted.
+      const promo = await promoForCheckout(tx, input.promoCode, userId, subtotalCents);
+      const { pricing, distanceKm, courierPay } = priceCheckout(store, input, subtotalCents, promo, slot);
+      if (pricing.totalCents < MIN_CHARGE_CENTS) throw new OrderError(`The minimum order is ${formatCents(MIN_CHARGE_CENTS)}`);
+      // A scheduled order is promised its window (scheduledStart–scheduledEnd), not a "minutes from now" estimate
+      const etaMinutes = distanceKm === null || slot ? null : estimateDelivery(distanceKm, store.prepMinutes).etaMinutes;
+
+      return tx.order.create({
+        data: {
+          userId,
+          storeId: store.id,
+          fulfilment: pickup ? "PICKUP" : "DELIVERY",
+          deliveryAddress: pickup ? null : input.deliveryAddress,
+          deliveryLat: pickup ? null : input.deliveryLat,
+          deliveryLng: pickup ? null : input.deliveryLng,
+          notes: input.notes,
+          ...pricing, // includes tipCents and courierFeeCents (the tip goes to the courier in full, no commission)
+          // the breakdown behind courierFeeCents; none for pickup (no courier)
+          ...(courierPay ? { courierPay: courierPay as unknown as Prisma.InputJsonValue } : {}),
+          promoCodeId: promo?.promoCodeId ?? null,
+          referrerId: promo?.referrerId ?? null,
+          etaMinutes,
+          scheduledStart: slot?.startAt ?? null,
+          scheduledEnd: slot?.endAt ?? null,
+          items: { createMany: { data: lines } },
+        },
+        include: { items: true, promoCode: { select: { code: true, description: true } } },
+      });
+    });
+  }
+
+  async function startPayment(order: Awaited<ReturnType<typeof reserveOrder>>) {
+    try {
+      // Automatic payment methods lets the Stripe PaymentSheet offer card, Apple/Google Pay,
+      // MobilePay and SEPA — whatever is enabled in the Stripe dashboard. SCA/3DS is handled by Stripe.
+      const paymentIntent = await getStripe().paymentIntents.create(
+        {
+          amount: order.totalCents,
+          currency: "eur",
+          automatic_payment_methods: { enabled: true },
+          metadata: { type: "ORDER", orderId: String(order.id), userId: String(userId), storeId: String(store.id) },
+          description: `Malvoya order #${order.id} – ${store.name}`,
+        },
+        { idempotencyKey: `order-${order.id}` }
+      );
+      await prisma.order.update({ where: { id: order.id }, data: { stripePaymentIntentId: paymentIntent.id } });
+      return { order: { ...order, stripePaymentIntentId: paymentIntent.id }, clientSecret: paymentIntent.client_secret };
+    } catch (err) {
+      await cancelOrderInternal(order.id, "Payment could not be started", { notifyCustomer: false });
+      throw err;
+  }
   }
 }
 
@@ -369,9 +400,14 @@ export async function markOrderPaid(orderId: number, paymentIntentId: string, am
   });
   emitOrderStatus(orderId, { status: order.status, paymentStatus: "SUCCEEDED" });
   const slotWindow = order.scheduledStart && order.scheduledEnd ? windowText(order.scheduledStart, order.scheduledEnd) : null;
+  const itemCount = order.items.reduce((n, i) => n + i.quantity, 0);
+  const subtotal = euros(order.subtotalCents);
+  const win = slotWindow ? lowerFirst(slotWindow) : null;
   pushToUser(order.store.ownerId, {
-    title: pickup ? `New pickup order #${order.id}` : slotWindow ? `New order #${order.id} for ${slotWindow.en.replace(/^T/, "t")}` : `New order #${order.id}`,
-    body: `${order.items.reduce((n, i) => n + i.quantity, 0)} item(s) · ${(order.subtotalCents / 100).toFixed(2).replace(".", ",")} € — accept it in Malvoya Store.`,
+    title: pickup ? t(`New pickup order #${order.id}`, `Uusi noutotilaus #${order.id}`)
+      : win ? t(`New order #${order.id} for ${win.en}`, `Uusi tilaus #${order.id}: ${win.fi}`)
+      : t(`New order #${order.id}`, `Uusi tilaus #${order.id}`),
+    body: t(`${itemCount} item(s) · ${subtotal.en} — accept it in Malvoya Store.`, `${itemCount} tuote(tta) · ${subtotal.fi} — hyväksy se Malvoya Storessa.`),
     data: { type: "order", orderId: String(order.id) },
     channel: "new_orders",
   }).catch(() => {});
@@ -421,7 +457,10 @@ async function restock(tx: Prisma.TransactionClient, orderId: number) {
  * Cancels, restocks and refunds (or voids the unpaid PaymentIntent). Idempotent.
  * `notifyCustomer: false` is for checkouts the customer abandoned themselves.
  */
-export async function cancelOrderInternal(orderId: number, reason: string, opts: { notifyCustomer?: boolean; customerMessage?: string } = {}) {
+export async function cancelOrderInternal(
+  orderId: number, reason: string,
+  opts: { notifyCustomer?: boolean; customerMessage?: Text; cancelledBy?: "STORE" } = {},
+) {
   const order = await prisma.order.findUnique({ where: { id: orderId } });
   if (!order || order.status === "CANCELLED") return order;
   if (order.status === "SHIPPED" || order.status === "DELIVERED") {
@@ -432,7 +471,7 @@ export async function cancelOrderInternal(orderId: number, reason: string, opts:
     // Guard against double cancellation racing with itself
     const res = await tx.order.updateMany({
       where: { id: orderId, status: { notIn: ["CANCELLED", "SHIPPED", "DELIVERED"] } },
-      data: { status: "CANCELLED", cancelledAt: new Date(), cancelReason: reason.slice(0, 200) },
+      data: { status: "CANCELLED", cancelledAt: new Date(), cancelReason: reason.slice(0, 200), cancelledBy: opts.cancelledBy ?? null },
     });
     if (res.count === 0) return null;
     await restock(tx, orderId);
@@ -471,10 +510,12 @@ export async function cancelOrderInternal(orderId: number, reason: string, opts:
   emitToStore(order.storeId, "order:status", { orderId, status: "CANCELLED" });
   if (order.fulfilment === "DELIVERY" && !order.courierId) emitToAllCouriers("courier:offer_closed", { orderId, reason: "cancelled" });
   if (opts.notifyCustomer !== false) {
-    const money = order.paymentStatus === "SUCCEEDED" ? "Your money is on its way back to you." : "You have not been charged.";
+    const money = order.paymentStatus === "SUCCEEDED"
+      ? t("Your money is on its way back to you.", "Rahasi palautetaan sinulle.")
+      : t("You have not been charged.", "Sinua ei veloitettu.");
     pushToUser(order.userId, {
-      title: `Order #${orderId} was cancelled`,
-      body: opts.customerMessage ? `${opts.customerMessage} ${money}` : money,
+      title: t(`Order #${orderId} was cancelled`, `Tilaus #${orderId} peruttiin`),
+      body: joinText(opts.customerMessage, money),
       data: { type: "order", orderId: String(orderId) },
     }).catch(() => {});
   }
@@ -505,7 +546,7 @@ const TRANSITIONS: Record<"vendor" | "courier" | "admin", Partial<Record<OrderSt
   admin: { PENDING: ["CANCELLED"], CONFIRMED: ["CANCELLED"], PROCESSING: ["CANCELLED"], SHIPPED: ["DELIVERED"] },
 };
 
-export async function updateOrderStatus(orderId: number, actor: Actor, next: OrderStatus) {
+export async function updateOrderStatus(orderId: number, actor: Actor, next: OrderStatus, opts: { reason?: string } = {}) {
   const relation = await getOrderRelation(orderId, actor);
   if (!relation || relation === "customer") throw new OrderError("Forbidden", 403);
 
@@ -525,8 +566,17 @@ export async function updateOrderStatus(orderId: number, actor: Actor, next: Ord
   }
 
   if (next === "CANCELLED") {
-    const cancelled = await cancelOrderInternal(orderId, relation === "vendor" ? "Declined by store" : "Cancelled by Malvoya");
-    sendOrderStatusEmail(orderId, order.user.email, "CANCELLED").catch(() => {});
+    // A store may say why (out of stock, closing early…): stored as the cancel reason and shown to the customer
+    const storeReason = relation === "vendor" ? opts.reason?.trim().slice(0, 200) || null : null;
+    const cancelled = await cancelOrderInternal(
+      orderId,
+      relation === "vendor" ? storeReason ?? "Declined by store" : "Cancelled by Malvoya",
+      {
+        ...(relation === "vendor" ? { cancelledBy: "STORE" as const } : {}),
+        ...(storeReason ? { customerMessage: t(`The store's reason: ${storeReason}.`, `Kaupan syy: ${storeReason}.`) } : {}),
+      },
+    );
+    sendOrderStatusEmail(orderId, order.user.email, "CANCELLED", { reason: storeReason }).catch(() => {});
     return cancelled;
   }
 
@@ -646,26 +696,47 @@ export async function markArrivedAtStore(orderId: number, userId: number) {
 }
 
 type PushOrder = { id: number; etaMinutes: number | null; scheduledStart?: Date | null; scheduledEnd?: Date | null };
-const windowOf = (o: PushOrder) => (o.scheduledStart && o.scheduledEnd ? windowText(o.scheduledStart, o.scheduledEnd).en : null);
+const windowOf = (o: PushOrder) => (o.scheduledStart && o.scheduledEnd ? windowText(o.scheduledStart, o.scheduledEnd) : null);
+type PushText = { title: Text; body: Text };
 
-const STATUS_PUSH: Partial<Record<OrderStatus, (o: PushOrder) => { title: string; body: string }>> = {
-  CONFIRMED: (o) => ({
-    title: `Order #${o.id} accepted`,
-    body: windowOf(o) ? `The store will have it ready for your delivery: ${windowOf(o)}.` : "The store is getting your order ready.",
+const STATUS_PUSH: Partial<Record<OrderStatus, (o: PushOrder) => PushText>> = {
+  CONFIRMED: (o) => {
+    const w = windowOf(o);
+    return {
+      title: t(`Order #${o.id} accepted`, `Tilaus #${o.id} hyväksytty`),
+      body: w ? t(`The store will have it ready for your delivery: ${w.en}.`, `Kauppa valmistelee sen toimitustasi varten: ${w.fi}.`)
+        : t("The store is getting your order ready.", "Kauppa valmistelee tilaustasi."),
+    };
+  },
+  PROCESSING: (o) => {
+    const w = windowOf(o);
+    return {
+      title: t(`Order #${o.id} is being packed`, `Tilausta #${o.id} pakataan`),
+      body: w ? t(`It is ready for your delivery: ${w.en}. We tell you when a courier is on the way.`, `Se on valmiina toimitustasi varten: ${w.fi}. Kerromme, kun lähetti on matkalla.`)
+        : t("A courier will pick it up soon.", "Lähetti noutaa sen pian."),
+    };
+  },
+  SHIPPED: (o) => ({ title: t(`Order #${o.id} is on its way`, `Tilaus #${o.id} on matkalla`), body: t("Follow your courier live in the app.", "Seuraa lähettiä sovelluksessa.") }),
+  DELIVERED: (o) => ({
+    title: t(`Order #${o.id} delivered`, `Tilaus #${o.id} toimitettu`),
+    body: t("Enjoy! You can rate the store and return items within 14 days.", "Nauti! Voit arvioida kaupan ja palauttaa tuotteita 14 päivän ajan."),
   }),
-  PROCESSING: (o) => ({
-    title: `Order #${o.id} is being packed`,
-    body: windowOf(o) ? `It is ready for your delivery: ${windowOf(o)}. We tell you when a courier is on the way.` : "A courier will pick it up soon.",
-  }),
-  SHIPPED: (o) => ({ title: `Order #${o.id} is on its way`, body: "Follow your courier live in the app." }),
-  DELIVERED: (o) => ({ title: `Order #${o.id} delivered`, body: "Enjoy! You can rate the store and return items within 14 days." }),
 };
 
 /** Reserve & collect: what the customer hears instead of the courier messages. */
-const PICKUP_PUSH: Partial<Record<OrderStatus, (o: { id: number; storeName: string }) => { title: string; body: string }>> = {
-  CONFIRMED: (o) => ({ title: `Order #${o.id} accepted`, body: `${o.storeName} is getting your order ready for pickup.` }),
-  PROCESSING: (o) => ({ title: `Ready for pickup at ${o.storeName}`, body: `Order #${o.id} is waiting for you. Show your pickup code at the store.` }),
-  DELIVERED: (o) => ({ title: `Order #${o.id} collected`, body: "Enjoy! You can rate the store and return items within 14 days." }),
+const PICKUP_PUSH: Partial<Record<OrderStatus, (o: { id: number; storeName: string }) => PushText>> = {
+  CONFIRMED: (o) => ({
+    title: t(`Order #${o.id} accepted`, `Tilaus #${o.id} hyväksytty`),
+    body: t(`${o.storeName} is getting your order ready for pickup.`, `${o.storeName} valmistelee tilaustasi noudettavaksi.`),
+  }),
+  PROCESSING: (o) => ({
+    title: t(`Ready for pickup at ${o.storeName}`, `Noudettavissa: ${o.storeName}`),
+    body: t(`Order #${o.id} is waiting for you. Show your pickup code at the store.`, `Tilaus #${o.id} odottaa sinua. Näytä noutokoodisi kaupassa.`),
+  }),
+  DELIVERED: (o) => ({
+    title: t(`Order #${o.id} collected`, `Tilaus #${o.id} noudettu`),
+    body: t("Enjoy! You can rate the store and return items within 14 days.", "Nauti! Voit arvioida kaupan ja palauttaa tuotteita 14 päivän ajan."),
+  }),
 };
 
 type StatusOrder = {
@@ -681,7 +752,7 @@ function afterStatusChange(order: StatusOrder, email: string, next: OrderStatus)
   sendOrderStatusEmail(order.id, email, emailStatus).catch(() => {});
   if (pickup) {
     prisma.store.findUnique({ where: { id: order.storeId }, select: { name: true } }).then((s) => {
-      const push = PICKUP_PUSH[next]?.({ id: order.id, storeName: s?.name ?? "the store" });
+      const push = PICKUP_PUSH[next]?.({ id: order.id, storeName: s?.name ?? "Malvoya" });
       if (push) return pushToUser(order.userId, { ...push, data: { type: "order", orderId: String(order.id) } });
     }).catch(() => {});
   } else {
@@ -988,9 +1059,10 @@ export async function acceptOrder(orderId: number, userId: number) {
   emitToAllCouriers("courier:offer_closed", { orderId, reason: "taken" });
   emitOrderStatus(orderId, { status: updated.status, courierId: courier.id, courierName: courier.name });
   emitToStore(updated.storeId, "order:status", { orderId, status: updated.status, courierName: courier.name });
+  const courierFirst = courier.name.split(" ")[0];
   pushToUser(updated.userId, {
-    title: `${courier.name.split(" ")[0]} is delivering your order`,
-    body: "Your courier is heading to the store.",
+    title: t(`${courierFirst} is delivering your order`, `${courierFirst} toimittaa tilauksesi`),
+    body: t("Your courier is heading to the store.", "Lähetti on matkalla kauppaan."),
     data: { type: "order", orderId: String(orderId) },
   }).catch(() => {});
   return updated;
@@ -1177,13 +1249,15 @@ export async function createReturn(userId: number, input: {
   orderId?: number; rentalId?: number; reason: string; conditionNote?: string; items?: ReturnLine[];
 }) {
   let lines: ReturnLine[] = [];
+  let storeOf: { id: number; ownerId: number } | null = null;
   if (input.orderId) {
     const order = await prisma.order.findUnique({
       where: { id: input.orderId },
-      select: { id: true, userId: true, status: true, deliveredAt: true, ...planOrderSelect },
+      select: { id: true, userId: true, status: true, deliveredAt: true, store: { select: { id: true, ownerId: true } }, ...planOrderSelect },
     });
     if (!order || order.userId !== userId) throw new OrderError("Order not found", 404);
     if (order.status !== "DELIVERED" || !order.deliveredAt) throw new OrderError("You can return an order once it has been delivered");
+    storeOf = order.store;
     // Kuluttajansuojalaki 6:14 — 14 days from the day the consumer received the goods
     const windowMs = env.returnWindowDays * 24 * 60 * 60 * 1000;
     if (Date.now() - order.deliveredAt.getTime() > windowMs) {
@@ -1226,7 +1300,19 @@ export async function createReturn(userId: number, input: {
     },
     include: { items: returnItemsSelect },
   });
-  return getReturn(created.id, { id: userId, role: "CUSTOMER" });
+  const presented = await getReturn(created.id, { id: userId, role: "CUSTOMER" });
+  if (storeOf && input.orderId) {
+    // The store hears about it at once: push (orders channel) and a live event in the store app
+    const itemCount = lines.reduce((n, l) => n + l.quantity, 0);
+    emitToStore(storeOf.id, "return:new", { returnId: created.id, orderId: input.orderId, reason: input.reason, itemCount, createdAt: created.createdAt });
+    pushToUser(storeOf.ownerId, {
+      title: t(`Return requested for order #${input.orderId}`, `Palautuspyyntö tilaukselle #${input.orderId}`),
+      body: t(`${itemCount} item(s). Open Malvoya Store to approve or reject it.`, `${itemCount} tuote(tta). Hyväksy tai hylkää se Malvoya Storessa.`),
+      data: { type: "return", returnId: String(created.id), orderId: String(input.orderId) },
+      channel: "orders",
+    }).catch(() => {});
+  }
+  return presented;
 }
 
 /**
@@ -1237,7 +1323,7 @@ export async function createReturn(userId: number, input: {
  */
 export async function updateReturnStatus(id: number, actor: Actor, data: {
   status: "APPROVED" | "IN_TRANSIT" | "RECEIVED" | "REFUNDED" | "REJECTED";
-  conditionNote?: string; refundCents?: number; damageDedCents?: number;
+  conditionNote?: string; storeNote?: string; refundCents?: number; damageDedCents?: number;
 }) {
   const ret = await prisma.return.findUnique({
     where: { id },
@@ -1254,16 +1340,36 @@ export async function updateReturnStatus(id: number, actor: Actor, data: {
   if (!ret || !ret.order) throw new OrderError("Return not found", 404);
   if (actor.role !== "ADMIN" && ret.order.store.ownerId !== actor.id) throw new OrderError("Forbidden", 403);
   if (ret.status === "REFUNDED") throw new OrderError("This return has already been refunded", 409);
+  const storeNote = data.storeNote?.trim() || undefined;
+  if (data.status === "REJECTED" && !storeNote) throw new OrderError("Tell the customer why the return is rejected (storeNote)", 400);
 
   if (data.status !== "REFUNDED") {
-    await prisma.return.update({ where: { id }, data: { status: data.status, conditionNote: data.conditionNote } });
+    await prisma.return.update({ where: { id }, data: { status: data.status, conditionNote: data.conditionNote, ...(storeNote ? { storeNote } : {}) } });
+    const orderId = ret.order.id;
+    if (data.status === "APPROVED" && ret.status !== "APPROVED") {
+      pushToUser(ret.userId, {
+        title: t(`Return approved for order #${orderId}`, `Palautus hyväksytty, tilaus #${orderId}`),
+        body: storeNote
+          ? t(`The store says: ${storeNote}`, `Kauppa kertoo: ${storeNote}`)
+          : t("Take the items back to the store as agreed. Your refund follows once the store has them.", "Vie tuotteet kauppaan sovitusti. Saat rahat takaisin, kun kauppa on vastaanottanut ne."),
+        data: { type: "return", returnId: String(id), orderId: String(orderId) },
+      }).catch(() => {});
+    }
+    if (data.status === "REJECTED" && ret.status !== "REJECTED") {
+      pushToUser(ret.userId, {
+        title: t(`Return rejected for order #${orderId}`, `Palautus hylätty, tilaus #${orderId}`),
+        body: t(`The store's reason: ${storeNote}`, `Kaupan perustelu: ${storeNote}`),
+        data: { type: "return", returnId: String(id), orderId: String(orderId) },
+      }).catch(() => {});
+    }
     return getReturn(id, actor);
   }
 
   const order = ret.order;
   const plan = refundPlan(order, ret);
   const deduction = data.damageDedCents ?? 0;
-  if (deduction > 0 && !data.conditionNote) throw new OrderError("Explain the deduction in the condition note");
+  // The explanation can be the store's note (2.10) or the condition note (older store apps)
+  if (deduction > 0 && !data.conditionNote && !storeNote) throw new OrderError("Explain the deduction in the store note");
   const refundCents = data.refundCents ?? plan.refundCents - deduction;
   const refundable = order.totalCents - order.refundedCents;
   if (refundCents <= 0 || refundCents > refundable) throw new OrderError(`Refund must be between 0.01 and ${(refundable / 100).toFixed(2)} €`);
@@ -1277,7 +1383,7 @@ export async function updateReturnStatus(id: number, actor: Actor, data: {
   const byId = new Map(order.items.map((i) => [i.id, i]));
   const returned = plan.lines.map((l) => ({ item: byId.get(l.orderItemId)!, quantity: l.quantity })).filter((r) => r.item);
   await prisma.$transaction([
-    prisma.return.update({ where: { id }, data: { status: "REFUNDED", refundCents, damageDedCents: deduction, conditionNote: data.conditionNote } }),
+    prisma.return.update({ where: { id }, data: { status: "REFUNDED", refundCents, damageDedCents: deduction, conditionNote: data.conditionNote, ...(storeNote ? { storeNote } : {}) } }),
     prisma.order.update({
       where: { id: order.id },
       data: {
@@ -1292,9 +1398,10 @@ export async function updateReturnStatus(id: number, actor: Actor, data: {
   // The store gives back the value of the returned goods (less the commission on them); with a store-chosen
   // amount the refund itself is scaled back to goods value as before
   await adjustStorePayoutForRefund(order.id, refundCents, data.refundCents === undefined ? Math.max(0, plan.goodsCents - deduction) : undefined);
+  const refunded = euros(refundCents);
   pushToUser(ret.userId, {
-    title: "Refund sent",
-    body: `${(refundCents / 100).toFixed(2).replace(".", ",")} € for order #${order.id} is on its way back to you.`,
+    title: t("Refund sent", "Hyvitys lähetetty"),
+    body: t(`${refunded.en} for order #${order.id} is on its way back to you.`, `${refunded.fi} tilauksesta #${order.id} on matkalla sinulle.`),
     data: { type: "order", orderId: String(order.id) },
   }).catch(() => {});
   return getReturn(id, actor);
@@ -1318,7 +1425,8 @@ export async function listReturns(actor: Actor) {
         select: {
           id: true, totalCents: true, subtotalCents: true, deliveryFeeCents: true, refundedCents: true, deliveredAt: true,
           serviceFeeCents: true, smallOrderFeeCents: true, discountCents: true, tipCents: true,
-          store: { select: { name: true } },
+          // Where to take the items back
+          store: { select: { name: true, address: true, phone: true } },
           items: { select: { id: true, quantity: true, unitCents: true, product: { select: { name: true, images: true } }, variant: { select: { size: true, color: true } } } },
           returns: { select: { id: true, status: true, refundCents: true, damageDedCents: true, items: returnItemsSelect } },
         },
@@ -1329,9 +1437,9 @@ export async function listReturns(actor: Actor) {
   });
   return rows.map((r) => {
     const presented = presentReturn(r, r.order);
-    if (!presented.order) return presented;
+    if (!presented.order) return { ...presented, store: null };
     const { returns: _others, ...order } = presented.order;
-    return { ...presented, order };
+    return { ...presented, order, store: order.store };
   });
 }
 
@@ -1345,4 +1453,155 @@ export async function getReturn(id: number, actor: Actor) {
   if (!allowed) throw new OrderError("Return not found", 404);
   const { order, ...rest } = presentReturn(ret, ret.order);
   return rest;
+}
+
+// ─── Finish an unpaid checkout ──────────────────────────────────────────────
+
+/**
+ * The PaymentSheet secret of the customer's own unpaid order, while the checkout hold lasts, so the app can
+ * offer "Complete payment" after the sheet was closed. Anything else (paid, cancelled, too late) is 409.
+ */
+export async function getOrderPayment(orderId: number, userId: number) {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { userId: true, status: true, paymentStatus: true, createdAt: true, totalCents: true, stripePaymentIntentId: true },
+  });
+  if (!order || order.userId !== userId) throw new OrderError("Order not found", 404);
+  const holdUntil = new Date(order.createdAt.getTime() + env.orderTimers.checkoutHold * 60_000);
+  const payable = order.status === "PENDING" && (order.paymentStatus === "PENDING" || order.paymentStatus === "FAILED")
+    && holdUntil > new Date() && !!order.stripePaymentIntentId;
+  if (!payable) throw new OrderError("This order can no longer be paid. Please place it again.", 409);
+  const intent = await getStripe().paymentIntents.retrieve(order.stripePaymentIntentId!);
+  if (!intent.client_secret || intent.status === "canceled") throw new OrderError("This order can no longer be paid. Please place it again.", 409);
+  return { clientSecret: intent.client_secret, amountCents: order.totalCents, holdUntil };
+}
+
+// ─── Courier cannot deliver ─────────────────────────────────────────────────
+
+/** How long the courier waits at the address (with the chat open) before taking the order back to the shop. */
+export const DELIVERY_PROBLEM_WAIT_MINUTES = 10;
+export type DeliveryProblemReason = "CUSTOMER_UNAVAILABLE" | "WRONG_ADDRESS" | "OTHER";
+
+const canReturnAtOf = (problemAt: Date) => new Date(problemAt.getTime() + DELIVERY_PROBLEM_WAIT_MINUTES * 60_000);
+
+/**
+ * The assigned courier is at the address and cannot hand the order over. The first report starts the
+ * 10-minute wait (repeating it updates the reason and note only) and tells the customer and the store.
+ */
+export async function reportDeliveryProblem(orderId: number, userId: number, input: { reason: DeliveryProblemReason; note?: string }) {
+  const courier = await requireApprovedCourier(userId);
+  const order = await prisma.order.findUnique({ where: { id: orderId }, select: { courierId: true, status: true, userId: true, storeId: true, store: { select: { ownerId: true } } } });
+  if (!order || order.courierId !== courier.id) throw new OrderError("Order not found", 404);
+  if (order.status !== "SHIPPED") throw new OrderError("You can report a delivery problem once you have picked the order up", 409);
+
+  const first = await prisma.order.updateMany({ where: { id: orderId, deliveryProblemAt: null, status: "SHIPPED" }, data: { deliveryProblemAt: new Date() } });
+  const updated = await prisma.order.update({
+    where: { id: orderId },
+    data: { deliveryProblemReason: input.reason, deliveryProblemNote: input.note?.trim().slice(0, 300) || null },
+    select: { deliveryProblemAt: true, deliveryProblemReason: true, deliveryProblemNote: true },
+  });
+  const canReturnAt = canReturnAtOf(updated.deliveryProblemAt!);
+
+  emitOrderStatus(orderId, { status: "SHIPPED", deliveryProblemAt: updated.deliveryProblemAt, deliveryProblemReason: updated.deliveryProblemReason });
+  emitToStore(order.storeId, "order:status", { orderId, status: "SHIPPED", deliveryProblemAt: updated.deliveryProblemAt, deliveryProblemReason: updated.deliveryProblemReason });
+  if (first.count) {
+    pushToUser(order.userId, {
+      title: input.reason === "WRONG_ADDRESS"
+        ? t("Your courier cannot find your address", "Lähetti ei löydä osoitettasi")
+        : t("Your courier is at your address", "Lähetti on osoitteessasi"),
+      body: input.reason === "WRONG_ADDRESS"
+        ? t(`Order #${orderId}: reply in the chat so the courier can find you.`, `Tilaus #${orderId}: vastaa chatissa, jotta lähetti löytää sinut.`)
+        : t(`Your courier is at your address and cannot reach you — reply in the chat (order #${orderId}).`, `Lähetti on osoitteessasi eikä tavoita sinua — vastaa chatissa (tilaus #${orderId}).`),
+      data: { type: "order", orderId: String(orderId), deliveryProblem: input.reason },
+    }).catch(() => {});
+    pushToUser(order.store.ownerId, {
+      title: t(`Order #${orderId}: the courier cannot reach the customer`, `Tilaus #${orderId}: lähetti ei tavoita asiakasta`),
+      body: t(`If the customer does not answer within ${DELIVERY_PROBLEM_WAIT_MINUTES} minutes, the courier brings the order back to you.`,
+        `Jos asiakas ei vastaa ${DELIVERY_PROBLEM_WAIT_MINUTES} minuutissa, lähetti tuo tilauksen takaisin teille.`),
+      data: { type: "order", orderId: String(orderId) },
+    }).catch(() => {});
+  }
+  return { canReturnAt, deliveryProblemAt: updated.deliveryProblemAt, deliveryProblemReason: updated.deliveryProblemReason };
+}
+
+/**
+ * Nobody answered: from 10 minutes after the report the courier takes the order back to the shop. The order is
+ * cancelled ("Customer could not be reached") and the items go back into stock. The customer gets back what they
+ * paid for the items (after any discount); the delivery fee, tip and service fees are not refunded, because the
+ * delivery was made. The courier is paid the job pay and the tip as for a delivery; the store gets no payout
+ * (it has the items back).
+ */
+export async function returnToStore(orderId: number, userId: number) {
+  const courier = await requireApprovedCourier(userId);
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: { user: { select: { email: true } }, store: { select: { ownerId: true, name: true } } },
+  });
+  if (!order || order.courierId !== courier.id) throw new OrderError("Order not found", 404);
+  if (order.status !== "SHIPPED") throw new OrderError("Only an order you are carrying can be taken back to the shop", 409);
+  if (!order.deliveryProblemAt) throw new OrderError("Report that you cannot deliver first, then wait for the customer", 409);
+  const canReturnAt = canReturnAtOf(order.deliveryProblemAt);
+  if (canReturnAt > new Date()) {
+    const min = Math.max(1, Math.ceil((canReturnAt.getTime() - Date.now()) / 60_000));
+    throw new OrderError(`Wait for the customer a little longer: you can take it back to the shop in ${min} min.`, 409);
+  }
+
+  const refundCents = Math.max(0, Math.min(order.subtotalCents - order.discountCents, order.totalCents - order.refundedCents));
+  const updated = await prisma.$transaction(async (tx) => {
+    const now = new Date();
+    const res = await tx.order.updateMany({
+      where: { id: orderId, status: "SHIPPED", courierId: courier.id },
+      data: { status: "CANCELLED", cancelledAt: now, cancelReason: "Customer could not be reached", returnedToStoreAt: now },
+    });
+    if (res.count === 0) throw new OrderError("The order changed in the meantime, please refresh", 409);
+    await restock(tx, orderId);
+    // Not a delivered first order, so an invite reward is not earned; the promo code stays used
+    await tx.referral.deleteMany({ where: { orderId, rewardedAt: null } });
+    await tx.courier.updateMany({ where: { id: courier.id, currentOrderId: orderId }, data: { currentOrderId: null } });
+    return tx.order.findUniqueOrThrow({ where: { id: orderId }, omit: { courierPay: false } });
+  });
+
+  if (refundCents > 0 && order.stripePaymentIntentId && order.paymentStatus === "SUCCEEDED") {
+    try {
+      await getStripe().refunds.create(
+        { payment_intent: order.stripePaymentIntentId, amount: refundCents, metadata: { orderId: String(orderId), reason: "returned_to_store" } },
+        { idempotencyKey: `return-to-store-${orderId}` },
+      );
+      await prisma.order.update({ where: { id: orderId }, data: { refundedCents: { increment: refundCents } } });
+      updated.refundedCents += refundCents;
+    } catch (err: any) {
+      // Shown in admin System → attention ("still need a refund")
+      logger.error({ orderId, err: err?.message }, "Refund after return to store failed — needs manual follow-up");
+    }
+  }
+  createCourierPayoutForReturnedOrder(orderId).catch((e) => logger.error({ orderId, err: e?.message }, "Courier payout for returned order failed"));
+
+  emitOrderStatus(orderId, { status: "CANCELLED", cancelReason: "Customer could not be reached", returnedToStoreAt: updated.returnedToStoreAt });
+  emitToStore(order.storeId, "order:status", { orderId, status: "CANCELLED", returnedToStoreAt: updated.returnedToStoreAt });
+  pushToUser(order.store.ownerId, {
+    title: t(`Courier is bringing order #${orderId} back`, `Lähetti tuo tilauksen #${orderId} takaisin`),
+    body: t("The customer could not be reached. Check the items when they arrive and confirm in the app that you got them back.",
+      "Asiakasta ei tavoitettu. Tarkista tuotteet, kun ne tulevat, ja vahvista sovelluksessa, että sait ne takaisin."),
+    data: { type: "order", orderId: String(orderId) },
+  }).catch(() => {});
+  const back = euros(refundCents);
+  pushToUser(order.userId, {
+    title: t(`Order #${orderId} is going back to the shop`, `Tilaus #${orderId} palaa kauppaan`),
+    body: refundCents > 0
+      ? t(`Your courier could not reach you. ${back.en} for the items is refunded; the delivery fee and tip are not.`,
+        `Lähetti ei tavoittanut sinua. Tuotteiden ${back.fi} palautetaan; toimitusmaksua ja tippiä ei palauteta.`)
+      : t("Your courier could not reach you, so the order was cancelled.", "Lähetti ei tavoittanut sinua, joten tilaus peruttiin."),
+    data: { type: "order", orderId: String(orderId) },
+  }).catch(() => {});
+  sendOrderStatusEmail(orderId, order.user.email, "RETURNED_TO_STORE").catch(() => {});
+  return { ...updated, courierPay: presentCourierPay(updated), refundCents };
+}
+
+/** The store confirms it has the items of a returned-to-store order back. Set once. */
+export async function confirmReturnReceived(orderId: number, userId: number) {
+  const order = await prisma.order.findUnique({ where: { id: orderId }, select: { returnedToStoreAt: true, store: { select: { ownerId: true } } } });
+  if (!order || order.store.ownerId !== userId) throw new OrderError("Order not found", 404);
+  if (!order.returnedToStoreAt) throw new OrderError("This order is not being returned to the shop", 409);
+  await prisma.order.updateMany({ where: { id: orderId, returnReceivedAt: null }, data: { returnReceivedAt: new Date() } });
+  return prisma.order.findUniqueOrThrow({ where: { id: orderId } });
 }

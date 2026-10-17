@@ -50,7 +50,6 @@ export async function deleteProduct(req: AuthRequest, res: Response) {
   const id = positiveId(req.params.id);
   if (!id) return res.status(404).json({ ok: false, error: "Product not found" });
   try {
-    await productsService.deleteProduct(id, req.user!.id);
-    res.json({ ok: true });
+    res.json({ ok: true, deleted: await productsService.deleteProduct(id, req.user!.id) });
   } catch (e) { sendError(res, e); }
 }

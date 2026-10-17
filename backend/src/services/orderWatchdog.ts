@@ -2,6 +2,7 @@ import pino from "pino";
 import { prisma } from "../lib/prisma";
 import { env } from "../config/env";
 import { pushToUser } from "../lib/push";
+import { t as tr } from "../lib/i18n";
 import { emitToStore } from "../lib/socket";
 import { cancelOrderInternal } from "../modules/orders/orders.service";
 import { sendOrderStatusEmail } from "./notificationDeliveryService";
@@ -54,8 +55,9 @@ export async function runOrderWatchdog() {
     if (!claimed.count) continue;
     const left = Math.max(1, Math.round(t.storeAccept - t.storeReminder));
     pushToUser(o.store.ownerId, {
-      title: `Order #${o.id} is waiting for you`,
-      body: `Accept or decline it in Malvoya Store. It is cancelled and refunded automatically in about ${left} min.`,
+      title: tr(`Order #${o.id} is waiting for you`, `Tilaus #${o.id} odottaa sinua`),
+      body: tr(`Accept or decline it in Malvoya Store. It is cancelled and refunded automatically in about ${left} min.`,
+        `Hyväksy tai hylkää se Malvoya Storessa. Se perutaan ja hyvitetään automaattisesti noin ${left} minuutin kuluttua.`),
       data: { type: "order", orderId: String(o.id) },
       channel: "new_orders",
     }).catch(() => {});
@@ -71,12 +73,13 @@ export async function runOrderWatchdog() {
   });
   for (const o of unanswered) {
     await cancelOrderInternal(o.id, "The store did not respond in time", {
-      customerMessage: "The store did not confirm your order in time.",
+      customerMessage: tr("The store did not confirm your order in time.", "Kauppa ei vahvistanut tilaustasi ajoissa."),
     });
     sendOrderStatusEmail(o.id, o.user.email, "CANCELLED").catch(() => {});
     pushToUser(o.store.ownerId, {
-      title: `Order #${o.id} was cancelled`,
-      body: "It was not accepted in time, so the customer was refunded. Pause orders in the app when you cannot answer.",
+      title: tr(`Order #${o.id} was cancelled`, `Tilaus #${o.id} peruttiin`),
+      body: tr("It was not accepted in time, so the customer was refunded. Pause orders in the app when you cannot answer.",
+        "Sitä ei hyväksytty ajoissa, joten asiakkaalle palautettiin rahat. Keskeytä tilaukset sovelluksessa, kun et ehdi vastata."),
       data: { type: "order", orderId: String(o.id) },
     }).catch(() => {});
     result.storeTimeouts++;
@@ -103,12 +106,13 @@ export async function runOrderWatchdog() {
 
     if (waitedMin >= t.courierSearch) {
       await cancelOrderInternal(o.id, "No courier was available", {
-        customerMessage: "We could not find a courier for your order.",
+        customerMessage: tr("We could not find a courier for your order.", "Emme löytäneet tilauksellesi lähettiä."),
       });
       sendOrderStatusEmail(o.id, o.user.email, "CANCELLED").catch(() => {});
       pushToUser(o.store.ownerId, {
-        title: `Order #${o.id} was cancelled`,
-        body: "No courier was available, so the customer was refunded. Please do not hand it over.",
+        title: tr(`Order #${o.id} was cancelled`, `Tilaus #${o.id} peruttiin`),
+        body: tr("No courier was available, so the customer was refunded. Please do not hand it over.",
+          "Lähettiä ei löytynyt, joten asiakkaalle palautettiin rahat. Älä luovuta tilausta."),
         data: { type: "order", orderId: String(o.id) },
       }).catch(() => {});
       result.courierTimeouts++;
@@ -119,8 +123,9 @@ export async function runOrderWatchdog() {
       const claimed = await prisma.order.updateMany({ where: { id: o.id, courierSearchNotifiedAt: null }, data: { courierSearchNotifiedAt: new Date() } });
       if (claimed.count) {
         pushToUser(o.userId, {
-          title: `Still looking for a courier`,
-          body: `Order #${o.id} is ready, we are finding someone to bring it. If nobody is available you get a full refund automatically.`,
+          title: tr("Still looking for a courier", "Etsimme yhä lähettiä"),
+          body: tr(`Order #${o.id} is ready, we are finding someone to bring it. If nobody is available you get a full refund automatically.`,
+            `Tilaus #${o.id} on valmis, etsimme sille tuojaa. Jos ketään ei löydy, saat rahasi automaattisesti takaisin.`),
           data: { type: "order", orderId: String(o.id) },
         }).catch(() => {});
         result.delayNotices++;
@@ -144,8 +149,9 @@ export async function runOrderWatchdog() {
     if (!claimed.count) continue;
     const left = Math.max(1, Math.round(p.holdHours - (Date.now() - o.readyAt!.getTime()) / 3_600_000));
     pushToUser(o.userId, {
-      title: `Your order is waiting at ${o.store.name}`,
-      body: `Collect order #${o.id}${o.store.address ? ` at ${o.store.address}` : ""} within about ${left} h. If it is not collected, it is cancelled and refunded in full.`,
+      title: tr(`Your order is waiting at ${o.store.name}`, `Tilauksesi odottaa: ${o.store.name}`),
+      body: tr(`Collect order #${o.id}${o.store.address ? ` at ${o.store.address}` : ""} within about ${left} h. If it is not collected, it is cancelled and refunded in full.`,
+        `Nouda tilaus #${o.id}${o.store.address ? ` osoitteesta ${o.store.address}` : ""} noin ${left} tunnin kuluessa. Noutamaton tilaus perutaan ja hyvitetään kokonaan.`),
       data: { type: "order", orderId: String(o.id) },
     }).catch(() => {});
     result.pickupReminders++;
@@ -159,12 +165,13 @@ export async function runOrderWatchdog() {
   });
   for (const o of abandoned) {
     await cancelOrderInternal(o.id, "Not collected in time", {
-      customerMessage: `The order was not collected within ${p.holdHours} hours of being ready.`,
+      customerMessage: tr(`The order was not collected within ${p.holdHours} hours of being ready.`, `Tilausta ei noudettu ${p.holdHours} tunnin kuluessa valmistumisesta.`),
     });
     sendOrderStatusEmail(o.id, o.user.email, "CANCELLED").catch(() => {});
     pushToUser(o.store.ownerId, {
-      title: `Order #${o.id} was cancelled`,
-      body: "It was not collected in time, so the customer was refunded. The items are back in your stock; please put them back on sale.",
+      title: tr(`Order #${o.id} was cancelled`, `Tilaus #${o.id} peruttiin`),
+      body: tr("It was not collected in time, so the customer was refunded. The items are back in your stock; please put them back on sale.",
+        "Sitä ei noudettu ajoissa, joten asiakkaalle palautettiin rahat. Tuotteet ovat taas varastossasi; laita ne takaisin myyntiin."),
       data: { type: "order", orderId: String(o.id) },
     }).catch(() => {});
     result.pickupTimeouts++;
@@ -178,12 +185,13 @@ export async function runOrderWatchdog() {
   });
   for (const o of neverReady) {
     await cancelOrderInternal(o.id, "The store did not get the order ready in time", {
-      customerMessage: "The shop did not get your order ready in time.",
+      customerMessage: tr("The shop did not get your order ready in time.", "Kauppa ei saanut tilaustasi valmiiksi ajoissa."),
     });
     sendOrderStatusEmail(o.id, o.user.email, "CANCELLED").catch(() => {});
     pushToUser(o.store.ownerId, {
-      title: `Order #${o.id} was cancelled`,
-      body: `It was not marked ready within ${p.readyHours} hours of accepting, so the customer was refunded.`,
+      title: tr(`Order #${o.id} was cancelled`, `Tilaus #${o.id} peruttiin`),
+      body: tr(`It was not marked ready within ${p.readyHours} hours of accepting, so the customer was refunded.`,
+        `Sitä ei merkitty valmiiksi ${p.readyHours} tunnin kuluessa hyväksymisestä, joten asiakkaalle palautettiin rahat.`),
       data: { type: "order", orderId: String(o.id) },
     }).catch(() => {});
     result.pickupNotReady++;

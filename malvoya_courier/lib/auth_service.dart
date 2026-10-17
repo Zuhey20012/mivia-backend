@@ -15,6 +15,9 @@ const _secureStorage = FlutterSecureStorage();
 /// Messages from this file follow the app language (no BuildContext here).
 String _t(String en, String fi) => ServerMessages.pick(en, fi);
 
+/// Every request names the app language, so the server can send notifications and emails in it.
+Map<String, String> get _jsonHeaders => {'Content-Type': 'application/json', 'Accept-Language': ServerMessages.languageCode};
+
 /// The account role this app is for. Other roles are refused at sign-in.
 const String kAppRole = 'COURIER';
 
@@ -36,6 +39,43 @@ class User {
       );
 
   Map<String, dynamic> toJson() => {'id': id, 'email': email, 'role': role, 'name': name, 'googleLinked': googleLinked};
+}
+
+/// Answer to a password-reset step. [unavailable] = the server cannot reset passwords by email
+/// (503: email not set up, or 404: an older server without the feature).
+class PasswordResetResult {
+  final bool ok;
+  final String? error;
+  final bool unavailable;
+  final bool tooMany;
+  /// 404: the server has no password reset at all (older version).
+  final bool notSupported;
+  /// The code was refused (wrong, expired or used up), so a new one is needed or it must be re-typed.
+  final bool codeProblem;
+  /// Set when the password was changed but signing in with it afterwards failed.
+  final String? signInError;
+
+  const PasswordResetResult({
+    required this.ok,
+    this.error,
+    this.unavailable = false,
+    this.tooMany = false,
+    this.notSupported = false,
+    this.codeProblem = false,
+    this.signInError,
+  });
+
+  factory PasswordResetResult.from(ApiResult res) {
+    final raw = '${res.data['error'] ?? ''}'.toLowerCase();
+    return PasswordResetResult(
+      ok: res.ok,
+      error: res.ok ? null : res.error,
+      unavailable: res.status == 503 || res.status == 404,
+      tooMany: res.status == 429,
+      notSupported: res.status == 404,
+      codeProblem: res.status == 400 && (raw.contains('code') || raw.contains('expired')),
+    );
+  }
 }
 
 /// Handles sign-in, secure token storage and automatic access-token refresh.
@@ -87,7 +127,7 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<String?> _applySession(Map<String, dynamic> data) async {
+  Future<String?> _applySession(Map<String, dynamic> data, {bool signIn = false}) async {
     final user = User.fromJson(data['user']);
     if (user.role != kAppRole) {
       return _t('This account is not a courier account. Please use the matching Malvoya app.', 'Tämä ei ole lähettitili. Käytä oikeaa Malvoya-sovellusta.');
@@ -101,6 +141,8 @@ class AuthService extends ChangeNotifier {
     await _secureStorage.write(key: 'refreshToken', value: _refreshToken);
     _scheduleRefresh();
     unawaited(refreshApprovalStatus());
+    // A new sign-in tells the server which language this phone uses (a token refresh does not)
+    if (signIn) unawaited(syncLocale());
     notifyListeners();
     return null;
   }
@@ -130,7 +172,7 @@ class AuthService extends ChangeNotifier {
     try {
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/refresh'),
-              headers: {'Content-Type': 'application/json'}, body: jsonEncode({'refreshToken': refresh}))
+              headers: _jsonHeaders, body: jsonEncode({'refreshToken': refresh}))
           .timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         await _applySession(jsonDecode(res.body));
@@ -156,14 +198,20 @@ class AuthService extends ChangeNotifier {
 
   // ── Email / password ───────────────────────────────────────────────────────
 
+  /// True when the last [login] was refused for its credentials (not for the connection), so the
+  /// sign-in screen can offer "Forgot password?".
+  bool lastLoginRejected = false;
+
   Future<String?> login(String emailOrPhone, String password) async {
+    lastLoginRejected = false;
     try {
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/login'),
-              headers: {'Content-Type': 'application/json'},
+              headers: _jsonHeaders,
               body: jsonEncode({'email': emailOrPhone.trim(), 'password': password}))
           .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
+      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body), signIn: true);
+      lastLoginRejected = res.statusCode == 400 || res.statusCode == 401;
       return _errorFrom(res, _t('Invalid email or password.', 'Sähköposti tai salasana on väärin.'));
     } catch (_) {
       return _t('Could not connect. Please check your internet connection.', 'Yhteyttä ei saatu. Tarkista nettiyhteys.');
@@ -175,7 +223,7 @@ class AuthService extends ChangeNotifier {
     try {
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/register'),
-              headers: {'Content-Type': 'application/json'},
+              headers: _jsonHeaders,
               body: jsonEncode({
                 'name': name.trim(),
                 'email': email.trim(),
@@ -184,11 +232,49 @@ class AuthService extends ChangeNotifier {
                 if (acceptTerms) 'acceptTerms': true,
               }))
           .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 201) return await _applySession(jsonDecode(res.body));
+      if (res.statusCode == 201) return await _applySession(jsonDecode(res.body), signIn: true);
       return _errorFrom(res, _t('Registration failed. Please try again.', 'Rekisteröinti epäonnistui. Yritä uudelleen.'));
     } catch (_) {
       return _t('Could not connect. Please check your internet connection.', 'Yhteyttä ei saatu. Tarkista nettiyhteys.');
     }
+  }
+
+  // ── Forgotten password (a code by email, API 2.10) ────────────────────────
+
+  /// Asks the server to email a 6-digit code. The server answers the same whether or not an
+  /// account exists, so this never reveals who has an account.
+  Future<PasswordResetResult> requestPasswordReset(String email) async {
+    final res = await const ApiClient().post('/auth/password/forgot', {'email': email.trim()});
+    return PasswordResetResult.from(res);
+  }
+
+  /// Sets the new password with the emailed code, then signs in with it.
+  Future<PasswordResetResult> resetPassword(String email, String code, String password) async {
+    final res = await const ApiClient().post('/auth/password/reset', {'email': email.trim(), 'code': code.trim(), 'password': password});
+    final result = PasswordResetResult.from(res);
+    if (!result.ok) return result;
+    // The reset ends every session, so a fresh one is opened with the new password
+    final err = await login(email, password);
+    return PasswordResetResult(ok: true, signInError: err);
+  }
+
+  // ── Language ──────────────────────────────────────────────────────────────
+
+  String? _localeSynced;
+
+  /// Stores the app language on the server (`PATCH /me {locale}`), so push notifications and
+  /// emails come in it. Sent after sign-in and when the language is changed; an older server
+  /// without the field simply ignores it.
+  Future<void> syncLocale() async {
+    final user = _currentUser;
+    if (user == null || _accessToken == null) return;
+    final code = ServerMessages.languageCode;
+    final key = '${user.id}:$code';
+    if (_localeSynced == key) return;
+    _localeSynced = key;
+    final res = await ApiClient(this).patch('/me', {'locale': code});
+    // Network trouble: try again next time; a refusal (old server) is not retried
+    if (res.status == 0) _localeSynced = null;
   }
 
   // ── Google ────────────────────────────────────────────────────────────────
@@ -201,9 +287,9 @@ class AuthService extends ChangeNotifier {
       if (idToken == null) return _t('Google did not return a sign-in token', 'Google ei palauttanut kirjautumistunnistetta');
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/google'),
-              headers: {'Content-Type': 'application/json'}, body: jsonEncode({'idToken': idToken, 'role': kAppRole}))
+              headers: _jsonHeaders, body: jsonEncode({'idToken': idToken, 'role': kAppRole}))
           .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
+      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body), signIn: true);
       return _errorFrom(res, _t('Google sign-in failed.', 'Google-kirjautuminen epäonnistui.'));
     } catch (_) {
       return _t('Google sign-in failed. Please check your internet connection.', 'Google-kirjautuminen epäonnistui. Tarkista nettiyhteys.');
@@ -301,10 +387,10 @@ class AuthService extends ChangeNotifier {
       if (firebaseToken == null) return _t('Phone verification failed', 'Puhelinnumeron vahvistus epäonnistui');
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/phone'),
-              headers: {'Content-Type': 'application/json'},
+              headers: _jsonHeaders,
               body: jsonEncode({'firebaseToken': firebaseToken, 'role': kAppRole}))
           .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
+      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body), signIn: true);
       return _errorFrom(res, _t('Phone sign-in failed.', 'Puhelinkirjautuminen epäonnistui.'));
     } on fb_auth.FirebaseAuthException catch (e) {
       return e.code == 'invalid-verification-code'
@@ -323,7 +409,7 @@ class AuthService extends ChangeNotifier {
     if (token == null) return false;
     try {
       final res = await http
-          .get(Uri.parse('${AppConstants.apiBase}/courier/me'), headers: {'Authorization': 'Bearer $token'})
+          .get(Uri.parse('${AppConstants.apiBase}/courier/me'), headers: {'Authorization': 'Bearer $token', 'Accept-Language': ServerMessages.languageCode})
           .timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         _isApproved = jsonDecode(res.body)['courier']?['isApproved'] == true;
@@ -362,7 +448,7 @@ class AuthService extends ChangeNotifier {
       try {
         await http
             .post(Uri.parse('${AppConstants.apiBase}/auth/logout'),
-                headers: {'Content-Type': 'application/json'}, body: jsonEncode({'refreshToken': refresh}))
+                headers: _jsonHeaders, body: jsonEncode({'refreshToken': refresh}))
             .timeout(const Duration(seconds: 5));
       } catch (_) {}
     }

@@ -1,6 +1,8 @@
 import { Router, Response } from "express";
 import { z } from "zod";
-import { auth, AuthRequest } from "../../middleware/auth";
+import { auth, optionalAuth, forgetSessionState, AuthRequest } from "../../middleware/auth";
+import { blockedIdsFor } from "./safety";
+import { hasPassword } from "../auth/session";
 import { sendError, positiveId, ApiError } from "../../lib/errors";
 import { prisma } from "../../lib/prisma";
 import { priceInfoFor, presentProduct, productInclude } from "../products/pricing";
@@ -26,12 +28,48 @@ router.patch("/me/profile", auth, async (req: AuthRequest, res: Response) => {
   } catch (e) { sendError(res, e); }
 });
 
+/**
+ * Account settings: the language of push notifications and emails ("fi" | "en"; the apps call this when the
+ * user changes language) and, optionally, the display name.
+ */
+const meSchema = z.object({
+  locale: z.enum(["fi", "en"]).optional(),
+  name: z.string().trim().min(1).max(80).optional(),
+}).strict().refine((d) => d.locale !== undefined || d.name !== undefined, { message: "Nothing to change" });
+
+/** The signed-in account, as in the session payload plus phone and language. */
+router.get("/me", auth, async (req: AuthRequest, res: Response) => {
+  try {
+    const u = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      select: { id: true, name: true, email: true, phone: true, role: true, locale: true, googleSub: true, passwordHash: true, termsAcceptedAt: true, termsVersion: true },
+    });
+    if (!u) throw new ApiError("Account not found", 404);
+    const { googleSub, passwordHash, ...user } = u;
+    res.json({ ok: true, user: { ...user, googleLinked: !!googleSub, hasPassword: hasPassword(passwordHash) } });
+  } catch (e) { sendError(res, e); }
+});
+
+router.patch("/me", auth, async (req: AuthRequest, res: Response) => {
+  const body = meSchema.safeParse(req.body);
+  if (!body.success) return res.status(400).json({ ok: false, error: "Send locale (fi or en) and/or a name of 1–80 characters" });
+  try {
+    const user = await prisma.user.update({
+      where: { id: req.user!.id },
+      data: body.data,
+      select: { id: true, name: true, email: true, phone: true, role: true, locale: true },
+    });
+    forgetSessionState(req.user!.id); // the next request reads the new language
+    res.json({ ok: true, user });
+  } catch (e) { sendError(res, e); }
+});
+
 // ─── Favourites (wishlist) ──────────────────────────────────────────────────
 
 router.get("/me/favorites", auth, async (req: AuthRequest, res: Response) => {
   try {
     const favs = await prisma.favorite.findMany({
-      where: { userId: req.user!.id, product: { store: { isVerified: true } } },
+      where: { userId: req.user!.id, product: { deletedAt: null, store: { isVerified: true } } },
       include: {
         product: {
           include: {
@@ -51,7 +89,7 @@ router.get("/me/favorites", auth, async (req: AuthRequest, res: Response) => {
 router.put("/me/favorites/:productId(\\d+)", auth, async (req: AuthRequest, res: Response) => {
   const productId = Number(req.params.productId);
   try {
-    const product = await prisma.product.findFirst({ where: { id: productId, store: { isVerified: true } }, select: { id: true } });
+    const product = await prisma.product.findFirst({ where: { id: productId, deletedAt: null, store: { isVerified: true } }, select: { id: true } });
     if (!product) throw new ApiError("Product not found", 404);
     await prisma.favorite.upsert({
       where: { userId_productId: { userId: req.user!.id, productId } },
@@ -157,16 +195,20 @@ router.get("/orders/:id(\\d+)/review", auth, async (req: AuthRequest, res: Respo
   } catch (e) { sendError(res, e); }
 });
 
-/** Public store reviews. Every review comes from a delivered order, which the app says. */
-router.get("/stores/:id(\\d+)/reviews", async (req: AuthRequest, res: Response) => {
+/**
+ * Public store reviews. Every review comes from a delivered order, which the app says. Reviews by users the
+ * signed-in viewer blocked are left out for that viewer; authorId lets the app offer "Report" and "Block user".
+ */
+router.get("/stores/:id(\\d+)/reviews", optionalAuth, async (req: AuthRequest, res: Response) => {
   const storeId = positiveId(req.params.id)!;
   const page = Math.max(1, Math.min(200, Number(req.query.page) || 1));
   try {
-    const where = { storeId, isHidden: false, store: { isVerified: true } };
+    const blocked = await blockedIdsFor(req.user?.id);
+    const where = { storeId, isHidden: false, store: { isVerified: true }, ...(blocked.length ? { userId: { notIn: blocked } } : {}) };
     const [rows, total] = await Promise.all([
       prisma.review.findMany({
         where, orderBy: { createdAt: "desc" }, skip: (page - 1) * 20, take: 20,
-        select: { id: true, storeRating: true, comment: true, createdAt: true, user: { select: { name: true, deletedAt: true } } },
+        select: { id: true, storeRating: true, comment: true, createdAt: true, userId: true, user: { select: { name: true, deletedAt: true } } },
       }),
       prisma.review.count({ where }),
     ]);
@@ -178,6 +220,8 @@ router.get("/stores/:id(\\d+)/reviews", async (req: AuthRequest, res: Response) 
       verifiedPurchase: true,
       // First name and initial only
       author: r.user.deletedAt ? "Former customer" : shortName(r.user.name),
+      authorId: r.user.deletedAt ? null : r.userId,
+      mine: req.user?.id === r.userId,
     }));
     res.json({ ok: true, reviews, total, page });
   } catch (e) { sendError(res, e); }

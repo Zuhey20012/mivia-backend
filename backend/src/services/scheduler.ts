@@ -8,6 +8,8 @@ import { checkProcessingProductVideos } from "../modules/products/productVideos"
 import { purgeOldDeliveryProofs } from "../modules/orders/orders.service";
 import { runOrderWatchdog } from "./orderWatchdog";
 import { failStaleImports } from "../modules/imports/imports.service";
+import { purgeOldMessages } from "../modules/orders/chat";
+import { sendTaxInfoReminders } from "../modules/sellers/taxReminders";
 
 const logger = pino({ name: "scheduler" });
 
@@ -20,6 +22,10 @@ const jobs: Job[] = [
   { name: "product-video-processing", everyMs: 2 * 60_000, enabled: mediaConfigured, run: checkProcessingProductVideos },
   { name: "delivery-proof-purge", everyMs: 6 * 60 * 60_000, enabled: mediaConfigured, run: purgeOldDeliveryProofs },
   { name: "import-watchdog", everyMs: 5 * 60_000, enabled: () => true, run: failStaleImports },
+  // Order chat is kept 30 days after the order is completed or cancelled
+  { name: "chat-purge", everyMs: 6 * 60 * 60_000, enabled: () => true, run: purgeOldMessages },
+  // DAC7: stores with sales and no tax details are reminded (every 30 days at most, 2 a year)
+  { name: "dac7-reminders", everyMs: 6 * 60 * 60_000, enabled: () => true, run: () => sendTaxInfoReminders() },
   {
     name: "expired-sign-in-codes", everyMs: 60 * 60_000, enabled: () => true,
     run: () => prisma.otpCode.deleteMany({ where: { expiresAt: { lt: new Date() } } }),

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { AuthRequest } from "../../middleware/auth";
 import {
   createOrderSchema, quoteOrderSchema, createRentalSchema, createReturnSchema, updateReturnStatusSchema, updateOrderStatusSchema,
-  collectOrderSchema,
+  collectOrderSchema, deliveryProblemSchema,
 } from "./orders.schema";
 import * as ordersService from "./orders.service";
 
@@ -71,7 +71,7 @@ export async function updateOrderStatus(req: AuthRequest, res: Response) {
   if (!id) return res.status(404).json({ ok: false, error: "Order not found" });
   if (!result.success) return res.status(400).json({ ok: false, errors: result.error.flatten() });
   try {
-    res.json({ ok: true, order: await ordersService.updateOrderStatus(id, req.user!, result.data.status) });
+    res.json({ ok: true, order: await ordersService.updateOrderStatus(id, req.user!, result.data.status, { reason: result.data.reason }) });
   } catch (e) { sendOrderError(res, e); }
 }
 
@@ -83,6 +83,41 @@ export async function collectOrder(req: AuthRequest, res: Response) {
   if (!result.success) return res.status(400).json({ ok: false, error: "Enter the customer's 6-digit pickup code", errors: result.error.flatten() });
   try {
     res.json({ ok: true, order: await ordersService.collectOrder(id, req.user!.id, result.data.code) });
+  } catch (e) { sendOrderError(res, e); }
+}
+
+/** "Complete payment": the PaymentSheet secret of the customer's own unpaid order (409 when it can no longer be paid). */
+export async function getOrderPayment(req: AuthRequest, res: Response) {
+  const id = idParam(req);
+  if (!id) return res.status(404).json({ ok: false, error: "Order not found" });
+  try {
+    res.json({ ok: true, ...(await ordersService.getOrderPayment(id, req.user!.id)) });
+  } catch (e) { sendOrderError(res, e); }
+}
+
+export async function reportDeliveryProblem(req: AuthRequest, res: Response) {
+  const id = idParam(req);
+  const result = deliveryProblemSchema.safeParse(req.body);
+  if (!id) return res.status(404).json({ ok: false, error: "Order not found" });
+  if (!result.success) return res.status(400).json({ ok: false, error: "Choose why you cannot deliver", errors: result.error.flatten() });
+  try {
+    res.json({ ok: true, ...(await ordersService.reportDeliveryProblem(id, req.user!.id, result.data)) });
+  } catch (e) { sendOrderError(res, e); }
+}
+
+export async function returnToStore(req: AuthRequest, res: Response) {
+  const id = idParam(req);
+  if (!id) return res.status(404).json({ ok: false, error: "Order not found" });
+  try {
+    res.json({ ok: true, order: await ordersService.returnToStore(id, req.user!.id) });
+  } catch (e) { sendOrderError(res, e); }
+}
+
+export async function confirmReturnReceived(req: AuthRequest, res: Response) {
+  const id = idParam(req);
+  if (!id) return res.status(404).json({ ok: false, error: "Order not found" });
+  try {
+    res.json({ ok: true, order: await ordersService.confirmReturnReceived(id, req.user!.id) });
   } catch (e) { sendOrderError(res, e); }
 }
 

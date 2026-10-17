@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 import { escapeHtml } from "../../services/notificationDeliveryService";
 
 /**
@@ -14,7 +15,32 @@ const DOCS: Record<string, { file: string; title: string }> = {
   terms: { file: "terms_of_service.md", title: "Terms of Service" },
   sellers: { file: "vendor_terms.md", title: "Seller Terms" },
   couriers: { file: "courier_agreement.md", title: "Courier Agreement" },
+  "delete-account": { file: "account_deletion.md", title: "Delete your account" },
 };
+// Other names the apps use for the same pages
+const ALIASES: Record<string, string> = { "vendor-terms": "sellers", "courier-agreement": "couriers", "account-deletion": "delete-account" };
+
+function readDoc(file: string) {
+  for (const dir of LEGAL_DIRS) {
+    const p = path.join(dir, file);
+    if (fs.existsSync(p)) return fs.readFileSync(p, "utf8");
+  }
+  return null;
+}
+
+/**
+ * The version of the agreement a new account accepts: the document's name plus the first 12 hex characters of
+ * the SHA-256 of its text, so every change to the text is a new version without anyone having to remember it.
+ */
+const versions = new Map<string, string>();
+export function termsVersionFor(role: string) {
+  const doc = role === "VENDOR" ? "sellers" : role === "COURIER" ? "couriers" : "terms";
+  if (!versions.has(doc)) {
+    const text = readDoc(DOCS[doc].file);
+    versions.set(doc, `${DOCS[doc].file.replace(/\.md$/, "")}@${text ? crypto.createHash("sha256").update(text.replace(/\r/g, "")).digest("hex").slice(0, 12) : "unknown"}`);
+  }
+  return versions.get(doc)!;
+}
 
 // The repository is deployed whole; the API runs from /backend
 const LEGAL_DIRS = [path.resolve(process.cwd(), "..", "legal"), path.resolve(__dirname, "..", "..", "..", "..", "legal")];
@@ -89,21 +115,17 @@ export function renderMarkdown(md: string) {
 
 function load(doc: string) {
   if (cache.has(doc)) return cache.get(doc)!;
-  const meta = DOCS[doc];
-  for (const dir of LEGAL_DIRS) {
-    const file = path.join(dir, meta.file);
-    if (fs.existsSync(file)) {
-      const html = renderMarkdown(fs.readFileSync(file, "utf8"));
-      cache.set(doc, html);
-      return html;
-    }
-  }
-  return null;
+  const text = readDoc(DOCS[doc].file);
+  if (text === null) return null;
+  const html = renderMarkdown(text);
+  cache.set(doc, html);
+  return html;
 }
 
 router.get("/legal/:doc", (req: Request, res: Response) => {
-  const meta = DOCS[req.params.doc];
-  const body = meta ? load(req.params.doc) : null;
+  const doc = ALIASES[req.params.doc] ?? req.params.doc;
+  const meta = Object.prototype.hasOwnProperty.call(DOCS, doc) ? DOCS[doc] : undefined;
+  const body = meta ? load(doc) : null;
   if (!meta || !body) return res.status(404).type("text").send("Not found");
   res.set("Cache-Control", "public, max-age=600");
   res.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");

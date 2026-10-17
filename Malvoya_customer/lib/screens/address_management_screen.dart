@@ -1,12 +1,12 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/theme.dart';
 import '../core/delivery_location.dart';
 import '../core/strings.dart';
 import '../l10n.dart';
 import 'map_address_picker.dart';
+import '../core/haptics.dart';
 
 class AddressManagementScreen extends StatefulWidget {
   const AddressManagementScreen({super.key});
@@ -55,7 +55,7 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
 
   /// Delivers to this address from now on (home, store list, checkout).
   Future<void> _useAddress(Map<String, dynamic> addr) async {
-    HapticFeedback.selectionClick();
+    Haptics.selection();
     await DeliveryLocation.instance.use(addr);
     if (!mounted) return;
     setState(() {});
@@ -326,7 +326,7 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
                         );
                         return;
                       }
-                      HapticFeedback.mediumImpact();
+                      Haptics.medium();
                       final aptPart = aptCtrl.text.isNotEmpty ? ' ' + aptCtrl.text.trim() : '';
                       final fullText = '${streetCtrl.text.trim()}$aptPart, ${postalCtrl.text.trim()} ${cityCtrl.text.trim()}';
                       final updated = {

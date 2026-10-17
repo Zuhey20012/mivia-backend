@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'core/app_language.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'config/constants.dart';
 
@@ -83,7 +84,7 @@ class RealtimeNotificationService {
       final res = await http
           .post(
             Uri.parse('${AppConstants.apiBase}/auth/otp/send'),
-            headers: {'Content-Type': 'application/json'},
+            headers: {'Content-Type': 'application/json', ...AppLanguage.header},
             body: jsonEncode({
               'target': destination,
               'channel': channel ?? (destination.contains('@') ? 'email' : 'sms'),
@@ -106,7 +107,7 @@ class RealtimeNotificationService {
       final res = await http
           .post(
             Uri.parse('${AppConstants.apiBase}/auth/otp/verify'),
-            headers: {'Content-Type': 'application/json'},
+            headers: {'Content-Type': 'application/json', ...AppLanguage.header},
             body: jsonEncode({'target': destination, 'code': code.trim()}),
           )
           .timeout(const Duration(seconds: 15));

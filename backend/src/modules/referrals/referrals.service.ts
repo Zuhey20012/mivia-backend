@@ -5,6 +5,7 @@ import { prisma } from "../../lib/prisma";
 import { env } from "../../config/env";
 import { ApiError } from "../../lib/errors";
 import { pushToUser } from "../../lib/push";
+import { euros, t } from "../../lib/i18n";
 import { PromoTerms, formatCents } from "../../utils/pricing";
 
 const logger = pino({ name: "referrals" });
@@ -180,8 +181,8 @@ export async function rewardReferralForOrder(orderId: number) {
   }
   await prisma.referral.update({ where: { id: ref.id }, data: { rewardPromoCodeId: promo.id } });
   pushToUser(ref.referrerId, {
-    title: `You earned ${moneyEn(rewardCents)} off`,
-    body: `A friend you invited got their first Malvoya order. Use code ${promo.code} at checkout. / Kaverisi sai ensimmäisen tilauksensa: käytä koodia ${promo.code}.`,
+    title: t(`You earned ${moneyEn(rewardCents)} off`, `Ansaitsit ${euros(rewardCents).fi} alennuksen`),
+    body: t(`A friend you invited got their first Malvoya order. Use code ${promo.code} at checkout.`, `Kutsumasi kaveri sai ensimmäisen Malvoya-tilauksensa. Käytä koodia ${promo.code} kassalla.`),
     data: { type: "referral", code: promo.code },
   }).catch(() => {});
 }

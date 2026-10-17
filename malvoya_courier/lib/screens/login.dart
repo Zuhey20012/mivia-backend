@@ -6,6 +6,7 @@ import '../config/theme.dart';
 import '../core/strings.dart';
 import '../l10n.dart';
 import '../locale_provider.dart';
+import 'forgot_password.dart';
 import 'register.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -21,6 +22,8 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _loading = false;
   bool _obscurePass = true;
   String? _error;
+  // The last sign-in was refused for a wrong email or password: offer a reset right there
+  bool _offerReset = false;
 
   @override
   void initState() {
@@ -42,16 +45,33 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() => _error = tr(context, 'Please enter your email and password.', 'Anna sähköpostiosoite ja salasana.'));
       return;
     }
-    setState(() { _loading = true; _error = null; });
+    setState(() { _loading = true; _error = null; _offerReset = false; });
     final auth = Provider.of<AuthService>(context, listen: false);
     final err = await auth.login(_emailCtrl.text.trim(), _passCtrl.text);
     if (mounted && err != null) {
-      setState(() { _error = err; _loading = false; });
+      setState(() {
+        _error = err;
+        _loading = false;
+        _offerReset = auth.lastLoginRejected && _emailCtrl.text.contains('@');
+      });
     }
   }
 
+  /// "Forgot password?": email → code → new password, then signed in automatically.
+  Future<void> _forgotPassword() async {
+    FocusScope.of(context).unfocus();
+    final email = await ForgotPasswordSheet.show(context, initialEmail: _emailCtrl.text);
+    if (!mounted) return;
+    setState(() {
+      if (email != null && email.isNotEmpty) _emailCtrl.text = email;
+      _passCtrl.clear();
+      _error = null;
+      _offerReset = false;
+    });
+  }
+
   Future<void> _handleGoogle() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() { _loading = true; _error = null; _offerReset = false; });
     final auth = Provider.of<AuthService>(context, listen: false);
     final err = await auth.loginWithGoogle();
     if (mounted && err != null) {
@@ -347,6 +367,16 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
 
+              if (ForgotPasswordSheet.available)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                    onPressed: _loading ? null : _forgotPassword,
+                    child: Text(tr(context, 'Forgot password?', 'Unohditko salasanan?')),
+                  ),
+                ),
+
               // Error message
               if (_error != null) ...[
                 const SizedBox(height: 14),
@@ -357,11 +387,26 @@ class _LoginScreenState extends State<LoginScreen> {
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: const Color(0xFFFFCDD2)),
                   ),
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.error_outline, color: Color(0xFFD93025), size: 18),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFD93025), fontSize: 13))),
+                      Row(
+                        children: [
+                          const Icon(Icons.error_outline, color: Color(0xFFD93025), size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFD93025), fontSize: 13))),
+                        ],
+                      ),
+                      if (_offerReset && ForgotPasswordSheet.available)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: TextButton.icon(
+                            style: TextButton.styleFrom(minimumSize: const Size(48, 48), padding: const EdgeInsets.symmetric(horizontal: 8)),
+                            onPressed: _forgotPassword,
+                            icon: const Icon(Icons.lock_reset_rounded, size: 20),
+                            label: Text(tr(context, 'Forgot your password? Reset it', 'Unohditko salasanan? Vaihda se')),
+                          ),
+                        ),
                     ],
                   ),
                 ),

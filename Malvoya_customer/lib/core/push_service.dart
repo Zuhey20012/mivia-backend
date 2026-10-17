@@ -9,7 +9,9 @@ import 'api_client.dart';
 /// Push notifications for order, delivery and payout updates (never marketing).
 ///
 /// The phone's push token is sent to Malvoya only while someone is signed in, and it is
-/// removed again on sign-out. Permission is asked right after sign-in, not at first launch.
+/// removed again on sign-out. The system permission is never asked at launch or sign-in: the app
+/// first explains why (`NotificationPrimer`, after the first order or when asking for a store
+/// alert) and calls [enable] only when the customer says yes.
 class PushService {
   PushService._();
   static final PushService instance = PushService._();
@@ -90,10 +92,41 @@ class PushService {
     if (_registeredFor != userId) _register(auth, userId);
   }
 
-  Future<void> _register(AuthService auth, int userId) async {
+  /// Whether this phone already lets Malvoya show notifications.
+  Future<bool> get allowed async {
+    try {
+      final settings = await FirebaseMessaging.instance.getNotificationSettings();
+      return settings.authorizationStatus == AuthorizationStatus.authorized ||
+          settings.authorizationStatus == AuthorizationStatus.provisional;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Asks the phone for permission (the customer agreed on the priming screen) and, when given,
+  /// registers this phone for the signed-in account. Returns whether notifications are on.
+  Future<bool> enable() async {
     try {
       final settings = await FirebaseMessaging.instance.requestPermission();
-      if (settings.authorizationStatus == AuthorizationStatus.denied) return;
+      final ok = settings.authorizationStatus == AuthorizationStatus.authorized ||
+          settings.authorizationStatus == AuthorizationStatus.provisional;
+      final auth = _auth;
+      final userId = auth != null && auth.isAuthenticated ? auth.currentUser?.id : null;
+      if (ok && auth != null && userId != null) {
+        _registeredFor = null;
+        await _register(auth, userId);
+      }
+      return ok;
+    } catch (e) {
+      debugPrint('Push permission failed: $e');
+      return false;
+    }
+  }
+
+  Future<void> _register(AuthService auth, int userId) async {
+    try {
+      // Only phones that already allow notifications; asking is left to the priming screen
+      if (!await allowed) return;
       _token ??= await FirebaseMessaging.instance.getToken();
       if (_token == null) return;
       final res = await ApiClient(auth).post('/me/devices', {

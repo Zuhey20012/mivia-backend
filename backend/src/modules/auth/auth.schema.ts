@@ -10,8 +10,16 @@ export const registerSchema = z.object({
   // bcrypt only uses the first 72 bytes
   password: z.string().min(8, "Password must be at least 8 characters").max(72),
   role:  z.enum(["CUSTOMER", "VENDOR", "COURIER"]).default("CUSTOMER"),
-  // Terms of service + privacy policy acceptance is required to create an account
+  // The agreement for the role (customer terms / seller terms / courier agreement); required for stores and
+  // couriers. When given, the time and the version of the text are stored on the account.
   acceptTerms: z.literal(true).optional(),
+}).superRefine((d, ctx) => {
+  if ((d.role === "VENDOR" || d.role === "COURIER") && d.acceptTerms !== true) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom, path: ["acceptTerms"],
+      message: d.role === "VENDOR" ? "Accept the Seller Terms to create a store account" : "Accept the Courier Agreement to create a courier account",
+    });
+  }
 });
 
 export const loginSchema = z.object({

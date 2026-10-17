@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
+import '../core/legal_links.dart';
 import '../core/strings.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -17,6 +18,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _passCtrl = TextEditingController();
   bool _loading = false;
   bool _obscurePass = true;
+  bool _acceptTerms = false;
   String? _error;
 
   @override
@@ -32,13 +34,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
       setState(() => _error = tr(context, 'Please fill in all fields.', 'Täytä kaikki kentät.'));
       return;
     }
+    if (_passCtrl.text.length < 8) {
+      setState(() => _error = tr(context, 'The password needs at least 8 characters.', 'Salasanassa on oltava vähintään 8 merkkiä.'));
+      return;
+    }
+    if (!_acceptTerms) {
+      setState(() => _error = tr(context, 'Accept the Seller Terms to create a store account.', 'Hyväksy myyjän ehdot luodaksesi kauppatilin.'));
+      return;
+    }
     setState(() { _loading = true; _error = null; });
     final auth = Provider.of<AuthService>(context, listen: false);
     final err = await auth.register(
       _nameCtrl.text.trim(),
       _emailCtrl.text.trim(),
       _passCtrl.text,
-      'VENDOR',
+      acceptTerms: _acceptTerms,
     );
 
     // On success the app's home switches to the welcome screen by itself and closes this one
@@ -113,6 +123,47 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     onPressed: () => setState(() => _obscurePass = !_obscurePass),
                   ),
                 ),
+              ),
+
+              const SizedBox(height: 14),
+              // Required: the server records when the Seller Terms were accepted, and which version
+              Container(
+                decoration: BoxDecoration(color: AppTheme.sand, borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  InkWell(
+                    borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                    onTap: () => setState(() {
+                      _acceptTerms = !_acceptTerms;
+                      _error = null;
+                    }),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 56),
+                      child: Row(children: [
+                        Checkbox(
+                          value: _acceptTerms,
+                          onChanged: (v) => setState(() {
+                            _acceptTerms = v ?? false;
+                            _error = null;
+                          }),
+                        ),
+                        Expanded(
+                          child: Text(tr(context, 'I accept the Seller Terms', 'Hyväksyn myyjän ehdot'),
+                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+                        ),
+                        const SizedBox(width: 12),
+                      ]),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4, bottom: 4),
+                    child: TextButton.icon(
+                      style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                      onPressed: () => openLegal('sellers'),
+                      icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                      label: Text(tr(context, 'Read the Seller Terms', 'Lue myyjän ehdot')),
+                    ),
+                  ),
+                ]),
               ),
 
               if (_error != null) ...[

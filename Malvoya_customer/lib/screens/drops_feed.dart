@@ -18,9 +18,12 @@ import '../core/strings.dart';
 import '../core/sign_in.dart';
 import '../widgets/add_to_bag_sheet.dart';
 import '../widgets/drop_comments_sheet.dart';
+import '../widgets/motion.dart';
 import '../widgets/price_tag.dart';
 import 'product_detail.dart';
 import 'store_detail.dart';
+import '../core/haptics.dart';
+import '../widgets/app_image.dart';
 
 /// Shoppable short videos from stores near you. Everything shown here comes from the API:
 /// real prices, real likes and views, and the reason each drop is in your feed.
@@ -62,6 +65,11 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   bool _routeCovered = false;
   DateTime? _watchStart;
 
+  /// Where the last double-tap landed: a heart pops there (one at a time, newest wins).
+  Offset? _burstAt;
+  int _burstId = 0;
+  Offset _lastDoubleTap = Offset.zero;
+
   bool get _shouldPlay => widget.isActive && !_paused && !_routeCovered && mounted;
 
   @override
@@ -101,8 +109,11 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     if (old.isActive != widget.isActive) {
       if (widget.isActive) {
         _watchStart = DateTime.now();
+        // Get the neighbours ready again for an instant swipe
+        _prepareAround(_index);
       } else {
         _flushView();
+        _releaseNeighbours();
       }
       _syncPlayback();
     }
@@ -216,7 +227,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
 
   void _switchMode(String mode) {
     if (mode == _mode) return;
-    HapticFeedback.selectionClick();
+    Haptics.selection();
     _flushView();
     _mode = mode;
     _load(reset: true);
@@ -242,6 +253,15 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
       _videos.remove(id)?.dispose();
     }
     _syncPlayback();
+  }
+
+  /// While another tab is showing, only the current video stays loaded (paused), to save memory.
+  void _releaseNeighbours() {
+    if (_drops.isEmpty || _index >= _drops.length) return;
+    final current = _id(_index);
+    for (final id in _videos.keys.where((k) => k != current).toList()) {
+      _videos.remove(id)?.dispose();
+    }
   }
 
   void _createController(int id, Map<String, dynamic> drop, {bool fallback = false}) {
@@ -315,7 +335,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   }
 
   void _toggleMute() {
-    HapticFeedback.selectionClick();
+    Haptics.selection();
     MediaSound.instance.toggle();
   }
 
@@ -330,7 +350,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     final storeId = asInt((drop['store'] as Map?)?['id']);
     if (storeId == null) return;
     final next = (drop['store'] as Map)['followedByMe'] != true;
-    HapticFeedback.lightImpact();
+    Haptics.light();
     setState(() => _setFollowed(storeId, next));
     final api = ApiClient(auth);
     final res = next ? await api.put('/stores/$storeId/follow') : await api.delete('/stores/$storeId/follow');
@@ -381,7 +401,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     }
     final liked = drop['likedByMe'] == true;
     if (onlyLike && liked) return;
-    HapticFeedback.lightImpact();
+    Haptics.light();
     setState(() {
       drop['likedByMe'] = !liked;
       drop['likeCount'] = (asInt(drop['likeCount']) ?? 0) + (liked ? -1 : 1);
@@ -401,7 +421,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   }
 
   Future<void> _share(Map<String, dynamic> drop) async {
-    HapticFeedback.selectionClick();
+    Haptics.selection();
     final product = drop['product'] ?? {};
     final store = drop['store'] ?? {};
     await SharePlus.instance.share(ShareParams(text: '${product['name']} · ${store['name']}\n${drop['shareUrl']}'));
@@ -672,7 +692,17 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
         setState(() => _paused = !_paused);
         _syncPlayback();
       },
-      onDoubleTap: () => _toggleLike(drop, onlyLike: true),
+      onDoubleTapDown: (d) => _lastDoubleTap = d.localPosition,
+      onDoubleTap: () {
+        final signedIn = Provider.of<AuthService>(context, listen: false).isAuthenticated;
+        if (signedIn && !reduceMotion(context)) {
+          setState(() {
+            _burstAt = _lastDoubleTap;
+            _burstId++;
+          });
+        }
+        _toggleLike(drop, onlyLike: true);
+      },
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -697,6 +727,17 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
           ),
           if (isCurrent && _paused && drop['kind'] == 'VIDEO')
             const Center(child: Icon(Icons.play_arrow_rounded, size: 84, color: Colors.white70)),
+          if (isCurrent && _burstAt != null)
+            Positioned(
+              left: _burstAt!.dx - 60,
+              top: _burstAt!.dy - 60,
+              child: _HeartBurst(
+                key: ValueKey(_burstId),
+                onDone: () {
+                  if (mounted) setState(() => _burstAt = null);
+                },
+              ),
+            ),
           Positioned(right: 10, bottom: bottomInset + 20, child: _rail(drop)),
           Positioned(left: 16, right: 84, bottom: bottomInset, child: _info(drop)),
           if (ready)
@@ -719,7 +760,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   Widget _rail(Map<String, dynamic> drop) {
     final store = (drop['store'] as Map?)?.cast<String, dynamic>() ?? {};
     final liked = drop['likedByMe'] == true;
-    Widget action(IconData icon, String? label, VoidCallback onTap, {Color color = Colors.white, String? tooltip}) => Padding(
+    Widget action(IconData icon, String? label, VoidCallback onTap, {Color color = Colors.white, String? tooltip, Object? bumpOn}) => Padding(
           padding: const EdgeInsets.only(bottom: 18),
           child: Semantics(
             button: true,
@@ -730,7 +771,11 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
               child: Column(
                 children: [
                   // At least 48 px wide to tap
-                  SizedBox(width: 48, child: Icon(icon, size: 34, color: color, shadows: const [Shadow(blurRadius: 10, color: Colors.black54)])),
+                  SizedBox(
+                    width: 48,
+                    height: 44,
+                    child: Bump(trigger: bumpOn, child: Icon(icon, size: 34, color: color, shadows: const [Shadow(blurRadius: 10, color: Colors.black54)])),
+                  ),
                   if (label != null)
                     Text(label,
                         style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700, shadows: [Shadow(blurRadius: 6, color: Colors.black54)])),
@@ -760,7 +805,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                   child: CircleAvatar(
                     radius: 22,
                     backgroundColor: AppTheme.primaryLight,
-                    backgroundImage: store['logoUrl'] != null ? CachedNetworkImageProvider(store['logoUrl']) : null,
+                    backgroundImage: store['logoUrl'] != null ? sizedImageProvider(context, store['logoUrl'], 44) : null,
                     child: store['logoUrl'] == null ? const Icon(Icons.storefront_rounded, color: AppTheme.primary) : null,
                   ),
                 ),
@@ -800,7 +845,9 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
           ),
         ),
         action(liked ? Icons.favorite_rounded : Icons.favorite_border_rounded, _compact(drop['likeCount']), () => _toggleLike(drop),
-            color: liked ? const Color(0xFFFF4D6D) : Colors.white, tooltip: tr(context, 'Like', 'Tykkää')),
+            color: liked ? const Color(0xFFFF4D6D) : Colors.white,
+            tooltip: liked ? tr(context, 'Unlike', 'Poista tykkäys') : tr(context, 'Like', 'Tykkää'),
+            bumpOn: liked),
         action(Icons.chat_bubble_outline_rounded, _compact(drop['commentCount']), () => _openComments(drop), tooltip: tr(context, 'Comments', 'Kommentit')),
         Padding(
           padding: const EdgeInsets.only(bottom: 18),
@@ -903,7 +950,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                     height: 58,
                     child: images.isEmpty
                         ? Container(color: AppTheme.primaryLight, child: const Icon(Icons.checkroom_rounded, color: AppTheme.primary))
-                        : CachedNetworkImage(imageUrl: images.first, fit: BoxFit.cover),
+                        : AppImage(images.first),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -942,4 +989,52 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
       ],
     );
   }
+}
+
+/// The heart that pops where a drop was double-tapped: grows, settles and fades in under a second.
+class _HeartBurst extends StatefulWidget {
+  final VoidCallback onDone;
+  const _HeartBurst({super.key, required this.onDone});
+
+  @override
+  State<_HeartBurst> createState() => _HeartBurstState();
+}
+
+class _HeartBurstState extends State<_HeartBurst> with SingleTickerProviderStateMixin {
+  late final _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 760))
+    ..forward().whenComplete(widget.onDone);
+  late final _scale = TweenSequence<double>([
+    TweenSequenceItem(tween: Tween(begin: 0.3, end: 1.15).chain(CurveTween(curve: Curves.easeOutBack)), weight: 40),
+    TweenSequenceItem(tween: Tween(begin: 1.15, end: 1.0), weight: 20),
+    TweenSequenceItem(tween: ConstantTween(1.0), weight: 40),
+  ]).animate(_c);
+  late final _fade = TweenSequence<double>([
+    TweenSequenceItem(tween: ConstantTween(1.0), weight: 65),
+    TweenSequenceItem(tween: Tween(begin: 1.0, end: 0.0), weight: 35),
+  ]).animate(_c);
+  late final _rise = Tween(begin: Offset.zero, end: const Offset(0, -0.25)).animate(CurvedAnimation(parent: _c, curve: const Interval(0.6, 1, curve: Curves.easeIn)));
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => IgnorePointer(
+        child: SlideTransition(
+          position: _rise,
+          child: FadeTransition(
+            opacity: _fade,
+            child: ScaleTransition(
+              scale: _scale,
+              child: const SizedBox(
+                width: 120,
+                height: 120,
+                child: Icon(Icons.favorite_rounded, size: 108, color: Color(0xFFFF4D6D), shadows: [Shadow(blurRadius: 18, color: Colors.black38)]),
+              ),
+            ),
+          ),
+        ),
+      );
 }

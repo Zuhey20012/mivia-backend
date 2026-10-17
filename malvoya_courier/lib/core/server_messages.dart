@@ -78,6 +78,14 @@ class ServerMessages {
     'You have orders in progress. Your account can be deleted once they are completed or cancelled.':
         'Sinulla on keskeneräisiä tilauksia. Tilisi voidaan poistaa, kun ne on toimitettu tai peruttu.',
     'Account not found': 'Tiliä ei löytynyt.',
+    // Forgotten password
+    'Password reset by email is not available yet. Contact support.':
+        'Salasanan vaihto sähköpostilla ei ole vielä käytössä. Ota yhteyttä tukeen.',
+    'Enter a valid email address': 'Anna kelvollinen sähköpostiosoite.',
+    'Enter the 6-digit code from the email': 'Anna sähköpostissa tullut 6-numeroinen koodi.',
+    'The code is wrong or has expired. Request a new one.': 'Koodi on väärä tai vanhentunut. Pyydä uusi koodi.',
+    'Too many wrong codes. Request a new one.': 'Liian monta väärää koodia. Pyydä uusi koodi.',
+    'Check the details': 'Tarkista tiedot.',
     'Refresh token expired or invalid': 'Kirjaudu uudelleen sisään.',
     'Invalid or expired token': 'Kirjaudu uudelleen sisään.',
     'Unauthorized': 'Kirjaudu uudelleen sisään.',

@@ -4,6 +4,7 @@ import { getStripe } from "../../lib/stripe";
 import { ApiError } from "../../lib/errors";
 import { env } from "../../config/env";
 import { pushToUser } from "../../lib/push";
+import { euros, t } from "../../lib/i18n";
 
 const logger = pino({ name: "payouts" });
 
@@ -146,6 +147,27 @@ export async function createPayoutsForOrder(orderId: number) {
   processDuePayouts().catch((err) => logger.error({ err: err?.message }, "Payout run failed"));
 }
 
+/**
+ * An order the courier took back to the shop (customer not reached): the courier is paid the job pay and the
+ * tip as for a delivery; the store gets no payout (it has the items back and the items were refunded).
+ * The transfer is tied to the charge only while it fits in what is left of it after the refund.
+ */
+export async function createCourierPayoutForReturnedOrder(orderId: number) {
+  const order = await prisma.order.findUnique({ where: { id: orderId }, include: { courier: { select: { id: true, payoutsEnabled: true } } } });
+  if (!order || !order.returnedToStoreAt || !order.courier || order.courierFeeCents <= 0 || order.paymentStatus !== "SUCCEEDED") return;
+  if (order.courierFeeCents > order.totalCents - order.refundedCents) {
+    logger.warn({ orderId, courier: order.courierFeeCents, kept: order.totalCents - order.refundedCents }, "Courier pay exceeds what was kept of the charge");
+  }
+  await prisma.payout.createMany({
+    data: [{
+      orderId, party: "COURIER", courierId: order.courier.id, amountCents: order.courierFeeCents,
+      status: order.courier.payoutsEnabled ? "SCHEDULED" : "WAITING_FOR_ACCOUNT", releaseAt: new Date(),
+    }],
+    skipDuplicates: true,
+  });
+  processDuePayouts().catch((err) => logger.error({ err: err?.message }, "Payout run failed"));
+}
+
 async function releaseWaiting(kind: "STORE" | "COURIER", id: number) {
   const where = kind === "STORE" ? { storeId: id } : { courierId: id };
   const res = await prisma.payout.updateMany({ where: { ...where, status: "WAITING_FOR_ACCOUNT" }, data: { status: "SCHEDULED" } });
@@ -208,9 +230,10 @@ export async function processDuePayouts() {
       });
       const userId = p.party === "STORE" ? p.store?.ownerId : p.courier?.userId;
       if (userId) {
+        const amount = euros(p.amountCents);
         pushToUser(userId, {
-          title: "Payout sent",
-          body: `${(p.amountCents / 100).toFixed(2).replace(".", ",")} € for order #${p.orderId} is on its way to your account.`,
+          title: t("Payout sent", "Tilitys lähetetty"),
+          body: t(`${amount.en} for order #${p.orderId} is on its way to your account.`, `${amount.fi} tilauksesta #${p.orderId} on matkalla tilillesi.`),
           data: { type: "payout", payoutId: String(p.id) },
         }).catch(() => {});
       }
@@ -242,7 +265,10 @@ async function linkableCents(
 export async function ordersPayingOutMoreThanCharged() {
   const rows = await prisma.$queryRaw<{ n: bigint }[]>`
     SELECT count(*)::bigint AS n FROM "Order"
-    WHERE "paymentStatus" = 'SUCCEEDED' AND status = 'DELIVERED' AND "sellerPayoutCents" + "courierFeeCents" > "totalCents"`;
+    WHERE "paymentStatus" = 'SUCCEEDED' AND (
+      (status = 'DELIVERED' AND "sellerPayoutCents" + "courierFeeCents" > "totalCents")
+      -- taken back to the shop: only the courier is paid, from what is left of the charge after the refund
+      OR (status = 'CANCELLED' AND "returnedToStoreAt" IS NOT NULL AND "courierFeeCents" > "totalCents" - "refundedCents"))`;
   return Number(rows[0]?.n ?? 0);
 }
 

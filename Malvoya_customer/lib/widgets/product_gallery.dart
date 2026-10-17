@@ -1,9 +1,9 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../config/theme.dart';
 import '../core/strings.dart';
+import 'app_image.dart';
 import 'product_video_player.dart';
+import '../core/haptics.dart';
 
 /// One slide of a product gallery: a photo URL or a video map from the API.
 class GalleryItem {
@@ -29,7 +29,12 @@ class GalleryItem {
 /// Swipeable photos and videos (with sound) on the product page. Tap opens the full-screen viewer.
 class ProductGallery extends StatefulWidget {
   final List<GalleryItem> items;
-  const ProductGallery({super.key, required this.items});
+
+  /// The tile photo that flew in: the first slide carries the same Hero when it is that photo.
+  final String? heroTag;
+  final String? heroImage;
+  final String? heroPreview;
+  const ProductGallery({super.key, required this.items, this.heroTag, this.heroImage, this.heroPreview});
 
   @override
   State<ProductGallery> createState() => _ProductGalleryState();
@@ -46,7 +51,7 @@ class _ProductGalleryState extends State<ProductGallery> {
   }
 
   Future<void> _openFullscreen() async {
-    HapticFeedback.selectionClick();
+    Haptics.selection();
     final back = await Navigator.of(context).push<int>(PageRouteBuilder(
       opaque: true,
       pageBuilder: (_, __, ___) => FullscreenGallery(items: widget.items, initialPage: _page),
@@ -82,9 +87,19 @@ class _ProductGalleryState extends State<ProductGallery> {
                 ),
               ]);
             }
-            return GestureDetector(
-              onTap: _openFullscreen,
-              child: CachedNetworkImage(imageUrl: item.image!, fit: BoxFit.cover, width: double.infinity),
+            final flewIn = i == 0 && widget.heroTag != null && item.image == widget.heroImage;
+            Widget photo = AppImage(item.image!, previewUrl: flewIn ? widget.heroPreview : null);
+            if (flewIn) {
+              photo = Hero(
+                tag: widget.heroTag!,
+                flightShuttleBuilder: widget.heroPreview == null ? null : photoShuttle(widget.heroPreview!),
+                child: photo,
+              );
+            }
+            return Semantics(
+              button: true,
+              label: tr(context, 'Photo ${i + 1} of ${items.length}. Open full screen', 'Kuva ${i + 1}/${items.length}. Avaa koko näytölle'),
+              child: GestureDetector(onTap: _openFullscreen, child: photo),
             );
           },
         ),
@@ -188,7 +203,15 @@ class _FullscreenGalleryState extends State<FullscreenGallery> {
                   transformationController: _zoomFor(i),
                   minScale: 1,
                   maxScale: 4,
-                  child: Center(child: CachedNetworkImage(imageUrl: item.image!, fit: BoxFit.contain)),
+                  // Sharp enough to zoom in on (the server's own size limit still applies)
+                  child: Center(
+                    child: AppImage(
+                      item.image!,
+                      fit: BoxFit.contain,
+                      requestWidth: 2000,
+                      placeholder: const Center(child: CircularProgressIndicator(color: Colors.white54, strokeWidth: 2)),
+                    ),
+                  ),
                 );
               },
             ),

@@ -4,8 +4,14 @@ Runs the real API against a throwaway Postgres, Stripe's official `stripe-mock` 
 Cloudinary mock, and checks security, payments, orders, couriers, drops, pricing, payouts,
 reviews, returns (also per item), GDPR, support, legal pages, fees, price quotes, promo codes, courier pay,
 catalogue import (Shopify, WooCommerce, CSV), Reserve & collect (pickup), per-store commission, referrals, share pages and App Links,
-scheduled delivery slots, DAC7 seller tax data and report, monthly store statements and owner analytics (499 checks; one
-slot check only runs when a today slot starts within the next hour or has passed, so the count can be 498).
+scheduled delivery slots, DAC7 seller tax data and report, monthly store statements and owner analytics, and (2.10) forgot/reset/change
+password and session revocation, agreement acceptance, language storage, finishing unpaid checkouts, store cancel reasons,
+return notes and notifications, product deletion and the store's paged catalogue, "courier cannot deliver" and return to the
+shop (items-only refund, courier payout), order chat history, blocking and review reports, approval messages, account-deletion
+media clean-up, signed statement links and DAC7 reminders (600 checks; one slot check only runs when a today slot starts
+within the next hour or has passed, so the count can be 599). The chat-purge and DAC7-reminder checks load
+`dist/modules/orders/chat.js` and `dist/modules/sellers/taxReminders.js` directly (same database); the referral instance
+on port 4556 runs with `NODE_ENV=production` and no SMTP, for the "password reset by email is not available" (503) check.
 
 ```bash
 # 1. Throwaway database and Stripe mock

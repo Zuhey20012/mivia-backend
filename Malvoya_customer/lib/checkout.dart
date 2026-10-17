@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -19,6 +18,11 @@ import 'models.dart';
 import 'realtime_notification_service.dart';
 import 'screens/location_selector_modal.dart';
 import 'screens/order_detail.dart';
+import 'core/haptics.dart';
+import 'widgets/app_image.dart';
+import 'screens/main_navigation.dart';
+import 'widgets/skeleton.dart';
+import 'widgets/motion.dart';
 
 /// Checkout: delivery or "collect from the shop", address, items, an optional courier tip, a promo
 /// code and the exact price the server will charge. Payment details are only ever entered in
@@ -275,7 +279,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
 
   void _pickSlot(Map<String, dynamic>? slot) {
     if (_paying || _sameSlot(slot, _slot) || (slot == null && _slot == null)) return;
-    HapticFeedback.selectionClick();
+    Haptics.selection();
     setState(() {
       _slot = slot;
       _errorMessage = null;
@@ -294,7 +298,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
     final code = _promoCtrl.text.trim();
     if (code.isEmpty) return;
     FocusScope.of(context).unfocus();
-    HapticFeedback.selectionClick();
+    Haptics.selection();
     setState(() {
       _promoCode = code;
       _quoteNow = true;
@@ -302,7 +306,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
   }
 
   void _removePromo() {
-    HapticFeedback.selectionClick();
+    Haptics.selection();
     if (_promoFromInvite) PendingPromo.instance.clear();
     setState(() {
       _promoFromInvite = false;
@@ -332,7 +336,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
 
   /// A guest keeps the bag, signs in (or creates an account) and comes straight back here.
   Future<void> _signInToPay() async {
-    HapticFeedback.selectionClick();
+    Haptics.selection();
     final signedIn = await openSignIn(context);
     if (!mounted || !signedIn) return;
     // Now the server can give the exact price (promo codes, fees, delivery times)
@@ -345,7 +349,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
 
   void _setFulfilment(String value) {
     if (value == _fulfilment) return;
-    HapticFeedback.selectionClick();
+    Haptics.selection();
     setState(() {
       _fulfilment = value;
       _errorMessage = null;
@@ -370,7 +374,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
       _paying = true;
       _errorMessage = null;
     });
-    HapticFeedback.mediumImpact();
+    Haptics.medium();
     if (!pickup) {
       try {
         final prefs = await SharedPreferences.getInstance();
@@ -448,7 +452,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
     }
 
     // Paid in the sheet; the order is confirmed when Stripe tells the server
-    HapticFeedback.heavyImpact();
+    Haptics.medium();
     try {
       await LocalNotificationService.showNotification(
         id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
@@ -475,7 +479,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
 
   /// Shows a payment/order problem right above the Pay button, where the customer is looking.
   void _fail(String message) {
-    HapticFeedback.heavyImpact();
+    Haptics.warning();
     setState(() {
       _paying = false;
       _errorMessage = message;
@@ -690,7 +694,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
         _summaryRow(tr(context, 'Courier tip', 'Tippi kuriirille'), money('tipCents')),
       ],
       const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Divider()),
-      _summaryRow(tr(context, 'Total', 'Yhteensä'), money('totalCents'), bold: true),
+      _summaryRow(tr(context, 'Total', 'Yhteensä'), money('totalCents'), bold: true, cents: asInt(q?['totalCents'])),
       const SizedBox(height: 6),
       Text(
         _legacy
@@ -995,7 +999,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
       excludeSemantics: true,
       child: GestureDetector(
         onTap: () {
-          HapticFeedback.selectionClick();
+          Haptics.selection();
           setState(() => _tipCents = cents);
         },
         child: AnimatedContainer(
@@ -1028,7 +1032,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
               borderRadius: BorderRadius.circular(14),
             ),
             child: item.imageUrl != null
-                ? Image.network(item.imageUrl!, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.checkroom_outlined, color: AppTheme.clayInk))
+                ? AppImage(item.imageUrl!, error: const Icon(Icons.checkroom_outlined, color: AppTheme.clayInk))
                 : const Icon(Icons.checkroom_outlined, color: AppTheme.clayInk),
           ),
           const SizedBox(width: 12),
@@ -1055,26 +1059,13 @@ class _CheckoutPageState extends State<CheckoutPage> {
     );
   }
 
-  Widget _emptyCart() => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 88,
-                height: 88,
-                decoration: BoxDecoration(color: AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine), shape: BoxShape.circle),
-                child: const Icon(Icons.shopping_bag_outlined, size: 40, color: Color(0xFF8A5A00)),
-              ),
-              const SizedBox(height: 16),
-              Text(tr(context, 'Your bag is empty', 'Ostoskassisi on tyhjä'), style: AppTheme.display(context, size: 21)),
-              const SizedBox(height: 6),
-              Text(tr(context, 'Find something you love from stores near you.', 'Löydä jotain ihanaa läheisistä kaupoista.'),
-                  textAlign: TextAlign.center, style: TextStyle(color: AppTheme.secondaryText(context))),
-            ],
-          ),
-        ),
+  Widget _emptyCart() => StateMessage(
+        icon: Icons.shopping_bag_outlined,
+        title: tr(context, 'Your bag is empty', 'Ostoskassisi on tyhjä'),
+        message: tr(context, 'Find something you love from stores near you.', 'Löydä jotain ihanaa läheisistä kaupoista.'),
+        actionLabel: tr(context, 'Browse shops', 'Selaa kauppoja'),
+        actionIcon: Icons.storefront_rounded,
+        onRetry: () => openMainTab(context, MainTab.home),
       );
 
   Widget _notice(IconData icon, String text, {bool error = false}) => Container(
@@ -1115,7 +1106,8 @@ class _CheckoutPageState extends State<CheckoutPage> {
         ),
       );
 
-  Widget _summaryRow(String label, String value, {bool bold = false, bool highlight = false}) => Row(
+  /// With [cents], the amount counts smoothly to its new value (tip, promo code or delivery time changed).
+  Widget _summaryRow(String label, String value, {bool bold = false, bool highlight = false, int? cents}) => Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Flexible(
@@ -1127,12 +1119,20 @@ class _CheckoutPageState extends State<CheckoutPage> {
                 )),
           ),
           const SizedBox(width: 12),
-          Text(value,
-              style: TextStyle(
-                color: highlight ? AppTheme.success : AppTheme.primaryText(context),
-                fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
-                fontSize: bold ? 18 : 14,
-              )),
+          if (cents != null)
+            AnimatedEuro(cents,
+                style: TextStyle(
+                  color: highlight ? AppTheme.success : AppTheme.primaryText(context),
+                  fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
+                  fontSize: bold ? 18 : 14,
+                ))
+          else
+            Text(value,
+                style: TextStyle(
+                  color: highlight ? AppTheme.success : AppTheme.primaryText(context),
+                  fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
+                  fontSize: bold ? 18 : 14,
+                )),
         ],
       );
 }
@@ -1163,7 +1163,7 @@ class _QuantityControl extends StatelessWidget {
   Widget _btn(BuildContext context, IconData icon, String label, VoidCallback cb) => IconButton(
         tooltip: label,
         onPressed: () {
-          HapticFeedback.selectionClick();
+          Haptics.selection();
           cb();
         },
         visualDensity: VisualDensity.compact,

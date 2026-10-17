@@ -5,14 +5,15 @@ import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/delete_account_tile.dart';
 import '../core/legal_links.dart';
+import '../core/push_service.dart';
 import '../core/strings.dart';
 import 'help_screen.dart';
 
 /// Shown until an admin approves the courier on the server.
 /// Identity and right-to-work documents are checked by the Malvoya team, never collected in this app.
-/// The server sends no message on approval, so this screen checks the status itself: when the app
-/// comes back to the foreground and every minute while it is on screen. Once approved, the app's
-/// home switches to the dashboard on its own.
+/// This screen checks the status itself: when the app comes back to the foreground, when a push
+/// arrives while it is open, and every minute while it is on screen. Once approved, the app's home
+/// switches to the dashboard on its own.
 class PendingApprovalScreen extends StatefulWidget {
   const PendingApprovalScreen({super.key});
 
@@ -30,11 +31,16 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> with Widg
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _startTimer();
+    // A notification while this screen is open (such as the approval) checks the status at once
+    PushService.instance.onReceive = (_) {
+      if (mounted) _check(silent: true);
+    };
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    PushService.instance.onReceive = null;
     _timer?.cancel();
     super.dispose();
   }
@@ -115,8 +121,8 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> with Widg
                       'Malvoyan tiimi hyväksyy hakemukset käsin, ei automaattisesti. Tiimi tarkistaa henkilöllisyytesi, että olet vähintään 18-vuotias, ja oikeutesi tehdä työtä Suomessa. Asiakirjoja ei ladata tähän sovellukseen; jos tiimi tarvitsee sinulta jotain, se käyttää yhteystietoja, jotka annoit rekisteröityessäsi.')),
               _step(Icons.sync_rounded, tr(context, 'Check your status here', 'Tarkista tilanne täältä'),
                   tr(context,
-                      'This screen checks your status by itself every minute while it is open, and whenever you come back to the app. When you are approved, the app opens your courier view here. No separate message is sent on approval yet.',
-                      'Tämä näkymä tarkistaa tilanteesi itse minuutin välein, kun se on auki, ja aina kun palaat sovellukseen. Kun hakemuksesi on hyväksytty, sovellus avaa lähettinäkymän tähän. Hyväksynnästä ei vielä lähetetä erillistä viestiä.')),
+                      'This screen checks your status by itself every minute while it is open, and whenever you come back to the app. When you are approved, the app opens your courier view here.',
+                      'Tämä näkymä tarkistaa tilanteesi itse minuutin välein, kun se on auki, ja aina kun palaat sovellukseen. Kun hakemuksesi on hyväksytty, sovellus avaa lähettinäkymän tähän.')),
               _step(Icons.description_outlined, tr(context, 'Courier agreement', 'Lähettisopimus'),
                   tr(context, 'You deliver as an independent entrepreneur under the courier agreement. Please read it before your first delivery.',
                       'Toimitat itsenäisenä yrittäjänä lähettisopimuksen mukaisesti. Lue se ennen ensimmäistä toimitusta.')),

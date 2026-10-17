@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
@@ -9,6 +8,7 @@ import '../config/theme.dart';
 import '../core/current_position.dart';
 import '../core/strings.dart';
 import '../local_notification_service.dart';
+import '../core/haptics.dart';
 
 
 class AddressResult {
@@ -239,7 +239,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
   }
 
   void _confirmAndReturn() {
-    HapticFeedback.mediumImpact();
+    Haptics.medium();
     final result = AddressResult(
       street: _street,
       houseNumber: _houseNumber,
@@ -417,6 +417,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                                 )
                               else if (_searchCtrl.text.isNotEmpty)
                                 IconButton(
+                                  tooltip: tr(context, 'Clear', 'Tyhjennä'),
                                   icon: const Icon(Icons.clear_rounded, size: 16, color: Colors.grey),
                                   onPressed: () {
                                     _searchCtrl.clear();
@@ -447,7 +448,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                 // Open the spot in the phone's maps app
                 GestureDetector(
                   onTap: () {
-                    HapticFeedback.lightImpact();
+                    Haptics.light();
                     LocalNotificationService.openGoogleMaps(
                       lat: _currentCenter.latitude,
                       lng: _currentCenter.longitude,
@@ -479,7 +480,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                 // Zoom In (+)
                 GestureDetector(
                   onTap: () {
-                    HapticFeedback.lightImpact();
+                    Haptics.light();
                     final newZoom = (_mapController.camera.zoom + 1.0).clamp(4.0, 20.0);
                     _mapController.move(_currentCenter, newZoom);
                   },
@@ -500,7 +501,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                 // Zoom Out (-)
                 GestureDetector(
                   onTap: () {
-                    HapticFeedback.lightImpact();
+                    Haptics.light();
                     final newZoom = (_mapController.camera.zoom - 1.0).clamp(4.0, 20.0);
                     _mapController.move(_currentCenter, newZoom);
                   },
@@ -527,7 +528,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                 // GPS Re-Center Floating Button
                 GestureDetector(
                   onTap: () {
-                    HapticFeedback.lightImpact();
+                    Haptics.light();
                     _locate();
                   },
                   child: Container(

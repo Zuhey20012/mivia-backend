@@ -1,7 +1,5 @@
 import 'dart:async';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
@@ -12,6 +10,10 @@ import '../l10n.dart';
 import '../widgets/product_tile.dart';
 import '../widgets/skeleton.dart';
 import 'store_detail.dart';
+import '../core/haptics.dart';
+import '../widgets/app_image.dart';
+import '../widgets/empty_art.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Search across every store: items with size, price, condition and second-hand filters,
 /// or stores by name.
@@ -55,6 +57,13 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
   bool _loadingMore = false;
   String? _error;
 
+  /// Searches typed on this phone (newest first), kept only on the phone.
+  List<String> _recent = [];
+  static const _recentKey = 'recent_searches';
+
+  /// Quick starting points under an empty search box (the same groups as on Home).
+  static const _quickCategories = ['Clothing', 'Shoes', 'Bags', 'Accessories', 'Jewelry', 'Vintage', 'Beauty', 'Home'];
+
   // The API has no list of sizes in use, so the common clothing and shoe sizes are offered
   static const _sizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', 'One Size'];
 
@@ -63,6 +72,71 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
     super.initState();
     _scroll.addListener(() {
       if (_scroll.position.pixels > _scroll.position.maxScrollExtent - 600) _loadMore();
+    });
+    _search();
+    _loadRecent();
+  }
+
+  Future<void> _loadRecent() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getStringList(_recentKey) ?? const [];
+      if (mounted) setState(() => _recent = saved);
+    } catch (_) {}
+  }
+
+  /// Remembers the current query (when it found something worth opening, or was submitted).
+  Future<void> _remember() async {
+    final q = _query.text.trim();
+    if (q.length < 2) return;
+    final next = [q, ..._recent.where((r) => r.toLowerCase() != q.toLowerCase())].take(8).toList();
+    setState(() => _recent = next);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_recentKey, next);
+    } catch (_) {}
+  }
+
+  Future<void> _clearRecent() async {
+    Haptics.selection();
+    setState(() => _recent = []);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_recentKey);
+    } catch (_) {}
+  }
+
+  void _useQuery(String q) {
+    Haptics.selection();
+    _debounce?.cancel();
+    _query.text = q;
+    _query.selection = TextSelection.collapsed(offset: q.length);
+    FocusScope.of(context).unfocus();
+    _search();
+    _remember();
+  }
+
+  void _useCategory(String name) {
+    Haptics.selection();
+    FocusScope.of(context).unfocus();
+    setState(() => _category = name);
+    _search();
+  }
+
+  bool get _hasFilters =>
+      _category != null || _size != null || _condition != null || _secondHand || _eco || _minPrice != null || _maxPrice != null;
+
+  void _clearFilters() {
+    Haptics.selection();
+    setState(() {
+      _category = null;
+      _size = null;
+      _condition = null;
+      _secondHand = false;
+      _eco = false;
+      _minPrice = null;
+      _maxPrice = null;
+      _sort = 'relevance';
     });
     _search();
   }
@@ -142,6 +216,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
   }
 
   void _onQuery(String _) {
+    setState(() {}); // shows or hides the clear button
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 350), _search);
   }
@@ -157,7 +232,11 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
           autofocus: !widget.isTab && widget.category == null && !widget.secondHand && !widget.eco,
           onChanged: _onQuery,
           textInputAction: TextInputAction.search,
-          onSubmitted: (_) => _search(),
+          onSubmitted: (_) {
+            _debounce?.cancel();
+            _search();
+            _remember();
+          },
           decoration: InputDecoration(
             hintText: (_category != null || (widget.secondHand && _secondHand) || (widget.eco && _eco)) && widget.title != null
                 ? widget.title
@@ -169,7 +248,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
                     tooltip: tr(context, 'Clear search', 'Tyhjennä haku'),
                     icon: const Icon(Icons.close_rounded),
                     onPressed: () {
-                      HapticFeedback.selectionClick();
+                      Haptics.selection();
                       _query.clear();
                       _search();
                     }),
@@ -195,7 +274,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
                   selected: {_storesTab},
                   showSelectedIcon: false,
                   onSelectionChanged: (s) {
-                    HapticFeedback.selectionClick();
+                    Haptics.selection();
                     setState(() => _storesTab = s.first);
                     _search();
                   },
@@ -209,7 +288,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
       body: _loading
           ? (_storesTab ? const SkeletonCardList(thumbHeight: 44) : const SkeletonProductGrid())
           : _error != null
-              ? StateMessage.error(message: _error!, onRetry: _search)
+              ? RefreshIndicator(onRefresh: _search, child: StateMessage.error(message: _error!, onRetry: _search))
               : _storesTab
                   ? _storeList()
                   : _itemGrid(),
@@ -225,13 +304,13 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
             selected: active,
             showCheckmark: false,
             onSelected: (_) {
-              HapticFeedback.selectionClick();
+              Haptics.selection();
               onTap();
             },
             deleteButtonTooltipMessage: tr(context, 'Remove filter', 'Poista suodatin'),
             onDeleted: active && onRemove != null
                 ? () {
-                    HapticFeedback.selectionClick();
+                    Haptics.selection();
                     setState(onRemove);
                     _search();
                   }
@@ -304,7 +383,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
                 title: Text(labels[v] ?? v),
                 trailing: v == current ? const Icon(Icons.check_rounded, color: AppTheme.primary) : null,
                 onTap: () {
-                  HapticFeedback.selectionClick();
+                  Haptics.selection();
                   Navigator.pop(ctx, v);
                 },
               ),
@@ -354,26 +433,148 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
   }
 
   Widget _itemGrid() {
-    if (_items.isEmpty) {
-      return StateMessage(
-        icon: Icons.search_off_rounded,
-        message: tr(context, 'Nothing found. Try another word or fewer filters.', 'Ei tuloksia. Kokeile toista hakusanaa tai vähemmän suodattimia.'),
+    final idle = _query.text.trim().isEmpty && !_hasFilters;
+    return RefreshIndicator(
+      onRefresh: _search,
+      child: CustomScrollView(
+        controller: _scroll,
+        physics: const AlwaysScrollableScrollPhysics(),
+        // Builds a screen of tiles ahead, so photos are ready before they scroll in
+        cacheExtent: 800,
+        slivers: [
+          if (idle && (_recent.isNotEmpty || _items.isNotEmpty)) SliverToBoxAdapter(child: _startPoints()),
+          if (_items.isEmpty)
+            SliverToBoxAdapter(child: _noResults())
+          else
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 140),
+              sliver: SliverGrid(
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisSpacing: 18, crossAxisSpacing: 14, childAspectRatio: 0.56),
+                delegate: SliverChildBuilderDelegate(
+                  (_, i) => ProductTile(product: _items[i], onOpen: _remember),
+                  childCount: _items.length,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionLabel(String text, {Widget? trailing}) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 8, 4),
+        child: Row(children: [
+          Expanded(
+            child: Text(text, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 0.3, color: AppTheme.secondaryText(context))),
+          ),
+          if (trailing != null) trailing,
+        ]),
       );
-    }
-    return GridView.builder(
-      controller: _scroll,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 140),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisSpacing: 18, crossAxisSpacing: 14, childAspectRatio: 0.56),
-      itemCount: _items.length,
-      itemBuilder: (_, i) => ProductTile(product: _items[i]),
+
+  /// Under an empty search box: recent searches and quick categories.
+  Widget _startPoints() {
+    final l10n = AppLocalizations.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_recent.isNotEmpty) ...[
+          _sectionLabel(
+            tr(context, 'Recent searches', 'Viimeisimmät haut'),
+            trailing: TextButton(onPressed: _clearRecent, child: Text(tr(context, 'Clear', 'Tyhjennä'))),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final r in _recent)
+                  ActionChip(
+                    avatar: const Icon(Icons.history_rounded, size: 18),
+                    label: Text(r),
+                    onPressed: () => _useQuery(r),
+                  ),
+              ],
+            ),
+          ),
+        ],
+        _sectionLabel(tr(context, 'Browse by category', 'Selaa kategorioittain')),
+        SizedBox(
+          height: 48,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            children: [
+              for (final c in _quickCategories)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ActionChip(label: Text(l10n.translateCategory(c)), onPressed: () => _useCategory(c)),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Nothing matched: say so kindly and offer ways forward.
+  Widget _noResults() {
+    final l10n = AppLocalizations.of(context);
+    final muted = AppTheme.secondaryText(context);
+    final suggestions = _recent.where((r) => r.toLowerCase() != _query.text.trim().toLowerCase()).take(4).toList();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(28, 40, 28, 140),
+      child: Column(
+        children: [
+          const EmptyArt(EmptyArtKind.search),
+          const SizedBox(height: 14),
+          Text(
+            _query.text.trim().isEmpty ? tr(context, 'Nothing here yet', 'Täällä ei ole vielä mitään') : tr(context, 'No matches', 'Ei osumia'),
+            style: AppTheme.display(context, size: 20),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _hasFilters
+                ? tr(context, 'Try fewer filters or another word.', 'Kokeile vähemmän suodattimia tai toista sanaa.')
+                : tr(context, 'Try another word, or look around a category.', 'Kokeile toista sanaa tai katso jotain kategoriaa.'),
+            textAlign: TextAlign.center,
+            style: TextStyle(color: muted, fontSize: 15, height: 1.4),
+          ),
+          const SizedBox(height: 16),
+          if (_hasFilters)
+            FilledButton.tonalIcon(
+              onPressed: _clearFilters,
+              icon: const Icon(Icons.filter_alt_off_rounded, size: 20),
+              label: Text(tr(context, 'Clear filters', 'Poista suodattimet')),
+            ),
+          const SizedBox(height: 12),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final r in suggestions)
+                ActionChip(avatar: const Icon(Icons.history_rounded, size: 18), label: Text(r), onPressed: () => _useQuery(r)),
+              if (!_hasFilters)
+                for (final c in _quickCategories.take(suggestions.isEmpty ? 6 : 3))
+                  ActionChip(label: Text(l10n.translateCategory(c)), onPressed: () => _useCategory(c)),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
   Widget _storeList() {
     if (_stores.isEmpty) {
-      return StateMessage(icon: Icons.storefront_outlined, message: tr(context, 'No stores found.', 'Kauppoja ei löytynyt.'));
+      return RefreshIndicator(
+        onRefresh: _search,
+        child: StateMessage(icon: Icons.storefront_outlined, message: tr(context, 'No stores found. Try another name.', 'Kauppoja ei löytynyt. Kokeile toista nimeä.')),
+      );
     }
-    return ListView.separated(
+    return RefreshIndicator(
+      onRefresh: _search,
+      child: ListView.separated(
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 140),
       itemCount: _stores.length,
       separatorBuilder: (_, __) => Divider(height: 1, color: AppTheme.cardBorder(context)),
@@ -384,7 +585,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
         return ListTile(
           leading: CircleAvatar(
             backgroundColor: AppTheme.primaryLight,
-            backgroundImage: s['logoUrl'] != null ? CachedNetworkImageProvider(s['logoUrl']) : null,
+            backgroundImage: s['logoUrl'] != null ? sizedImageProvider(context, s['logoUrl'], 40) : null,
             child: s['logoUrl'] == null ? const Icon(Icons.storefront_rounded, color: AppTheme.primary) : null,
           ),
           title: Text(s['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w700)),
@@ -394,11 +595,13 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
             '${euro(context, s['deliveryFeeCents'])} ${tr(context, 'delivery', 'toimitus')}',
           ].join(' · ')),
           onTap: () {
-            HapticFeedback.selectionClick();
+            Haptics.selection();
+            _remember();
             Navigator.push(context, MaterialPageRoute(builder: (_) => StoreDetailScreen(store: s)));
           },
         );
       },
+      ),
     );
   }
 }

@@ -1,7 +1,8 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import '../core/app_language.dart';
 import 'dart:convert';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
@@ -21,8 +22,10 @@ import '../core/network_status.dart';
 import '../core/strings.dart';
 import '../core/store_hours.dart';
 import '../core/api_client.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shimmer/shimmer.dart';
+import '../core/haptics.dart';
+import '../widgets/app_image.dart';
+import '../core/notification_primer.dart';
 
 class HomeScreen extends StatefulWidget {
   /// Switches the app to the Drops tab.
@@ -109,7 +112,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       _pickAddress();
       return;
     }
-    HapticFeedback.mediumImpact();
+    Haptics.medium();
     setState(() => _alertBusy = true);
     final api = ApiClient(auth);
     final res = _alertSaved
@@ -120,6 +123,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       _alertBusy = false;
       if (res.ok) _alertSaved = !_alertSaved;
     });
+    // The alert arrives as a notification: explain and ask now, if the phone does not allow them yet
+    if (res.ok && _alertSaved) unawaited(NotificationPrimer.maybeAsk(context, reason: PrimerReason.storeAlert, force: true));
     if (!res.ok) messenger.showSnackBar(SnackBar(content: Text(res.errorText(context) ?? tr(context, 'Something went wrong', 'Jokin meni vikaan'))));
   }
 
@@ -184,7 +189,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     try {
       final q = DeliveryLocation.instance.query;
       final res = await http
-          .get(Uri.parse('${AppConstants.apiBase}/stores').replace(queryParameters: q.isEmpty ? null : q))
+          .get(Uri.parse('${AppConstants.apiBase}/stores').replace(queryParameters: q.isEmpty ? null : q),
+              headers: AppLanguage.header)
           .timeout(const Duration(seconds: 12));
       if (!mounted) return;
       if (res.statusCode == 200) {
@@ -215,7 +221,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   void _openCategory(String name) {
-    HapticFeedback.lightImpact();
+    Haptics.light();
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => name == 'Returns' ? const ReturnsScreen() : CategoryDetailScreen(categoryName: name)),
@@ -223,7 +229,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   void _pickAddress() {
-    HapticFeedback.selectionClick();
+    Haptics.selection();
     showModalBottomSheet(
       showDragHandle: false,
       context: context,
@@ -293,7 +299,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             icon: Icons.notifications_none_rounded,
             label: tr(context, 'Updates', 'Ilmoitukset'),
             onTap: () {
-              HapticFeedback.lightImpact();
+              Haptics.light();
               NotificationCenterDrawer.show(context);
             },
           ),
@@ -330,7 +336,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         child: InkWell(
           customBorder: const StadiumBorder(),
           onTap: () {
-            HapticFeedback.selectionClick();
+            Haptics.selection();
             Navigator.push(context, MaterialPageRoute(builder: (_) => const SearchScreen()));
           },
           child: SizedBox(
@@ -374,7 +380,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         child: InkWell(
           borderRadius: BorderRadius.circular(AppTheme.radiusLg),
           onTap: () {
-            HapticFeedback.mediumImpact();
+            Haptics.selection();
             Navigator.push(context, MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: asInt(order['id'])!)));
           },
           child: Padding(
@@ -431,7 +437,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 context,
                 color: AppTheme.primary,
                 onTap: () {
-                  HapticFeedback.lightImpact();
+                  Haptics.light();
                   widget.onOpenDrops?.call();
                 },
                 child: Stack(
@@ -599,7 +605,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: () {
-            HapticFeedback.lightImpact();
+            Haptics.light();
             Navigator.push(context, MaterialPageRoute(builder: (_) => StoreDetailScreen(store: store)));
           },
           child: Column(
@@ -612,13 +618,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   fit: StackFit.expand,
                   children: [
                     if (store['bannerUrl'] != null)
-                      CachedNetworkImage(imageUrl: store['bannerUrl'], fit: BoxFit.cover)
+                      AppImage(store['bannerUrl'])
                     else
                       Container(
                         color: AppTheme.pastel(context, AppTheme.clay, AppTheme.clayInk),
                         alignment: Alignment.center,
                         child: store['logoUrl'] != null
-                            ? CircleAvatar(radius: 34, backgroundImage: CachedNetworkImageProvider(store['logoUrl']))
+                            ? CircleAvatar(radius: 34, backgroundImage: sizedImageProvider(context, store['logoUrl'], 68))
                             : Icon(Icons.storefront_outlined, size: 48, color: AppTheme.clayInk.withValues(alpha: 0.8)),
                       ),
                     if (closed != null)

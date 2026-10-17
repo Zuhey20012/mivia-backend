@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { haversineKm } from "../utils/distance";
 import { emitToAllCouriers, emitToCourier } from "../lib/socket";
 import { pushToUser, pushToUsers } from "../lib/push";
+import { euros, lowerFirst, t } from "../lib/i18n";
 import { presentCourierPay } from "../utils/courierPay";
 import { freshPosition } from "../utils/courierPosition";
 import { env } from "../config/env";
@@ -42,9 +43,10 @@ export async function offerOrderToCouriers(orderId: number) {
     const claimed = await prisma.order.updateMany({ where: { id: orderId, dispatchStartedAt: null }, data: { dispatchStartedAt: new Date() } });
     if (claimed.count) {
       order.dispatchStartedAt = new Date();
+      const win = lowerFirst(windowText(order.scheduledStart, order.scheduledEnd));
       pushToUser(order.userId, {
-        title: `Finding a courier for order #${order.id}`,
-        body: `Your delivery ${windowText(order.scheduledStart, order.scheduledEnd).en.replace(/^T/, "t")} is starting: we are offering it to couriers now.`,
+        title: t(`Finding a courier for order #${order.id}`, `Etsimme lähettiä tilaukselle #${order.id}`),
+        body: t(`Your delivery ${win.en} is starting: we are offering it to couriers now.`, `Toimituksesi (${win.fi}) alkaa: tarjoamme sitä nyt läheteille.`),
         data: { type: "order", orderId: String(order.id) },
       }).catch(() => {});
     }
@@ -106,9 +108,10 @@ export async function offerOrderToCouriers(orderId: number) {
   }
   // Same offer as a push, for couriers who are online but have the app in the background
   const recipients = (nearby.length ? nearby : couriers).map((c) => c.userId).filter((id): id is number => id !== null);
+  const pay = euros(order.courierFeeCents);
   pushToUsers(recipients, {
-    title: `New delivery · ${(order.courierFeeCents / 100).toFixed(2).replace(".", ",")} €`,
-    body: `Pick up at ${order.store.name}. Open Malvoya Courier to accept.`,
+    title: t(`New delivery · ${pay.en}`, `Uusi toimitus · ${pay.fi}`),
+    body: t(`Pick up at ${order.store.name}. Open Malvoya Courier to accept.`, `Nouto: ${order.store.name}. Hyväksy Malvoya Courier -sovelluksessa.`),
     data: { type: "offer", orderId: String(order.id) },
   }).catch(() => {});
 

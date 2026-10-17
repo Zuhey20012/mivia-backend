@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Flag, Play, EyeOff, RotateCcw, MessageSquare } from 'lucide-react';
+import { Flag, Play, EyeOff, RotateCcw, MessageSquare, Star } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../utils/api';
 
@@ -37,6 +37,19 @@ type ReportedComment = {
   reports: { reason: string; createdAt: string }[];
 };
 
+type ReportedReview = {
+  id: number;
+  orderId: number;
+  storeRating: number;
+  comment: string | null;
+  isHidden: boolean;
+  createdAt: string;
+  reportCount: number;
+  store: { id: number; name: string };
+  user: { id: number; name: string };
+  reports: { reason: string; createdAt: string }[];
+};
+
 const STATUSES = ['READY', 'REMOVED', 'PROCESSING', 'FAILED'] as const;
 
 /**
@@ -47,16 +60,22 @@ export default function Moderation() {
   const [reports, setReports] = useState<Report[]>([]);
   const [drops, setDrops] = useState<Drop[]>([]);
   const [comments, setComments] = useState<ReportedComment[]>([]);
+  const [reviews, setReviews] = useState<ReportedReview[]>([]);
   const [status, setStatus] = useState<(typeof STATUSES)[number]>('READY');
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
     setError(null);
     try {
-      const [r, d, c] = await Promise.all([api.get('/admin/reports'), api.get(`/admin/drops?status=${status}`), api.get('/admin/comments/reported')]);
+      const [r, d, c, rv] = await Promise.all([
+        api.get('/admin/reports'), api.get(`/admin/drops?status=${status}`), api.get('/admin/comments/reported'),
+        // Older API versions have no reported reviews yet
+        api.get('/admin/reviews/reported').catch(() => ({ data: { reviews: [] } })),
+      ]);
       setReports(r.data.reports);
       setDrops(d.data.drops);
       setComments(c.data.comments);
+      setReviews(rv.data.reviews ?? []);
     } catch {
       setError('Could not load moderation data.');
     }
@@ -80,6 +99,12 @@ export default function Moderation() {
   async function moderateComment(commentId: number, action: 'remove' | 'restore') {
     try { await api.post(`/admin/comments/${commentId}`, { action }); await load(); }
     catch { alert(action === 'remove' ? 'Could not remove the comment' : 'Could not restore the comment'); }
+  }
+
+  async function resolveReview(reviewId: number, action: 'hide' | 'keep') {
+    if (action === 'hide' && !confirm('Hide this review? It disappears from the store page and the store rating is recalculated.')) return;
+    try { await api.post(`/admin/reviews/${reviewId}/resolve`, { action }); await load(); }
+    catch { alert('Could not save the decision'); }
   }
 
   async function dismiss(reportId: number) {
@@ -138,6 +163,33 @@ export default function Moderation() {
                   <td className="py-3 text-right whitespace-nowrap">
                     <button className="apple-btn-danger text-xs px-3 py-1.5 mr-2" onClick={() => moderateComment(c.id, 'remove')}>Remove</button>
                     {c.status === 'HIDDEN' && <button className="apple-btn-secondary text-xs px-3 py-1.5" onClick={() => moderateComment(c.id, 'restore')}>Restore</button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="apple-card mb-6">
+        <h2 className="font-semibold mb-1 flex items-center gap-2"><Star className="w-4 h-4" /> Reported reviews ({reviews.length})</h2>
+        <p className="text-gray-400 text-xs mb-4">Reviews stay visible until you decide. Hiding removes the review from the store page and its rating; keeping closes the reports.</p>
+        {reviews.length === 0 ? <p className="text-gray-400 text-sm">Nothing to review.</p> : (
+          <table className="w-full text-sm">
+            <tbody>
+              {reviews.map(rv => (
+                <tr key={rv.id} className="table-row">
+                  <td className="py-3 pr-4 whitespace-nowrap">
+                    {[...new Set(rv.reports.map(r => r.reason))].map(reason => <span key={reason} className="badge-red mr-1">{reason}</span>)}
+                  </td>
+                  <td className="py-3 pr-4">
+                    <p className="font-medium">{'★'.repeat(rv.storeRating)}{'☆'.repeat(5 - rv.storeRating)} {rv.comment ?? <span className="text-gray-400">(no text)</span>}</p>
+                    <p className="text-gray-400 text-xs">{rv.store.name} · order #{rv.orderId} · by user #{rv.user.id} · {rv.reportCount} report{rv.reportCount === 1 ? '' : 's'}{rv.isHidden ? ' · already hidden' : ''}</p>
+                  </td>
+                  <td className="py-3 pr-4 text-gray-400 text-xs">{new Date(rv.createdAt).toLocaleString('fi-FI')}</td>
+                  <td className="py-3 text-right whitespace-nowrap">
+                    <button className="apple-btn-danger text-xs px-3 py-1.5 mr-2" onClick={() => resolveReview(rv.id, 'hide')}>Hide</button>
+                    <button className="apple-btn-secondary text-xs px-3 py-1.5" onClick={() => resolveReview(rv.id, 'keep')}>Keep</button>
                   </td>
                 </tr>
               ))}

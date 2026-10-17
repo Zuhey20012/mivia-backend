@@ -64,7 +64,12 @@ class MalvoyaCourierApp extends StatelessWidget {
           });
           return auth;
         }),
-        ChangeNotifierProvider(create: (_) => LocaleProvider()),
+        ChangeNotifierProvider(create: (ctx) {
+          final locale = LocaleProvider();
+          // Push notifications and emails follow the app language
+          locale.onChanged = (_) => Provider.of<AuthService>(ctx, listen: false).syncLocale();
+          return locale;
+        }),
       ],
       child: Consumer<LocaleProvider>(
         builder: (context, localeProvider, child) => MaterialApp(
@@ -72,6 +77,7 @@ class MalvoyaCourierApp extends StatelessWidget {
           navigatorKey: appNavigatorKey,
           debugShowCheckedModeBanner: false,
           theme: AppTheme.lightTheme,
+          highContrastTheme: AppTheme.highContrastTheme,
           locale: localeProvider.locale,
           localizationsDelegates: const [
             AppLocalizations.delegate,

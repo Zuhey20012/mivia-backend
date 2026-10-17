@@ -75,7 +75,7 @@ export async function getStoreById(id: number, viewerId?: number, lat: number | 
     select: {
       ...publicStoreFields,
       ownerId: true,
-      products: { where: { isAvailable: true }, take: 60, include: productInclude, orderBy: [{ isFeatured: "desc" }, { createdAt: "desc" }] },
+      products: { where: { isAvailable: true, deletedAt: null }, take: 60, include: productInclude, orderBy: [{ isFeatured: "desc" }, { createdAt: "desc" }] },
     },
   });
   // Unverified stores are only visible to their owner
@@ -94,7 +94,8 @@ export async function getStoreById(id: number, viewerId?: number, lat: number | 
 export async function getMyStore(ownerId: number) {
   const store = await prisma.store.findUnique({
     where: { ownerId },
-    include: { products: { include: productInclude, orderBy: { createdAt: "desc" } }, taxInfo: { select: taxRowSelect } },
+    // Large catalogues are paged with GET /stores/my/products; this keeps the newest 100
+    include: { products: { where: { deletedAt: null }, include: productInclude, orderBy: { createdAt: "desc" }, take: 100 }, taxInfo: { select: taxRowSelect } },
   });
   if (!store) return null;
   const info = await priceInfoFor(store.products);

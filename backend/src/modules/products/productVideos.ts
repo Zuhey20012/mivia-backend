@@ -16,8 +16,8 @@ const MAX_VIDEO_SECONDS = 60;
 type Actor = { id: number; role: string };
 
 async function ownedProduct(actor: Actor, productId: number) {
-  const product = await prisma.product.findUnique({ where: { id: productId }, select: { id: true, store: { select: { ownerId: true } } } });
-  if (!product || product.store.ownerId !== actor.id) throw new ApiError("Product not found", 404);
+  const product = await prisma.product.findUnique({ where: { id: productId }, select: { id: true, deletedAt: true, store: { select: { ownerId: true } } } });
+  if (!product || product.deletedAt || product.store.ownerId !== actor.id) throw new ApiError("Product not found", 404);
   return product;
 }
 

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -8,9 +9,10 @@ import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
+import '../core/haptics.dart';
+import '../core/images.dart';
 import '../core/media_upload.dart';
 import '../core/strings.dart';
-import '../widgets/loading_states.dart';
 
 /// Categories shared with the customer app's home screen and catalogue.
 const productCategories = ['Clothing', 'Shoes', 'Bags', 'Accessories', 'Jewelry', 'Beauty', 'Home', 'Other'];
@@ -133,8 +135,9 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
     if (discard == true && mounted) Navigator.pop(context);
   }
 
-  /// DELETE /products/:id hides the product for good: past orders still refer to it, so the server keeps it
-  /// (hidden) instead of erasing it.
+  /// DELETE /products/:id. From API 2.10 the answer says what happened: `deleted: "hard"` (never ordered,
+  /// erased) or `"soft"` (kept only for past orders' records, gone from every list). Older servers only
+  /// hide it, and it stays in the store's own list.
   Future<void> _delete() async {
     const red = Color(0xFFD93025);
     final ok = await showDialog<bool>(
@@ -142,8 +145,8 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
       builder: (ctx) => AlertDialog(
         title: Text(tr(ctx, 'Remove this product?', 'Poistetaanko tuote?')),
         content: Text(tr(ctx,
-            'Shoppers can no longer see or buy it. Past orders still refer to it, so it stays in your list as hidden; you can switch it back on later.',
-            'Asiakkaat eivät enää näe tai voi ostaa sitä. Aiemmat tilaukset viittaavat siihen, joten se jää listaasi piilotettuna; voit kytkeä sen myöhemmin takaisin.')),
+            'Shoppers will no longer see or buy it. To only take it off sale for a while, switch it to sold out instead.',
+            'Asiakkaat eivät enää näe tai voi ostaa sitä. Jos haluat poistaa sen myynnistä vain väliaikaisesti, merkitse se loppuneeksi.')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(ctx, 'Back', 'Takaisin'))),
           FilledButton(
@@ -169,6 +172,16 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
       return;
     }
     HapticFeedback.mediumImpact();
+    final name = '${widget.product!['name'] ?? ''}'.trim();
+    final message = switch ('${res.data['deleted'] ?? ''}') {
+      'hard' => tr(context, 'Product deleted.', 'Tuote poistettu.'),
+      'soft' => tr(context, 'Product removed. It is kept only in the records of past orders.', 'Tuote poistettu. Se säilyy vain aiempien tilausten tiedoissa.'),
+      _ => tr(context, 'Product hidden from shoppers. Past orders refer to it, so it stays in your list as hidden.',
+          'Tuote piilotettu asiakkailta. Aiemmat tilaukset viittaavat siihen, joten se jää listaasi piilotettuna.'),
+    };
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(name.isEmpty ? message : '$name: $message')));
     Navigator.pop(context, true);
   }
 
@@ -184,8 +197,65 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
     super.dispose();
   }
 
+  static const _tipsSeenKey = 'photo_tips_seen';
+
+  /// Three short tips for photos that sell; shown before the first photo on this phone, and any
+  /// time from "Photo tips".
+  Future<void> _showPhotoTips() {
+    Haptics.select();
+    Widget tip(IconData icon, String title, String body) => Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: const BoxDecoration(color: AppTheme.sunshineLight, shape: BoxShape.circle),
+              child: Icon(icon, color: const Color(0xFF8A5A00), size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                Text(body, style: const TextStyle(color: AppTheme.textSecondary, height: 1.35)),
+              ]),
+            ),
+          ]),
+        );
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text(tr(ctx, 'Photos that sell', 'Myyvät kuvat'), style: AppTheme.display(size: 21)),
+            const SizedBox(height: 14),
+            tip(Icons.wb_sunny_outlined, tr(ctx, 'Good light', 'Hyvä valo'),
+                tr(ctx, 'Daylight from a window, no flash. Colours then look true.', 'Päivänvaloa ikkunasta, ei salamaa. Silloin värit näkyvät oikein.')),
+            tip(Icons.crop_portrait_rounded, tr(ctx, 'Plain background', 'Yksinkertainen tausta'),
+                tr(ctx, 'A wall or a sheet in one colour keeps the eye on the item.', 'Yksivärinen seinä tai lakana pitää katseen tuotteessa.')),
+            tip(Icons.threesixty_rounded, tr(ctx, 'At least 3 angles', 'Vähintään 3 kuvakulmaa'),
+                tr(ctx, 'Front, back and a close-up of the fabric or label. The first photo is the cover; drag photos to change the order.',
+                    'Edestä, takaa ja lähikuva kankaasta tai merkistä. Ensimmäinen kuva on kansikuva; vedä kuvia muuttaaksesi järjestystä.')),
+            const SizedBox(height: 4),
+            FilledButton(onPressed: () => Navigator.pop(ctx), child: Text(tr(ctx, 'Got it', 'Selvä'))),
+          ]),
+        ),
+      ),
+    );
+  }
+
   Future<void> _addPhoto() async {
     if (_photos.length >= 8) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool(_tipsSeenKey) != true) {
+        await prefs.setBool(_tipsSeenKey, true);
+        if (!mounted) return;
+        await _showPhotoTips();
+        if (!mounted) return;
+      }
+    } catch (_) {}
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       builder: (ctx) => SafeArea(
@@ -365,31 +435,63 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
           children: [
-            _label(tr(context, 'Photos', 'Kuvat')),
+            Row(children: [
+              Expanded(child: _label(tr(context, 'Photos', 'Kuvat'))),
+              TextButton.icon(
+                style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                onPressed: _showPhotoTips,
+                icon: const Icon(Icons.lightbulb_outline_rounded, size: 18),
+                label: Text(tr(context, 'Photo tips', 'Kuvavinkit')),
+              ),
+            ]),
             SizedBox(
               height: 112,
-              child: ListView(
+              // The images list is saved in this order (the first is the cover): long-press and drag to move
+              child: ReorderableListView.builder(
                 scrollDirection: Axis.horizontal,
-                children: [
-                  for (final p in _photos) _photoTile(p),
-                  if (_photos.length < 8)
-                    GestureDetector(
-                      onTap: _addPhoto,
-                      child: Container(
-                        width: 90,
-                        decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(14)),
-                        child: const Icon(Icons.add_a_photo_outlined, color: AppTheme.primary, size: 30),
-                      ),
-                    ),
-                ],
+                buildDefaultDragHandles: false,
+                itemCount: _photos.length,
+                onReorderStart: (_) => Haptics.select(),
+                onReorder: (from, to) => setState(() {
+                  if (to > from) to--;
+                  _photos.insert(to, _photos.removeAt(from));
+                }),
+                proxyDecorator: (child, _, __) => Material(color: Colors.transparent, elevation: 6, borderRadius: BorderRadius.circular(14), child: child),
+                itemBuilder: (_, i) => ReorderableDelayedDragStartListener(
+                  key: ObjectKey(_photos[i]),
+                  index: i,
+                  child: _photoTile(_photos[i], cover: i == 0),
+                ),
+                footer: _photos.length < 8
+                    ? Semantics(
+                        button: true,
+                        label: tr(context, 'Add photo', 'Lisää kuva'),
+                        child: GestureDetector(
+                          onTap: _addPhoto,
+                          child: Container(
+                            width: 90,
+                            decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(14)),
+                            child: const Icon(Icons.add_a_photo_outlined, color: AppTheme.primary, size: 30),
+                          ),
+                        ),
+                      )
+                    : null,
               ),
             ),
             const SizedBox(height: 6),
             Text(
                 tr(context,
-                    'Good light and a plain background show the item clearly. The first photo is the cover. Use your own photos, or ones the brand allows you to use.',
-                    'Hyvä valo ja yksinkertainen tausta näyttävät tuotteen selkeästi. Ensimmäinen kuva on kansikuva. Käytä omia kuviasi tai kuvia, joiden käyttöön brändi on antanut luvan.'),
+                    'Good light, a plain background and at least 3 angles show the item clearly. The first photo is the cover — long-press a photo and drag it to change the order. Use your own photos, or ones the brand allows you to use.',
+                    'Hyvä valo, yksinkertainen tausta ja vähintään 3 kuvakulmaa näyttävät tuotteen selkeästi. Ensimmäinen kuva on kansikuva — paina kuvaa pitkään ja vedä muuttaaksesi järjestystä. Käytä omia kuviasi tai kuvia, joiden käyttöön brändi on antanut luvan.'),
                 style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+            if (_photos.isNotEmpty && _photos.length < 3)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                    tr(context, 'Add ${3 - _photos.length} more angle${_photos.length == 2 ? '' : 's'} so shoppers can see the whole item.',
+                        'Lisää vielä ${3 - _photos.length} kuvakulma${_photos.length == 2 ? '' : 'a'}, jotta asiakkaat näkevät koko tuotteen.'),
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF8A5A00), fontWeight: FontWeight.w700)),
+              ),
             const SizedBox(height: 20),
             _label(tr(context, 'Videos', 'Videot')),
             SizedBox(
@@ -537,7 +639,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
         child: Text(text, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppTheme.textPrimary)),
       );
 
-  Widget _photoTile(_Photo p) => Padding(
+  Widget _photoTile(_Photo p, {bool cover = false}) => Padding(
         padding: const EdgeInsets.only(right: 10),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(14),
@@ -547,27 +649,57 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
               fit: StackFit.expand,
               children: [
                 Container(color: AppTheme.primaryLight),
-                if (p.url != null)
-                  CachedNetworkImage(imageUrl: p.url!, fit: BoxFit.cover, placeholder: (_, __) => const Shimmering(child: SkeletonBox(height: double.infinity, radius: 0))),
+                if (p.url != null) NetImage(p.url!, width: 90, height: 112),
                 if (p.url == null && p.error == null)
-                  Center(child: CircularProgressIndicator(value: p.progress > 0 ? p.progress : null, color: AppTheme.primary)),
+                  Center(
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      CircularProgressIndicator(value: p.progress > 0 ? p.progress : null, color: AppTheme.primary),
+                      if (p.progress > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text('${(p.progress * 100).round()} %', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppTheme.primary)),
+                        ),
+                    ]),
+                  ),
+                if (cover && p.url != null)
+                  Positioned(
+                    left: 4,
+                    bottom: 4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(8)),
+                      child: Text(tr(context, 'Cover', 'Kansi'), style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppTheme.textPrimary)),
+                    ),
+                  ),
                 if (p.error != null)
                   Padding(
                     padding: const EdgeInsets.all(6),
                     child: Center(child: Text(p.error!, style: const TextStyle(fontSize: 10, color: AppTheme.accent), textAlign: TextAlign.center)),
                   ),
                 Positioned(
-                  top: 2,
-                  right: 2,
+                  top: 0,
+                  right: 0,
                   child: Semantics(
                     button: true,
                     label: tr(context, 'Remove photo', 'Poista kuva'),
                     child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
                       onTap: () {
                         HapticFeedback.selectionClick();
                         setState(() => _photos.remove(p));
                       },
-                      child: const CircleAvatar(radius: 12, backgroundColor: Colors.black54, child: Icon(Icons.close_rounded, size: 14, color: Colors.white)),
+                      // 48 px touch area around the small visible button
+                      child: const SizedBox(
+                        width: 48,
+                        height: 48,
+                        child: Align(
+                          alignment: Alignment.topRight,
+                          child: Padding(
+                            padding: EdgeInsets.all(2),
+                            child: CircleAvatar(radius: 12, backgroundColor: Colors.black54, child: Icon(Icons.close_rounded, size: 14, color: Colors.white)),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),

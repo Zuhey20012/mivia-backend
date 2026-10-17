@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../config/theme.dart';
 import '../../l10n.dart';
 import '../../locale_provider.dart';
+import '../haptics.dart';
+import '../strings.dart';
 
 class LanguagePickerSheet {
   static void show(BuildContext context) {
-    HapticFeedback.mediumImpact();
+    Haptics.selection();
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final modalBg = isDark ? const Color(0xFA1A161F) : Colors.white;
     final textPrimary = AppTheme.primaryText(context);
@@ -80,6 +81,7 @@ class LanguagePickerSheet {
                     ],
                   ),
                   IconButton(
+                    tooltip: tr(context, 'Close', 'Sulje'),
                     icon: Icon(Icons.close_rounded, color: textSecondary),
                     onPressed: () => Navigator.pop(ctx),
                   ),
@@ -112,7 +114,7 @@ class LanguagePickerSheet {
                             ? const Icon(Icons.check_circle_rounded, color: AppTheme.primary, size: 22)
                             : null,
                         onTap: () {
-                          HapticFeedback.mediumImpact();
+                          Haptics.medium();
                           provider.setLocaleCode(entry.key);
                           Navigator.pop(ctx);
                           ScaffoldMessenger.of(context).showSnackBar(

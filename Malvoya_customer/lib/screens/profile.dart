@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import 'chatbot.dart';
@@ -13,6 +12,8 @@ import 'privacy_gdpr_screen.dart';
 import 'orders.dart';
 import 'favorites_screen.dart';
 import 'invite_screen.dart';
+import 'blocked_users_screen.dart';
+import '../widgets/forgot_password_sheet.dart';
 import '../core/sign_in.dart';
 import '../core/strings.dart';
 import '../locale_provider.dart';
@@ -20,6 +21,7 @@ import '../l10n.dart';
 import '../config/theme.dart';
 import '../theme_provider.dart';
 import 'notification_center_drawer.dart';
+import '../core/haptics.dart';
 
 /// Profile: orders, favourites, addresses, language, appearance, privacy and help.
 
@@ -45,13 +47,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (mounted) setState(() => _referral = data);
   }
 
+  /// Change password = the reset flow with the account's email: a code proves it is them, and
+  /// they are signed in again with the new password (the server ends every session).
+  Future<void> _changePassword(AuthService auth, String email) async {
+    Haptics.light();
+    final outcome = await showForgotPasswordSheet(context, email: email, changing: true);
+    if (outcome == null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    if (outcome.signedIn) {
+      messenger.showSnackBar(SnackBar(content: Text(tr(context, 'Password changed.', 'Salasana vaihdettu.'))));
+    } else {
+      // The old session was ended by the server, so sign out instead of pretending
+      messenger.showSnackBar(SnackBar(content: Text(tr(context, 'Password changed. Sign in with your new password.', 'Salasana vaihdettu. Kirjaudu sisään uudella salasanalla.'))));
+      await auth.logout();
+    }
+  }
+
   void _nav(BuildContext context, Widget screen) {
-    HapticFeedback.lightImpact();
+    Haptics.light();
     Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
   }
 
   void _showThemePicker(BuildContext context, ThemeProvider themeProvider) {
-    HapticFeedback.lightImpact();
+    Haptics.light();
     final l10n = AppLocalizations.of(context);
     final cardBg = AppTheme.cardBackground(context);
     final textPrimary = AppTheme.primaryText(context);
@@ -85,7 +103,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               title: Text(l10n.translate('themeCrispDaylight'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
               trailing: themeProvider.mode == AppThemeMode.light ? const Icon(Icons.check_circle_rounded, color: AppTheme.primary) : null,
               onTap: () {
-                HapticFeedback.selectionClick();
+                Haptics.selection();
                 themeProvider.setTheme(AppThemeMode.light);
                 Navigator.pop(ctx);
               },
@@ -96,7 +114,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               title: Text(l10n.translate('themeOledMidnight'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
               trailing: themeProvider.mode == AppThemeMode.dark ? const Icon(Icons.check_circle_rounded, color: AppTheme.primary) : null,
               onTap: () {
-                HapticFeedback.selectionClick();
+                Haptics.selection();
                 themeProvider.setTheme(AppThemeMode.dark);
                 Navigator.pop(ctx);
               },
@@ -107,7 +125,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               title: Text(l10n.translate('themeEyeComfort'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
               trailing: themeProvider.mode == AppThemeMode.eyeComfort ? const Icon(Icons.check_circle_rounded, color: AppTheme.primary) : null,
               onTap: () {
-                HapticFeedback.selectionClick();
+                Haptics.selection();
                 themeProvider.setTheme(AppThemeMode.eyeComfort);
                 Navigator.pop(ctx);
               },
@@ -119,7 +137,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _showLanguageBottomSheet(BuildContext context) {
-    HapticFeedback.lightImpact();
+    Haptics.light();
     final cardBg = AppTheme.cardBackground(context);
     final textPrimary = AppTheme.primaryText(context);
     final textSecondary = AppTheme.secondaryText(context);
@@ -194,7 +212,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               ? const Icon(Icons.check_circle_rounded, color: AppTheme.primary, size: 22)
                               : null,
                           onTap: () {
-                            HapticFeedback.mediumImpact();
+                            Haptics.selection();
                             provider.setLocaleCode(entry.key);
                             Navigator.pop(ctx);
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -221,12 +239,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// Account deletion happens on the Privacy screen, which really deletes the account on the
   /// server (signing out alone must never look like a deletion).
   void _openAccountDeletion(BuildContext context) {
-    HapticFeedback.mediumImpact();
+    Haptics.selection();
     _nav(context, const PrivacyGdprScreen());
   }
 
   void _confirmLogout(BuildContext context, AuthService auth) {
-    HapticFeedback.mediumImpact();
+    Haptics.medium();
     final l10n = AppLocalizations.of(context);
     final cardBg = AppTheme.cardBackground(context);
     final textPrimary = AppTheme.primaryText(context);
@@ -557,10 +575,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       title: tr(context, 'Invite a friend', 'Kutsu ystävä'),
                       subtitle: tr(context, 'Share your code: ${_referral!['code']}', 'Jaa koodisi: ${_referral!['code']}'),
                       onTap: () async {
-                        HapticFeedback.lightImpact();
+                        Haptics.light();
                         await Navigator.push(context, MaterialPageRoute(builder: (_) => InviteScreen(initial: _referral)));
                         _loadReferral();
                       },
+                    ),
+                  ],
+                ),
+
+              // Account: password (only for accounts that have one and a real email address)
+              if (auth.isAuthenticated && (auth.currentUser?.hasPassword ?? false) && userEmail.contains('@'))
+                _buildMenuGroup(
+                  context: context,
+                  title: tr(context, 'Account', 'Tili'),
+                  children: [
+                    _buildTile(
+                      context: context,
+                      icon: Icons.key_rounded,
+                      iconColor: AppTheme.primary,
+                      title: tr(context, 'Change password', 'Vaihda salasana'),
+                      subtitle: tr(context, 'We email you a code to confirm it is you', 'Lähetämme koodin sähköpostiisi varmistukseksi'),
+                      onTap: () => _changePassword(auth, userEmail),
                     ),
                   ],
                 ),
@@ -646,6 +681,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     subtitle: l10n.translate('legalTermsSubtitle'),
                     onTap: () => _nav(context, const TermsLegalScreen()),
                   ),
+                  if (auth.isAuthenticated) ...[
+                    Divider(height: 1, indent: 56, color: dividerColor),
+                    _buildTile(
+                      context: context,
+                      icon: Icons.block_rounded,
+                      iconColor: const Color(0xFFD93025),
+                      title: tr(context, 'Blocked users', 'Estetyt käyttäjät'),
+                      subtitle: tr(context, 'People whose comments and reviews you have hidden', 'Henkilöt, joiden kommentit ja arviot olet piilottanut'),
+                      onTap: () => _nav(context, const BlockedUsersScreen()),
+                    ),
+                  ],
                 ],
               ),
 

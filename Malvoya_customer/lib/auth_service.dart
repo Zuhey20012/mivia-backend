@@ -9,6 +9,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'config/constants.dart';
 import 'core/api_client.dart';
+import 'core/app_language.dart';
 
 const _secureStorage = FlutterSecureStorage();
 
@@ -24,7 +25,11 @@ class User {
   final String? phone;
   final bool isActive;
 
-  User({required this.id, required this.email, required this.role, this.name, this.phone, this.isActive = true, this.googleLinked = false});
+  /// The account has a password (signed in with one on this phone, or the server says so).
+  /// Unknown counts as no, so password actions are only offered when they can work.
+  final bool hasPassword;
+
+  User({required this.id, required this.email, required this.role, this.name, this.phone, this.isActive = true, this.googleLinked = false, this.hasPassword = false});
 
   factory User.fromJson(Map<String, dynamic> json) => User(
         id: json['id'],
@@ -34,9 +39,10 @@ class User {
         googleLinked: json['googleLinked'] == true,
         phone: json['phone'],
         isActive: json['isActive'] ?? true,
+        hasPassword: json['hasPassword'] == true,
       );
 
-  Map<String, dynamic> toJson() => {'id': id, 'email': email, 'role': role, 'name': name, 'googleLinked': googleLinked, 'phone': phone, 'isActive': isActive};
+  Map<String, dynamic> toJson() => {'id': id, 'email': email, 'role': role, 'name': name, 'googleLinked': googleLinked, 'phone': phone, 'isActive': isActive, 'hasPassword': hasPassword};
 }
 
 /// Handles sign-in, secure token storage and automatic access-token refresh.
@@ -91,8 +97,15 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<String?> _applySession(Map<String, dynamic> data) async {
-    final user = User.fromJson(data['user']);
+  Future<String?> _applySession(Map<String, dynamic> data, {bool withPassword = false}) async {
+    final raw = Map<String, dynamic>.from(data['user'] as Map);
+    // A refresh does not say whether the account has a password: keep what this phone knows
+    if (withPassword) {
+      raw['hasPassword'] = true;
+    } else if (!raw.containsKey('hasPassword') && _currentUser?.id == raw['id']) {
+      raw['hasPassword'] = _currentUser?.hasPassword ?? false;
+    }
+    final user = User.fromJson(raw);
     if (user.role != kAppRole) {
       return 'This account is not a customer account. Please use the matching Malvoya app.';
     }
@@ -134,7 +147,7 @@ class AuthService extends ChangeNotifier {
     try {
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/refresh'),
-              headers: {'Content-Type': 'application/json'}, body: jsonEncode({'refreshToken': refresh}))
+              headers: {'Content-Type': 'application/json', ...AppLanguage.header}, body: jsonEncode({'refreshToken': refresh}))
           .timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         await _applySession(jsonDecode(res.body));
@@ -164,10 +177,10 @@ class AuthService extends ChangeNotifier {
     try {
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/login'),
-              headers: {'Content-Type': 'application/json'},
+              headers: {'Content-Type': 'application/json', ...AppLanguage.header},
               body: jsonEncode({'email': emailOrPhone.trim(), 'password': password}))
           .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
+      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body), withPassword: true);
       return _errorFrom(res, 'Invalid email or password.');
     } catch (_) {
       return 'Could not connect. Please check your internet connection.';
@@ -178,15 +191,26 @@ class AuthService extends ChangeNotifier {
     try {
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/register'),
-              headers: {'Content-Type': 'application/json'},
-              body: jsonEncode({'name': name.trim(), 'email': email.trim(), 'password': password, 'role': kAppRole}))
+              headers: {'Content-Type': 'application/json', ...AppLanguage.header},
+              body: jsonEncode({'name': name.trim(), 'email': email.trim(), 'password': password, 'role': kAppRole, 'acceptTerms': true}))
           .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 201) return await _applySession(jsonDecode(res.body));
+      if (res.statusCode == 201) return await _applySession(jsonDecode(res.body), withPassword: true);
       return _errorFrom(res, 'Registration failed. Please try again.');
     } catch (_) {
       return 'Could not connect. Please check your internet connection.';
     }
   }
+
+  // ── Forgotten password (a 6-digit code by email, then a new password) ───────
+
+  /// Asks the server to email a reset code. The server answers 200 for any well-formed address
+  /// (it never says whether an account exists); 503 when email sending is not set up.
+  Future<ApiResult> requestPasswordReset(String email) =>
+      const ApiClient().post('/auth/password/forgot', {'email': email.trim()});
+
+  /// Sets a new password with the emailed code. The server signs the account out everywhere.
+  Future<ApiResult> resetPassword(String email, String code, String password) =>
+      const ApiClient().post('/auth/password/reset', {'email': email.trim(), 'code': code.trim(), 'password': password});
 
   // ── Google ────────────────────────────────────────────────────────────────
 
@@ -198,7 +222,7 @@ class AuthService extends ChangeNotifier {
       if (idToken == null) return 'Google did not return a sign-in token';
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/google'),
-              headers: {'Content-Type': 'application/json'}, body: jsonEncode({'idToken': idToken, 'role': kAppRole}))
+              headers: {'Content-Type': 'application/json', ...AppLanguage.header}, body: jsonEncode({'idToken': idToken, 'role': kAppRole}))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
       return _errorFrom(res, 'Google sign-in failed.');
@@ -300,7 +324,7 @@ class AuthService extends ChangeNotifier {
       if (firebaseToken == null) return 'Phone verification failed';
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/phone'),
-              headers: {'Content-Type': 'application/json'},
+              headers: {'Content-Type': 'application/json', ...AppLanguage.header},
               body: jsonEncode({'firebaseToken': firebaseToken, 'role': kAppRole}))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
@@ -336,7 +360,7 @@ class AuthService extends ChangeNotifier {
     try {
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/phone'),
-              headers: {'Content-Type': 'application/json'},
+              headers: {'Content-Type': 'application/json', ...AppLanguage.header},
               body: jsonEncode({'firebaseToken': firebaseIdToken, 'role': kAppRole}))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
@@ -361,7 +385,7 @@ class AuthService extends ChangeNotifier {
       if (firebaseToken == null) return 'Apple sign-in failed.';
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/apple'),
-              headers: {'Content-Type': 'application/json'},
+              headers: {'Content-Type': 'application/json', ...AppLanguage.header},
               body: jsonEncode({'idToken': firebaseToken, 'role': kAppRole}))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
@@ -403,7 +427,7 @@ class AuthService extends ChangeNotifier {
       try {
         await http
             .post(Uri.parse('${AppConstants.apiBase}/auth/logout'),
-                headers: {'Content-Type': 'application/json'}, body: jsonEncode({'refreshToken': refresh}))
+                headers: {'Content-Type': 'application/json', ...AppLanguage.header}, body: jsonEncode({'refreshToken': refresh}))
             .timeout(const Duration(seconds: 5));
       } catch (_) {}
     }

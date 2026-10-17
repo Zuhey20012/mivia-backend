@@ -1,17 +1,21 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../config/theme.dart';
 import '../core/strings.dart';
 import '../screens/product_detail.dart';
+import 'app_image.dart';
+import 'motion.dart';
 import 'price_tag.dart';
+import '../core/haptics.dart';
 
 /// Grid tile used by search, store pages and favourites.
 class ProductTile extends StatelessWidget {
   final Map<String, dynamic> product;
   final String? storeName;
 
-  const ProductTile({super.key, required this.product, this.storeName});
+  /// Called when the tile is opened (search remembers the query that found it).
+  final VoidCallback? onOpen;
+
+  const ProductTile({super.key, required this.product, this.storeName, this.onOpen});
 
   @override
   Widget build(BuildContext context) {
@@ -20,11 +24,28 @@ class ProductTile extends StatelessWidget {
     final hasVideo = ((product['videos'] as List?) ?? const []).isNotEmpty;
     final store = storeName ?? product['store']?['name'];
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
+    // One tag per tile on screen, so the same item shown twice never confuses the photo flight
+    final heroTag = 'product-${product['id']}-${identityHashCode(context)}';
+    final image = images.isNotEmpty ? images.first : null;
+    // The exact photo URL this tile drew (set during layout, read when tapped)
+    String? preview;
+
+    return Pressable(
       onTap: () {
-        HapticFeedback.selectionClick();
-        Navigator.push(context, MaterialPageRoute(builder: (_) => ProductDetailScreen(productId: asInt(product['id'])!)));
+        Haptics.selection();
+        onOpen?.call();
+        // The tile's own copy of the photo is shown while the product page loads its sharper one
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ProductDetailScreen(
+              productId: asInt(product['id'])!,
+              heroTag: image == null ? null : heroTag,
+              heroImage: image,
+              heroPreview: preview,
+            ),
+          ),
+        );
       },
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -37,8 +58,16 @@ class ProductTile extends StatelessWidget {
                 fit: StackFit.expand,
                 children: [
                   Container(color: AppTheme.pastel(context, AppTheme.clay, AppTheme.clayInk)),
-                  if (images.isNotEmpty)
-                    CachedNetworkImage(imageUrl: images.first, fit: BoxFit.cover, fadeInDuration: const Duration(milliseconds: 180))
+                  if (image != null)
+                    LayoutBuilder(builder: (context, box) {
+                      final url = sizedUrlFor(context, image, box.biggest);
+                      preview = url;
+                      return Hero(
+                        tag: heroTag,
+                        flightShuttleBuilder: photoShuttle(url),
+                        child: AppImage(image),
+                      );
+                    })
                   else
                     Icon(Icons.checkroom_outlined, size: 44, color: AppTheme.clayInk.withValues(alpha: 0.8)),
                   if (hasVideo)

@@ -13,7 +13,7 @@ type Status = {
   attention: string[];
   integrations: Record<string, Integration>;
   marketplace: Record<string, number>;
-  ordersInFlight: { waitingForStore: number; waitingForCourier: number; waitingForPickup?: number; scheduledUpcoming?: number };
+  ordersInFlight: { waitingForStore: number; waitingForCourier: number; waitingForPickup?: number; scheduledUpcoming?: number; deliveryProblems?: number };
   scheduledDelivery?: { slots: { start: string; end: string }[]; discountCents: number; leadMinutes: number; dispatchBufferMinutes: number };
   pickup?: { reminderHours: number; holdHours: number };
   referrals?: Referrals;
@@ -156,6 +156,9 @@ export default function System() {
                 <div className="flex items-center justify-between text-sm"><span>Accepted orders waiting for a courier</span><span className="font-semibold">{status.ordersInFlight.waitingForCourier}</span></div>
                 {status.ordersInFlight.scheduledUpcoming !== undefined && (
                   <div className="flex items-center justify-between text-sm"><span>Scheduled deliveries, courier search not started yet</span><span className="font-semibold">{status.ordersInFlight.scheduledUpcoming}</span></div>
+                )}
+                {status.ordersInFlight.deliveryProblems !== undefined && (
+                  <div className="flex items-center justify-between text-sm"><span>Couriers at the address who cannot deliver (see Orders → Delivery problem)</span><span className={status.ordersInFlight.deliveryProblems ? 'font-semibold text-red-500' : 'font-semibold'}>{status.ordersInFlight.deliveryProblems}</span></div>
                 )}
                 {status.ordersInFlight.waitingForPickup !== undefined && (
                   <div className="flex items-center justify-between text-sm"><span>Pickup orders ready, not collected yet</span><span className="font-semibold">{status.ordersInFlight.waitingForPickup}</span></div>

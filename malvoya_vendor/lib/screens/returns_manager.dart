@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -5,11 +6,15 @@ import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
 import '../core/strings.dart';
+import '../services/socket_service.dart';
 import '../widgets/loading_states.dart';
 
 /// Returns from customers: approve, confirm you received the items, then refund through Stripe.
 class ReturnsManager extends StatefulWidget {
   const ReturnsManager({super.key});
+
+  /// How many Returns screens are open (the dashboard shows no "new return" banner over this screen).
+  static int openCount = 0;
 
   @override
   State<ReturnsManager> createState() => _ReturnsManagerState();
@@ -22,10 +27,24 @@ class _ReturnsManagerState extends State<ReturnsManager> {
 
   ApiClient get _api => ApiClient(Provider.of<AuthService>(context, listen: false));
 
+  StreamSubscription<Map<String, dynamic>>? _newReturns;
+
   @override
   void initState() {
     super.initState();
+    ReturnsManager.openCount++;
     _load();
+    // A new request while this screen is open appears at once
+    _newReturns = VendorSocketService().returnsNew.listen((_) {
+      if (mounted) _load();
+    });
+  }
+
+  @override
+  void dispose() {
+    ReturnsManager.openCount--;
+    _newReturns?.cancel();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -40,21 +59,26 @@ class _ReturnsManagerState extends State<ReturnsManager> {
 
   static const _red = Color(0xFFD93025);
 
-  Future<ApiResult> _send(Map<String, dynamic> r, String status, {String? note, int? deduction}) => _api.patch('/returns/${r['id']}/status', {
+  /// [storeNote] is the store's own reason or note (API 2.10 keeps it apart from the customer's
+  /// `conditionNote`; a rejection requires it). [conditionNote] is only sent for a refund deduction,
+  /// which servers before 2.10 require to be explained there.
+  Future<ApiResult> _send(Map<String, dynamic> r, String status, {String? storeNote, String? conditionNote, int? deduction}) =>
+      _api.patch('/returns/${r['id']}/status', {
         'status': status,
-        if (note != null && note.isNotEmpty) 'conditionNote': note,
+        if (storeNote != null && storeNote.isNotEmpty) 'storeNote': storeNote,
+        if (conditionNote != null && conditionNote.isNotEmpty) 'conditionNote': conditionNote,
         if (deduction != null && deduction > 0) 'damageDedCents': deduction,
       });
 
-  Future<void> _update(Map<String, dynamic> r, String status, {String? note}) async {
+  Future<void> _update(Map<String, dynamic> r, String status, {String? storeNote}) async {
     HapticFeedback.mediumImpact();
-    final res = await _send(r, status, note: note);
+    final res = await _send(r, status, storeNote: storeNote);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.ok ? tr(context, 'Updated', 'Päivitetty') : res.errorMessage)));
     _load();
   }
 
-  /// Rejecting needs a written reason (saved as the return's condition note). Consumers who bought from a
+  /// Rejecting needs a written reason (sent as `storeNote`; the customer gets it with the rejection). Consumers who bought from a
   /// business have a statutory 14-day right of withdrawal, so a rejection must have a real ground.
   Future<void> _reject(Map<String, dynamic> r) async {
     final reason = TextEditingController();
@@ -98,7 +122,7 @@ class _ReturnsManagerState extends State<ReturnsManager> {
     );
     reason.dispose();
     if (note == null || !mounted) return;
-    await _update(r, 'REJECTED', note: note);
+    await _update(r, 'REJECTED', storeNote: note);
   }
 
   /// "12,50" or "12.50" → 1250 cents; null when empty, -1 when not a number.
@@ -130,7 +154,7 @@ class _ReturnsManagerState extends State<ReturnsManager> {
               return;
             }
             if (ded != null && ded > 0 && note.text.trim().isEmpty) {
-              setSheet(() => error = tr(ctx, 'Explain the deduction in the condition note.', 'Perustele vähennys kuntohuomiossa.'));
+              setSheet(() => error = tr(ctx, 'Explain the deduction in your note on the condition.', 'Perustele vähennys huomiossasi tuotteen kunnosta.'));
               return;
             }
             if (finalCents != null && finalCents <= 0) {
@@ -157,7 +181,17 @@ class _ReturnsManagerState extends State<ReturnsManager> {
               error = null;
             });
             HapticFeedback.mediumImpact();
-            final res = await _send(r, 'REFUNDED', note: note.text.trim(), deduction: ded != null && ded > 0 ? ded : null);
+            final storeNote = note.text.trim();
+            final hasDeduction = ded != null && ded > 0;
+            var res = await _send(r, 'REFUNDED',
+                storeNote: storeNote,
+                conditionNote: hasDeduction && !_hasStoreNote(r) ? storeNote : null,
+                deduction: hasDeduction ? ded : null);
+            // A server that still wants the deduction explained in `conditionNote` refuses before refunding
+            // anything, so sending it again that way is safe
+            if (!res.ok && hasDeduction && _hasStoreNote(r) && res.data['error'] == 'Explain the deduction in the condition note') {
+              res = await _send(r, 'REFUNDED', storeNote: storeNote, conditionNote: storeNote, deduction: ded);
+            }
             if (!ctx.mounted) return;
             if (res.ok) {
               Navigator.pop(ctx, true);
@@ -203,7 +237,7 @@ class _ReturnsManagerState extends State<ReturnsManager> {
                     enabled: !busy,
                     maxLength: 500,
                     onChanged: (_) => setSheet(() => error = null),
-                    decoration: InputDecoration(labelText: tr(ctx, 'Condition note', 'Kuntohuomio')),
+                    decoration: InputDecoration(labelText: tr(ctx, 'Your note on the condition', 'Huomiosi tuotteen kunnosta')),
                   ),
                   if (finalCents != null)
                     Padding(
@@ -350,6 +384,36 @@ class _ReturnsManagerState extends State<ReturnsManager> {
         ]),
       );
 
+  /// Servers from API 2.10 send `storeNote` (null or text) on every return.
+  bool _hasStoreNote(Map<String, dynamic> r) => r.containsKey('storeNote');
+
+  /// The customer's note and the store's note, each with who wrote it. Older servers keep a single
+  /// `conditionNote` that either side may have written, so it is shown without a name.
+  List<Widget> _notes(Map<String, dynamic> r) {
+    final customer = '${r['conditionNote'] ?? ''}'.trim();
+    final store = '${r['storeNote'] ?? ''}'.trim();
+    if (!_hasStoreNote(r)) {
+      return [if (customer.isNotEmpty) Text('“$customer”', style: const TextStyle(fontStyle: FontStyle.italic))];
+    }
+    Widget note(String who, String text, Color bg) => Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(top: 8),
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+          decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(14)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(who, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppTheme.textSecondary)),
+            const SizedBox(height: 2),
+            Text(text, style: const TextStyle(height: 1.35, color: AppTheme.textPrimary)),
+          ]),
+        );
+    return [
+      if (customer.isNotEmpty) note(tr(context, "Customer's note", 'Asiakkaan viesti'), customer, AppTheme.sand),
+      if (store.isNotEmpty)
+        note(r['status'] == 'REJECTED' ? tr(context, 'Your reason for rejecting', 'Hylkäyksen syy') : tr(context, 'Your note', 'Sinun huomiosi'), store,
+            AppTheme.primaryLight),
+    ];
+  }
+
   Widget _card(Map<String, dynamic> r) {
     final order = (r['order'] as Map?) ?? {};
     final items = (order['items'] as List?) ?? [];
@@ -384,7 +448,7 @@ class _ReturnsManagerState extends State<ReturnsManager> {
             Text(statusLabel, style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primary, fontSize: 12)),
           ]),
           Text(reasons[r['reason']] ?? '${r['reason']}', style: const TextStyle(color: AppTheme.textSecondary)),
-          if (r['conditionNote'] != null) Text('“${r['conditionNote']}”', style: const TextStyle(fontStyle: FontStyle.italic)),
+          ..._notes(r),
           const SizedBox(height: 10),
           Container(
             margin: const EdgeInsets.only(bottom: 8),

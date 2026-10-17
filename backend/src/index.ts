@@ -27,6 +27,7 @@ import mediaRoutes    from "./modules/media/media.routes";
 import dropsRoutes, { shareRouter } from "./modules/drops/drops.routes";
 import meRoutes       from "./modules/me/me.routes";
 import { launchAlertRoutes } from "./modules/me/launchAlerts";
+import { safetyRoutes } from "./modules/me/safety";
 import referralRoutes from "./modules/referrals/referrals.routes";
 import { shareRoutes } from "./modules/share/share.routes";
 import appConfigRoutes from "./modules/appConfig/appConfig.routes";
@@ -82,7 +83,7 @@ app.use(express.json({ limit: "100kb" }));
 app.use(globalLimiter);
 
 // Liveness: the process is up. Readiness: it can also reach the database.
-app.get("/health", (_req, res) => res.json({ ok: true, status: "healthy", version: "2.9.0" }));
+app.get("/health", (_req, res) => res.json({ ok: true, status: "healthy", version: "2.10.0" }));
 app.get("/health/ready", async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
@@ -103,6 +104,7 @@ app.use("/api/v1",        ordersRoutes);
 app.use("/api/v1",        dropsRoutes);
 app.use("/api/v1",        meRoutes);
 app.use("/api/v1",        launchAlertRoutes);
+app.use("/api/v1",        safetyRoutes); // /me/blocks, /reviews/:id/report, /admin/reviews/reported (before /admin)
 app.use("/api/v1",        referralRoutes); // /me/referral
 app.use("/api/v1",        appConfigRoutes);
 app.use("/api/v1",        payoutsRoutes);
@@ -118,7 +120,7 @@ app.use(errorHandler);
 server.keepAliveTimeout = 65_000; // longer than typical load-balancer idle timeouts
 server.headersTimeout = 66_000;
 server.listen(env.port, () => {
-  logger.info(`Malvoya API v2.9 listening on port ${env.port} (${env.nodeEnv})`);
+  logger.info(`Malvoya API v2.10 listening on port ${env.port} (${env.nodeEnv})`);
   // Yes/no per integration (never secrets), so the deploy log shows at a glance what is switched on
   const on = integrationStatus();
   logger.info({ integrations: Object.fromEntries(Object.entries(on).map(([k, v]) => [k, "mode" in v ? v.mode : v.configured ? "on" : "off"])) }, "Integrations");

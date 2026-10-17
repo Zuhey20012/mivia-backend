@@ -1,4 +1,4 @@
-// End-to-end test for API v2.9 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
+// End-to-end test for API v2.10 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
 const { execSync, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -68,6 +68,13 @@ function hel(d = new Date()) {
   const g = (t) => p.find((x) => x.type === t).value;
   return { date: `${g("year")}-${g("month")}-${g("day")}`, time: `${g("hour")}:${g("minute")}`, wd: g("weekday").toLowerCase().slice(0, 3) };
 }
+/** Emits with an acknowledgement; null after 5 s without one. */
+function ack(sock, ev, ...args) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 5000);
+    sock.emit(ev, ...args, (reply) => { clearTimeout(timer); resolve(reply); });
+  });
+}
 function connect(token) {
   return new Promise((resolve) => {
     const s = io(BASE, { auth: { token }, transports: ["websocket"], reconnection: false });
@@ -91,7 +98,9 @@ async function seedResource(publicId, info) {
   await fetch("http://localhost:12222/__seed", { method: "POST", body: JSON.stringify({ publicId, info }) });
 }
 async function register(name, role, extra = {}) {
-  const r = await call("POST", "/auth/register", { name, email: `${name.toLowerCase().replace(/\W/g, "")}${uniq}@example.fi`, password: "strong-pass-123", ...(role ? { role } : {}), ...extra });
+  // Stores and couriers must accept their agreement (2.10)
+  const terms = role === "VENDOR" || role === "COURIER" ? { acceptTerms: true } : {};
+  const r = await call("POST", "/auth/register", { name, email: `${name.toLowerCase().replace(/\W/g, "")}${uniq}@example.fi`, password: "strong-pass-123", ...(role ? { role } : {}), ...terms, ...extra });
   return r.body;
 }
 
@@ -99,7 +108,7 @@ async function register(name, role, extra = {}) {
   console.log("\n— Auth");
   const regA = await call("POST", "/auth/register", { name: "Aino Korhonen", email: `aino${uniq}@example.fi`, password: "correct-horse-1" });
   check("customer can register", regA.status === 201 && regA.body.accessToken, regA);
-  const takeover = await call("POST", "/auth/register", { name: "Evil", email: `aino${uniq}@example.fi`, password: "whatever12", role: "VENDOR" });
+  const takeover = await call("POST", "/auth/register", { name: "Evil", email: `aino${uniq}@example.fi`, password: "whatever12", role: "VENDOR", acceptTerms: true });
   check("register with existing email is refused and returns no tokens", takeover.status === 409 && !takeover.body.accessToken, takeover);
   check("cannot self-register as ADMIN", (await call("POST", "/auth/register", { name: "X", email: `x${uniq}@example.fi`, password: "whatever12", role: "ADMIN" })).status === 400);
   check("wrong password rejected", (await call("POST", "/auth/login", { email: `aino${uniq}@example.fi`, password: "wrong-password" })).status === 401);
@@ -134,6 +143,72 @@ async function register(name, role, extra = {}) {
   check("Google cannot be unlinked from an account without a password", (await call("DELETE", "/auth/google/link", null, codeNew.body.accessToken)).status === 409);
   check("code sign-in creates an account and returns to it", codeNew.status === 200 && codeAgain.status === 200 && codeAgain.body.user?.id === codeNew.body.user?.id, [codeNew, codeAgain]);
   check("password login still works for the registered account", (await call("POST", "/auth/login", { email: `aino${uniq}@example.fi`, password: "correct-horse-1" })).status === 200);
+
+  console.log("\n— Forgot, reset and change password (2.10)");
+  check("sessions say whether the account has a password", regA.body.user?.hasPassword === true && codeNew.body.user?.hasPassword === false, [regA.body.user, codeNew.body.user]);
+  const meA = await call("GET", "/me", null, tokenA);
+  check("GET /me returns the account with hasPassword and googleLinked", meA.status === 200 && meA.body.user?.hasPassword === true && meA.body.user.googleLinked === false && !("passwordHash" in meA.body.user), meA.body);
+  const reija = await call("POST", "/auth/register", { name: "Reija Reset", email: `reija${uniq}@example.fi`, password: "old-password-1" });
+  const reijaLogin2 = await call("POST", "/auth/login", { email: `reija${uniq}@example.fi`, password: "old-password-1" }); // "another device"
+  const resetTarget = `pwreset:reija${uniq}@example.fi`;
+  const resetRow = () => sql(`select count(*) from "OtpCode" where target = '${resetTarget}'`);
+  const forgot = await call("POST", "/auth/password/forgot", { email: ` Reija${uniq}@Example.fi ` });
+  const forgotUnknown = await call("POST", "/auth/password/forgot", { email: `nobody-${uniq}@example.fi` });
+  check("forgot password: the same 200 for an existing and an unknown address (no enumeration)", forgot.status === 200 && forgotUnknown.status === 200 && JSON.stringify(forgot.body) === JSON.stringify(forgotUnknown.body) && JSON.stringify(forgot.body) === '{"ok":true}', [forgot.body, forgotUnknown.body]);
+  check("forgot password refuses a malformed address (400)", (await call("POST", "/auth/password/forgot", { email: "not-an-email" })).status === 400 && (await call("POST", "/auth/password/forgot", {})).status === 400);
+  for (let i = 0; i < 20 && resetRow() !== "1"; i++) await sleep(100);
+  check("a reset code is stored hashed (15 minutes) for an account with a password; none for an unknown address", resetRow() === "1" && sql(`select "expiresAt" between now() + interval '14 minutes' and now() + interval '16 minutes' and length("codeHash") = 64 from "OtpCode" where target = '${resetTarget}'`) === "t" && sql(`select count(*) from "OtpCode" where target = 'pwreset:nobody-${uniq}@example.fi'`) === "0");
+  await call("POST", "/auth/password/forgot", { email: `otp${uniq}@example.fi` });
+  await sleep(300);
+  check("an account without a password gets a 'no password needed' note, never a reset code", sql(`select count(*) from "OtpCode" where target = 'pwreset:otp${uniq}@example.fi'`) === "0");
+  const limitEmail = `limit-${uniq}@example.fi`;
+  const limited3 = [];
+  for (let i = 0; i < 4; i++) limited3.push((await call("POST", "/auth/password/forgot", { email: limitEmail })).status);
+  check("forgot password is rate-limited per address (3 an hour, any account or none)", limited3.join() === "200,200,200,429", limited3);
+  check("a reset code cannot be used to sign in", (await call("POST", "/auth/otp/verify", { target: resetTarget, code: "123456" })).status === 401);
+  // The code itself is only in the email (never logged): plant a known one like the sign-in tests do
+  const plantReset = (code) => sql(`update "OtpCode" set "codeHash" = '${crypto.createHash("sha256").update(`${resetTarget}:${code}`).digest("hex")}', attempts = 0 where target = '${resetTarget}'`);
+  plantReset("246810");
+  check("reset with a wrong code is 400", (await call("POST", "/auth/password/reset", { email: `reija${uniq}@example.fi`, code: "111111", password: "new-password-2" })).status === 400);
+  check("reset needs a password like registration (8+)", (await call("POST", "/auth/password/reset", { email: `reija${uniq}@example.fi`, code: "246810", password: "short" })).status === 400);
+  await sleep(1100); // access tokens carry whole seconds: the old ones must be older than the reset
+  const reset = await call("POST", "/auth/password/reset", { email: `reija${uniq}@example.fi`, code: "246810", password: "new-password-2" });
+  check("reset with the emailed code sets the new password", reset.status === 200 && reset.body.ok === true && !reset.body.accessToken, reset.body);
+  check("after a reset the old password stops working and the new one works", (await call("POST", "/auth/login", { email: `reija${uniq}@example.fi`, password: "old-password-1" })).status === 401 && (await call("POST", "/auth/login", { email: `reija${uniq}@example.fi`, password: "new-password-2" })).status === 200);
+  check("after a reset other devices are signed out (refresh and access tokens refused)", (await call("POST", "/auth/refresh", { refreshToken: reija.body.refreshToken })).status === 401 && (await call("POST", "/auth/refresh", { refreshToken: reijaLogin2.body.refreshToken })).status === 401 && (await call("GET", "/me", null, reija.body.accessToken)).status === 401 && (await call("GET", "/me", null, reijaLogin2.body.accessToken)).status === 401);
+  check("a reset code works once", (await call("POST", "/auth/password/reset", { email: `reija${uniq}@example.fi`, code: "246810", password: "another-pass-3" })).status === 400);
+  sql(`insert into "OtpCode" (target, "codeHash", "expiresAt") values ('${resetTarget}', 'x', now() + interval '15 minutes') on conflict (target) do update set "expiresAt" = excluded."expiresAt"`);
+  plantReset("135790");
+  for (let i = 0; i < 5; i++) await call("POST", "/auth/password/reset", { email: `reija${uniq}@example.fi`, code: "000000", password: "another-pass-3" });
+  check("after 5 wrong codes even the right one is refused", (await call("POST", "/auth/password/reset", { email: `reija${uniq}@example.fi`, code: "135790", password: "another-pass-3" })).status === 400);
+  const reijaNow = await call("POST", "/auth/login", { email: `reija${uniq}@example.fi`, password: "new-password-2" });
+  const reijaOther = await call("POST", "/auth/login", { email: `reija${uniq}@example.fi`, password: "new-password-2" });
+  check("changing the password needs the current one (400) and a signed-in user", (await call("POST", "/auth/password/change", { currentPassword: "wrong-one-9", newPassword: "changed-pass-4" }, reijaNow.body.accessToken)).status === 400 && (await call("POST", "/auth/password/change", { currentPassword: "new-password-2", newPassword: "changed-pass-4" })).status === 401);
+  check("the new password follows the registration rules", (await call("POST", "/auth/password/change", { currentPassword: "new-password-2", newPassword: "short" }, reijaNow.body.accessToken)).status === 400);
+  await sleep(1100);
+  const changed = await call("POST", "/auth/password/change", { currentPassword: "new-password-2", newPassword: "changed-pass-4" }, reijaNow.body.accessToken);
+  check("password change returns a fresh session like login and keeps this device signed in", changed.status === 200 && !!changed.body.accessToken && !!changed.body.refreshToken && changed.body.user?.hasPassword === true && (await call("GET", "/me", null, changed.body.accessToken)).status === 200, changed.body);
+  check("password change signs the other devices out", (await call("POST", "/auth/refresh", { refreshToken: reijaOther.body.refreshToken })).status === 401 && (await call("GET", "/me", null, reijaOther.body.accessToken)).status === 401 && (await call("POST", "/auth/login", { email: `reija${uniq}@example.fi`, password: "changed-pass-4" })).status === 200);
+  check("an account without a password cannot 'change' one", (await call("POST", "/auth/password/change", { currentPassword: "x", newPassword: "whatever-123" }, codeNew.body.accessToken)).status === 400);
+
+  console.log("\n— Agreements and language (2.10)");
+  const noTermsV = await call("POST", "/auth/register", { name: "No Terms", email: `noterms${uniq}@example.fi`, password: "strong-pass-123", role: "VENDOR" });
+  const noTermsC = await call("POST", "/auth/register", { name: "No Terms C", email: `notermsc${uniq}@example.fi`, password: "strong-pass-123", role: "COURIER" });
+  check("store and courier registration require accepting the agreement (400)", noTermsV.status === 400 && noTermsC.status === 400 && /Seller Terms/.test(noTermsV.body.error || ""), [noTermsV.body.error, noTermsC.body.error]);
+  const withTerms = await register("Terhi", "VENDOR");
+  check("accepting stores the time and the agreement version (seller terms)", sql(`select ("termsAcceptedAt" is not null) || '|' || "termsVersion" from "User" where id = ${withTerms.user.id}`).match(/^true\|vendor_terms@[0-9a-f]{12}$/) !== null, sql(`select coalesce("termsVersion", '-') from "User" where id = ${withTerms.user.id}`));
+  const custTerms = await call("POST", "/auth/register", { name: "Cecilia", email: `cecilia${uniq}@example.fi`, password: "strong-pass-123", acceptTerms: true });
+  check("a customer who accepts gets the customer terms version", custTerms.status === 201 && /^terms_of_service@[0-9a-f]{12}$/.test(sql(`select "termsVersion" from "User" where id = ${custTerms.body.user.id}`)));
+  const fiTok = custTerms.body.accessToken;
+  await call("GET", "/me", null, fiTok, { headers: { "Accept-Language": "fi-FI,fi;q=0.9,en;q=0.5" } });
+  await sleep(200);
+  check("the app's Accept-Language is stored as the user's language", sql(`select locale from "User" where id = ${custTerms.body.user.id}`) === "fi");
+  await call("GET", "/me", null, fiTok, { headers: { "Accept-Language": "sv-SE" } });
+  await sleep(200);
+  check("any other language is stored as English", sql(`select locale from "User" where id = ${custTerms.body.user.id}`) === "en");
+  const setFi = await call("PATCH", "/me", { locale: "fi" }, fiTok);
+  check("PATCH /me sets the language (fi|en); anything else is 400", setFi.status === 200 && setFi.body.user?.locale === "fi" && (await call("PATCH", "/me", { locale: "sv" }, fiTok)).status === 400 && (await call("PATCH", "/me", {}, fiTok)).status === 400);
+  check("requests without Accept-Language leave the language alone", (await call("GET", "/me", null, fiTok)).body.user?.locale === "fi");
 
   // Linking Google (the e2e API has no GOOGLE_CLIENT_ID, so token checks stop at 503; the link itself is set in SQL)
   check("sessions say whether Google is linked", regA.body.user?.googleLinked === false, regA.body.user);
@@ -184,14 +259,23 @@ async function register(name, role, extra = {}) {
   await call("POST", "/me/devices", { token: `courier-device-${uniq}-xxxxxxxxxxxx`, platform: "android" }, c1.accessToken);
 
   console.log("\n— Checkout through Stripe (stripe-mock)");
+  const otherCustEarly = await register("Ulla");
   const realOrder = await call("POST", "/orders", { storeId, deliveryAddress: "Aleksanterinkatu 5, Helsinki", deliveryLat: 60.18, deliveryLng: 24.95, items: [{ productId, quantity: 1 }] }, tokenA);
   check("order creates a PaymentIntent and returns a client secret", realOrder.status === 201 && !!realOrder.body.clientSecret, realOrder.body);
   const ro = realOrder.body.order;
   // Courier pay is separate from the customer fee: 1.24 km straight = 1.6 km route → 4.50 + 1.76 € = 6.26 €, raised to the 6.50 € minimum
   check("courier pay (formula, with minimum) and ETA are set on the order", sql(`select "courierFeeCents" = 650 and ("courierPay"->>'topUpCents')::int = 24 and ("courierPay"->>'distanceKm')::float = 1.6 and "etaMinutes" > 0 from "Order" where id=${ro?.id}`) === "t", sql(`select "courierFeeCents" || ' ' || coalesce("courierPay"::text, '') from "Order" where id=${ro?.id}`));
   check("charged delivery fee equals the advertised fee", ro?.deliveryFeeCents === listedFee, { charged: ro?.deliveryFeeCents, listed: listedFee });
-  check("cannot order more than stock", (await call("POST", "/orders", { storeId, deliveryAddress: "Aleksanterinkatu 5, Helsinki", items: [{ productId, quantity: 5 }] }, tokenA)).status === 400);
+  const payInfo = await call("GET", `/orders/${ro.id}/payment`, null, tokenA);
+  check("an unpaid order can be finished: the PaymentSheet secret, amount and hold time", payInfo.status === 200 && !!payInfo.body.clientSecret && payInfo.body.amountCents === ro.totalCents && new Date(payInfo.body.holdUntil) > new Date(), payInfo.body);
+  check("only the customer can get the payment of an order", (await call("GET", `/orders/${ro.id}/payment`, null, otherCustEarly.accessToken)).status === 404 && (await call("GET", `/orders/${ro.id}/payment`, null, vendor.accessToken)).status === 403);
   check("customer cancels before the store accepts; stock returns", (await call("POST", `/orders/${ro.id}/cancel`, null, tokenA)).status === 200 && sql(`select "stockQuantity" from "Product" where id=${productId}`) === "2");
+  check("a cancelled order can no longer be paid (409)", (await call("GET", `/orders/${ro.id}/payment`, null, tokenA)).status === 409);
+  const retryA = await call("POST", "/orders", { storeId, deliveryAddress: "Aleksanterinkatu 5, Helsinki", deliveryLat: 60.18, deliveryLng: 24.95, items: [{ productId, quantity: 2 }] }, tokenA);
+  const retryB = await call("POST", "/orders", { storeId, deliveryAddress: "Aleksanterinkatu 5, Helsinki", deliveryLat: 60.18, deliveryLng: 24.95, items: [{ productId, quantity: 2 }] }, tokenA);
+  check("retrying checkout never fails on stock: the earlier unpaid checkout is cancelled quietly", retryA.status === 201 && retryB.status === 201 && sql(`select status || '|' || "cancelReason" from "Order" where id=${retryA.body.order?.id}`) === "CANCELLED|Replaced by a new checkout" && sql(`select "stockQuantity" from "Product" where id=${productId}`) === "0", [retryA.body, retryB.body]);
+  check("cannot order more than stock", (await call("POST", "/orders", { storeId, deliveryAddress: "Aleksanterinkatu 5, Helsinki", items: [{ productId, quantity: 5 }] }, tokenA)).status === 400);
+  check("…and that attempt released the previous unpaid checkout too", sql(`select status from "Order" where id=${retryB.body.order?.id}`) === "CANCELLED" && sql(`select "stockQuantity" from "Product" where id=${productId}`) === "2");
 
   console.log("\n— Payment webhook → store → courier");
   const fee = listedFee;
@@ -686,7 +770,7 @@ async function register(name, role, extra = {}) {
   }));
 
   const sysDefault = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.9.0", sysDefault.pricing);
+  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.10.0", sysDefault.pricing);
   const stockBeforeQuote = stockOf(productId);
   const ordersBeforeQuote = sql(`select count(*) from "Order" where "userId"=${otherCust.user.id}`);
   const q0 = await quote(quoteBody, otherCust.accessToken);
@@ -1082,7 +1166,8 @@ async function register(name, role, extra = {}) {
   check("CSV: dot decimals, condition and GTIN; an http photo is skipped", scarf?.salePriceCents === 1950 && scarf.condition === "LIKE_NEW" && scarf.gtin === "40123455" && scarf.category === "Accessories" && cap?.images.length === 0 && cap.category === "Accessories", [scarf, cap]);
   const cj2 = await csvImport({ csv: csvText, rightsConfirmed: true });
   const cjob2 = await waitJob(cj2.body.job?.id);
-  check("re-importing the same CSV updates, never duplicates", cjob2?.created === 0 && cjob2.updated === 3 && (await ownList()).length === 6, cjob2);
+  // 3 Shopify + 3 CSV products, less the boots the store deleted (since 2.10 deleted products leave the owner's list too)
+  check("re-importing the same CSV updates, never duplicates", cjob2?.created === 0 && cjob2.updated === 3 && (await ownList()).length === 5, cjob2);
   check("publishing the CSV import shows only the products with a photo", (await call("POST", `/products/import/${cj2.body.job?.id}/publish`, null, importer.accessToken)).body.published === 2);
   const cj3 = await csvImport({ csv: "name,price\nShirt,12,90\nCap,15\n", rightsConfirmed: true });
   const cjob3 = await waitJob(cj3.body.job?.id);
@@ -1311,8 +1396,11 @@ async function register(name, role, extra = {}) {
   check("while invites are off the invite page says it is not valid", offPage.status === 404 && /no longer valid/.test(await offPage.text()));
   check("a promo code cannot take a customer's invite code", (await mkPromo({ code: myCode, description: "shadow", kind: "AMOUNT", value: 100 })).status === 409);
 
-  const refUp = await startFeeApi({ REFERRAL_DISCOUNT_CENTS: "500", REFERRAL_REWARD_CENTS: "300", ANDROID_APP_SHA256: `${"ab:".repeat(31)}cd, ${"12:".repeat(31)}EF, not-a-fingerprint` });
+  // This instance also runs as production without SMTP: password reset by email is unavailable there
+  const refUp = await startFeeApi({ NODE_ENV: "production", REFERRAL_DISCOUNT_CENTS: "500", REFERRAL_REWARD_CENTS: "300", ANDROID_APP_SHA256: `${"ab:".repeat(31)}cd, ${"12:".repeat(31)}EF, not-a-fingerprint` });
   check("API starts with invites switched on", refUp);
+  const noMail = await callAt(FEE_API, "POST", "/auth/password/forgot", { email: `reija${uniq}@example.fi` });
+  check("without email sending, forgot password says so (503) for any address", noMail.status === 503 && noMail.body.error === "Password reset by email is not available yet. Contact support." && (await callAt(FEE_API, "POST", "/auth/password/forgot", { email: `nobody2-${uniq}@example.fi` })).status === 503, noMail.body);
   const refOn = (await callAt(FEE_API, "GET", "/me/referral", null, otherCust.accessToken)).body;
   check("with invites on: same code, 5 € for the friend, 3 € reward, honest terms", refOn.enabled === true && refOn.code === myCode && refOn.discountCents === 500 && refOn.rewardCents === 300 && refOn.shareUrl === `${FEE_BASE}/r/${myCode}` && refOn.terms?.en.includes("5.00 €") && refOn.terms.en.includes("3.00 €") && refOn.terms.fi.includes("5,00"), refOn);
   const selfQ = (await quote({ ...quoteBody, promoCode: myCode }, otherCust.accessToken, FEE_API)).body.quote;
@@ -1398,6 +1486,207 @@ async function register(name, role, extra = {}) {
   check("analytics: a custom range", anDay.status === 200 && anDay.body.daily?.length === 1 && anDay.body.range.from === hel().date);
   check("analytics: bad ranges are refused; admin only", (await call("GET", "/admin/analytics?from=2026-10-10&to=2026-10-01", null, adminToken)).status === 400 && (await call("GET", "/admin/analytics?from=2026-13-01", null, adminToken)).status === 400 && (await call("GET", "/admin/analytics?from=2020-01-01&to=2026-01-01", null, adminToken)).status === 400 && (await call("GET", "/admin/analytics", null, otherCust.accessToken)).status === 403);
 
+  console.log("\n— Store cancel reasons (2.10)");
+  sql(`update "Product" set "stockQuantity"=40, "isAvailable"=true where id=${productId}`);
+  const scRes = await call("POST", "/orders", { storeId, deliveryAddress: "Aleksanterinkatu 5, Helsinki", deliveryLat: 60.18, deliveryLng: 24.95, items: [{ productId, quantity: 1 }] }, otherCust.accessToken);
+  await payOrder(scRes.body.order);
+  check("a store's cancel reason is limited to 200 characters", (await call("PATCH", `/orders/${scRes.body.order.id}/status`, { status: "CANCELLED", reason: "x".repeat(201) }, vendor.accessToken)).status === 400);
+  const scCancel = await call("PATCH", `/orders/${scRes.body.order.id}/status`, { status: "CANCELLED", reason: "Item damaged / Tuote vaurioitunut" }, vendor.accessToken);
+  const scView = (await call("GET", `/orders/${scRes.body.order.id}`, null, otherCust.accessToken)).body.order;
+  check("the store's reason is stored as the cancel reason and shown to the customer; the customer is refunded", scCancel.status === 200 && scView?.cancelReason === "Item damaged / Tuote vaurioitunut" && sql(`select "cancelledBy" || '|' || "paymentStatus" from "Order" where id=${scRes.body.order.id}`) === "STORE|REFUNDED", [scCancel.body, scView?.cancelReason]);
+
+  console.log("\n— Returns: store notes and notifications (2.10)");
+  const rnOrder = Number(sql(`insert into "Order" ("userId","storeId","status","subtotalCents","deliveryFeeCents","courierFeeCents","commissionCents","sellerPayoutCents","totalCents","stripePaymentIntentId","paymentStatus","paidAt","deliveredAt","deliveryAddress","updatedAt") values (${otherCust.user.id},${storeId},'DELIVERED',4000,300,300,400,3600,4300,'pi_ret2_${uniq}','SUCCEEDED',now(),now(),'Aleksanterinkatu 5, Helsinki',now()) returning id`).split("\n")[0]);
+  sql(`insert into "OrderItem" ("orderId","productId","quantity","unitCents") values (${rnOrder},${productId},1,4000)`);
+  vendorSock.events.length = 0;
+  const rn1 = await call("POST", "/returns", { orderId: rnOrder, reason: "CHANGED_MIND", conditionNote: "Too big" }, otherCust.accessToken);
+  await sleep(400);
+  check("a new return reaches the store live (return:new) and the payload has storeNote", rn1.status === 201 && rn1.body.return?.storeNote === null && vendorSock.events.some((e) => e.ev === "return:new" && e.data.returnId === rn1.body.return.id && e.data.orderId === rnOrder), [rn1.body, vendorSock.events.map((e) => e.ev)]);
+  const myRet = (await call("GET", "/returns", null, otherCust.accessToken)).body.returns?.find((r) => r.id === rn1.body.return?.id);
+  check("the customer's return says where to take the items (store name, address, phone)", myRet?.store?.name === `Vera Vintage ${uniq}` && myRet.store.address === "Mannerheimintie 1, Helsinki" && "phone" in myRet.store, myRet?.store);
+  check("rejecting a return needs the store's reason (storeNote)", (await call("PATCH", `/returns/${rn1.body.return.id}/status`, { status: "REJECTED" }, vendor.accessToken)).status === 400);
+  const rnRej = await call("PATCH", `/returns/${rn1.body.return.id}/status`, { status: "REJECTED", storeNote: "The tags were removed and it was worn" }, vendor.accessToken);
+  check("the store rejects with a note; the customer's own note is kept separately", rnRej.status === 200 && rnRej.body.return?.status === "REJECTED" && rnRej.body.return.storeNote === "The tags were removed and it was worn" && rnRej.body.return.conditionNote === "Too big", rnRej.body);
+  const rn2 = await call("POST", "/returns", { orderId: rnOrder, reason: "NOT_AS_DESCRIBED" }, otherCust.accessToken);
+  const rnAppr = await call("PATCH", `/returns/${rn2.body.return?.id}/status`, { status: "APPROVED", storeNote: "Bring it to the counter" }, vendor.accessToken);
+  check("after a rejection the items can be returned again; approval carries a note", rn2.status === 201 && rnAppr.status === 200 && rnAppr.body.return?.storeNote === "Bring it to the counter", [rn2.body, rnAppr.body]);
+  const rnRef = await call("PATCH", `/returns/${rn2.body.return?.id}/status`, { status: "REFUNDED", damageDedCents: 500, storeNote: "A stain on the sleeve" }, vendor.accessToken);
+  check("a deduction can be explained in the store note (old apps: the condition note)", rnRef.status === 200 && rnRef.body.return?.refundCents === 4300 - 500 && rnRef.body.return.storeNote === "A stain on the sleeve", rnRef.body);
+
+  console.log("\n— Deleting products and the store's own catalogue (2.10)");
+  const hardP = (await call("POST", "/products", { name: `Delete me ${uniq}`, category: "Shirt", salePriceCents: 1500, images: [ownImage(storeId, "del")] }, vendor.accessToken)).body.product;
+  const hardDel = await call("DELETE", `/products/${hardP.id}`, null, vendor.accessToken);
+  check("a product nobody ordered is deleted for good", hardDel.status === 200 && hardDel.body.deleted === "hard" && sql(`select count(*) from "Product" where id=${hardP.id}`) === "0", hardDel.body);
+  const softP = (await call("POST", "/products", { name: `Keep me ${uniq}`, category: "Shirt", salePriceCents: 1500, stockQuantity: 0, images: [ownImage(storeId, "keep")] }, vendor.accessToken)).body.product;
+  const mySold = await call("GET", "/stores/my/products?filter=soldout&limit=100", null, vendor.accessToken);
+  check("the store's catalogue filters sold-out products", mySold.status === 200 && mySold.body.products.some((p) => p.id === softP.id) && mySold.body.products.every((p) => p.stockQuantity <= 0), mySold.body.products?.map((p) => p.stockQuantity));
+  sql(`insert into "OrderItem" ("orderId","productId","quantity","unitCents") values (${rnOrder},${softP.id},1,1500)`);
+  check("another store cannot delete it", (await call("DELETE", `/products/${softP.id}`, null, otherVendor.accessToken)).status === 403);
+  const softDel = await call("DELETE", `/products/${softP.id}`, null, vendor.accessToken);
+  check("an ordered product is kept for the records but marked deleted", softDel.status === 200 && softDel.body.deleted === "soft" && sql(`select ("deletedAt" is not null) || '|' || "isAvailable" from "Product" where id=${softP.id}`) === "true|false", softDel.body);
+  const ownerList = (await call("GET", `/stores/${storeId}/products?limit=50`, null, vendor.accessToken)).body.products;
+  const myQ = await call("GET", `/stores/my/products?q=${encodeURIComponent(`Keep me ${uniq}`)}`, null, vendor.accessToken);
+  check("a deleted product disappears everywhere, also from the owner's lists", (await call("GET", `/products/${softP.id}`, null, vendor.accessToken)).status === 404 && !ownerList.some((p) => p.id === softP.id) && myQ.body.total === 0 && !(await call("GET", "/stores/my", null, vendor.accessToken)).body.store.products.some((p) => p.id === softP.id));
+  check("deleting it again is 404; editing it is 404", (await call("DELETE", `/products/${softP.id}`, null, vendor.accessToken)).status === 404 && (await call("PATCH", `/products/${softP.id}`, { salePriceCents: 1000 }, vendor.accessToken)).status === 404);
+  const myP1 = await call("GET", "/stores/my/products?page=1&limit=2", null, vendor.accessToken);
+  const myP2 = await call("GET", "/stores/my/products?page=2&limit=2", null, vendor.accessToken);
+  check("the store's catalogue is paged: products, total, page, pageSize", myP1.status === 200 && myP1.body.products.length === 2 && myP1.body.page === 1 && myP1.body.pageSize === 2 && myP1.body.total >= 4 && myP2.body.page === 2 && !myP2.body.products.some((p) => myP1.body.products.some((q) => q.id === p.id)), [myP1.body.total, myP1.body.pageSize]);
+  const myVis = (await call("GET", "/stores/my/products?filter=visible&limit=100", null, vendor.accessToken)).body;
+  const myDrafts = (await call("GET", "/stores/my/products?filter=drafts&limit=100", null, vendor.accessToken)).body;
+  check("filters: visible and drafts", myVis.products.every((p) => p.isAvailable === true) && myDrafts.products.every((p) => p.isAvailable === false) && myVis.total + myDrafts.total === myP1.body.total);
+  check("the catalogue is the owner's (customers 403); bad filters are 400", (await call("GET", "/stores/my/products", null, otherCust.accessToken)).status === 403 && (await call("GET", "/stores/my/products?filter=secret", null, vendor.accessToken)).status === 400 && (await call("GET", "/stores/my/products?limit=500", null, vendor.accessToken)).status === 400);
+
+  console.log("\n— Courier cannot deliver: chat, wait, back to the shop (2.10)");
+  const dpRes = await call("POST", "/orders", { storeId, deliveryAddress: "Aleksanterinkatu 5, Helsinki", deliveryLat: 60.18, deliveryLng: 24.95, tipCents: 200, items: [{ productId, quantity: 2 }] }, otherCust.accessToken);
+  const dp = dpRes.body.order;
+  await payOrder(dp);
+  await call("PATCH", `/orders/${dp.id}/status`, { status: "CONFIRMED" }, vendor.accessToken);
+  await call("POST", "/courier/status", { isOnline: true, latitude: 60.1702, longitude: 24.9402 }, c1.accessToken);
+  const dpAcc = await call("PATCH", `/orders/${dp.id}/assign-courier`, null, c1.accessToken);
+  check("courier takes the job", dpAcc.status === 200, dpAcc.body);
+  const custChat = await connect(otherCust.accessToken);
+  const join1 = await ack(custChat, "chat:join", dp.id);
+  check("chat:join acknowledges with the history (empty at first)", join1?.ok === true && Array.isArray(join1.messages) && join1.messages.length === 0, join1);
+  const msg1 = await call("POST", `/orders/${dp.id}/messages`, { text: "  I'll be at the door in 5 min  " }, otherCust.accessToken);
+  check("the customer sends a message over HTTP; it is stored", msg1.status === 201 && msg1.body.message?.text === "I'll be at the door in 5 min" && msg1.body.message.senderRole === "CUSTOMER" && msg1.body.message.senderId === otherCust.user.id && msg1.body.message.orderId === dp.id, msg1.body);
+  check("only the customer, the assigned courier and admins can read the chat", (await call("GET", `/orders/${dp.id}/messages`, null, vendor.accessToken)).status === 404 && (await call("GET", `/orders/${dp.id}/messages`, null, pirjo.accessToken)).status === 404 && (await call("GET", `/orders/${dp.id}/messages`, null, c2.accessToken)).status === 404 && (await call("GET", `/orders/${dp.id}/messages`, null, adminToken)).status === 200);
+  check("an empty message is refused", (await call("POST", `/orders/${dp.id}/messages`, { text: "   " }, otherCust.accessToken)).status === 400 && (await call("POST", `/orders/${dp.id}/messages`, { text: "hi" }, vendor.accessToken)).status === 404);
+  const c1Chat = await connect(c1.accessToken);
+  const join2 = await ack(c1Chat, "chat:join", dp.id);
+  const sent = await ack(c1Chat, "chat:send", { orderId: dp.id, text: "On my way" });
+  await sleep(400);
+  check("the courier joins (history has the customer's message) and sends over the socket; the customer gets it live", join2?.messages?.length === 1 && sent?.ok === true && custChat.events.some((e) => e.ev === "chat:message" && e.data.id === sent.message.id && e.data.text === "On my way" && e.data.senderRole === "COURIER"), [join2, sent]);
+  const chatHist = await call("GET", `/orders/${dp.id}/messages`, null, c1.accessToken);
+  check("chat history: oldest first, exactly the documented fields", chatHist.status === 200 && chatHist.body.messages.map((m) => m.senderRole).join() === "CUSTOMER,COURIER" && chatHist.body.messages.every((m) => Object.keys(m).sort().join() === "createdAt,id,orderId,senderId,senderRole,text"), chatHist.body);
+  check("a courier can only report a problem after pickup", (await call("POST", `/orders/${dp.id}/delivery-problem`, { reason: "CUSTOMER_UNAVAILABLE" }, c1.accessToken)).status === 409);
+  await call("PATCH", `/orders/${dp.id}/status`, { status: "SHIPPED" }, c1.accessToken);
+  check("only the assigned courier can report it; the reason must be one of the three", (await call("POST", `/orders/${dp.id}/delivery-problem`, { reason: "CUSTOMER_UNAVAILABLE" }, otherCust.accessToken)).status === 403 && (await call("POST", `/orders/${dp.id}/delivery-problem`, { reason: "CUSTOMER_UNAVAILABLE" }, c2.accessToken)).status === 404 && (await call("POST", `/orders/${dp.id}/delivery-problem`, { reason: "RAINING" }, c1.accessToken)).status === 400);
+  check("taking it back needs a reported problem first", (await call("POST", `/orders/${dp.id}/return-to-store`, null, c1.accessToken)).status === 409);
+  const prob = await call("POST", `/orders/${dp.id}/delivery-problem`, { reason: "CUSTOMER_UNAVAILABLE", note: "Rang the bell twice" }, c1.accessToken);
+  const canAt = new Date(prob.body.canReturnAt).getTime();
+  check("reporting starts a 10-minute wait (canReturnAt)", prob.status === 200 && Math.abs(canAt - (Date.now() + 10 * 60_000)) < 30_000, prob.body);
+  const dpCust = (await call("GET", `/orders/${dp.id}`, null, otherCust.accessToken)).body.order;
+  check("the order shows the problem to the customer", !!dpCust?.deliveryProblemAt && dpCust.deliveryProblemReason === "CUSTOMER_UNAVAILABLE", dpCust);
+  const prob2 = await call("POST", `/orders/${dp.id}/delivery-problem`, { reason: "WRONG_ADDRESS" }, c1.accessToken);
+  check("reporting again keeps the original wait", prob2.status === 200 && prob2.body.canReturnAt === prob.body.canReturnAt && prob2.body.deliveryProblemReason === "WRONG_ADDRESS");
+  check("admin System lists the delivery problem", (await call("GET", "/admin/system", null, adminToken)).body.attention?.some((a) => a.startsWith(`Order #${dp.id}: the courier`)));
+  check("the courier cannot take it back before the 10 minutes are up", (await call("POST", `/orders/${dp.id}/return-to-store`, null, c1.accessToken)).status === 409);
+  sql(`update "Order" set "deliveryProblemAt" = now() - interval '11 minutes' where id=${dp.id}`);
+  const stockBack0 = Number(sql(`select "stockQuantity" from "Product" where id=${productId}`));
+  check("only the assigned courier takes it back", (await call("POST", `/orders/${dp.id}/return-to-store`, null, c2.accessToken)).status === 404);
+  const back = await call("POST", `/orders/${dp.id}/return-to-store`, null, c1.accessToken);
+  check("back to the shop: cancelled 'Customer could not be reached', returnedToStoreAt set", back.status === 200 && back.body.order?.status === "CANCELLED" && back.body.order.cancelReason === "Customer could not be reached" && !!back.body.order.returnedToStoreAt, back.body);
+  check("the items are refunded (2 × 50 €); delivery fee and tip are not", sql(`select "refundedCents" || '|' || "paymentStatus" from "Order" where id=${dp.id}`) === "10000|SUCCEEDED" && dp.totalCents === 10000 + dp.deliveryFeeCents + 200, sql(`select "refundedCents" || '|' || "paymentStatus" from "Order" where id=${dp.id}`));
+  check("the items are back in the store's stock", Number(sql(`select "stockQuantity" from "Product" where id=${productId}`)) === stockBack0 + 2);
+  await sleep(900);
+  const dpFee = sql(`select "courierFeeCents" from "Order" where id=${dp.id}`);
+  check("the courier is paid the job pay and the tip; the store gets no payout", sql(`select "amountCents" from "Payout" where "orderId"=${dp.id} and party='COURIER'`) === dpFee && Number(dpFee) >= 650 + 200 && sql(`select count(*) from "Payout" where "orderId"=${dp.id} and party='STORE'`) === "0", [dpFee, sql(`select party || ':' || "amountCents" || ':' || status from "Payout" where "orderId"=${dp.id}`)]);
+  const sysBack = (await call("GET", "/admin/system", null, adminToken)).body.attention || [];
+  check("System no longer lists the problem and does not count the kept delivery fee as a missing refund", !sysBack.some((a) => a.startsWith(`Order #${dp.id}:`)) && Number(sql(`select count(*) from "Order" where status='CANCELLED' and "paymentStatus"='SUCCEEDED' and ("returnedToStoreAt" is null or "refundedCents" < greatest(0, least("subtotalCents" - "discountCents", "totalCents")))`)) === Number((sysBack.find((a) => /still need a refund/.test(a)) || "0").match(/\d+/)[0]), sysBack);
+  check("taking it back twice is refused; the closed order's chat is closed", (await call("POST", `/orders/${dp.id}/return-to-store`, null, c1.accessToken)).status === 409 && (await call("POST", `/orders/${dp.id}/messages`, { text: "hello?" }, otherCust.accessToken)).status === 409);
+  check("only the store confirms it got the items back", (await call("POST", `/orders/${dp.id}/returned-received`, null, otherVendor.accessToken)).status === 404 && (await call("POST", `/orders/${dp.id}/returned-received`, null, otherCust.accessToken)).status === 403 && (await call("POST", `/orders/${scRes.body.order.id}/returned-received`, null, vendor.accessToken)).status === 409);
+  const recv = await call("POST", `/orders/${dp.id}/returned-received`, null, vendor.accessToken);
+  const vendDp = (await call("GET", "/orders", null, vendor.accessToken)).body.orders?.find((o) => o.id === dp.id);
+  check("the store confirms it got the items back; its order list shows both times", recv.status === 200 && !!recv.body.order?.returnReceivedAt && !!vendDp?.returnedToStoreAt && !!vendDp.returnReceivedAt, vendDp);
+  // Chat is deleted 30 days after the order is closed (scheduler job "chat-purge", run here directly)
+  const chatMod = require(path.join(__dirname, "..", "..", "dist", "modules", "orders", "chat.js"));
+  await chatMod.purgeOldMessages();
+  const keptMsgs = sql(`select count(*) from "OrderMessage" where "orderId"=${dp.id}`);
+  sql(`update "Order" set "cancelledAt" = now() - interval '31 days' where id=${dp.id}`);
+  await chatMod.purgeOldMessages();
+  check("order chat is kept until 30 days after the order is closed, then deleted", keptMsgs === "2" && sql(`select count(*) from "OrderMessage" where "orderId"=${dp.id}`) === "0", keptMsgs);
+  sql(`update "Order" set "cancelledAt" = now() where id=${dp.id}`);
+  custChat.close();
+  c1Chat.close();
+  const an2 = (await call("GET", "/admin/analytics", null, adminToken)).body.totals?.cancelledByReason;
+  check("analytics: store cancellations in the store's own words and customers not reached have their own buckets", an2?.store_cancelled >= 1 && an2.customer_unreachable >= 1, an2);
+
+  console.log("\n— Blocking users and reporting reviews (2.10)");
+  const liveDrop = (await call("GET", `/stores/${storeId}/drops`)).body.drops?.[0]?.id;
+  const pirjoComment = await call("POST", `/drops/${liveDrop}/comments`, { body: "Lovely colours" }, pirjo.accessToken);
+  check("comments carry the author's user id", pirjoComment.status === 201 && pirjoComment.body.comment?.authorId === pirjo.user.id, pirjoComment.body);
+  check("blocking needs a signed-in user, another real user", (await call("POST", "/me/blocks", { userId: pirjo.user.id })).status === 401 && (await call("POST", "/me/blocks", { userId: otherCust.user.id }, otherCust.accessToken)).status === 400 && (await call("POST", "/me/blocks", { userId: 99999999 }, otherCust.accessToken)).status === 404 && (await call("POST", "/me/blocks", { userId: "x" }, otherCust.accessToken)).status === 400);
+  const blk = await call("POST", "/me/blocks", { userId: pirjo.user.id }, otherCust.accessToken);
+  const blocks = await call("GET", "/me/blocks", null, otherCust.accessToken);
+  check("a customer blocks another user and sees the block list", blk.status === 200 && blk.body.blocked === true && blocks.body.blocks?.some((b) => b.userId === pirjo.user.id && b.name === "Pirjo"), blocks.body);
+  const seenByBlocker = (await call("GET", `/drops/${liveDrop}/comments`, null, otherCust.accessToken)).body.comments || [];
+  const seenByOthers = (await call("GET", `/drops/${liveDrop}/comments`)).body.comments || [];
+  check("the blocked user's comments are hidden for the blocker only", !seenByBlocker.some((c) => c.id === pirjoComment.body.comment?.id) && seenByOthers.some((c) => c.id === pirjoComment.body.comment?.id));
+  const pRevOrder = Number(sql(`insert into "Order" ("userId","storeId","status","subtotalCents","deliveryFeeCents","courierFeeCents","commissionCents","sellerPayoutCents","totalCents","paymentStatus","paidAt","deliveredAt","updatedAt") values (${pirjo.user.id},${storeId},'DELIVERED',5000,300,300,500,4500,5300,'SUCCEEDED',now(),now(),now()) returning id`).split("\n")[0]);
+  const pRev = await call("POST", `/orders/${pRevOrder}/review`, { storeRating: 2, comment: "Slow to answer" }, pirjo.accessToken);
+  const revBlocker = (await call("GET", `/stores/${storeId}/reviews`, null, otherCust.accessToken)).body.reviews || [];
+  const revPublic = (await call("GET", `/stores/${storeId}/reviews`)).body.reviews || [];
+  check("reviews carry authorId; the blocked user's reviews are hidden for the blocker only", pRev.status === 201 && !revBlocker.some((r) => r.id === pRev.body.review.id) && revPublic.some((r) => r.id === pRev.body.review.id && r.authorId === pirjo.user.id), revPublic.slice(0, 2));
+  const unblk = await call("DELETE", `/me/blocks/${pirjo.user.id}`, null, otherCust.accessToken);
+  check("unblocking shows them again", unblk.status === 200 && unblk.body.blocked === false && (await call("GET", `/stores/${storeId}/reviews`, null, otherCust.accessToken)).body.reviews.some((r) => r.id === pRev.body.review.id));
+  check("you cannot report your own review; a reason is needed", (await call("POST", `/reviews/${pRev.body.review.id}/report`, { reason: "SPAM" }, pirjo.accessToken)).status === 400 && (await call("POST", `/reviews/${pRev.body.review.id}/report`, {}, otherCust.accessToken)).status === 400 && (await call("POST", `/reviews/${pRev.body.review.id}/report`, { reason: "SPAM" })).status === 401);
+  const repRev = await call("POST", `/reviews/${pRev.body.review.id}/report`, { reason: "HARASSMENT" }, otherCust.accessToken);
+  await call("POST", `/reviews/${pRev.body.review.id}/report`, { reason: "SPAM" }, commentStranger.accessToken);
+  const reported = await call("GET", "/admin/reviews/reported", null, adminToken);
+  const rr = reported.body.reviews?.find((r) => r.id === pRev.body.review.id);
+  check("admins see reported reviews with their reasons; others cannot", repRev.status === 200 && rr?.reportCount === 2 && rr.reports.length === 2 && (await call("GET", "/admin/reviews/reported", null, otherCust.accessToken)).status === 403, reported.body);
+  check("System asks an admin to look at reported reviews", (await call("GET", "/admin/system", null, adminToken)).body.attention?.some((a) => /reported review/.test(a)));
+  check("resolving needs hide or keep", (await call("POST", `/admin/reviews/${pRev.body.review.id}/resolve`, { action: "delete" }, adminToken)).status === 400 && (await call("POST", `/admin/reviews/${pRev.body.review.id}/resolve`, { action: "hide" }, otherCust.accessToken)).status === 403);
+  const hid = await call("POST", `/admin/reviews/${pRev.body.review.id}/resolve`, { action: "hide" }, adminToken);
+  check("the admin hides the review: gone from the store page and the reported list", hid.status === 200 && hid.body.review?.isHidden === true && !(await call("GET", `/stores/${storeId}/reviews`)).body.reviews.some((r) => r.id === pRev.body.review.id) && !(await call("GET", "/admin/reviews/reported", null, adminToken)).body.reviews.some((r) => r.id === pRev.body.review.id));
+
+  console.log("\n— Approval messages, account deletion clean-up, legal pages (2.10)");
+  const aaro = await register("Aaro", "COURIER");
+  const aaroCourier = (await call("GET", "/admin/couriers", null, adminToken)).body.couriers.find((c) => c.user?.id === aaro.user.id);
+  const ap1 = await call("PATCH", `/admin/couriers/${aaroCourier.id}/approve`, null, adminToken);
+  const ap2 = await call("PATCH", `/admin/couriers/${aaroCourier.id}/approve`, null, adminToken);
+  check("approving a courier sends 'You're approved' (push and email) once", ap1.status === 200 && ap1.body.approvalSent === true && ap2.body.approvalSent === false, [ap1.body.approvalSent, ap2.body.approvalSent]);
+  const vilja = await register("Vilja", "VENDOR");
+  const viljaStore = (await call("POST", "/stores", { name: `Vilja Vintage ${uniq}`, category: "THRIFT", sellerType: "PRIVATE", latitude: 60.17, longitude: 24.94 }, vilja.accessToken)).body.store;
+  const sp1 = await call("PATCH", `/admin/vendors/${viljaStore.id}/approve`, null, adminToken);
+  const sp2 = await call("PATCH", `/admin/vendors/${viljaStore.id}/approve`, null, adminToken);
+  check("approving a store sends 'You're approved' once", sp1.body.approvalSent === true && sp2.body.approvalSent === false, [sp1.body, sp2.body.approvalSent]);
+  const viljaDel = await call("DELETE", "/auth/me", null, vilja.accessToken);
+  await sleep(700);
+  const destroyedNow = await (await fetch("http://localhost:12222/__destroyed")).json();
+  check("deleting a store account deletes its media on Cloudinary (products, store pictures, drops, avatar)", viljaDel.status === 200 && [`prefix:malvoya/products/s${viljaStore.id}/`, `prefix:malvoya/stores/s${viljaStore.id}/`, `prefix:malvoya/drops/s${viljaStore.id}/`, `prefix:malvoya/avatars/u${vilja.user.id}/`].every((p) => destroyedNow.includes(p)), destroyedNow.filter((d) => String(d).startsWith("prefix:")));
+  check("a deleted account's token stops working at once", (await call("GET", "/me", null, vilja.accessToken)).status === 401);
+  const delPage = await fetch(`${BASE}/legal/delete-account`);
+  const delHtml = await delPage.text();
+  check("the account deletion page is published and listed with the legal documents", delPage.status === 200 && delHtml.includes("Delete your Malvoya account") && delHtml.includes("Malvoya Courier") && (await (await fetch(`${BASE}/legal/terms`)).text()).includes('href="/legal/delete-account"'));
+  check("/legal/vendor-terms opens the seller terms", (await fetch(`${BASE}/legal/vendor-terms`)).status === 200 && (await (await fetch(`${BASE}/legal/vendor-terms`)).text()).includes("Seller Terms"));
+  check("the customer terms explain what happens when the courier cannot reach you", (await (await fetch(`${BASE}/legal/terms`)).text()).includes("If the courier cannot reach you at the address"));
+
+  console.log("\n— Signed statement links (2.10)");
+  const stLink = await call("GET", `/stores/my/statements/${month}/link`, null, stinaV.accessToken);
+  check("the store gets a 10-minute link to its printable statement", stLink.status === 200 && stLink.body.url.startsWith(`${BASE}/api/v1/stores/statements/${stina.id}/${month}.html?exp=`) && Math.abs(new Date(stLink.body.expiresAt).getTime() - Date.now() - 600_000) < 30_000, stLink.body);
+  const stPage = await fetch(stLink.body.url);
+  const stPageHtml = await stPage.text();
+  check("the link opens the statement in a normal browser (no token)", stPage.status === 200 && stPageHtml.includes("Statement — not a VAT invoice") && stPageHtml.includes(`#${sA}`) && (stPage.headers.get("content-security-policy") || "").startsWith("default-src 'none'"));
+  const badSig = await fetch(stLink.body.url.replace(/sig=[^&]+/, "sig=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
+  const otherStore = await fetch(stLink.body.url.replace(`/statements/${stina.id}/`, `/statements/${paula.id}/`));
+  const otherMonth = await fetch(stLink.body.url.replace(`/${month}.html`, "/2025-01.html"));
+  check("a changed signature, store or month is refused (403)", badSig.status === 403 && otherStore.status === 403 && otherMonth.status === 403);
+  const linkKey = crypto.createHmac("sha256", testEnv.JWT_SECRET).update("malvoya:statement-link:v1").digest();
+  const oldExp = Math.floor(Date.now() / 1000) - 60;
+  const oldSig = crypto.createHmac("sha256", linkKey).update(`statement|${stina.id}|${month}|${oldExp}`).digest("base64url");
+  const expired = await fetch(`${API}/stores/statements/${stina.id}/${month}.html?exp=${oldExp}&sig=${oldSig}`);
+  check("an expired link is refused and says so", expired.status === 403 && /expired/.test(await expired.text()));
+  check("statement links are the store owner's; the month is validated", (await call("GET", `/stores/my/statements/${month}/link`, null, otherCust.accessToken)).status === 403 && (await call("GET", "/stores/my/statements/2026-13/link", null, stinaV.accessToken)).status === 400);
+
+  console.log("\n— DAC7 reminders (2.10)");
+  const rasmus = await register("Rasmus", "VENDOR");
+  const rStore = (await call("POST", "/stores", { name: `Rasmus Retro ${uniq}`, category: "THRIFT", sellerType: "PRIVATE", latitude: 60.17, longitude: 24.94 }, rasmus.accessToken)).body.store;
+  await call("PATCH", `/admin/vendors/${rStore.id}/approve`, null, adminToken);
+  sql(`insert into "Order" ("userId","storeId","status","subtotalCents","deliveryFeeCents","courierFeeCents","commissionCents","sellerPayoutCents","totalCents","paymentStatus","paidAt","deliveredAt","updatedAt") values (${otherCust.user.id},${rStore.id},'DELIVERED',3000,300,300,300,2700,3300,'SUCCEEDED',now(),now(),now())`);
+  const reminders = require(path.join(__dirname, "..", "..", "dist", "modules", "sellers", "taxReminders.js"));
+  const remCount = () => sql(`select "taxReminderCount" || '|' || coalesce("taxReminderYear"::text, '-') from "Store" where id=${rStore.id}`);
+  const thisYear = hel().date.slice(0, 4);
+  await reminders.sendTaxInfoReminders();
+  check("a store with sales and no tax details is reminded (push and email)", remCount() === `1|${thisYear}`, remCount());
+  await reminders.sendTaxInfoReminders();
+  check("…at most once every 30 days", remCount() === `1|${thisYear}`);
+  sql(`update "Store" set "taxReminderAt" = now() - interval '31 days' where id=${rStore.id}`);
+  await reminders.sendTaxInfoReminders();
+  sql(`update "Store" set "taxReminderAt" = now() - interval '31 days' where id=${rStore.id}`);
+  await reminders.sendTaxInfoReminders();
+  check("…and at most twice a year; stores with complete details are never reminded", remCount() === `2|${thisYear}` && sql(`select "taxReminderCount" from "Store" where id=${stina.id}`) === "0", remCount());
+
   console.log("\n— Background jobs and input hardening");
   const leaseSql = `INSERT INTO "JobLease" ("name","lockedUntil") VALUES ('t${uniq}', now() + interval '1 minute') ON CONFLICT ("name") DO UPDATE SET "lockedUntil" = now() + interval '1 minute' WHERE "JobLease"."lockedUntil" < now() RETURNING "name"`;
   const firstLine = (q) => sql(q).split(/\r?\n/)[0];
@@ -1408,7 +1697,7 @@ async function register(name, role, extra = {}) {
   check("huge search input rejected", (await call("GET", `/products/search?q=${"a".repeat(200)}`)).status === 400);
   const cors = await fetch(`${API}/stores`, { headers: { Origin: "https://evil.example" } });
   check("CORS does not allow unknown origins", !cors.headers.get("access-control-allow-origin"));
-  check("health reports v2.9.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.9.0");
+  check("health reports v2.10.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.10.0");
 
   [vendorSock, custSock, otherSock, c1Sock, c2Sock].forEach((s) => s.close());
   console.log(`\n${pass} passed, ${fail} failed`);

@@ -37,6 +37,8 @@ class ApiClient {
     );
     final headers = <String, String>{
       'Content-Type': 'application/json',
+      // The server stores the language and sends notifications and emails in it
+      'Accept-Language': ServerMessages.languageCode,
       if (auth?.accessToken != null) 'Authorization': 'Bearer ${auth!.accessToken}',
     };
     try {

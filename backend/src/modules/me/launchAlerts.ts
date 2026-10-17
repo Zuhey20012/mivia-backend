@@ -5,6 +5,7 @@ import { auth, AuthRequest } from "../../middleware/auth";
 import { sendError } from "../../lib/errors";
 import { prisma } from "../../lib/prisma";
 import { pushToUsers } from "../../lib/push";
+import { t } from "../../lib/i18n";
 import { haversineKm } from "../../utils/distance";
 
 const logger = pino({ name: "launch-alerts" });
@@ -68,8 +69,8 @@ export async function notifyLaunchAlertsNear(store: { id: number; name: string; 
 
   await prisma.launchAlert.updateMany({ where: { id: { in: near.map((a) => a.id) } }, data: { notifiedAt: new Date() } });
   await pushToUsers(near.map((a) => a.userId), {
-    title: "Malvoya is open near you",
-    body: `${store.name} now delivers to your area. Take a look!`,
+    title: t("Malvoya is open near you", "Malvoya on avattu lähelläsi"),
+    body: t(`${store.name} now delivers to your area. Take a look!`, `${store.name} toimittaa nyt alueellesi. Käy katsomassa!`),
     data: { type: "store", storeId: String(store.id) },
   }).catch((e) => logger.error({ err: e?.message }, "Launch alert push failed"));
   logger.info({ storeId: store.id, notified: near.length }, "Launch alerts sent");

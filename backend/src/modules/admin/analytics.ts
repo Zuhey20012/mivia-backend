@@ -20,8 +20,10 @@ const CANCEL_REASONS: Record<string, string> = {
   "Not collected in time": "pickup_not_collected",
   "The store did not get the order ready in time": "store_not_ready",
   "Cancelled by Malvoya": "admin",
+  "Customer could not be reached": "customer_unreachable",
 };
-export const CANCEL_REASON_KEYS = [...new Set(Object.values(CANCEL_REASONS)), "other"];
+// Since 2.10 a store can cancel in its own words (Order.cancelledBy = "STORE"): those are "store_cancelled"
+export const CANCEL_REASON_KEYS = [...new Set(Object.values(CANCEL_REASONS)), "store_cancelled", "other"];
 
 const MAX_DAYS = 366;
 
@@ -59,7 +61,9 @@ export async function analytics(fromRaw: unknown, toRaw: unknown) {
       FROM "Order" WHERE "deliveredAt" >= ${start} AND "deliveredAt" < ${end} AND status IN ('DELIVERED', 'REFUNDED') GROUP BY 1`,
     // Cancellations of paid orders (unpaid checkouts that lapse are not cancellations anyone experienced)
     prisma.$queryRaw<{ day: string; reason: string | null; orders: number }[]>`
-      SELECT ${day('"cancelledAt"')} AS day, "cancelReason" AS reason, count(*)::int AS orders
+      SELECT ${day('"cancelledAt"')} AS day,
+        CASE WHEN "cancelledBy" = 'STORE' AND "cancelReason" IS DISTINCT FROM 'Declined by store' THEN '#store_cancelled' ELSE "cancelReason" END AS reason,
+        count(*)::int AS orders
       FROM "Order" WHERE "cancelledAt" >= ${start} AND "cancelledAt" < ${end} AND status = 'CANCELLED' AND "paidAt" IS NOT NULL
       GROUP BY 1, 2`,
     // Malvoya's revenue, same rule as /admin/stats: paid, not refunded or cancelled; by payment day
@@ -74,7 +78,7 @@ export async function analytics(fromRaw: unknown, toRaw: unknown) {
     // Store answers to orders paid in the range
     prisma.$queryRaw<{ accepted: number; declined: number; timed_out: number; median_s: number | null }[]>`
       SELECT count(*) FILTER (WHERE "confirmedAt" IS NOT NULL)::int AS accepted,
-        count(*) FILTER (WHERE "confirmedAt" IS NULL AND "cancelReason" = 'Declined by store')::int AS declined,
+        count(*) FILTER (WHERE "confirmedAt" IS NULL AND ("cancelReason" = 'Declined by store' OR "cancelledBy" = 'STORE'))::int AS declined,
         count(*) FILTER (WHERE "confirmedAt" IS NULL AND "cancelReason" = 'The store did not respond in time')::int AS timed_out,
         percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM "confirmedAt" - "paidAt"))
           FILTER (WHERE "confirmedAt" IS NOT NULL AND "confirmedAt" >= "paidAt") AS median_s
@@ -132,7 +136,7 @@ export async function analytics(fromRaw: unknown, toRaw: unknown) {
   const reasons: Record<string, number> = Object.fromEntries(CANCEL_REASON_KEYS.map((k) => [k, 0]));
   for (const c of cancelled) {
     cancelledBy.set(c.day, (cancelledBy.get(c.day) ?? 0) + c.orders);
-    reasons[CANCEL_REASONS[c.reason ?? ""] ?? "other"] += c.orders;
+    reasons[c.reason === "#store_cancelled" ? "store_cancelled" : CANCEL_REASONS[c.reason ?? ""] ?? "other"] += c.orders;
   }
 
   const daily = r.days.map((d) => ({

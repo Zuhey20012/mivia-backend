@@ -4,6 +4,8 @@ import { prisma } from "../../lib/prisma";
 import { sendVerificationCode } from "../../services/notificationDeliveryService";
 import { issueSession } from "./session";
 import { AuthError, assertVerifiedSignInAllowed, phoneToSyntheticEmail } from "./auth.service";
+import { Locale } from "../../lib/i18n";
+import { RESET_TARGET_PREFIX } from "./passwordReset";
 
 const logger = pino({ name: "OtpService" });
 
@@ -27,7 +29,7 @@ function maskTarget(target: string) {
   return target.includes("@") ? target.replace(/^(.).*(@.*)$/, "$1***$2") : `***${target.slice(-3)}`;
 }
 
-export async function sendOtp(rawTarget: string, channel?: "sms" | "email") {
+export async function sendOtp(rawTarget: string, channel?: "sms" | "email", locale: Locale = "en") {
   const target = normalizeTarget(rawTarget);
   const isEmail = target.includes("@");
   if (isEmail ? !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target) : !/^\+?\d{7,15}$/.test(target)) {
@@ -44,7 +46,7 @@ export async function sendOtp(rawTarget: string, channel?: "sms" | "email") {
   const record = { codeHash: hashCode(target, code), attempts: 0, sentAt: new Date(), expiresAt: new Date(Date.now() + OTP_TTL_MS) };
   await prisma.otpCode.upsert({ where: { target }, create: { target, ...record }, update: record });
 
-  const { delivered } = await sendVerificationCode(target, effectiveChannel, code);
+  const { delivered } = await sendVerificationCode(target, effectiveChannel, code, locale);
   logger.info({ target: maskTarget(target), channel: effectiveChannel, delivered }, "Verification code dispatched");
   if (!delivered) {
     await prisma.otpCode.deleteMany({ where: { target } });
@@ -56,6 +58,8 @@ export async function sendOtp(rawTarget: string, channel?: "sms" | "email") {
 
 export async function verifyOtp(rawTarget: string, code: string) {
   const target = normalizeTarget(rawTarget);
+  // Password-reset codes share the table but can never be used to sign in
+  if (target.startsWith(RESET_TARGET_PREFIX)) throw new AuthError("The code has expired. Please request a new one.", 401);
   const stored = await prisma.otpCode.findUnique({ where: { target } });
   if (!stored || Date.now() > stored.expiresAt.getTime()) {
     await prisma.otpCode.deleteMany({ where: { target } });

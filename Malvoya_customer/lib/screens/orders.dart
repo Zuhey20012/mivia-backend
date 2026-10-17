@@ -1,7 +1,5 @@
 import 'dart:async';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
@@ -12,8 +10,11 @@ import '../core/sign_in.dart';
 import '../core/strings.dart';
 import '../services/socket_service.dart';
 import '../widgets/skeleton.dart';
+import 'main_navigation.dart';
 import 'order_detail.dart';
 import 'returns_screen.dart';
+import '../core/haptics.dart';
+import '../widgets/app_image.dart';
 
 /// Your orders: what is on its way first, then everything delivered or cancelled.
 class OrdersScreen extends StatefulWidget {
@@ -165,7 +166,7 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
             icon: const Icon(Icons.assignment_return_outlined),
             onPressed: auth.isAuthenticated
                 ? () {
-                    HapticFeedback.selectionClick();
+                    Haptics.selection();
                     Navigator.push(context, MaterialPageRoute(builder: (_) => const ReturnsScreen()));
                   }
                 : null,
@@ -187,9 +188,13 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
                       ? StateMessage.error(message: _error!, onRetry: () => _load())
                       : _orders.isEmpty
                           ? StateMessage(
-                              icon: Icons.shopping_bag_outlined,
-                              message: tr(context, 'No orders yet. When you order, you can follow it here live.',
-                                  'Ei vielä tilauksia. Kun tilaat, voit seurata sitä täällä reaaliajassa.'),
+                              icon: Icons.receipt_long_outlined,
+                              title: tr(context, 'No orders yet', 'Ei vielä tilauksia'),
+                              message: tr(context, 'When you order, you can follow it here live.',
+                                  'Kun tilaat, voit seurata tilaustasi täällä reaaliajassa.'),
+                              actionLabel: tr(context, 'Start shopping', 'Aloita ostokset'),
+                              actionIcon: Icons.storefront_rounded,
+                              onRetry: () => openMainTab(context, MainTab.home),
                             )
                           : ListView(
                               padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
@@ -250,7 +255,7 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
 
     return GestureDetector(
       onTap: () async {
-        HapticFeedback.selectionClick();
+        Haptics.selection();
         await Navigator.push(context, MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: asInt(o['id'])!)));
         if (mounted) _load(quiet: true);
       },
@@ -271,7 +276,7 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
                 height: 68,
                 child: images.isEmpty
                     ? Container(color: AppTheme.pastel(context, AppTheme.clay, AppTheme.clayInk), child: const Icon(Icons.checkroom_outlined, color: AppTheme.clayInk))
-                    : CachedNetworkImage(imageUrl: images.first, fit: BoxFit.cover),
+                    : AppImage(images.first),
               ),
             ),
             const SizedBox(width: 12),
@@ -325,7 +330,7 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
                           onPressed: busy != null
                               ? null
                               : () {
-                                  HapticFeedback.selectionClick();
+                                  Haptics.selection();
                                   reorder(context, Map<String, dynamic>.from(o));
                                 },
                           icon: busy == asInt(o['id'])

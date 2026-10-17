@@ -6,7 +6,8 @@ import { ApiError } from "../../lib/errors";
 import { env } from "../../config/env";
 import { destroyResource, getResource, hlsReady, imageUrl, videoHlsUrl, videoMp4Url, videoPosterUrl } from "../../lib/cloudinary";
 import { pushToUser, pushToUsers } from "../../lib/push";
-import { sendEmail, escapeHtml } from "../../services/notificationDeliveryService";
+import { sendDropRemovedEmail } from "../../services/notificationDeliveryService";
+import { localeOfUser, t } from "../../lib/i18n";
 import { priceInfoFor, presentProduct, productInclude } from "../products/pricing";
 import { deliveryInfo } from "../stores/stores.service";
 import { describe, UploadProof, verifyOwnedUpload } from "../media/media.service";
@@ -381,7 +382,13 @@ async function publish(dropId: number) {
   const updated = await prisma.drop.updateMany({ where: { id: dropId, status: "PROCESSING" }, data: { status: "READY", publishedAt: new Date() } });
   if (!updated.count) return;
   const drop = await prisma.drop.findUnique({ where: { id: dropId }, select: { store: { select: { ownerId: true } } } });
-  if (drop) pushToUser(drop.store.ownerId, { title: "Your drop is live", body: "Shoppers can now see it in the Drops feed.", data: { type: "drop", dropId: String(dropId) } }).catch(() => {});
+  if (drop) {
+    pushToUser(drop.store.ownerId, {
+      title: t("Your drop is live", "Droppisi on julkaistu"),
+      body: t("Shoppers can now see it in the Drops feed.", "Ostajat näkevät sen nyt Drops-syötteessä."),
+      data: { type: "drop", dropId: String(dropId) },
+    }).catch(() => {});
+  }
   notifyFollowers(dropId).catch(() => {});
 }
 
@@ -397,7 +404,7 @@ async function notifyFollowers(dropId: number) {
   const followers = await prisma.storeFollow.findMany({ where: { storeId: drop.storeId }, select: { userId: true }, take: MAX_FOLLOWER_PUSHES });
   const ids = followers.map((f) => f.userId).filter((id) => id !== drop.store.ownerId);
   if (ids.length) {
-    await pushToUsers(ids, { title: `New drop from ${drop.store.name}`, body: drop.product.name, data: { type: "drop", dropId: String(dropId) } });
+    await pushToUsers(ids, { title: t(`New drop from ${drop.store.name}`, `Uusi drop: ${drop.store.name}`), body: drop.product.name, data: { type: "drop", dropId: String(dropId) } });
   }
 }
 
@@ -477,12 +484,8 @@ export async function moderate(dropId: number, adminId: number, action: "remove"
   ]);
 
   const owner = drop.store.owner;
-  const text =
-    `Your drop #${dropId} was removed from Malvoya.\n\nReason: ${reason.trim()}\n\n` +
-    `This decision was made by a person on the Malvoya team after review. ` +
-    `If you think it is wrong, reply to this email or write to sellers@malvoya.com within 6 months and we will look at it again.`;
-  sendEmail(owner.email, "Malvoya – a drop was removed", `<p>${escapeHtml(text).replace(/\n/g, "<br>")}</p>`, text).catch(() => {});
-  pushToUser(owner.id, { title: "A drop was removed", body: reason.trim().slice(0, 120), data: { type: "drop", dropId: String(dropId) } }).catch(() => {});
+  localeOfUser(owner.id).then((locale) => sendDropRemovedEmail(owner.email, dropId, reason.trim(), locale)).catch(() => {});
+  pushToUser(owner.id, { title: t("A drop was removed", "Drop poistettiin"), body: reason.trim().slice(0, 120), data: { type: "drop", dropId: String(dropId) } }).catch(() => {});
   return { status: "REMOVED" };
 }
 

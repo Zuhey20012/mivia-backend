@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
-import '../core/report_reasons.dart';
+import '../core/blocked_users.dart';
 import '../core/strings.dart';
+import 'ugc_actions.dart';
+import '../core/haptics.dart';
 
 /// Opens the comments of a drop. [onCountChanged] receives the new visible-comment count.
 Future<void> showDropComments(BuildContext context, Map<String, dynamic> drop, {ValueChanged<int>? onCountChanged}) {
@@ -49,10 +50,16 @@ class _DropCommentsState extends State<_DropComments> {
       if (_scroll.position.pixels > _scroll.position.maxScrollExtent - 200) _load();
     });
     _load(reset: true);
+    BlockedUsers.instance.addListener(_onBlocksChanged);
+  }
+
+  void _onBlocksChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    BlockedUsers.instance.removeListener(_onBlocksChanged);
     _input.dispose();
     _scroll.dispose();
     super.dispose();
@@ -96,7 +103,7 @@ class _DropCommentsState extends State<_DropComments> {
       }
     });
     if (res.ok) {
-      HapticFeedback.lightImpact();
+      Haptics.light();
       if (_scroll.hasClients) _scroll.animateTo(0, duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
     } else {
       _snack(res.errorText(context)!);
@@ -117,16 +124,7 @@ class _DropCommentsState extends State<_DropComments> {
   }
 
   Future<void> _report(Map<String, dynamic> c) async {
-    final reason = await showModalBottomSheet<String>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: ListView(shrinkWrap: true, children: [
-          ListTile(title: Text(tr(ctx, 'Report this comment', 'Ilmoita kommentista'), style: const TextStyle(fontWeight: FontWeight.w700))),
-          for (final e in reportReasons.entries)
-            ListTile(title: Text(isFinnish(ctx) ? e.value[1] : e.value[0]), onTap: () => Navigator.pop(ctx, e.key)),
-        ]),
-      ),
-    );
+    final reason = await pickReportReason(context, title: tr(context, 'Report this comment', 'Ilmoita kommentista'));
     if (reason == null || !mounted) return;
     final res = await _api.post('$_base/${c['id']}/report', {'reason': reason});
     if (mounted) _snack(res.ok ? tr(context, 'Thanks — we will review it.', 'Kiitos — tarkistamme sen.') : res.errorText(context)!);
@@ -179,12 +177,16 @@ class _DropCommentsState extends State<_DropComments> {
                                     textAlign: TextAlign.center, style: TextStyle(color: textSecondary)),
                               ),
                             )
-                          : ListView.builder(
-                              controller: _scroll,
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              itemCount: _comments.length,
-                              itemBuilder: (_, i) => _tile(_comments[i], auth, textPrimary, textSecondary),
-                            ),
+                          : Builder(builder: (context) {
+                              // Comments by people this customer blocked are hidden at once
+                              final visible = _comments.where((c) => !BlockedUsers.instance.isBlocked(authorIdOf(c))).toList();
+                              return ListView.builder(
+                                controller: _scroll,
+                                padding: const EdgeInsets.symmetric(vertical: 8),
+                                itemCount: visible.length,
+                                itemBuilder: (_, i) => _tile(visible[i], auth, textPrimary, textSecondary),
+                              );
+                            }),
             ),
             const Divider(height: 1),
             SafeArea(
@@ -233,7 +235,17 @@ class _DropCommentsState extends State<_DropComments> {
     final byStore = c['byStore'] == true;
     final canDelete = c['canDelete'] == true;
     final canReport = auth.isAuthenticated && c['mine'] != true;
+    final authorId = authorIdOf(c);
+    final canBlock = canReport && authorId != null && authorId != auth.currentUser?.id && BlockedUsers.instance.available;
+    void act(String? v) {
+      if (v == 'delete') _delete(c);
+      if (v == 'report') _report(c);
+      if (v == 'block' && authorId != null) confirmAndBlock(context, userId: authorId, name: '${c['author'] ?? ''}');
+    }
     return ListTile(
+      onLongPress: canDelete || canReport
+          ? () async => act(await showUgcActions(context, canReport: canReport, canBlock: canBlock, canDelete: canDelete))
+          : null,
       leading: CircleAvatar(
         backgroundColor: byStore ? AppTheme.primary : AppTheme.primaryLight,
         child: byStore
@@ -255,11 +267,13 @@ class _DropCommentsState extends State<_DropComments> {
       subtitle: Text('${c['body'] ?? ''}', style: TextStyle(color: textPrimary, fontSize: 14, height: 1.3)),
       trailing: canDelete || canReport
           ? PopupMenuButton<String>(
+              tooltip: tr(context, 'More', 'Lisää'),
               icon: Icon(Icons.more_vert_rounded, color: textSecondary, size: 20),
-              onSelected: (v) => v == 'delete' ? _delete(c) : _report(c),
+              onSelected: act,
               itemBuilder: (_) => [
                 if (canDelete) PopupMenuItem(value: 'delete', child: Text(tr(context, 'Delete', 'Poista'))),
                 if (canReport) PopupMenuItem(value: 'report', child: Text(tr(context, 'Report', 'Ilmoita'))),
+                if (canBlock) PopupMenuItem(value: 'block', child: Text(tr(context, 'Block user', 'Estä käyttäjä'))),
               ],
             )
           : null,

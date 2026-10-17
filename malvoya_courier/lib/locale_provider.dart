@@ -10,6 +10,9 @@ class LocaleProvider extends ChangeNotifier {
   // Only fully translated languages are offered
   static const List<String> supportedCodes = ['en', 'fi'];
 
+  /// Called when the user picks a language (not when the saved one is loaded), e.g. to tell the server.
+  void Function(String languageCode)? onChanged;
+
   LocaleProvider() {
     _loadLocale();
   }
@@ -19,6 +22,7 @@ class LocaleProvider extends ChangeNotifier {
     _locale = locale;
     ServerMessages.languageCode = locale.languageCode;
     notifyListeners();
+    onChanged?.call(locale.languageCode);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('languageCode', locale.languageCode);
   }

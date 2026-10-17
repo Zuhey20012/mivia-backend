@@ -1,0 +1,6 @@
+/* Purpose strings shown by iOS permission prompts (English). Keep in sync with Info.plist. */
+"NSLocationWhenInUseUsageDescription" = "Malvoya uses your location once to place your store on the map for customers and couriers.";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "Malvoya Store uses your location only while you use the app, to place your store on the map. It does not use your location in the background.";
+"NSCameraUsageDescription" = "Malvoya Store uses the camera when you take product photos or record a video for a product or a drop.";
+"NSMicrophoneUsageDescription" = "Malvoya Store uses the microphone only while you record a product or drop video, so the video has sound.";
+"NSPhotoLibraryUsageDescription" = "Malvoya Store uses the photos and videos you choose for your products, drops, logo and banner.";

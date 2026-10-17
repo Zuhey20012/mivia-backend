@@ -1,9 +1,12 @@
 import { Request, Response } from "express";
+import { z } from "zod";
 import { registerSchema, loginSchema, refreshSchema } from "./auth.schema";
 import * as authService from "./auth.service";
 import * as socialService from "./social.service";
 import { sendOtp, verifyOtp } from "./otp.service";
 import { AuthRequest } from "../../middleware/auth";
+import { localeFromHeader } from "../../lib/i18n";
+import { forgotPassword, resetPassword, forgotSchema, resetSchema } from "./passwordReset";
 
 /** AuthErrors carry a safe message + status; anything else is logged and hidden. */
 function sendError(res: Response, e: unknown, fallbackStatus = 500) {
@@ -14,7 +17,7 @@ function sendError(res: Response, e: unknown, fallbackStatus = 500) {
 
 export async function register(req: Request, res: Response) {
   const result = registerSchema.safeParse(req.body);
-  if (!result.success) return res.status(400).json({ ok: false, errors: result.error.flatten() });
+  if (!result.success) return res.status(400).json({ ok: false, error: result.error.issues[0]?.message, errors: result.error.flatten() });
   try {
     const data = await authService.registerUser(result.data);
     res.status(201).json({ ok: true, ...data });
@@ -96,7 +99,7 @@ export async function sendOtpHandler(req: Request, res: Response) {
     return res.status(400).json({ ok: false, error: "Phone number or email address is required" });
   }
   try {
-    res.json(await sendOtp(destination, channel === "email" || channel === "sms" ? channel : undefined));
+    res.json(await sendOtp(destination, channel === "email" || channel === "sms" ? channel : undefined, localeFromHeader(req.headers["accept-language"]) ?? "en"));
   } catch (e) {
     sendError(res, e);
   }
@@ -112,6 +115,49 @@ export async function verifyOtpHandler(req: Request, res: Response) {
     res.json(await verifyOtp(destination, code));
   } catch (e) {
     sendError(res, e, 401);
+  }
+}
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1).max(72),
+  // Same rules as registration
+  newPassword: z.string().min(8, "Password must be at least 8 characters").max(72),
+});
+
+export async function changePasswordHandler(req: AuthRequest, res: Response) {
+  const body = changePasswordSchema.safeParse(req.body);
+  if (!body.success) {
+    return res.status(400).json({ ok: false, error: body.error.issues[0]?.message ?? "Check the details", errors: body.error.flatten() });
+  }
+  try {
+    res.json({ ok: true, ...(await authService.changePassword(req.user!.id, body.data.currentPassword, body.data.newPassword)) });
+  } catch (e) {
+    sendError(res, e);
+  }
+}
+
+/** Always 200 for a well-formed address, whether or not an account exists (no account enumeration). */
+export async function forgotPasswordHandler(req: Request, res: Response) {
+  const body = forgotSchema.safeParse(req.body);
+  if (!body.success) return res.status(400).json({ ok: false, error: "Enter a valid email address" });
+  try {
+    forgotPassword(body.data.email, localeFromHeader(req.headers["accept-language"]));
+    res.json({ ok: true });
+  } catch (e) {
+    sendError(res, e);
+  }
+}
+
+export async function resetPasswordHandler(req: Request, res: Response) {
+  const body = resetSchema.safeParse(req.body);
+  if (!body.success) {
+    return res.status(400).json({ ok: false, error: body.error.issues[0]?.message ?? "Check the details", errors: body.error.flatten() });
+  }
+  try {
+    await resetPassword(body.data.email, body.data.code, body.data.password);
+    res.json({ ok: true });
+  } catch (e) {
+    sendError(res, e);
   }
 }
 

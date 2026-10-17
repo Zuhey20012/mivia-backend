@@ -1,19 +1,21 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../cart.dart';
 import '../checkout.dart';
 import '../config/theme.dart';
 import '../core/api_client.dart';
+import '../core/blocked_users.dart';
 import '../core/delivery_location.dart';
 import '../core/sign_in.dart';
 import '../core/store_hours.dart';
 import '../core/strings.dart';
 import '../widgets/product_tile.dart';
 import '../widgets/skeleton.dart';
+import '../widgets/ugc_actions.dart';
 import 'drops_feed.dart';
+import '../core/haptics.dart';
+import '../widgets/app_image.dart';
 
 /// A store: delivery time and fee to your address, who the seller is, their drops, what
 /// verified customers say, and everything they sell.
@@ -53,7 +55,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
       ));
       return;
     }
-    HapticFeedback.lightImpact();
+    Haptics.light();
     final next = _store['followedByMe'] != true;
     setState(() => _followBusy = true);
     final api = ApiClient(auth);
@@ -160,7 +162,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                     title: Text(_store['name'] ?? '',
                         style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, shadows: [Shadow(blurRadius: 8, color: Colors.black54)])),
                     background: _store['bannerUrl'] != null
-                        ? CachedNetworkImage(imageUrl: _store['bannerUrl'], fit: BoxFit.cover)
+                        ? AppImage(_store['bannerUrl'])
                         : Container(
                             color: AppTheme.isDarkMode(context) ? const Color(0xFF3A2F42) : AppTheme.primary,
                             child: Center(child: Icon(Icons.storefront_outlined, size: 72, color: Colors.white.withValues(alpha: 0.25))),
@@ -359,7 +361,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
       );
 
   void _traderInfo() {
-    HapticFeedback.selectionClick();
+    Haptics.selection();
     final isPrivate = _store['sellerType'] == 'PRIVATE';
     showModalBottomSheet(
       context: context,
@@ -408,7 +410,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                 final poster = d['media']?['poster'];
                 return GestureDetector(
                   onTap: () {
-                    HapticFeedback.selectionClick();
+                    Haptics.selection();
                     Navigator.push(context, MaterialPageRoute(
                       builder: (_) => DropsFeedScreen(storeId: _id, storeName: _store['name'], startDropId: asInt(d['id'])),
                     ));
@@ -421,7 +423,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                         fit: StackFit.expand,
                         children: [
                           Container(color: Colors.black12),
-                          if (poster != null) CachedNetworkImage(imageUrl: poster, fit: BoxFit.cover),
+                          if (poster != null) AppImage(poster),
                           if (d['kind'] == 'VIDEO') const Center(child: Icon(Icons.play_arrow_rounded, color: Colors.white, size: 36)),
                           Positioned(
                             left: 6,
@@ -443,8 +445,58 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
         ],
       );
 
-  Widget _reviewsBlock() {
+  Future<void> _reportReview(Map<String, dynamic> r) async {
+    final reason = await pickReportReason(context, title: tr(context, 'Report this review', 'Ilmoita arviosta'));
+    if (reason == null || !mounted) return;
+    final res = await ApiClient(Provider.of<AuthService>(context, listen: false)).post('/reviews/${r['id']}/report', {'reason': reason});
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(res.ok
+          ? tr(context, 'Thanks — we will review it.', 'Kiitos — tarkistamme sen.')
+          : res.status == 404
+              ? tr(context, 'Reporting reviews is not available yet.', 'Arvioista ilmoittaminen ei ole vielä käytössä.')
+              : res.errorText(context)!),
+    ));
+  }
+
+  Widget _reviewActions(Map<String, dynamic> r, Widget child) {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final authorId = authorIdOf(r);
+    // Only on servers that send the author's public id (they also take reports and blocks)
+    if (!auth.isAuthenticated || authorId == null || authorId == auth.currentUser?.id || r['id'] == null) return child;
+    final canBlock = BlockedUsers.instance.available;
+    void act(String? v) {
+      if (v == 'report') _reportReview(r);
+      if (v == 'block') confirmAndBlock(context, userId: authorId, name: '${r['author'] ?? ''}');
+    }
+    return GestureDetector(
+      onLongPress: () async => act(await showUgcActions(context, canReport: true, canBlock: canBlock)),
+      child: Stack(
+        children: [
+          child,
+          Positioned(
+            top: 0,
+            right: 0,
+            child: PopupMenuButton<String>(
+              tooltip: tr(context, 'More', 'Lisää'),
+              icon: Icon(Icons.more_vert_rounded, size: 20, color: AppTheme.secondaryText(context)),
+              onSelected: act,
+              itemBuilder: (_) => [
+                PopupMenuItem(value: 'report', child: Text(tr(context, 'Report', 'Ilmoita'))),
+                if (canBlock) PopupMenuItem(value: 'block', child: Text(tr(context, 'Block user', 'Estä käyttäjä'))),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _reviewsBlock() => ListenableBuilder(listenable: BlockedUsers.instance, builder: (context, _) => _reviewsList());
+
+  Widget _reviewsList() {
     final muted = AppTheme.secondaryText(context);
+    final shown = _reviews.where((r) => !BlockedUsers.instance.isBlocked(authorIdOf(r))).take(3);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
       child: Column(
@@ -459,10 +511,11 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
           Text(tr(context, 'Only customers whose order was delivered can review.', 'Vain asiakkaat, joiden tilaus on toimitettu, voivat arvioida.'),
               style: TextStyle(fontSize: 12, color: muted)),
           const SizedBox(height: 10),
-          for (final r in _reviews.take(3))
-            Container(
+          for (final r in shown)
+            _reviewActions(r, Container(
+              width: double.infinity,
               margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(14),
+              padding: const EdgeInsets.fromLTRB(14, 14, 40, 14),
               decoration: BoxDecoration(color: AppTheme.cardBackground(context), borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.cardBorder(context))),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -478,7 +531,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                     Padding(padding: const EdgeInsets.only(top: 6), child: Text(r['comment'], style: const TextStyle(height: 1.4))),
                 ],
               ),
-            ),
+            )),
         ],
       ),
     );
@@ -489,7 +542,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
           if (cart.items.isEmpty) return const SizedBox.shrink();
           return GestureDetector(
             onTap: () {
-              HapticFeedback.mediumImpact();
+              Haptics.selection();
               Navigator.push(context, MaterialPageRoute(builder: (_) => const CheckoutPage()));
             },
             child: Container(
