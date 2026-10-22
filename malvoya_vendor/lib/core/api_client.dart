@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:package_info_plus/package_info_plus.dart';
 import '../auth_service.dart';
 import '../config/constants.dart';
 import '../locale_provider.dart';
@@ -13,9 +14,19 @@ class ApiResult {
   final Map<String, dynamic> data;
   final String? error;
 
-  const ApiResult(this.status, this.data, this.error);
+  /// Something worth telling the user besides the result itself, e.g. "Seller Terms accepted" when the
+  /// call was retried after the agreement sheet (see `core/agreements.dart`).
+  final String? notice;
+
+  const ApiResult(this.status, this.data, this.error, {this.notice});
 
   bool get ok => error == null && status >= 200 && status < 300;
+
+  /// 428 AGREEMENT_REQUIRED (API 2.11): the store must accept the version in force of its Seller Terms
+  /// before accepting orders or publishing products.
+  bool get agreementRequired => status == 428 && data['code'] == 'AGREEMENT_REQUIRED';
+
+  ApiResult withNotice(String? notice) => ApiResult(status, data, error, notice: notice);
 
   /// The error to show the user, in the app's language; never null.
   String get errorMessage => error ?? trApp('Something went wrong. Please try again.', 'Jokin meni vikaan. Yritä uudelleen.');
@@ -29,11 +40,23 @@ class ApiClient {
 
   static const _timeout = Duration(seconds: 15);
 
+  /// "1.7.0+9": recorded by the server with every agreement acceptance (X-App-Version).
+  static String? appVersion;
+
+  /// Reads the app's version once at start-up; requests made before it is known simply go without it.
+  static Future<void> loadAppVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      appVersion = info.buildNumber.isEmpty ? info.version : '${info.version}+${info.buildNumber}';
+    } catch (_) {}
+  }
+
   /// Headers for every request to the Malvoya API. `Accept-Language` lets the server answer, and
   /// send push notifications and emails, in the app's language.
   static Map<String, String> get baseHeaders => {
         'Content-Type': 'application/json',
         'Accept-Language': LocaleProvider.currentCode,
+        if (appVersion != null) 'X-App-Version': appVersion!,
       };
 
   Future<ApiResult> get(String path, {Map<String, String>? query}) => _send('GET', path, query: query);

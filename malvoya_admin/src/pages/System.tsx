@@ -11,6 +11,11 @@ type Status = {
   readyForOrders: boolean;
   blockers: string[];
   attention: string[];
+  // Onboarding finished (everything but approval), oldest first (2.11)
+  readyForApproval?: {
+    stores: { id: number; name: string; readyForApprovalAt: string }[];
+    couriers: { id: number; name: string; readyForApprovalAt: string }[];
+  };
   integrations: Record<string, Integration>;
   marketplace: Record<string, number>;
   ordersInFlight: { waitingForStore: number; waitingForCourier: number; waitingForPickup?: number; scheduledUpcoming?: number; deliveryProblems?: number };
@@ -128,6 +133,21 @@ export default function System() {
             <div className="apple-card">
               <p className="font-semibold mb-2">Needs your attention</p>
               <ul className="space-y-1 text-sm list-disc pl-6">{status.attention.map(a => <li key={a}>{a}</li>)}</ul>
+            </div>
+          )}
+
+          {status.readyForApproval && (status.readyForApproval.stores.length > 0 || status.readyForApproval.couriers.length > 0) && (
+            <div className="apple-card">
+              <p className="font-semibold mb-2">Ready for approval</p>
+              <p className="text-xs text-gray-500 mb-2">Every onboarding step except your approval is done. The business check only helps; you decide.</p>
+              <ul className="space-y-1 text-sm list-disc pl-6">
+                {status.readyForApproval.stores.map(s => (
+                  <li key={`s${s.id}`}>Store <a className="text-blue-600" href="#/approvals">{s.name}</a> (#{s.id}) since {new Date(s.readyForApprovalAt).toLocaleString('fi-FI')}</li>
+                ))}
+                {status.readyForApproval.couriers.map(c => (
+                  <li key={`c${c.id}`}>Courier <a className="text-blue-600" href="#/couriers">{c.name}</a> (#{c.id}) since {new Date(c.readyForApprovalAt).toLocaleString('fi-FI')}</li>
+                ))}
+              </ul>
             </div>
           )}
 

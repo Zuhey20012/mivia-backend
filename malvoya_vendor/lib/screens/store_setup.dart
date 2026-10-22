@@ -17,7 +17,9 @@ import 'store_location_picker.dart';
 /// Create the store, or edit it later. Who the seller is (business or private person) is shown
 /// to shoppers, as EU marketplace law requires, and is checked during review.
 class StoreSetupScreen extends StatefulWidget {
-  const StoreSetupScreen({super.key});
+  /// Opened from the business check ("Edit" / "Check your Y-tunnus"): puts the cursor in the Y-tunnus field.
+  final bool focusBusinessId;
+  const StoreSetupScreen({super.key, this.focusBusinessId = false});
 
   @override
   State<StoreSetupScreen> createState() => _StoreSetupScreenState();
@@ -30,6 +32,7 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
   final _address = TextEditingController();
   final _phone = TextEditingController();
   final _businessId = TextEditingController();
+  final _businessIdFocus = FocusNode();
 
   Map<String, dynamic>? _existing;
   String _category = 'APPAREL';
@@ -71,6 +74,7 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
     for (final c in [_name, _description, _address, _phone, _businessId]) {
       c.dispose();
     }
+    _businessIdFocus.dispose();
     super.dispose();
   }
 
@@ -95,6 +99,28 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
       _logoUrl = s['logoUrl'];
       _bannerUrl = s['bannerUrl'];
     });
+    if (widget.focusBusinessId && res.ok && _sellerType == 'BUSINESS' && !_verified) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _businessIdFocus.requestFocus();
+        final ctx = _businessIdFocus.context;
+        if (ctx != null) Scrollable.ensureVisible(ctx, alignment: 0.3, duration: const Duration(milliseconds: 250));
+      });
+    }
+  }
+
+  /// Y-tunnus check digit (weights 7 9 10 5 8 4 2, mod 11), the same rule as the server's.
+  static bool _validYTunnus(String v) {
+    final m = RegExp(r'^(\d{7})-(\d)$').firstMatch(v);
+    if (m == null) return false;
+    const weights = [7, 9, 10, 5, 8, 4, 2];
+    var sum = 0;
+    for (var i = 0; i < 7; i++) {
+      sum += int.parse(m.group(1)![i]) * weights[i];
+    }
+    final rem = sum % 11;
+    if (rem == 1) return false;
+    return int.parse(m.group(2)!) == (rem == 0 ? 0 : 11 - rem);
   }
 
   /// The map step: the owner puts the pin on the shop (couriers navigate to it).
@@ -251,9 +277,16 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                   if (_sellerType == 'BUSINESS')
                     TextFormField(
                       controller: _businessId,
+                      focusNode: _businessIdFocus,
+                      onChanged: (_) => setState(() {}),
                       enabled: !_verified,
-                      decoration: InputDecoration(labelText: 'Y-tunnus', hintText: '1234567-8'),
-                      validator: (v) => RegExp(r'^\d{7}-\d$').hasMatch((v ?? '').trim()) ? null : tr(context, 'Format 1234567-8', 'Muoto 1234567-8'),
+                      decoration: InputDecoration(labelText: 'Y-tunnus', hintText: '1234567-8', helperText: _businessCheckNote(), helperMaxLines: 3),
+                      validator: (v) {
+                        final value = (v ?? '').trim();
+                        if (!RegExp(r'^\d{7}-\d$').hasMatch(value)) return tr(context, 'Format 1234567-8', 'Muoto 1234567-8');
+                        if (!_validYTunnus(value)) return tr(context, 'This Y-tunnus is not valid: check the last digit', 'Y-tunnus ei kelpaa: tarkista viimeinen numero');
+                        return null;
+                      },
                     ),
                   const SizedBox(height: 20),
                   TextFormField(
@@ -308,6 +341,22 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
               ),
             ),
     );
+  }
+
+  /// What the automatic lookup in the Finnish Trade Register found for the saved Y-tunnus (API 2.11).
+  String? _businessCheckNote() {
+    final check = _existing?['businessCheck'];
+    if (check is! Map || _businessId.text.trim() != '${check['businessId'] ?? ''}') return null;
+    final name = '${check['registeredName'] ?? ''}'.trim();
+    return switch (check['verificationStatus']) {
+      'matched' => tr(context, 'Verified in the Finnish Trade Register', 'Tarkistettu kaupparekisteristä'),
+      'name_mismatch' => name.isEmpty
+          ? tr(context, 'Registered under another name. The Malvoya team will check it.', 'Rekisteröity toisella nimellä. Malvoyan tiimi tarkistaa asian.')
+          : tr(context, 'Registered as “$name”. The Malvoya team will check it.', 'Rekisteröity nimellä ”$name”. Malvoyan tiimi tarkistaa asian.'),
+      'not_found' => tr(context, 'Not found in the Finnish Trade Register. Check the number.', 'Ei löytynyt kaupparekisteristä. Tarkista numero.'),
+      'inactive' => tr(context, 'The register shows this company as no longer active.', 'Rekisterin mukaan yritys ei ole enää toiminnassa.'),
+      _ => tr(context, 'Checked automatically in the Finnish Trade Register after saving.', 'Tarkistetaan tallennuksen jälkeen automaattisesti kaupparekisteristä.'),
+    };
   }
 
   /// The pin on a small map, or a call to set it.

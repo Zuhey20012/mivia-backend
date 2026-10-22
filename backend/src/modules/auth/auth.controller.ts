@@ -7,6 +7,7 @@ import { sendOtp, verifyOtp } from "./otp.service";
 import { AuthRequest } from "../../middleware/auth";
 import { localeFromHeader } from "../../lib/i18n";
 import { forgotPassword, resetPassword, forgotSchema, resetSchema } from "./passwordReset";
+import { acceptContext } from "../legal/agreements";
 
 /** AuthErrors carry a safe message + status; anything else is logged and hidden. */
 function sendError(res: Response, e: unknown, fallbackStatus = 500) {
@@ -19,7 +20,7 @@ export async function register(req: Request, res: Response) {
   const result = registerSchema.safeParse(req.body);
   if (!result.success) return res.status(400).json({ ok: false, error: result.error.issues[0]?.message, errors: result.error.flatten() });
   try {
-    const data = await authService.registerUser(result.data);
+    const data = await authService.registerUser(result.data, acceptContext(req));
     res.status(201).json({ ok: true, ...data });
   } catch (e) {
     sendError(res, e);

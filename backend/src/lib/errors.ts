@@ -1,5 +1,7 @@
 import { Response } from "express";
 import pino from "pino";
+import { reportError } from "./sentry";
+import { currentRequestId } from "./requestContext";
 
 const logger = pino({ name: "api" });
 
@@ -13,10 +15,12 @@ export class ApiError extends Error {
 export function sendError(res: Response, e: any) {
   if (typeof e?.status === "number" && e.status < 500) return res.status(e.status).json({ ok: false, error: e.message });
   if (typeof e?.type === "string" && e.type.startsWith("Stripe")) {
-    logger.error({ err: e?.message, code: e?.code }, "Stripe error");
+    logger.error({ reqId: currentRequestId(), err: e?.message, code: e?.code }, "Stripe error");
+    reportError(e, { tags: { area: "stripe" } });
     return res.status(502).json({ ok: false, error: "The payment provider did not respond. Please try again." });
   }
-  logger.error({ err: e?.message, stack: e?.stack }, "Unhandled error");
+  logger.error({ reqId: currentRequestId(), err: e?.message, stack: e?.stack }, "Unhandled error");
+  if (e?.status !== 503) reportError(e);
   return res.status(e?.status === 503 ? 503 : 500).json({ ok: false, error: e?.status === 503 ? e.message : "Something went wrong" });
 }
 

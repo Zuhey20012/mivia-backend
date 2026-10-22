@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
+import '../core/agreements.dart';
 import '../core/api_client.dart';
 import '../core/haptics.dart';
 import '../core/images.dart';
@@ -394,7 +395,14 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
           .toList(),
       if (_editing) 'isAvailable': _available,
     };
-    final res = _editing ? await _api.patch('/products/${widget.product!['id']}', body) : await _api.post('/products', body);
+    final api = _api;
+    // A visible product needs the Seller Terms in force: on 428 the agreement sheet opens and the save is
+    // sent again once they are accepted (the 428 comes before anything is saved)
+    final res = await withAgreement(
+      context,
+      api,
+      () => _editing ? api.patch('/products/${widget.product!['id']}', body) : api.post('/products', body),
+    );
     if (!mounted) return;
     if (res.ok) {
       // Videos picked while creating the product are attached once it exists

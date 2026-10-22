@@ -95,6 +95,16 @@ class ServerMessages {
     'Give an email address we can reply to': 'Anna sähköpostiosoite, johon voimme vastata.',
     'You have sent several requests already. We will reply to them by email.':
         'Olet lähettänyt jo useita viestejä. Vastaamme niihin sähköpostilla.',
+    // Agreements and onboarding (API 2.11)
+    'That is not the current or the announced version of this document. Reload and try again.':
+        'Tämä ei ole asiakirjan voimassa oleva tai ilmoitettu versio. Lataa näkymä uudelleen ja yritä uudelleen.',
+    'This document is not one your account accepts': 'Tätä asiakirjaa ei hyväksytä tällä tilillä.',
+    'doc and version are required': 'Asiakirja ja versio puuttuvat. Yritä uudelleen.',
+    'Agreement copy not found': 'Sopimuksen kopiota ei löytynyt.',
+    'Enter a phone number': 'Anna puhelinnumero.',
+    'Enter a name between 1 and 80 characters': 'Anna nimi, jossa on 1–80 merkkiä.',
+    'Nothing to change': 'Ei muutettavaa.',
+    'locationDisclosure: true is required': 'Sijaintitiedotteen hyväksyntä puuttuu.',
     // General
     'Too many requests, please try again later.': 'Liian monta pyyntöä. Yritä hetken päästä uudelleen.',
     'Too many attempts, please try again later.': 'Liian monta yritystä. Yritä hetken päästä uudelleen.',

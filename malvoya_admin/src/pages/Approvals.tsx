@@ -2,12 +2,17 @@ import { useEffect, useState } from 'react';
 import { CheckCircle, XCircle, Store, RefreshCw } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../utils/api';
+import { BusinessCheckDetails, type BusinessCheck } from '../components/BusinessCheckBadge';
 
 interface Vendor {
   id: number; name: string; email: string | null;
   category: string; isVerified: boolean;
   owner: { name: string; email: string };
   createdAt: string;
+  sellerType?: 'BUSINESS' | 'PRIVATE';
+  businessCheck?: BusinessCheck; // PRH/YTJ lookup (2.11): pre-fills the decision, never approves
+  readyForApprovalAt?: string | null;
+  taxInfoComplete?: boolean;
 }
 
 export default function Approvals() {
@@ -83,7 +88,15 @@ export default function Approvals() {
                   </p>
                   <p style={{ color:'#8E8E93',fontSize:'0.75rem',marginTop:'0.25rem' }}>
                     Category: {v.category.replace('_',' ')} · Applied {new Date(v.createdAt).toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'})}
+                    {v.sellerType === 'PRIVATE' ? ' · Private seller' : ''}
+                    {v.taxInfoComplete === false ? ' · Tax data missing' : ''}
                   </p>
+                  {v.readyForApprovalAt && (
+                    <p style={{ fontSize:'0.75rem',marginTop:'0.25rem' }}>
+                      <span className="badge-blue">Onboarding complete {new Date(v.readyForApprovalAt).toLocaleDateString('fi-FI')}</span>
+                    </p>
+                  )}
+                  <BusinessCheckDetails check={v.businessCheck} />
                 </div>
               </div>
               <div style={{ display:'flex',gap:'0.75rem',flexShrink:0 }}>

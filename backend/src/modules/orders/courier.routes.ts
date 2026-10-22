@@ -7,6 +7,8 @@ import { getIo } from "../../lib/socket";
 import { translateChatMessage } from "../../services/translationService";
 import * as ordersService from "./orders.service";
 import { sendOrderError } from "./orders.controller";
+import { requireAgreement } from "../legal/agreements";
+import { courierOnboarding, checkReadyForApproval } from "../onboarding/onboarding";
 
 const router = Router();
 const courierOnly = [auth, requireRole("COURIER")];
@@ -22,8 +24,62 @@ router.get("/courier/me", ...courierOnly, async (req: AuthRequest, res: Response
     }
     res.json({
       ok: true,
-      courier: { id: courier.id, name: courier.name, isApproved: courier.isApproved, isOnline: courier.isActive, currentOrderId: courier.currentOrderId },
+      courier: {
+        id: courier.id, name: courier.name, isApproved: courier.isApproved, isOnline: courier.isActive, currentOrderId: courier.currentOrderId,
+        phone: courier.phone, vehicleType: courier.vehicleType, locationDisclosureAt: courier.locationDisclosureAt,
+      },
     });
+  } catch (e) { sendOrderError(res, e); }
+});
+
+// ─── Onboarding (2.11) ───────────────────────────────────────────────────────
+// { steps:[{key, done, title:{en,fi}, action}], percent, approved, readyForApproval }
+router.get("/courier/me/onboarding", ...courierOnly, async (req: AuthRequest, res: Response) => {
+  try {
+    if (!(await getCourierForUser(req.user!.id))) {
+      const user = await prisma.user.findUniqueOrThrow({ where: { id: req.user!.id } });
+      await prisma.courier.create({ data: { userId: user.id, name: user.name, phone: user.phone, isActive: false } });
+    }
+    const o = await courierOnboarding(req.user!.id);
+    if (o.readyForApproval) await checkReadyForApproval(req.user!.id, "COURIER");
+    res.json({ ok: true, ...o });
+  } catch (e) { sendOrderError(res, e); }
+});
+
+export const VEHICLE_TYPES = ["bicycle", "ebike", "moped", "scooter", "car", "on_foot"] as const;
+const courierProfileSchema = z.object({
+  vehicleType: z.enum(VEHICLE_TYPES).optional(),
+  phone: z.string().trim().regex(/^\+?[0-9 ()-]{5,20}$/, "Enter a phone number").optional(),
+}).strict().refine((d) => d.vehicleType !== undefined || d.phone !== undefined, { message: "Nothing to change" });
+
+/** Vehicle type and contact phone for the courier profile. */
+router.patch("/courier/me", ...courierOnly, async (req: AuthRequest, res: Response) => {
+  const body = courierProfileSchema.safeParse(req.body);
+  if (!body.success) return res.status(400).json({ ok: false, error: body.error.issues[0]?.message ?? "Invalid request", vehicleTypes: VEHICLE_TYPES });
+  try {
+    const courier = await getCourierForUser(req.user!.id);
+    if (!courier) return res.status(404).json({ ok: false, error: "Courier profile not found" });
+    const updated = await prisma.courier.update({
+      where: { id: courier.id },
+      data: body.data,
+      select: { id: true, name: true, phone: true, vehicleType: true, isApproved: true, locationDisclosureAt: true },
+    });
+    checkReadyForApproval(req.user!.id, "COURIER").catch(() => {});
+    res.json({ ok: true, courier: updated });
+  } catch (e) { sendOrderError(res, e); }
+});
+
+/** The courier read how location is used while online (the in-app disclosure). Recorded once; repeating is harmless. */
+router.post("/courier/me/disclosures", ...courierOnly, async (req: AuthRequest, res: Response) => {
+  const body = z.object({ locationDisclosure: z.literal(true) }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ ok: false, error: "locationDisclosure: true is required" });
+  try {
+    const courier = await getCourierForUser(req.user!.id);
+    if (!courier) return res.status(404).json({ ok: false, error: "Courier profile not found" });
+    await prisma.courier.updateMany({ where: { id: courier.id, locationDisclosureAt: null }, data: { locationDisclosureAt: new Date() } });
+    const after = await prisma.courier.findUniqueOrThrow({ where: { id: courier.id }, select: { locationDisclosureAt: true } });
+    checkReadyForApproval(req.user!.id, "COURIER").catch(() => {});
+    res.json({ ok: true, locationDisclosureAt: after.locationDisclosureAt });
   } catch (e) { sendOrderError(res, e); }
 });
 
@@ -42,11 +98,16 @@ router.get("/orders/unassigned", ...courierOnly, async (req: AuthRequest, res: R
 
 router.get("/orders/courier/mine", ...courierOnly, async (req: AuthRequest, res: Response) => {
   try {
-    res.json({ ok: true, orders: await ordersService.listCourierOrders(req.user!.id) });
+    // Optional ?limit= (≤ 100) and ?before=<id>
+    const limit = Number(req.query.limit), before = Number(req.query.before);
+    res.json({ ok: true, orders: await ordersService.listCourierOrders(req.user!.id, {
+      ...(Number.isInteger(limit) && limit > 0 ? { limit } : {}), ...(Number.isInteger(before) && before > 0 ? { before } : {}),
+    }) });
   } catch (e) { sendOrderError(res, e); }
 });
 
-router.patch("/orders/:id(\\d+)/assign-courier", ...courierOnly, async (req: AuthRequest, res: Response) => {
+// Taking a job needs the Courier Agreement in force to be accepted (428 AGREEMENT_REQUIRED)
+router.patch("/orders/:id(\\d+)/assign-courier", ...courierOnly, requireAgreement(), async (req: AuthRequest, res: Response) => {
   try {
     const order = await ordersService.acceptOrder(Number(req.params.id), req.user!.id);
     res.json({ ok: true, order, message: "Delivery accepted" });
@@ -69,7 +130,8 @@ const statusSchema = z.object({
   longitude: z.number().min(-180).max(180).nullish(),
 });
 
-router.post("/courier/status", ...courierOnly, async (req: AuthRequest, res: Response) => {
+// Going online needs the Courier Agreement in force to be accepted; going offline never does
+router.post("/courier/status", ...courierOnly, requireAgreement((req) => req.body?.isOnline === true), async (req: AuthRequest, res: Response) => {
   const parsed = statusSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ ok: false, errors: parsed.error.flatten() });
   try {

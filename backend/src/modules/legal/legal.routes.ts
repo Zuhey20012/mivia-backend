@@ -1,50 +1,31 @@
 import { Router, Request, Response } from "express";
-import fs from "fs";
-import path from "path";
-import crypto from "crypto";
 import { escapeHtml } from "../../services/notificationDeliveryService";
+import { sendError } from "../../lib/errors";
+import {
+  LEGAL_DOCS, LegalDoc, docFromParam, docUrl, formatHelsinki, legalState, readLegalFile, statusOf, versionText,
+} from "./legalDocs";
 
 /**
- * Public legal pages (privacy policy, terms). The Markdown files in /legal are the single source
- * of truth: the apps and the Google Play listing link here.
+ * Public legal pages (privacy policy, terms). The apps and the Google Play listing link here. Since 2.11.0 the four
+ * agreements show the version in force (LegalVersion), with every version listed at /legal/:doc/versions and each one
+ * readable at /legal/:doc/v/:version; the Markdown files in /legal are where new versions are written.
  */
 const router = Router();
 
-const DOCS: Record<string, { file: string; title: string }> = {
-  privacy: { file: "privacy_policy.md", title: "Privacy Policy" },
-  terms: { file: "terms_of_service.md", title: "Terms of Service" },
-  sellers: { file: "vendor_terms.md", title: "Seller Terms" },
-  couriers: { file: "courier_agreement.md", title: "Courier Agreement" },
-  "delete-account": { file: "account_deletion.md", title: "Delete your account" },
+// Pages: the four versioned documents (what is in force comes from LegalVersion) and the account-deletion help page
+const PAGES: Record<string, { title: string; doc?: LegalDoc; file?: string }> = {
+  privacy: { title: "Privacy Policy", doc: "privacy" },
+  terms: { title: "Terms of Service", doc: "terms" },
+  sellers: { title: "Seller Terms", doc: "seller-terms" },
+  couriers: { title: "Courier Agreement", doc: "courier-agreement" },
+  "delete-account": { title: "Delete your account", file: "account_deletion.md" },
 };
 // Other names the apps use for the same pages
-const ALIASES: Record<string, string> = { "vendor-terms": "sellers", "courier-agreement": "couriers", "account-deletion": "delete-account" };
+const ALIASES: Record<string, string> = {
+  "vendor-terms": "sellers", "seller-terms": "sellers", "courier-agreement": "couriers", "account-deletion": "delete-account",
+};
 
-function readDoc(file: string) {
-  for (const dir of LEGAL_DIRS) {
-    const p = path.join(dir, file);
-    if (fs.existsSync(p)) return fs.readFileSync(p, "utf8");
-  }
-  return null;
-}
-
-/**
- * The version of the agreement a new account accepts: the document's name plus the first 12 hex characters of
- * the SHA-256 of its text, so every change to the text is a new version without anyone having to remember it.
- */
-const versions = new Map<string, string>();
-export function termsVersionFor(role: string) {
-  const doc = role === "VENDOR" ? "sellers" : role === "COURIER" ? "couriers" : "terms";
-  if (!versions.has(doc)) {
-    const text = readDoc(DOCS[doc].file);
-    versions.set(doc, `${DOCS[doc].file.replace(/\.md$/, "")}@${text ? crypto.createHash("sha256").update(text.replace(/\r/g, "")).digest("hex").slice(0, 12) : "unknown"}`);
-  }
-  return versions.get(doc)!;
-}
-
-// The repository is deployed whole; the API runs from /backend
-const LEGAL_DIRS = [path.resolve(process.cwd(), "..", "legal"), path.resolve(__dirname, "..", "..", "..", "..", "legal")];
-const cache = new Map<string, string>();
+const fileCache = new Map<string, string>();
 
 function inline(text: string) {
   return escapeHtml(text)
@@ -113,24 +94,12 @@ export function renderMarkdown(md: string) {
   return out.join("\n");
 }
 
-function load(doc: string) {
-  if (cache.has(doc)) return cache.get(doc)!;
-  const text = readDoc(DOCS[doc].file);
-  if (text === null) return null;
-  const html = renderMarkdown(text);
-  cache.set(doc, html);
-  return html;
-}
+export const PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
-router.get("/legal/:doc", (req: Request, res: Response) => {
-  const doc = ALIASES[req.params.doc] ?? req.params.doc;
-  const meta = Object.prototype.hasOwnProperty.call(DOCS, doc) ? DOCS[doc] : undefined;
-  const body = meta ? load(doc) : null;
-  if (!meta || !body) return res.status(404).type("text").send("Not found");
-  res.set("Cache-Control", "public, max-age=600");
-  res.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
-  res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Malvoya – ${meta.title}</title>
+/** The shared page shell (Birch background, the legal pages listed at the top). `body` and `banner` are already escaped. */
+export function legalPageHtml(title: string, body: string, banner = "") {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Malvoya – ${escapeHtml(title)}</title>
 <style>
 body{margin:0;background:#F6F3EE;color:#17131C;font:16px/1.6 -apple-system,system-ui,"Segoe UI",sans-serif}
 main{max-width:760px;margin:0 auto;padding:28px 20px 64px}
@@ -138,11 +107,115 @@ h1{font-size:26px;line-height:1.25;margin:0 0 8px}h2{font-size:19px;margin:32px 
 table{border-collapse:collapse;width:100%;font-size:14px;margin:12px 0;display:block;overflow-x:auto}
 th,td{border:1px solid #E6E1EA;padding:8px;text-align:left;vertical-align:top}th{background:#EFE8F3}
 blockquote{margin:12px 0;padding:10px 14px;background:#FFF7E6;border-left:4px solid #E08A00}
+.version{font-size:14px;color:#5b5363;margin:0 0 18px;padding:10px 14px;background:#fff;border:1px solid #E6E1EA;border-radius:12px}
+code{word-break:break-all}
 a{color:#6D2E8C}nav{font-size:14px;margin-bottom:20px}nav a{margin-right:14px}
 </style></head><body><main>
-<nav>${Object.entries(DOCS).map(([k, d]) => `<a href="/legal/${k}">${d.title}</a>`).join("")}</nav>
+<nav>${Object.entries(PAGES).map(([k, d]) => `<a href="/legal/${k}">${d.title}</a>`).join("")}</nav>
+${banner}
 ${body}
-</main></body></html>`);
+</main></body></html>`;
+}
+
+function sendPage(res: Response, title: string, body: string, banner = "", maxAge = 300) {
+  res.set("Cache-Control", `public, max-age=${maxAge}`);
+  res.set("Content-Security-Policy", PAGE_CSP);
+  res.type("html").send(legalPageHtml(title, body, banner));
+}
+
+const day = (d: Date) => formatHelsinki(d, "en");
+
+/** "Version …, in force from …" and, while a change is announced, when the new version takes effect. */
+function versionBanner(
+  doc: LegalDoc,
+  row: { version: string; effectiveAt: Date },
+  pending: { version: string; effectiveAt: Date; summaryEn: string } | null,
+  superseded = false,
+) {
+  const page = LEGAL_DOCS[doc].page;
+  const lines = [
+    `Version <code>${escapeHtml(row.version)}</code>${superseded ? " (no longer in force)" : ""} · in force from ${escapeHtml(day(row.effectiveAt))} · <a href="/legal/${page}/versions">all versions</a>`,
+  ];
+  if (pending) {
+    lines.push(`<strong>Change announced:</strong> a new version takes effect on ${escapeHtml(day(pending.effectiveAt))}: ${escapeHtml(pending.summaryEn)} <a href="/legal/${page}/v/${encodeURIComponent(pending.version)}">Read the new version</a>`);
+  }
+  return `<p class="version">${lines.join("<br>")}</p>`;
+}
+
+function pageKey(param: string) {
+  const key = ALIASES[param] ?? param;
+  return Object.prototype.hasOwnProperty.call(PAGES, key) ? key : null;
+}
+
+router.get("/legal/:doc", async (req: Request, res: Response) => {
+  const key = pageKey(req.params.doc);
+  if (!key) return res.status(404).type("text").send("Not found");
+  const page = PAGES[key];
+  try {
+    if (page.file) {
+      if (!fileCache.has(page.file)) {
+        const text = readLegalFile(page.file);
+        if (text === null) return res.status(404).type("text").send("Not found");
+        fileCache.set(page.file, renderMarkdown(text));
+      }
+      return sendPage(res, page.title, fileCache.get(page.file)!, "", 600);
+    }
+    // What is in force: the current version's stored text (never the repository file directly)
+    const state = await legalState(page.doc!);
+    if (!state.current) return res.status(404).type("text").send("Not found");
+    const row = await versionText(page.doc!, state.current.version);
+    if (!row) return res.status(404).type("text").send("Not found");
+    sendPage(res, page.title, renderMarkdown(row.textSnapshot), versionBanner(page.doc!, row, state.pending));
+  } catch (e) { sendError(res, e); }
+});
+
+/** Every version of a document (public): when it was published and took effect, and what changed. */
+async function listVersions(req: Request, res: Response) {
+  const doc = docFromParam(req.params.doc);
+  if (!doc) return res.status(404).json({ ok: false, error: "Unknown document" });
+  try {
+    const now = new Date();
+    const state = await legalState(doc, now);
+    res.set("Cache-Control", "public, max-age=60");
+    res.json({
+      ok: true,
+      doc,
+      title: LEGAL_DOCS[doc].title,
+      url: docUrl(doc),
+      currentVersion: state.current?.version ?? null,
+      pendingVersion: state.pending?.version ?? null,
+      versions: state.rows.map((r) => ({
+        version: r.version,
+        status: statusOf(r, state, now),
+        publishedAt: r.publishedAt,
+        effectiveAt: r.effectiveAt,
+        noticeDays: r.noticeDays,
+        legalObligation: r.legalObligation,
+        summary: { en: r.summaryEn, fi: r.summaryFi },
+        url: docUrl(doc, r.version),
+      })),
+    });
+  } catch (e) { sendError(res, e); }
+}
+router.get("/legal/:doc/versions", listVersions);
+router.get("/api/v1/legal/:doc/versions", listVersions);
+
+/** One exact version, as it was published (also announced and superseded ones). */
+router.get("/legal/:doc/v/:version", async (req: Request, res: Response) => {
+  const doc = docFromParam(req.params.doc);
+  if (!doc) return res.status(404).type("text").send("Not found");
+  try {
+    const row = await versionText(doc, String(req.params.version));
+    if (!row) return res.status(404).type("text").send("Not found");
+    const now = new Date();
+    const state = await legalState(doc, now);
+    const status = row.effectiveAt.getTime() > now.getTime() ? "pending" : state.current?.id === row.id ? "current" : "superseded";
+    const banner = status === "pending"
+      ? `<p class="version"><strong>Announced version</strong> <code>${escapeHtml(row.version)}</code>: takes effect on ${escapeHtml(day(row.effectiveAt))}. ${escapeHtml(row.summaryEn)} · <a href="/legal/${LEGAL_DOCS[doc].page}/versions">all versions</a></p>`
+      : versionBanner(doc, row, null, status === "superseded");
+    // A stored version never changes; only an announced one may still become current
+    sendPage(res, LEGAL_DOCS[doc].title.en, renderMarkdown(row.textSnapshot), banner, status === "pending" ? 300 : 3600);
+  } catch (e) { sendError(res, e); }
 });
 
 export default router;

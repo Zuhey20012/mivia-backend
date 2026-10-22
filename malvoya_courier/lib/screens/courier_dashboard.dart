@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
+import '../core/agreements.dart';
 import '../core/api_client.dart';
 import '../core/connectivity.dart';
 import '../core/haptics.dart';
@@ -28,9 +29,12 @@ import '../services/courier_telemetry_service.dart';
 import '../services/socket_service.dart';
 import '../widgets/earnings_chart.dart';
 import '../widgets/job_map.dart';
+import '../widgets/courier_profile_sheets.dart';
 import '../widgets/mini_route.dart';
+import '../widgets/onboarding_checklist.dart';
 import '../widgets/skeletons.dart';
 import '../widgets/swipe_to_confirm.dart';
+import 'agreements_screen.dart';
 import 'go_online_check.dart';
 import 'help_screen.dart';
 import 'offer_screen.dart';
@@ -95,6 +99,14 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
   final Set<String> _openPay = {};
 
   int? _acceptingId;
+  // Jobs closed (taken or cancelled) while this courier was accepting them, with the reason:
+  // after the agreement sheet the retry is skipped and the courier is told at once
+  final Map<int, String?> _closedWhileAccepting = {};
+
+  // Onboarding checklist and announced agreement changes (API 2.11), shown above the tabs
+  final _checklistKey = GlobalKey<OnboardingChecklistState>();
+  final _agreementBannerKey = GlobalKey<AgreementUpdateBannerState>();
+  String? _vehicleType;
   bool _arriving = false;
   bool _pickingUp = false;
   bool _completing = false;
@@ -176,6 +188,8 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     if (foreground && _meLoaded) {
       _loadMine();
       if (_online) _loadJobs();
+      // e.g. back from Stripe's payout pages
+      _checklistKey.currentState?.reload();
     }
   }
 
@@ -213,7 +227,11 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     if (!mounted) return;
     _meLoaded = me.ok;
     final online = me.ok && me.data['courier']?['isOnline'] == true;
-    setState(() => _online = online);
+    setState(() {
+      _online = online;
+      final vehicle = me.data['courier']?['vehicleType'];
+      if (vehicle is String) _vehicleType = vehicle;
+    });
     if (online) {
       // Still online from last time. Sharing restarts by itself only when the courier has accepted
       // the location disclosure and the permission is still there; otherwise they are asked first.
@@ -310,8 +328,22 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     } else {
       CourierTelemetryService().stop();
     }
-    final res = await _api.post('/courier/status', {'isOnline': next, 'latitude': lat, 'longitude': lng});
+    final body = {'isOnline': next, 'latitude': lat, 'longitude': lng};
+    var res = await _api.post('/courier/status', body);
     if (!mounted) return;
+    // Going online needs the Courier Agreement in force (428, API 2.11): show it, then go online by itself
+    final need = next ? AgreementRequired.from(res) : null;
+    if (need != null) {
+      if (await Agreements.resolve(context, _auth, need)) {
+        if (!mounted) return;
+        res = await _api.post('/courier/status', body);
+        _checklistKey.currentState?.reload();
+        _agreementBannerKey.currentState?.reload();
+      }
+      if (!mounted) return;
+    }
+    // Not online after all: location must not stay shared
+    if (next && !res.ok && _active == null) CourierTelemetryService().stop();
     setState(() {
       _switching = false;
       if (res.ok) _online = next;
@@ -390,10 +422,42 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
               },
             ),
             ListTile(
+              leading: const Icon(Icons.badge_outlined),
+              title: Text(tr(context, 'Name and phone', 'Nimi ja puhelin'), style: const TextStyle(fontWeight: FontWeight.w600)),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () async {
+                Navigator.pop(ctx);
+                if (await showCourierProfileSheet(context)) {
+                  _checklistKey.currentState?.reload();
+                  if (mounted) setState(() {});
+                }
+              },
+            ),
+            ListTile(
+              leading: Icon(vehicleIcon(_vehicleType)),
+              title: Text(tr(context, 'Vehicle', 'Kulkuneuvo'), style: const TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: _vehicleType == null ? null : Text(vehicleLabel(context, _vehicleType!)),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final picked = await showVehiclePicker(context, current: _vehicleType);
+                if (picked == null || !mounted) return;
+                setState(() => _vehicleType = picked);
+                _checklistKey.currentState?.reload();
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.gavel_rounded),
-              title: Text(tr(context, 'Courier agreement', 'Lähettisopimus'), style: const TextStyle(fontWeight: FontWeight.w600)),
-              trailing: const Icon(Icons.open_in_new_rounded, size: 20),
-              onTap: () => openLegal('couriers'),
+              title: Text(tr(context, 'Agreements', 'Sopimukset'), style: const TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text(tr(context, 'Courier Agreement, privacy, your copies', 'Lähettisopimus, tietosuoja, kopiosi')),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () async {
+                Navigator.pop(ctx);
+                await Navigator.push(context, MaterialPageRoute(builder: (_) => const AgreementsScreen()));
+                if (!mounted) return;
+                _checklistKey.currentState?.reload();
+                _agreementBannerKey.currentState?.reload();
+              },
             ),
             const Divider(height: 16),
             const DeleteAccountTile(),
@@ -681,7 +745,11 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     if (id == null || !mounted) return;
     PushService.instance.clearOffer(id);
     // This courier's own accept is answered by the accept request itself
-    if (_acceptingId == id || asInt(_active?['id']) == id) return;
+    if (_acceptingId == id) {
+      _closedWhileAccepting[id] = data['reason'] as String?;
+      return;
+    }
+    if (asInt(_active?['id']) == id) return;
     final shown = _jobs.any((j) => asInt(j['id']) == id);
     if (!shown) return;
     final watching = _foreground && _online && _active == null && _tabs.index == 0;
@@ -893,11 +961,48 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     if (id == null || _acceptingId != null) return;
     HapticFeedback.mediumImpact();
     setState(() => _acceptingId = id);
+    _closedWhileAccepting.remove(id);
     // The server checks how far the courier is from the shop, so it needs a fresh position
-    final sent = await CourierTelemetryService().sendNow(post: _postPosition);
+    var sent = await CourierTelemetryService().sendNow(post: _postPosition);
+    final sentAt = DateTime.now();
     if (!mounted) return;
-    final res = await _api.patch('/orders/$id/assign-courier');
+    var res = await _api.patch('/orders/$id/assign-courier');
     if (!mounted) return;
+    // Taking jobs needs the Courier Agreement in force (428, API 2.11): show it, then accept by itself
+    final need = AgreementRequired.from(res);
+    if (need != null) {
+      final accepted = await Agreements.resolve(context, _auth, need);
+      if (!mounted) return;
+      if (accepted) {
+        _checklistKey.currentState?.reload();
+        _agreementBannerKey.currentState?.reload();
+      }
+      if (accepted && _closedWhileAccepting.containsKey(id)) {
+        // Taken by another courier (or cancelled) while the agreement was open: no point asking the server
+        final reason = _closedWhileAccepting.remove(id);
+        setState(() {
+          _acceptingId = null;
+          _jobs = _jobs.where((j) => asInt(j['id']) != id).toList();
+          _offerPay.remove(id);
+          if (_newOfferId == id) _newOfferId = null;
+        });
+        _openOffers.value = {..._openOffers.value}..remove(id);
+        PushService.instance.clearOffer(id);
+        _snack(_offerGoneText(cancelled: reason == 'cancelled'));
+        _loadJobs();
+        return;
+      }
+      if (accepted) {
+        // Reading may have taken a while: the distance check needs a recent position
+        if (DateTime.now().difference(sentAt) > const Duration(seconds: 60)) {
+          sent = await CourierTelemetryService().sendNow(post: _postPosition);
+          if (!mounted) return;
+        }
+        res = await _api.patch('/orders/$id/assign-courier');
+        if (!mounted) return;
+      }
+    }
+    _closedWhileAccepting.remove(id);
     setState(() => _acceptingId = null);
     if (!res.ok) {
       if (res.status == 409 && _rawError(res).contains('no longer available')) {
@@ -1458,6 +1563,22 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
       ),
       body: Column(children: [
         _onlineBar(active),
+        // Steps still open (vehicle, payouts, agreement, ...), hidden during a delivery and once all are done
+        ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.45),
+          child: SingleChildScrollView(
+            child: OnboardingChecklist(
+              key: _checklistKey,
+              compact: true,
+              suppressed: active != null,
+              onLoaded: (data) {
+                final vehicle = data?['courier'] is Map ? (data!['courier'] as Map)['vehicleType'] : null;
+                if (vehicle is String && vehicle != _vehicleType && mounted) setState(() => _vehicleType = vehicle);
+              },
+            ),
+          ),
+        ),
+        AgreementUpdateBanner(key: _agreementBannerKey, suppressed: active != null),
         if (active == null && _returningOrder() != null) _returnStrip(_returningOrder()!),
         Expanded(child: TabBarView(controller: _tabs, children: [_jobsTab(active), _deliveryTab(active), _earningsTab()])),
       ]),
@@ -1477,7 +1598,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
             width: 40,
             height: 40,
             decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-            child: Icon(_online ? Icons.pedal_bike_rounded : Icons.power_settings_new_rounded,
+            child: Icon(_online ? vehicleIcon(_vehicleType) : Icons.power_settings_new_rounded,
                 size: 22, color: _online ? AppTheme.successDark : AppTheme.textPrimary),
           ),
           const SizedBox(width: 12),

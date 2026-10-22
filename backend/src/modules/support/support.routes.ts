@@ -7,6 +7,7 @@ import { sendError, ApiError } from "../../lib/errors";
 import { sendEmail, escapeHtml, sendSupportAck } from "../../services/notificationDeliveryService";
 import { localeFromHeader, localeOfUser } from "../../lib/i18n";
 import { isSyntheticEmail } from "../auth/auth.service";
+import { rateLimitStore } from "../../middleware/rateLimiter";
 
 // Requests are always saved for the admin panel; they are also emailed when a support mailbox is set.
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || "";
@@ -14,7 +15,8 @@ const router = Router();
 
 // A person can send a handful of requests an hour; more is spam
 const supportLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 8, standardHeaders: true, legacyHeaders: false,
-  message: { ok: false, error: "You have sent several requests already. We will reply to them by email." } });
+  message: { ok: false, error: "You have sent several requests already. We will reply to them by email." },
+  ...rateLimitStore("support") });
 
 const requestSchema = z.object({
   app: z.enum(["customer", "store", "courier"]),

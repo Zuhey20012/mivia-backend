@@ -7,6 +7,7 @@ import { sendError, positiveId, ApiError } from "../../lib/errors";
 import { prisma } from "../../lib/prisma";
 import { priceInfoFor, presentProduct, productInclude } from "../products/pricing";
 import { getOrderRelation } from "../orders/access";
+import { agreementRoutes } from "../legal/agreements";
 
 const router = Router();
 
@@ -232,5 +233,8 @@ function shortName(name: string) {
   const initial = rest.length ? ` ${rest[rest.length - 1][0].toUpperCase()}.` : "";
   return `${first}${initial}`;
 }
+
+// Agreements (2.11): GET /me/agreements, POST /me/agreements/accept, copies and their signed links
+router.use(agreementRoutes);
 
 export default router;

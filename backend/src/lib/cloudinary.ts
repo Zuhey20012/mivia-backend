@@ -94,7 +94,18 @@ export function videoMp4Url(publicId: string) {
 }
 
 export function videoPosterUrl(publicId: string, width = 720) {
-  return `${base()}/video/upload/so_0,c_limit,w_${width},q_auto,f_jpg/${publicId}.jpg`;
+  // f_auto: WebP/AVIF where the client accepts it, JPEG otherwise (the .jpg name keeps old clients happy)
+  return `${base()}/video/upload/so_0,c_limit,w_${width},q_auto,f_auto/${publicId}.jpg`;
+}
+
+/**
+ * Delivery URL for a stored Cloudinary image: a plain upload URL (no transformation, e.g. `/image/upload/v123/…`)
+ * gets the standard `c_limit,w_1200,q_auto,f_auto`, so every image goes out in the best format and quality for the
+ * device. URLs that already carry a transformation, other hosts and anything else are returned unchanged.
+ */
+export function deliveryImageUrl(url: string): string {
+  const m = /^(https:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\/)(v\d+\/.+)$/.exec(url);
+  return m ? `${m[1]}c_limit,w_1200,q_auto,f_auto/${m[2]}` : url;
 }
 
 /** True once Cloudinary has produced the adaptive-streaming (HLS) version of a video. */

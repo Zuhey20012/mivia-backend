@@ -50,6 +50,12 @@ const Map<String, String> _finnish = {
   // Store details
   'Business sellers must give their Y-tunnus': 'Yritysmyyjän on annettava Y-tunnus.',
   'Y-tunnus format is 1234567-8': 'Y-tunnuksen muoto on 1234567-8.',
+  'This Y-tunnus is not valid: check the last digit': 'Y-tunnus ei kelpaa: tarkista viimeinen numero.',
+  // Agreements
+  'That is not the current or the announced version of this document. Reload and try again.':
+      'Tämä ei ole voimassa oleva eikä ilmoitettu versio. Päivitä näkymä ja yritä uudelleen.',
+  'Agreement copy not found': 'Sopimuksen kopiota ei löytynyt.',
+  'This document is not one your account accepts': 'Tätä asiakirjaa ei hyväksytä tällä tilillä.',
   // Payouts
   'You can set up payouts once your account is approved': 'Voit ottaa tilitykset käyttöön, kun tilisi on hyväksytty.',
   'Set up payouts first': 'Ota ensin tilitykset käyttöön.',

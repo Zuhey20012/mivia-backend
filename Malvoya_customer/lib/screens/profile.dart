@@ -13,6 +13,9 @@ import 'orders.dart';
 import 'favorites_screen.dart';
 import 'invite_screen.dart';
 import 'blocked_users_screen.dart';
+import 'agreements_screen.dart';
+import '../core/agreements.dart';
+import '../widgets/agreement_sheet.dart';
 import '../widgets/forgot_password_sheet.dart';
 import '../core/sign_in.dart';
 import '../core/strings.dart';
@@ -39,7 +42,59 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadReferral());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadReferral();
+      // Fresh agreement state for the "Terms update" banner
+      final auth = Provider.of<AuthService>(context, listen: false);
+      if (auth.isAuthenticated) Agreements.instance.load(auth);
+    });
+  }
+
+  /// A soft notice about an announced, not yet effective version: never blocks anything.
+  Widget _agreementBanner(BuildContext context) {
+    return ListenableBuilder(
+      listenable: Agreements.instance,
+      builder: (context, _) {
+        final item = Agreements.instance.pendingNotice;
+        if (item == null) return const SizedBox.shrink();
+        final date = agreementDate(context, item['pendingEffectiveAt']);
+        final privacy = item['doc'] == 'privacy';
+        final text = privacy
+            ? tr(context, 'Privacy Policy update on $date: review', 'Tietosuojaseloste päivittyy $date: tutustu')
+            : tr(context, 'Terms update on $date: review', 'Käyttöehdot päivittyvät $date: tutustu');
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+          child: Material(
+            color: AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine),
+            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+              onTap: () {
+                Haptics.light();
+                showAgreementSheet(context, Agreements.instance.promptFor(item, pending: true));
+              },
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 56),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Row(
+                    children: [
+                      Icon(Icons.event_note_rounded, color: AppTheme.isDarkMode(context) ? AppTheme.sunshine : const Color(0xFF8A5A00)),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(text,
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
+                      ),
+                      Icon(Icons.chevron_right_rounded, color: AppTheme.secondaryText(context)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _loadReferral() async {
@@ -509,6 +564,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
 
+              if (auth.isAuthenticated) _agreementBanner(context),
+
               // Quick-Access Action Grid (4 Refined Cards: Orders, Returns/Swap, Addresses, Language)
               // Google Pay completely removed per brand guidelines
               Padding(
@@ -682,6 +739,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     onTap: () => _nav(context, const TermsLegalScreen()),
                   ),
                   if (auth.isAuthenticated) ...[
+                    Divider(height: 1, indent: 56, color: dividerColor),
+                    _buildTile(
+                      context: context,
+                      icon: Icons.handshake_outlined,
+                      iconColor: AppTheme.primary,
+                      title: tr(context, 'Agreements', 'Sopimukset'),
+                      subtitle: tr(context, 'What you have accepted, and copies', 'Mitä olet hyväksynyt, ja kopiot'),
+                      onTap: () => _nav(context, const AgreementsScreen()),
+                    ),
                     Divider(height: 1, indent: 56, color: dividerColor),
                     _buildTile(
                       context: context,

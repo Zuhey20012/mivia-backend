@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import '../config/constants.dart';
+import '../core/app_version.dart';
 import '../core/server_messages.dart';
 import 'socket_service.dart';
 
@@ -123,7 +124,7 @@ class CourierTelemetryService extends ChangeNotifier {
       final res = await http
           .post(
             Uri.parse('${AppConstants.apiBase}/courier/telemetry'),
-            headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $_token'},
+            headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $_token', 'Accept-Language': ServerMessages.languageCode, ...AppVersion.headers},
             body: jsonEncode(body),
           )
           .timeout(const Duration(seconds: 6));

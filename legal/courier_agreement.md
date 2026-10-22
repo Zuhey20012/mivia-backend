@@ -26,6 +26,8 @@ Before approval, Malvoya checks:
 
 Documents are checked through [VERIFICATION METHOD], not collected in the app.
 
+The courier app shows a checklist of the steps before approval: name and phone, vehicle type, payouts (Stripe), this agreement, and reading how location is used (section 6). When those are done, Malvoya's team is told; approval is always a person's decision.
+
 ## 4. How jobs are offered (transparency of automated systems)
 
 - Jobs are offered to approved, online couriers within 7.5 km of the store, nearest first. If none is nearby, the job is shown to all online couriers.
@@ -52,11 +54,18 @@ Documents are checked through [VERIFICATION METHOD], not collected in the app.
 
 ## 6. Location data
 
-The Courier's location is processed only while they are online, as described in the Privacy Policy. On Android a permanent notification shows whenever the location is being shared. Only the latest location is kept, and it is deleted when the Courier goes offline. The location at the moment the Courier accepts a job is used once to calculate the pay for the ride to the store (section 5); only the resulting distance is stored with the job. When an order is left at the door, the Courier takes a delivery photo; it is visible only to the customer and Malvoya and deleted after 30 days.
+The Courier's location is processed only while they are online, as described in the Privacy Policy. Before the first time online, the app explains how location is used and the Courier confirms having read it; Malvoya records when. On Android a permanent notification shows whenever the location is being shared. Only the latest location is kept, and it is deleted when the Courier goes offline. The location at the moment the Courier accepts a job is used once to calculate the pay for the ride to the store (section 5); only the resulting distance is stored with the job. When an order is left at the door, the Courier takes a delivery photo; it is visible only to the customer and Malvoya and deleted after 30 days.
 
 ## 7. Conduct and safety
 
 The Courier follows traffic law and treats customers and stores respectfully. The customer's address and door codes are used only to complete the delivery.
+
+## 7a. Accepting this agreement and changes to it
+
+- The Courier accepts this agreement when creating the courier account or in the courier app. Malvoya records which version was accepted, when, how, the network address shortened to its first part (IPv4: first three of four numbers; IPv6: first three of eight groups), the app or browser type and the app version, and emails the Courier a copy of the full text accepted. The copy can be opened in the app at any time.
+- Every change is published as a new version with a summary and the date it takes effect, and the Courier is told by push notification and email in their language, with a link to the full text. All versions stay readable at [malvoya-api-eu.onrender.com/legal/couriers/versions](https://malvoya-api-eu.onrender.com/legal/couriers/versions).
+- A change takes effect **no earlier than 15 days** after it is announced, unless the law requires it sooner; the notice then says so and why. The Courier may stop working with Malvoya at any time, also before a change takes effect.
+- Once a new version is in effect, the app asks the Courier to accept it before going online or accepting jobs. Jobs already accepted can be finished, and earnings, payouts, support, data export and account deletion stay available.
 
 ## 8. Ending the agreement
 

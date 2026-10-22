@@ -1,5 +1,24 @@
 import crypto from "crypto";
-import rateLimit from "express-rate-limit";
+import rateLimit, { Options } from "express-rate-limit";
+import { RedisStore } from "rate-limit-redis";
+import { redis, rkey } from "../lib/redis";
+
+/**
+ * Where the counters live. With REDIS_URL they are shared by every instance (a client gets the same limit however
+ * many instances run); without it each instance counts in memory, as before. If Redis stops answering, requests
+ * are let through (passOnStoreError) rather than failing the whole API.
+ */
+export function rateLimitStore(name: string): Pick<Partial<Options>, "store" | "passOnStoreError"> {
+  const r = redis();
+  if (!r) return {};
+  return {
+    store: new RedisStore({
+      prefix: rkey(`rl:${name}:`),
+      sendCommand: (command: string, ...args: string[]) => r.call(command, ...args) as any,
+    }),
+    passOnStoreError: true,
+  };
+}
 
 export const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -7,6 +26,7 @@ export const globalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { ok: false, error: "Too many requests, please try again later." },
+  ...rateLimitStore("global"),
 });
 
 export const authLimiter = rateLimit({
@@ -15,6 +35,7 @@ export const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { ok: false, error: "Too many attempts, please try again later." },
+  ...rateLimitStore("auth"),
 });
 
 
@@ -27,6 +48,7 @@ export const passwordForgotIpLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: tooMany,
+  ...rateLimitStore("pwforgot-ip"),
 });
 
 /**
@@ -43,6 +65,7 @@ export const passwordForgotEmailLimiter = rateLimit({
     const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
     return `pw:${crypto.createHash("sha256").update(email).digest("hex")}`;
   },
+  ...rateLimitStore("pwforgot-email"),
 });
 
 /** Setting the new password with the code, per client address (each code also allows only 5 tries). */
@@ -52,4 +75,5 @@ export const passwordResetLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: tooMany,
+  ...rateLimitStore("pwreset"),
 });

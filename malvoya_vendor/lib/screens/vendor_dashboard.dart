@@ -5,11 +5,11 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
+import '../core/agreements.dart';
 import '../core/api_client.dart';
 import '../core/connectivity.dart';
 import '../core/haptics.dart';
 import '../core/images.dart';
-import '../core/legal_links.dart';
 import '../core/strings.dart';
 import '../core/google_link_tile.dart';
 import '../core/delete_account_tile.dart';
@@ -18,6 +18,7 @@ import '../core/push_service.dart';
 import '../widgets/language_sheet.dart';
 import '../widgets/loading_states.dart';
 import '../widgets/setup_checklist.dart';
+import 'agreements_screen.dart';
 import 'chatbot.dart';
 import 'drops_manager.dart';
 import 'import_products_screen.dart';
@@ -98,6 +99,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
   void dispose() {
     _poll?.cancel();
     _tick?.cancel();
+    _businessRetry?.cancel();
     _restored?.cancel();
     _returnsSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
@@ -135,8 +137,106 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       _loadImports();
       _loadReturns();
       _loadProductPage(reset: true);
+      _loadOnboarding();
+      _loadAgreements();
     }
     await _loadOrders();
+  }
+
+  // ── Onboarding and agreements (API 2.11) ─────────────────────────────────
+  // The server's checklist replaces the one worked out in the app; servers without it answer 404 and
+  // the app's own checklist is shown as before (also while the server's cannot be loaded).
+
+  Map<String, dynamic>? _onboarding;
+  bool _onboardingSupported = true;
+  Timer? _businessRetry;
+  int _businessRetries = 0;
+
+  /// `GET /me/agreements`'s `required` list (null = not known, e.g. an older server).
+  List<Map>? _agreementItems;
+
+  Future<void> _loadOnboarding() async {
+    final res = await _api.get('/stores/my/onboarding');
+    if (!mounted) return;
+    if (res.status == 404) {
+      setState(() {
+        _onboardingSupported = false;
+        _onboarding = null;
+      });
+      return;
+    }
+    if (!res.ok || res.data['steps'] is! List) {
+      // Not reachable right now: the app's own checklist until the server's can be loaded
+      if (_onboarding == null) setState(() => _onboardingSupported = false);
+      return;
+    }
+    setState(() {
+      _onboarding = Map<String, dynamic>.from(res.data);
+      _onboardingSupported = true;
+    });
+    // The register lookup runs in the background after the store is saved: look again a few times
+    final waiting = OnboardingChecklist.stepsOf(_onboarding!).any((st) => st['key'] == 'business_check' && st['action'] == 'wait');
+    if (waiting && _businessRetries < 3 && _businessRetry == null) {
+      _businessRetries++;
+      _businessRetry = Timer(const Duration(seconds: 8), () {
+        _businessRetry = null;
+        // The whole store again: the registered name comes with /stores/my
+        if (mounted) _load();
+      });
+    }
+  }
+
+  Future<void> _loadAgreements() async {
+    final res = await _api.get('/me/agreements');
+    if (!mounted) return;
+    setState(() => _agreementItems = res.ok ? ((res.data['required'] as List?) ?? const []).whereType<Map>().toList() : null);
+  }
+
+  /// The Seller Terms in force are not accepted: new orders cannot be accepted until they are.
+  bool get _termsNeeded => _agreementItems?.any((a) => a['blocking'] == true && a['accepted'] != true) == true;
+
+  /// An announced update of the Seller Terms not accepted yet (it never blocks before it takes effect).
+  Map? get _pendingUpdate =>
+      _agreementItems?.where((a) => a['blocking'] == true && a['pendingVersion'] != null && a['pendingAccepted'] != true).firstOrNull;
+
+  Future<void> _openAgreements() async {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => const AgreementsScreen()));
+    if (mounted) _load();
+  }
+
+  Future<void> _acceptSellerTerms() async {
+    final accepted = await showAgreementSheet(context, api: _api, doc: 'seller-terms');
+    if (accepted != null && mounted) _load();
+  }
+
+  Future<void> _openStoreSetup({bool focusBusinessId = false}) async {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => StoreSetupScreen(focusBusinessId: focusBusinessId)));
+    if (!mounted) return;
+    // A new Y-tunnus is looked up again in the background
+    _businessRetries = 0;
+    _load();
+  }
+
+  Future<void> _onOnboardingAction(String action) async {
+    switch (action) {
+      case 'edit_store':
+      case 'create_store':
+      case 'set_location':
+        // The store details screen holds the address, the map pin, the description and the logo
+        await _openStoreSetup();
+      case 'edit_business_id':
+        await _openStoreSetup(focusBusinessId: true);
+      case 'set_hours':
+        await _openSetupStep(SetupStep.hours);
+      case 'connect_payouts':
+        await _openSetupStep(SetupStep.payouts);
+      case 'add_product':
+        await _editProduct();
+      case 'tax_info':
+        await _openTaxInfo();
+      case 'accept_agreement':
+        await _acceptSellerTerms();
+    }
   }
 
   // ── Open returns (badge on the Store tab) ───────────────────────────────
@@ -516,15 +616,21 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       if (ok != true) return false;
     }
     Haptics.tap();
-    final res = await _api.patch('/orders/${order['id']}/status', {'status': status});
+    final api = _api;
+    Future<ApiResult> send() => api.patch('/orders/${order['id']}/status', {'status': status});
+    // Accepting needs the Seller Terms in force: on 428 the agreement sheet opens over the incoming-order
+    // screen (its countdown keeps running) and the answer is sent again right after acceptance
+    final res = status == 'CONFIRMED' ? await withAgreement(context, api, send, announce: false) : await send();
     if (!mounted) return res.ok;
+    if (res.notice != null) _loadAgreements();
     if (!res.ok) {
       Haptics.warning();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.errorMessage)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text([if (res.notice != null) res.notice!, res.errorMessage].join(' '))));
     } else if (status == 'CONFIRMED') {
+      final accepted = tr(context, 'Order #${order['id']} accepted.', 'Tilaus #${order['id']} hyväksytty.');
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(tr(context, 'Order #${order['id']} accepted', 'Tilaus #${order['id']} hyväksytty'))));
+        ..showSnackBar(SnackBar(content: Text(res.notice == null ? accepted : '$accepted ${res.notice}')));
     }
     _loadOrders();
     return res.ok;
@@ -706,15 +812,17 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
         await _editProduct(p);
       case QuickEditRemove():
         await _removeWithUndo(p);
-      case QuickEditSaved(:final product, :final sent):
+      case QuickEditSaved(:final product, :final sent, :final notice):
         setState(() {
           for (final t in _copiesOf(p['id'])) {
             t.addAll(product ?? sent);
           }
         });
+        if (notice != null) _loadAgreements();
+        final saved = tr(context, '${p['name']} saved', '${p['name']} tallennettu');
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
-          ..showSnackBar(SnackBar(content: Text(tr(context, '${p['name']} saved', '${p['name']} tallennettu')), duration: const Duration(seconds: 2)));
+          ..showSnackBar(SnackBar(content: Text(notice == null ? saved : '$notice $saved'), duration: Duration(seconds: notice == null ? 2 : 4)));
     }
   }
 
@@ -828,7 +936,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             Tab(text: tr(context, 'Drops', 'Julkaisut')),
             Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [
               Text(tr(context, 'Store', 'Kauppa')),
-              if (_openReturns > 0 || _store?['taxInfoComplete'] == false) ...[
+              if (_openReturns > 0 || _store?['taxInfoComplete'] == false || _termsNeeded) ...[
                 const SizedBox(width: 6),
                 _openReturns > 0
                     ? Semantics(label: tr(context, '$_openReturns open returns', '$_openReturns avointa palautusta'), child: _countBadge(_openReturns))
@@ -899,12 +1007,16 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
         padding: const EdgeInsets.all(16),
         children: [
           _notificationsOffBar(),
-          if (_store != null)
+          if (_store != null && _onboarding != null)
+            OnboardingChecklist(onboarding: _onboarding!, store: _store, onAction: _onOnboardingAction)
+          else if (_store != null && !_onboardingSupported)
             SetupChecklist(store: _store!, productCount: _productCount, onOpen: _openSetupStep),
+          // Accepting new terms before an order is waiting saves time on the next order
+          if (_termsNeeded && !_checklistShown) _termsBanner(),
           _availabilityCard(),
           if (_ordersLoaded) _todayHeader(),
           // The checklist already lists the tax step while it is shown
-          if (_store == null || SetupChecklist.isComplete(_store!, _productCount)) _taxInfoBanner(),
+          if (!_checklistShown) _taxInfoBanner(),
           // First load: placeholders, or what went wrong. Later failures keep the list and show a strip.
           if (!_ordersLoaded && _ordersError != null) ErrorState(message: _ordersError, onRetry: _retryOrders, top: 24),
           if (!_ordersLoaded && _ordersError == null) ...[for (var i = 0; i < 3; i++) SkeletonCard(lines: 4, button: i == 0)],
@@ -925,6 +1037,43 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       ),
     );
   }
+
+  /// Whether a setup checklist card is on screen (it lists the tax and agreement steps itself).
+  bool get _checklistShown {
+    if (_store == null) return false;
+    if (_onboarding != null) return !OnboardingChecklist.isComplete(_onboarding!);
+    if (!_onboardingSupported) return !SetupChecklist.isComplete(_store!, _productCount);
+    return false;
+  }
+
+  Widget _termsBanner() => Container(
+        margin: const EdgeInsets.only(bottom: 14),
+        decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+          onTap: _acceptSellerTerms,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 56),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+              child: Row(children: [
+                const Icon(Icons.gavel_rounded, color: AppTheme.textPrimary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(tr(context, 'Accept the Seller Terms in force', 'Hyväksy voimassa olevat myyjän ehdot'),
+                        style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.textPrimary)),
+                    const SizedBox(height: 2),
+                    Text(tr(context, 'You need them to accept new orders and publish products.', 'Tarvitset ne, jotta voit hyväksyä uusia tilauksia ja julkaista tuotteita.'),
+                        style: const TextStyle(fontSize: 12.5, color: AppTheme.textPrimary, height: 1.35)),
+                  ]),
+                ),
+                const Icon(Icons.chevron_right_rounded, color: AppTheme.textPrimary),
+              ]),
+            ),
+          ),
+        ),
+      );
 
   /// Paid and not answered yet: the store has 10 minutes before the order is refunded automatically.
   bool _isWaiting(Map<String, dynamic> o) => o['status'] == 'PENDING' && o['paymentStatus'] == 'SUCCEEDED';
@@ -1362,8 +1511,12 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       }
       _savingProducts.add(id);
     });
-    final res = await _api.patch('/products/$id', {'isAvailable': value});
+    final api = _api;
+    Future<ApiResult> send() => api.patch('/products/$id', {'isAvailable': value});
+    // Showing a product needs the Seller Terms in force (428 → agreement sheet → sent again)
+    final res = value ? await withAgreement(context, api, send, announce: false) : await send();
     if (!mounted) return;
+    if (res.notice != null) _loadAgreements();
     setState(() {
       _savingProducts.remove(id);
       if (!res.ok) {
@@ -1374,16 +1527,18 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     });
     final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
     if (!res.ok) Haptics.warning();
+    final message = !res.ok
+        ? (res.error ?? tr(context, 'Could not change it', 'Muutos epäonnistui'))
+        : value && wasDraft
+            ? tr(context, '${p['name']} is published', '${p['name']} on julkaistu')
+            : value
+                ? tr(context, '${p['name']} is available again', '${p['name']} on taas saatavilla')
+                : tr(context, '${p['name']} is sold out and hidden from shoppers', '${p['name']} on loppu ja piilotettu asiakkailta');
     messenger.showSnackBar(SnackBar(
       // Hiding is one tap away from a mistake: offer to put it straight back
       action: res.ok && !value ? SnackBarAction(label: tr(context, 'Undo', 'Kumoa'), onPressed: () => _setProductAvailable(p, true)) : null,
-      content: Text(!res.ok
-          ? (res.error ?? tr(context, 'Could not change it', 'Muutos epäonnistui'))
-          : value && wasDraft
-              ? tr(context, '${p['name']} is published', '${p['name']} on julkaistu')
-          : value
-              ? tr(context, '${p['name']} is available again', '${p['name']} on taas saatavilla')
-              : tr(context, '${p['name']} is sold out and hidden from shoppers', '${p['name']} on loppu ja piilotettu asiakkailta')),
+      // "Seller Terms accepted" first when the sheet was shown on the way
+      content: Text(res.notice == null ? message : '${res.notice} $message'),
       duration: Duration(seconds: res.ok && !value ? 4 : 2),
     ));
   }
@@ -1805,10 +1960,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
               if (saved == true) _load();
             }),
             const Divider(height: 1),
-            tile(Icons.storefront_outlined, tr(context, 'Store details', 'Kaupan tiedot'), tr(context, 'Name, address, pictures, seller type', 'Nimi, osoite, kuvat, myyjätyyppi'), () async {
-              await Navigator.push(context, MaterialPageRoute(builder: (_) => const StoreSetupScreen()));
-              _load();
-            }),
+            tile(Icons.storefront_outlined, tr(context, 'Store details', 'Kaupan tiedot'), tr(context, 'Name, address, pictures, seller type', 'Nimi, osoite, kuvat, myyjätyyppi'), _openStoreSetup),
             const Divider(height: 1),
             tile(Icons.language_rounded, tr(context, 'Language', 'Kieli'),
                 tr(context, 'English — also for your notifications and emails', 'Suomi — myös ilmoituksissa ja sähköposteissa'), () => showLanguageSheet(context)),
@@ -1818,7 +1970,13 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             tile(Icons.help_outline_rounded, tr(context, 'Help', 'Apua'), tr(context, 'Answers for sellers', 'Vastauksia myyjille'),
                 () => Navigator.push(context, MaterialPageRoute(builder: (_) => ChatbotScreen(commissionRate: _store?['commissionRate'] as num?)))),
             const Divider(height: 1),
-            tile(Icons.gavel_rounded, tr(context, 'Seller terms and privacy', 'Myyjän ehdot ja tietosuoja'), tr(context, 'The rules you agreed to', 'Hyväksymäsi säännöt'), () => openLegal('sellers')),
+            tile(
+              Icons.gavel_rounded,
+              tr(context, 'Agreements', 'Sopimukset'),
+              _agreementsSubtitle(),
+              _openAgreements,
+              badge: _termsNeeded || _pendingUpdate != null ? const CircleAvatar(radius: 5, backgroundColor: AppTheme.sunshine) : null,
+            ),
             const Divider(height: 1),
             tile(Icons.code_rounded, tr(context, 'Open-source licences', 'Avoimen lähdekoodin lisenssit'), tr(context, 'Software this app is built with', 'Ohjelmistot, joilla sovellus on tehty'),
                 () => showLicensePage(context: context, applicationName: 'Malvoya Store', applicationLegalese: '© Malvoya')),
@@ -1835,6 +1993,15 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       ],
     ),
     );
+  }
+
+  String _agreementsSubtitle() {
+    if (_termsNeeded) return tr(context, 'Seller Terms need your acceptance', 'Myyjän ehdot odottavat hyväksyntääsi');
+    final change = parseDate(_pendingUpdate?['pendingEffectiveAt']);
+    if (change != null) {
+      return tr(context, 'Seller Terms change on ${longDate(context, change)}: have a look', 'Myyjän ehdot muuttuvat ${longDate(context, change)}: tutustu muutokseen');
+    }
+    return tr(context, 'Seller Terms, privacy and your copies', 'Myyjän ehdot, tietosuoja ja kopiosi');
   }
 
   Widget _stat(String label, String value) => Expanded(

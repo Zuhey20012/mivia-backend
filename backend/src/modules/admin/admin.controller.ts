@@ -10,6 +10,7 @@ import { forgetSessionState } from "../../middleware/auth";
 import { pushToUser } from "../../lib/push";
 import { localeOfUser, t } from "../../lib/i18n";
 import { sendApprovalEmail } from "../../services/notificationDeliveryService";
+import { businessCheckOf, runBusinessCheck } from "../stores/businessCheck";
 
 /** "You're approved": push and email, sent on the first approval only (never on a repeated click). */
 async function tellApproved(userId: number, kind: "store" | "courier") {
@@ -122,7 +123,24 @@ export async function getVendors(req: Request, res: Response) {
     take: 500,
   });
   // DAC7: whether each store has given its tax data; the data itself is only in the DAC7 report
-  res.json({ ok: true, stores: stores.map(({ taxInfo, ...s }) => ({ ...s, taxInfoComplete: taxInfoComplete(s, taxInfo) })) });
+  // businessCheck: the PRH/YTJ lookup of the Y-tunnus (pre-fills the decision; never approves)
+  res.json({ ok: true, stores: stores.map(({ taxInfo, ...s }) => ({ ...s, taxInfoComplete: taxInfoComplete(s, taxInfo), businessCheck: businessCheckOf(s) })) });
+}
+
+/** Runs the PRH/YTJ business check again (e.g. after the register was unavailable). */
+export async function rerunBusinessCheck(req: Request, res: Response) {
+  const id = idParam(req);
+  if (!id) return res.status(404).json({ ok: false, error: "Store not found" });
+  const store = await prisma.store.findUnique({ where: { id }, select: { sellerType: true, businessId: true } });
+  if (!store) return res.status(404).json({ ok: false, error: "Store not found" });
+  if (store.sellerType !== "BUSINESS" || !store.businessId) return res.status(409).json({ ok: false, error: "Private sellers have no Y-tunnus to check" });
+  try {
+    const result = await runBusinessCheck(id);
+    if (!result) return res.status(409).json({ ok: false, error: "The store's Y-tunnus is not valid" });
+    res.json({ ok: true, businessCheck: { required: true, businessId: result.businessId, verificationStatus: result.status, registeredName: result.registeredName, registeredAt: result.registeredAt, checkedAt: result.checkedAt } });
+  } catch {
+    res.status(500).json({ ok: false, error: "Something went wrong" });
+  }
 }
 
 export async function approveVendor(req: Request, res: Response) {
@@ -214,6 +232,7 @@ export async function getCouriers(req: Request, res: Response) {
     },
     select: {
       id: true, name: true, phone: true, email: true, isApproved: true, isActive: true, currentOrderId: true, createdAt: true,
+      vehicleType: true, locationDisclosureAt: true, payoutsEnabled: true, readyForApprovalAt: true,
       user: { select: { id: true, email: true, isActive: true } },
       _count: { select: { orders: true } },
     },

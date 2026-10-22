@@ -10,6 +10,7 @@ import { ImportIssue, ImportItem } from "./mapping";
 import { assertPublicHost, parseShopUrl } from "./safeFetch";
 import { assertEuroShop, fetchShopifyProducts, mapShopifyProduct } from "./shopify";
 import { csvToItems } from "./csv";
+import { defineJob, enqueue } from "../../lib/queue";
 import { WooKeys, fetchWooProducts, fetchWooVariations, mapWooProduct, wooShopChecks } from "./woocommerce";
 
 /**
@@ -93,7 +94,14 @@ export async function startShopifyImport(ownerId: number, shopUrl: string) {
   await assertCanStart(store.id); // before any DNS lookup
   await assertPublicHost(origin);
   const job = await createJob(store.id, { source: "SHOPIFY", sourceRef: origin.host, rightsConfirmedAt: new Date() });
-  launch(job.id, store.id, "SHOPIFY", async () => {
+  // Background job (lib/queue.ts): in this process without Redis, else on the queue (worker)
+  await enqueue<ImportJobData>("catalogue-import", { jobId: job.id, storeId: store.id, source: "SHOPIFY", shopUrl });
+  return presentJob(job);
+}
+
+function shopifyLoader(shopUrl: string) {
+  const origin = parseShopUrl(shopUrl);
+  return async (): Promise<Loaded> => {
     const currencyIssues = await assertEuroShop(origin); // a shop pricing in another currency is refused
     let products, issues: ImportIssue[];
     try {
@@ -104,9 +112,17 @@ export async function startShopifyImport(ownerId: number, shopUrl: string) {
     issues.unshift(...currencyIssues);
     const items = products.map((p) => mapShopifyProduct(p, issues)).filter((x): x is ImportItem => !!x);
     return { items, issues, skipped: products.length - items.length, total: products.length };
-  });
-  return presentJob(job);
+  };
 }
+
+/** Shopify and CSV imports carry nothing secret, so they can wait on the queue. WooCommerce keys never leave memory. */
+type ImportJobData = { jobId: number; storeId: number; source: "SHOPIFY" | "CSV"; shopUrl?: string; csv?: string };
+defineJob<ImportJobData>("catalogue-import", async (d) => {
+  const load = d.source === "SHOPIFY"
+    ? shopifyLoader(d.shopUrl!)
+    : async () => { const parsed = csvToItems(d.csv!); return { ...parsed, total: parsed.groups }; };
+  await runLaunched(d.jobId, d.storeId, d.source, load);
+}, { attempts: 1 }); // never re-run: a failed import is marked FAILED and the store can start it again
 
 /**
  * WooCommerce: the store's own read-only REST API keys. They are kept only in this job's closure while it runs
@@ -148,7 +164,7 @@ export async function startCsvImport(ownerId: number, csv: string) {
   await assertCanStart(store.id); // before parsing up to 1 MB
   const parsed = csvToItems(csv); // header problems → 400 now; row problems are reported on the job
   const job = await createJob(store.id, { source: "CSV", rightsConfirmedAt: new Date(), total: parsed.groups });
-  launch(job.id, store.id, "CSV", async () => ({ ...parsed, total: parsed.groups }));
+  await enqueue<ImportJobData>("catalogue-import", { jobId: job.id, storeId: store.id, source: "CSV", csv });
   return presentJob(job);
 }
 
@@ -156,17 +172,19 @@ type Loaded = { items: ImportItem[]; issues: ImportIssue[]; skipped: number; tot
 
 /** Runs the job after the response has been sent. A crash marks it FAILED; a restart leaves it to the watchdog. */
 function launch(jobId: number, storeId: number, source: ImportSource, load: () => Promise<Loaded>) {
-  setImmediate(() => {
-    runJob(jobId, storeId, source, load).catch(async (e) => {
-      logger.error({ jobId, err: e?.message }, "Import failed");
-      await prisma.importJob.updateMany({
-        where: { id: jobId, status: { in: ["QUEUED", "RUNNING"] } },
-        data: {
-          status: "FAILED", finishedAt: new Date(),
-          errors: [{ item: "import", message: e instanceof ApiError ? e.message : "The import stopped unexpectedly", level: "error" }],
-        },
-      }).catch(() => {});
-    });
+  setImmediate(() => { runLaunched(jobId, storeId, source, load); });
+}
+
+async function runLaunched(jobId: number, storeId: number, source: ImportSource, load: () => Promise<Loaded>) {
+  await runJob(jobId, storeId, source, load).catch(async (e) => {
+    logger.error({ jobId, err: e?.message }, "Import failed");
+    await prisma.importJob.updateMany({
+      where: { id: jobId, status: { in: ["QUEUED", "RUNNING"] } },
+      data: {
+        status: "FAILED", finishedAt: new Date(),
+        errors: [{ item: "import", message: e instanceof ApiError ? e.message : "The import stopped unexpectedly", level: "error" }],
+      },
+    }).catch(() => {});
   });
 }
 

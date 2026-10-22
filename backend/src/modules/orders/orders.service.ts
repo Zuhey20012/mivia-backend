@@ -929,7 +929,12 @@ export async function getOrder(id: number, actor: Actor) {
 }
 
 /** The same endpoint serves every app; what you get depends on your role. */
-export async function listOrdersFor(actor: Actor) {
+/** Optional paging for order lists: newest first, `before` = the last id of the previous page. */
+export type ListPage = { limit?: number; before?: number };
+const pageTake = (p: ListPage, max: number) => Math.min(Math.max(1, p.limit ?? max), max);
+const beforeId = (p: ListPage) => (p.before ? { id: { lt: p.before } } : {});
+
+export async function listOrdersFor(actor: Actor, page: ListPage = {}) {
   const include = {
     items: { include: { product: { select: { name: true, images: true } }, variant: { select: { size: true, color: true } } } },
     store: { select: { id: true, name: true, logoUrl: true, address: true, latitude: true, longitude: true } },
@@ -941,16 +946,16 @@ export async function listOrdersFor(actor: Actor) {
     if (!store) return [];
     // Unpaid orders are invisible to stores
     return prisma.order.findMany({
-      where: { storeId: store.id, paymentStatus: { in: ["SUCCEEDED", "REFUNDED"] } },
+      where: { storeId: store.id, paymentStatus: { in: ["SUCCEEDED", "REFUNDED"] }, ...beforeId(page) },
       include: { ...include, courier: courierPublic },
-      orderBy: { createdAt: "desc" },
-      take: 200,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: pageTake(page, 200),
     });
   }
-  if (actor.role === "COURIER") return listCourierOrders(actor.id);
+  if (actor.role === "COURIER") return listCourierOrders(actor.id, page);
 
   const mine = await prisma.order.findMany({
-    where: { userId: actor.id }, omit: { pickupCode: false }, include, orderBy: { createdAt: "desc" }, take: 200,
+    where: { userId: actor.id, ...beforeId(page) }, omit: { pickupCode: false }, include, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: pageTake(page, 200),
   });
   return mine.map(withPickupCode);
 }
@@ -1009,11 +1014,11 @@ export async function listAvailableOrders(userId: number) {
   });
 }
 
-export async function listCourierOrders(userId: number) {
+export async function listCourierOrders(userId: number, page: ListPage = {}) {
   const courier = await getCourierForUser(userId);
   if (!courier) return [];
   const orders = await prisma.order.findMany({
-    where: { courierId: courier.id },
+    where: { courierId: courier.id, ...beforeId(page) },
     omit: { courierPay: false },
     include: {
       store: { select: { id: true, name: true, address: true, latitude: true, longitude: true, phone: true } },
@@ -1021,7 +1026,7 @@ export async function listCourierOrders(userId: number) {
       user: { select: { name: true } },
     },
     orderBy: { updatedAt: "desc" },
-    take: 100,
+    take: pageTake(page, 100),
   });
   // courierArrivedAt is a plain column; courierPay is the final breakdown (waiting is added at pickup)
   return orders.map((o) => ({ ...o, courierPay: presentCourierPay(o) }));
@@ -1155,11 +1160,12 @@ export async function getRental(id: number, userId: number) {
   return rental;
 }
 
-export async function listRentals(userId: number) {
+export async function listRentals(userId: number, page: ListPage = {}) {
   return prisma.rental.findMany({
-    where: { userId },
+    where: { userId, ...beforeId(page) },
     include: { items: { include: { product: { select: { name: true, images: true } } } } },
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: pageTake(page, 200),
   });
 }
 
@@ -1408,7 +1414,7 @@ export async function updateReturnStatus(id: number, actor: Actor, data: {
 }
 
 /** Customers see their own returns; stores see returns of their orders so they can process them. */
-export async function listReturns(actor: Actor) {
+export async function listReturns(actor: Actor, page: ListPage = {}) {
   let where: Prisma.ReturnWhereInput = { userId: actor.id };
   if (actor.role === "VENDOR") {
     const store = await prisma.store.findUnique({ where: { ownerId: actor.id }, select: { id: true } });
@@ -1418,7 +1424,7 @@ export async function listReturns(actor: Actor) {
     where = {};
   }
   const rows = await prisma.return.findMany({
-    where,
+    where: { ...where, ...beforeId(page) },
     include: {
       items: returnItemsSelect,
       order: {
@@ -1432,8 +1438,8 @@ export async function listReturns(actor: Actor) {
         },
       },
     },
-    orderBy: { createdAt: "desc" },
-    take: 100,
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: pageTake(page, 100),
   });
   return rows.map((r) => {
     const presented = presentReturn(r, r.order);

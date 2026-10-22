@@ -38,7 +38,10 @@ export async function localeOfUser(userId: number): Promise<Locale> {
 /** Emails are sent to addresses; this finds the account's language for one (English when unknown). */
 export async function localeOfEmail(email: string | null | undefined): Promise<Locale> {
   if (!email) return "en";
-  const u = await prisma.user.findFirst({ where: { email: { equals: email, mode: "insensitive" } }, select: { locale: true } }).catch(() => null);
+  // Addresses are stored in lower case, so the unique index answers almost every lookup; the case-insensitive scan
+  // is only the fallback for an address that is not an account (e.g. a shop's contact address)
+  const u = await prisma.user.findUnique({ where: { email: email.trim().toLowerCase() }, select: { locale: true } }).catch(() => null)
+    ?? await prisma.user.findFirst({ where: { email: { equals: email, mode: "insensitive" } }, select: { locale: true } }).catch(() => null);
   return asLocale(u?.locale);
 }
 

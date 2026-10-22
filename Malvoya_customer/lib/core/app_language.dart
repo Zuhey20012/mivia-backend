@@ -1,3 +1,4 @@
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../auth_service.dart';
 import 'api_client.dart';
@@ -10,8 +11,15 @@ class AppLanguage {
 
   static String code = 'fi';
 
-  /// Merge into the headers of any raw `http` call to the API.
-  static Map<String, String> get header => {'Accept-Language': code};
+  /// "1.7.0+9": sent as `X-App-Version` so the server can record which build an agreement was
+  /// accepted in. Null until [load] has read it (and on platforms where it cannot be read).
+  static String? appVersion;
+
+  /// Merge into the headers of any raw `http` call to the API: the language and the app version.
+  static Map<String, String> get header => {
+        'Accept-Language': code,
+        if (appVersion != null) 'X-App-Version': appVersion!,
+      };
 
   static AuthService? _auth;
   static int? _syncedUserId;
@@ -61,8 +69,13 @@ class AppLanguage {
     } catch (_) {}
   }
 
-  /// Reads the saved choice before the first request goes out.
+  /// Reads the saved choice (and the app version) before the first request goes out.
   static Future<void> load() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      final build = info.buildNumber.trim();
+      appVersion = build.isEmpty ? info.version : '${info.version}+$build';
+    } catch (_) {}
     try {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString('languageCode') ?? prefs.getString('selected_user_locale');

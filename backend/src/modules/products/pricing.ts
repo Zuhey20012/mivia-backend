@@ -1,11 +1,20 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
-import { videoHlsUrl, videoMp4Url, videoPosterUrl } from "../../lib/cloudinary";
+import { deliveryImageUrl, videoHlsUrl, videoMp4Url, videoPosterUrl } from "../../lib/cloudinary";
+import { presentCatalog, presentOption } from "../catalog/present";
 
-/** What every product query loads for presentProduct: options and videos (oldest first). */
+/**
+ * What every product query loads for presentProduct: options and videos (oldest first), and since 2.12.0 the category,
+ * the manufacturer / responsible person records, certificates and an active recall.
+ */
 export const productInclude = {
   variants: { orderBy: { id: "asc" as const } },
   videos: { orderBy: [{ position: "asc" as const }, { id: "asc" as const }] },
+  categoryRef: { select: { id: true, slug: true, nameEn: true, nameFi: true, template: true, parentId: true } },
+  manufacturer: true,
+  responsiblePerson: true,
+  certificates: { include: { certificate: true } },
+  recalls: { where: { recall: { status: "ACTIVE" as const } }, select: { recall: { select: { id: true, title: true, createdAt: true } } } },
 } satisfies Prisma.ProductInclude;
 
 type VideoRow = { id: number; publicId: string; status: string; durationSec: number | null; width: number | null; height: number | null };
@@ -95,34 +104,49 @@ type ProductWithVariants = {
   salePriceCents: number | null;
   stockQuantity: number;
   isAvailable: boolean;
-  variants?: { id: number; size: string | null; color: string | null; stock: number; priceAdjustCents: number; sku?: string | null }[];
+  variants?: any[];
   videos?: VideoRow[];
 };
 
 /**
  * What shoppers see of a product: real prices only, and per-option availability without exact stock
- * counts (no artificial "only 2 left" pressure).
+ * counts (no artificial "only 2 left" pressure). Since 2.12.0 also the category, attributes, unit prices, the product
+ * safety block, verified certificates, the hygiene-seal notice and an active recall (catalog/present.ts).
  */
 export function presentProduct<T extends ProductWithVariants>(product: T, info: PriceInfo | undefined, opts: { owner?: boolean } = {}) {
-  const variants = (product.variants ?? []).map((v) => ({
-    id: v.id,
-    size: v.size,
-    color: v.color,
-    priceCents: product.salePriceCents === null ? null : product.salePriceCents + v.priceAdjustCents,
-    inStock: v.stock > 0,
-    ...(opts.owner ? { stock: v.stock, sku: v.sku ?? null, priceAdjustCents: v.priceAdjustCents } : {}),
-  }));
+  const p = product as any;
+  const variants = (product.variants ?? []).map((v: any) => {
+    const priceCents = product.salePriceCents === null ? null : product.salePriceCents + v.priceAdjustCents;
+    return {
+      id: v.id,
+      size: v.size,
+      color: v.color,
+      priceCents,
+      inStock: v.stock > 0,
+      ...presentOption(v, priceCents, p),
+      ...(opts.owner ? { stock: v.stock, sku: v.sku ?? null, priceAdjustCents: v.priceAdjustCents } : {}),
+    };
+  });
   const inStock = product.isAvailable && (variants.length ? variants.some((v) => v.inStock) : product.stockQuantity > 0);
-  // Import bookkeeping is only for the store itself
-  const { stockQuantity, videos: videoRows, importJobId, externalSource, externalId, ...rest } =
-    product as T & { importJobId?: number | null; externalSource?: string | null; externalId?: string | null };
-  const videos = (videoRows ?? []).filter((v) => opts.owner || v.status === "READY").map((v) => presentVideo(v, opts));
+  const pricing = info ?? { priceCents: product.salePriceCents, previousPriceCents: null, discountPct: null };
+  // Import bookkeeping is only for the store itself; the raw safety, category and lock columns become structured fields
+  const {
+    stockQuantity, videos: videoRows, importJobId, externalSource, externalId,
+    categoryRef, manufacturer, responsiblePerson, certificates, recalls,
+    warningsFi, warningsSv, warningsEn, noWarnings, safetyImages, productModel, batchOrSerial,
+    lockedAt, lockedReason, importHold, contentAmount, contentUnit,
+    ...rest
+  } = p;
+  const videos = (videoRows ?? []).filter((v: VideoRow) => opts.owner || v.status === "READY").map((v: VideoRow) => presentVideo(v, opts));
   return {
     ...rest,
-    ...(opts.owner ? { stockQuantity, importJobId, externalSource, externalId } : {}),
+    // Shoppers get optimised delivery URLs; owners get the stored URLs back unchanged (they send them back on edit)
+    ...(!opts.owner && Array.isArray(rest.images) ? { images: (rest.images as string[]).map(deliveryImageUrl) } : {}),
+    ...(opts.owner ? { stockQuantity, importJobId, externalSource, externalId, lockedAt, lockedReason, importHold } : {}),
+    ...presentCatalog(p, pricing.priceCents, opts),
     variants,
     videos,
     inStock,
-    pricing: info ?? { priceCents: product.salePriceCents, previousPriceCents: null, discountPct: null },
+    pricing,
   };
 }

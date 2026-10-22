@@ -21,7 +21,7 @@ Malvoya arranges payment and local delivery by independent couriers.
 - You must be at least 18 years old.
 - Keep your sign-in details secret. If you forget your password, you can set a new one with a code we email to you ("Forgot password?" in the app). Setting a new password signs you out on all your other devices.
 - You can delete your account at any time in the app. How, and what happens to your data, is explained at [malvoya-api-eu.onrender.com/legal/delete-account](https://malvoya-api-eu.onrender.com/legal/delete-account).
-- When you create an account you accept these terms; we record when you accepted and which version.
+- When you create an account you accept these terms and confirm you have read the Privacy Policy. We record when you accepted, which version, how (when signing up or in the app), your network address shortened to its first part, your app or browser type and the app version, and we email you a copy of the text you accepted. You can open that copy in the app at any time.
 
 ## 4. Prices and payment
 
@@ -113,4 +113,6 @@ Finnish law applies. As a consumer you may also bring a claim in the district co
 
 ## 13. Changes
 
-Material changes are announced in the app at least 30 days in advance.
+- Every change is published as a new version with a short summary and the date it takes effect. We tell you by push notification and email, in your language, with a link to the full new text. All versions stay readable at [malvoya-api-eu.onrender.com/legal/terms/versions](https://malvoya-api-eu.onrender.com/legal/terms/versions).
+- Changes to your disadvantage are announced at least 30 days before they take effect, unless the law requires a change sooner.
+- Once a new version is in effect, the app asks you to accept it before your next order. Until you do, you can still sign in, see your orders, returns and receipts, contact support, export your data and delete your account. If you do not agree, you can delete your account at any time; orders already placed stay under the terms that applied when you placed them.

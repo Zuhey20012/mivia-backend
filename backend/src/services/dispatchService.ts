@@ -77,10 +77,24 @@ export async function offerOrderToCouriers(orderId: number) {
 
   await prisma.order.update({ where: { id: orderId }, data: { lastOfferAt: new Date() } });
 
-  const couriers = await prisma.courier.findMany({
-    where: { isApproved: true, isActive: true, currentOrderId: null },
-    select: { id: true, userId: true, latitude: true, longitude: true, locationAt: true, updatedAt: true },
-  });
+  // Only couriers inside a box around the store are read (the radius check below is exact); when none is near,
+  // the offer goes to every online courier, read in a bounded batch. Keeps dispatch cheap with thousands online.
+  const courierSelect = { id: true, userId: true, latitude: true, longitude: true, locationAt: true, updatedAt: true } as const;
+  const online = { isApproved: true, isActive: true, currentOrderId: null };
+  const sLat = order.store.latitude, sLng = order.store.longitude;
+  const dLat = OFFER_RADIUS_KM / 111;
+  const dLng = sLat !== null ? OFFER_RADIUS_KM / (111 * Math.max(0.01, Math.cos((sLat * Math.PI) / 180))) : 0;
+  let couriers = sLat !== null && sLng !== null
+    ? await prisma.courier.findMany({
+        where: { ...online, latitude: { gte: sLat - dLat, lte: sLat + dLat }, longitude: { gte: sLng - dLng, lte: sLng + dLng } },
+        select: courierSelect, take: 500,
+      })
+    : [];
+  const anyNearby = couriers.some((c) => c.latitude !== null && c.longitude !== null && Date.now() - c.updatedAt.getTime() < LOCATION_FRESH_MS
+    && haversineKm(sLat!, sLng!, c.latitude, c.longitude) <= OFFER_RADIUS_KM);
+  if (!anyNearby) {
+    couriers = await prisma.courier.findMany({ where: online, select: courierSelect, orderBy: { updatedAt: "desc" }, take: 2_000 });
+  }
 
   const nearby =
     order.store.latitude !== null && order.store.longitude !== null

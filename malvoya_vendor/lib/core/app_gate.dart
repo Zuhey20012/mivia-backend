@@ -49,7 +49,10 @@ class _AppGateState extends State<AppGate> with WidgetsBindingObserver {
     try {
       final info = await PackageInfo.fromPlatform();
       final uri = Uri.parse('${AppConstants.apiBase}/app-config').replace(queryParameters: {'app': widget.app, 'build': info.buildNumber});
-      final res = await http.get(uri, headers: {'Accept-Language': LocaleProvider.currentCode}).timeout(const Duration(seconds: 8));
+      final res = await http.get(uri, headers: {
+        'Accept-Language': LocaleProvider.currentCode,
+        'X-App-Version': info.buildNumber.isEmpty ? info.version : '${info.version}+${info.buildNumber}',
+      }).timeout(const Duration(seconds: 8));
       if (res.statusCode != 200 || !mounted) return;
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       final maintenance = data['maintenance'] as Map?;

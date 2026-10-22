@@ -3,6 +3,7 @@ import { z } from "zod";
 import { auth, requireRole, AuthRequest } from "../../middleware/auth";
 import { positiveId, sendError } from "../../lib/errors";
 import * as imports from "./imports.service";
+import { requireAgreement } from "../legal/agreements";
 
 /**
  * Catalogue import for stores: /products/import/{shopify,woocommerce,csv} start a job (202), GET reads jobs,
@@ -81,7 +82,7 @@ router.get("/products/import/:id(\\d+)", ...vendor, async (req: AuthRequest, res
   } catch (e) { sendError(res, e); }
 });
 
-router.post("/products/import/:id(\\d+)/publish", ...vendor, async (req: AuthRequest, res: Response) => {
+router.post("/products/import/:id(\\d+)/publish", ...vendor, requireAgreement(), async (req: AuthRequest, res: Response) => {
   const id = positiveId(req.params.id);
   if (!id) return res.status(404).json({ ok: false, error: "Import not found" });
   try {

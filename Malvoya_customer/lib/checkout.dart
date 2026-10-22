@@ -409,6 +409,13 @@ class _CheckoutPageState extends State<CheckoutPage> {
             },
     );
     if (!mounted) return;
+    if (res.status == 428) {
+      // The agreement sheet was closed without accepting (ApiClient resends the order after an
+      // acceptance). Nothing was reserved; the bag and the price stay as they are.
+      _fail(tr(context, 'Accept the Terms of Service to place your order. Your bag is saved.',
+          'Hyväksy käyttöehdot, niin voit tehdä tilauksen. Ostoskassisi on tallessa.'));
+      return;
+    }
     if (!res.ok) {
       _fail(res.errorText(context) ?? tr(context, 'The order could not be placed. Please try again.', 'Tilausta ei voitu tehdä. Yritä uudelleen.'));
       // The store may have closed, the time slot or the promo code stopped working: fetch the current price

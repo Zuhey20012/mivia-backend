@@ -17,7 +17,9 @@
   - business sellers: legal name, business ID (Y-tunnus), VAT number if registered, and registered address with country;
   - private sellers: legal name, date of birth, tax identification number (for Finnish residents the personal identity code, henkilötunnus) and home address with country.
 - Malvoya reports, per seller, these details, the number of sales in the year, and per quarter the amounts paid or credited to the Seller (sales less refunds and Malvoya's commission) and the commission Malvoya withheld. Sellers with fewer than 30 sales and at most 2 000 € in the year are not reported. Malvoya keeps the details and report data for 10 years after the year concerned, also if the Seller closes their store or deletes their account. The tax identification number is stored encrypted and shown to the Seller only in part; only Malvoya's administrators can see it in full, for the report. The Seller keeps the details up to date. If a store with sales has not given its details, Malvoya reminds the Seller in the app and by email, at most every 30 days and twice a year. Malvoya may withhold payouts or suspend a store whose details are missing or wrong after two reminders, as the directive requires; this is a decision made by a person, never automatically.
-- A store becomes visible to customers only after Malvoya has reviewed these details.
+- **Business ID check.** When a business seller enters its Y-tunnus, Malvoya checks its form and check digit and looks it up in the Finnish Patent and Registration Office's free open company register (YTJ): whether it exists, the registered name, the registration date and whether the company is active. The result helps Malvoya's team review the store; it never approves or rejects a store by itself. Private sellers have no Y-tunnus and skip this check.
+- The store app shows a checklist of what is still needed before review (store details, map location, opening hours, payouts, a first product, tax details, these terms, and for businesses the business ID check). When everything is done, Malvoya's team is told that the store is ready for review.
+- A store becomes visible to customers only after a person at Malvoya has reviewed these details.
 
 ## 3. Listings
 
@@ -51,6 +53,14 @@ The Seller may post short videos and photos ("drops") of their own products. The
 ## 7. Ranking
 
 Stores are listed by distance to the customer (when location is shared) and by rating. Malvoya does not sell better placement. [UPDATE IF PAID PLACEMENT IS INTRODUCED.]
+
+## 7a. Accepting these terms and changes to them
+
+- The Seller accepts these terms when creating the store account or in the store app. Malvoya records which version was accepted, when, how, the network address shortened to its first part (IPv4: first three of four numbers; IPv6: first three of eight groups), the app or browser type and the app version, and emails the Seller a copy of the full text accepted. The copy can be opened in the store app at any time.
+- Every change is published as a new version with a summary of what changes and the date it takes effect. Malvoya tells the Seller by push notification and email, in the Seller's language, with a link to the full new text. All versions stay readable at [malvoya-api-eu.onrender.com/legal/sellers/versions](https://malvoya-api-eu.onrender.com/legal/sellers/versions).
+- A change takes effect **no earlier than 15 days** after it is announced (EU Platform-to-Business Regulation 2019/1150, Art. 3), unless the law requires Malvoya to make the change sooner; the notice then says so and why. Malvoya may give longer notice when a change needs more work from sellers.
+- **The Seller may end the agreement before a change takes effect**, free of charge, by closing the store (store app → Account → Delete account) or by telling Malvoya support. Orders already accepted are completed and paid out under the terms that applied to them.
+- Once a new version is in effect, the store app asks the Seller to accept it before accepting new orders or publishing products. Until then the Seller can still sign in, see and finish orders already accepted, handle returns, receive payouts, see statements, contact support, export data and close the store.
 
 ## 8. Suspension and ending the agreement
 

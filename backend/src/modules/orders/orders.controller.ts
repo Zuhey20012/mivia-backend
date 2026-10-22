@@ -1,4 +1,5 @@
 import { Response } from "express";
+import { reportError } from "../../lib/sentry";
 import { z } from "zod";
 import { AuthRequest } from "../../middleware/auth";
 import {
@@ -19,10 +20,26 @@ export function sendOrderError(res: Response, e: any) {
   if (e instanceof ordersService.OrderError) return res.status(e.status).json({ ok: false, error: e.message });
   if (typeof e?.status === "number") return res.status(e.status).json({ ok: false, error: e.message });
   console.error(e);
+  reportError(e, { tags: { area: "orders" } });
   if (typeof e?.type === "string" && e.type.startsWith("Stripe")) {
     return res.status(502).json({ ok: false, error: "Payment could not be started. Please try again." });
   }
   return res.status(500).json({ ok: false, error: "Something went wrong" });
+}
+
+/** `?limit=` (capped per list) and `?before=<id>` (the `nextBefore` of the previous page). Both optional. */
+function listPage(req: AuthRequest): ordersService.ListPage {
+  const limit = Number(req.query.limit);
+  const before = Number(req.query.before);
+  return {
+    ...(Number.isInteger(limit) && limit > 0 ? { limit } : {}),
+    ...(Number.isInteger(before) && before > 0 ? { before } : {}),
+  };
+}
+/** The id to pass as `before` for the next page, or null when this page was the last. */
+function nextBefore(rows: { id: number }[], page: ordersService.ListPage, max: number) {
+  const take = Math.min(page.limit ?? max, max);
+  return rows.length >= take && rows.length ? rows[rows.length - 1].id : null;
 }
 
 // ─── ORDERS ──────────────────────────────────────────────────────────────────
@@ -45,7 +62,9 @@ export async function quoteOrder(req: AuthRequest, res: Response) {
 
 export async function listOrders(req: AuthRequest, res: Response) {
   try {
-    res.json({ ok: true, orders: await ordersService.listOrdersFor(req.user!) });
+    const page = listPage(req);
+    const orders = await ordersService.listOrdersFor(req.user!, page);
+    res.json({ ok: true, orders, nextBefore: nextBefore(orders, page, req.user!.role === "COURIER" ? 100 : 200) });
   } catch (e) { sendOrderError(res, e); }
 }
 
@@ -133,7 +152,9 @@ export async function createRental(req: AuthRequest, res: Response) {
 
 export async function listRentals(req: AuthRequest, res: Response) {
   try {
-    res.json({ ok: true, rentals: await ordersService.listRentals(req.user!.id) });
+    const page = listPage(req);
+    const rentals = await ordersService.listRentals(req.user!.id, page);
+    res.json({ ok: true, rentals, nextBefore: nextBefore(rentals, page, 200) });
   } catch (e) { sendOrderError(res, e); }
 }
 
@@ -157,7 +178,9 @@ export async function createReturn(req: AuthRequest, res: Response) {
 
 export async function listReturns(req: AuthRequest, res: Response) {
   try {
-    res.json({ ok: true, returns: await ordersService.listReturns(req.user!) });
+    const page = listPage(req);
+    const returns = await ordersService.listReturns(req.user!, page);
+    res.json({ ok: true, returns, nextBefore: nextBefore(returns, page, 100) });
   } catch (e) { sendOrderError(res, e); }
 }
 

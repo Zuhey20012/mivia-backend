@@ -3,6 +3,7 @@ import pino from "pino";
 import { env } from "../config/env";
 import { formatCents } from "../utils/pricing";
 import { Locale, Text, localeOfEmail, pick, t } from "../lib/i18n";
+import { defineJob, enqueue, queueIsRemote } from "../lib/queue";
 
 const logger = pino({ name: "Notifications" });
 
@@ -10,6 +11,8 @@ export interface DeliveryResult {
   delivered: boolean;
   /** true when no provider is configured and we are outside production (dev convenience) */
   simulated?: boolean;
+  /** true when the email was handed to the background queue (REDIS_URL set); it is sent with retries */
+  queued?: boolean;
 }
 
 const BRAND = "Malvoya";
@@ -68,15 +71,38 @@ export async function sendEmail(to: string, subject: string, html: string, text:
     logger.info({ to: mask(to), subject, ...(opts.sensitive ? {} : { text }) }, "[dev] Email not sent (SMTP not configured)");
     return { delivered: true, simulated: true };
   }
+  // With Redis, ordinary emails go through the background queue (retries, no waiting on SMTP in the request).
+  // Sign-in and reset codes (sensitive) are always sent directly, so codes are never stored in Redis.
+  if (queueIsRemote() && !opts.sensitive) {
+    await enqueue<EmailJob>("email", { to, subject, html, text });
+    return { delivered: true, queued: true };
+  }
   try {
-    // Send as the mailbox we log in with (e.g. a Gmail address); a foreign domain would fail SPF/DMARC
-    await transport.sendMail({ from: process.env.SMTP_FROM || `"${BRAND}" <${process.env.SMTP_USER}>`, to, subject, html, text });
+    await deliverEmail(transport, { to, subject, html, text });
     return { delivered: true };
   } catch (err: any) {
     logger.error({ err: err?.message, to: mask(to) }, "Email delivery failed");
     return { delivered: false };
   }
 }
+
+type EmailJob = { to: string; subject: string; html: string; text: string };
+
+function deliverEmail(transport: NonNullable<ReturnType<typeof getTransporter>>, m: EmailJob) {
+  // Send as the mailbox we log in with (e.g. a Gmail address); a foreign domain would fail SPF/DMARC
+  return transport.sendMail({ from: process.env.SMTP_FROM || `"${BRAND}" <${process.env.SMTP_USER}>`, to: m.to, subject: m.subject, html: m.html, text: m.text });
+}
+
+defineJob<EmailJob>("email", async (m) => {
+  const transport = getTransporter();
+  if (!transport) return;
+  try {
+    await deliverEmail(transport, m);
+  } catch (err: any) {
+    logger.warn({ err: err?.message, to: mask(m.to) }, "Email delivery failed; will retry");
+    throw new Error(err?.message || "Email delivery failed"); // the error never carries the address
+  }
+}, { attempts: 5, backoffMs: 5_000 });
 
 export async function sendSms(to: string, body: string, opts: { sensitive?: boolean } = {}): Promise<DeliveryResult> {
   const phone = to.replace(/[^0-9+]/g, "");

@@ -5,6 +5,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'config/theme.dart';
 import 'core/font_licenses.dart';
+import 'core/api_client.dart';
 import 'core/app_gate.dart';
 import 'core/connectivity.dart';
 import 'screens/login.dart';
@@ -18,6 +19,8 @@ import 'core/push_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   registerFontLicenses();
+  // Sent as X-App-Version with every request (the server records it with agreement acceptances)
+  await ApiClient.loadAppVersion();
   // Shows a "No internet" strip and lets screens refresh when the connection comes back
   ConnectivityService.instance.start();
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);

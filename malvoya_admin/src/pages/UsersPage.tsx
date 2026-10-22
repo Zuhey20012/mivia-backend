@@ -1,11 +1,45 @@
-import { useEffect, useState } from 'react';
-import { Search, Users, ShieldOff, RefreshCw } from 'lucide-react';
+import { Fragment, useEffect, useState } from 'react';
+import { Search, Users, ShieldOff, RefreshCw, ScrollText } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../utils/api';
 
 interface User {
   id: number; name: string; email: string;
   role: string; phone: string | null; createdAt: string;
+}
+
+// Acceptance records (API 2.11): which agreement version the user accepted, when and how
+interface Acceptance {
+  id: number; doc: string; version: string; acceptedAt: string; method: string;
+  ip: string | null; userAgent: string | null; appVersion: string | null;
+}
+const DOC_NAMES: Record<string,string> = { terms: 'Terms of Service', 'seller-terms': 'Seller Terms', 'courier-agreement': 'Courier Agreement', privacy: 'Privacy Policy' };
+const METHODS: Record<string,string> = { register: 'at sign-up', in_app: 'in the app', admin_import: 'imported' };
+
+function AgreementHistory({ userId }: { userId: number }) {
+  const [rows, setRows] = useState<Acceptance[] | null>(null);
+  useEffect(() => {
+    api.get(`/admin/users/${userId}/agreements`).then(r => setRows(r.data.acceptances)).catch(() => setRows([]));
+  }, [userId]);
+  if (!rows) return <p style={{ color:'#8E8E93',fontSize:'0.8125rem' }}>Loading agreements…</p>;
+  if (!rows.length) return <p style={{ color:'#8E8E93',fontSize:'0.8125rem' }}>No agreement accepted yet.</p>;
+  return (
+    <table style={{ width:'100%',fontSize:'0.8125rem',borderCollapse:'collapse' }}>
+      <thead><tr style={{ color:'#8E8E93',textAlign:'left' }}>{['Document','Version','Accepted','How','Network (truncated)','App'].map(h => <th key={h} style={{ padding:'0.375rem 0.5rem',fontWeight:500 }}>{h}</th>)}</tr></thead>
+      <tbody>
+        {rows.map(a => (
+          <tr key={a.id}>
+            <td style={{ padding:'0.375rem 0.5rem' }}>{DOC_NAMES[a.doc] ?? a.doc}</td>
+            <td style={{ padding:'0.375rem 0.5rem' }}><code>{a.version}</code></td>
+            <td style={{ padding:'0.375rem 0.5rem',whiteSpace:'nowrap' }}>{new Date(a.acceptedAt).toLocaleString('fi-FI')}</td>
+            <td style={{ padding:'0.375rem 0.5rem' }}>{METHODS[a.method] ?? a.method}</td>
+            <td style={{ padding:'0.375rem 0.5rem' }}>{a.ip ?? '—'}</td>
+            <td style={{ padding:'0.375rem 0.5rem' }} title={a.userAgent ?? ''}>{a.appVersion ?? '—'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
 }
 
 const roleBadge: Record<string,string> = {
@@ -19,6 +53,7 @@ export default function UsersPage() {
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('ALL');
   const [banId, setBanId] = useState<number|null>(null);
+  const [openId, setOpenId] = useState<number|null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -104,7 +139,8 @@ export default function UsersPage() {
             </thead>
             <tbody>
               {filtered.map(u => (
-                <tr key={u.id} className="table-row">
+                <Fragment key={u.id}>
+                <tr className="table-row">
                   <td style={{ padding:'1rem 1.5rem' }}>
                     <div style={{ display:'flex',alignItems:'center',gap:'0.75rem' }}>
                       <div style={{ width:'32px',height:'32px',borderRadius:'50%',background:'#F5F5F7',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:600,fontSize:'0.875rem',flexShrink:0 }}>
@@ -126,6 +162,12 @@ export default function UsersPage() {
                   <td style={{ padding:'1rem 1.5rem' }}>
                     <div style={{ display:'flex',gap:'0.5rem' }}>
                       {u.role !== 'ADMIN' && (
+                        <button className="apple-btn-secondary" style={{ padding:'0.375rem 0.75rem',fontSize:'0.75rem',display:'flex',alignItems:'center',gap:'0.25rem' }}
+                          onClick={() => setOpenId(openId === u.id ? null : u.id)}>
+                          <ScrollText style={{ width:'12px',height:'12px' }} /> Agreements
+                        </button>
+                      )}
+                      {u.role !== 'ADMIN' && (
                         <button className="apple-btn-danger" style={{ padding:'0.375rem 0.75rem',fontSize:'0.75rem',display:'flex',alignItems:'center',gap:'0.25rem' }}
                           onClick={() => ban(u.id, u.name)} disabled={banId === u.id}>
                           <ShieldOff style={{ width:'12px',height:'12px' }} />
@@ -135,6 +177,10 @@ export default function UsersPage() {
                     </div>
                   </td>
                 </tr>
+                {openId === u.id && (
+                  <tr><td colSpan={5} style={{ padding:'0.5rem 1.5rem 1.25rem',background:'#FAFAFC' }}><AgreementHistory userId={u.id} /></td></tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>

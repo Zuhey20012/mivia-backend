@@ -19,9 +19,11 @@ const TZ = "Europe/Helsinki";
 const toMin = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
 
 /** Weekday (0 = mon) and minute of day in Helsinki for the given instant. */
+// Creating an Intl.DateTimeFormat is expensive (it was the top CPU cost of the store list under load): make it once
+const clockFmt = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+
 function helsinkiClock(now: Date) {
-  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
-    .formatToParts(now);
+  const parts = clockFmt.formatToParts(now);
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
   const day = DAYS.indexOf(get("weekday").toLowerCase().slice(0, 3) as Day);
   return { day, minute: Number(get("hour")) * 60 + Number(get("minute")) };

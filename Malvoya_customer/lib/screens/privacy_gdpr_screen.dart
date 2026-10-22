@@ -17,6 +17,7 @@ import '../local_notification_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'address_management_screen.dart';
 import 'support_hub_screen.dart';
+import 'agreements_screen.dart';
 import '../core/haptics.dart';
 
 /// Privacy: download your data (GDPR art. 15), correct it, ask about it, and delete the account
@@ -417,6 +418,18 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                           trailing: const Icon(Icons.open_in_new_rounded, size: 18),
                           onTap: () => openLegal('privacy'),
                         ),
+                        if (auth.isAuthenticated) ...[
+                          Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
+                          ListTile(
+                            leading: const Icon(Icons.handshake_outlined, color: AppTheme.primary),
+                            title: Text(tr(context, 'Agreements', 'Sopimukset'),
+                                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
+                            subtitle: Text(tr(context, 'What you have accepted and when, with copies', 'Mitä olet hyväksynyt ja milloin, sekä kopiot'),
+                                style: TextStyle(fontSize: 12, color: textSecondary)),
+                            trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
+                            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AgreementsScreen())),
+                          ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 16),

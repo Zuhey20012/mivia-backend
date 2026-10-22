@@ -4,6 +4,7 @@ import { listStores, getStore, getMyStore, createStore, updateStore } from "./st
 import { auth, optionalAuth, requireRole, AuthRequest } from "../../middleware/auth";
 import { sendError } from "../../lib/errors";
 import { listMyProducts } from "../products/products.service";
+import { storeOnboarding, checkReadyForApproval } from "../onboarding/onboarding";
 
 const router = Router();
 
@@ -22,6 +23,14 @@ router.get("/my/products", auth, requireRole("VENDOR"), async (req: AuthRequest,
   if (!q.success) return res.status(400).json({ ok: false, error: "Invalid page, limit or filter" });
   try {
     res.json({ ok: true, ...(await listMyProducts(req.user!.id, { ...q.data, q: q.data.q || undefined })) });
+  } catch (e) { sendError(res, e); }
+});
+// Onboarding checklist (2.11): { steps:[{key, done, title:{en,fi}, action}], percent, readyForApproval }
+router.get("/my/onboarding", auth, requireRole("VENDOR"), async (req: AuthRequest, res: Response) => {
+  try {
+    const o = await storeOnboarding(req.user!.id);
+    if (o.readyForApproval) await checkReadyForApproval(req.user!.id, "VENDOR");
+    res.json({ ok: true, ...o });
   } catch (e) { sendError(res, e); }
 });
 router.get("/:id(\\d+)", optionalAuth, getStore);

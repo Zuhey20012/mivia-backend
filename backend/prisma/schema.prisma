@@ -24,8 +24,15 @@ enum StoreCategory {
   ACCESSORIES
   HOME_DECOR
   HANDMADE
-  ECO_FRIENDLY
-  OTHER
+  OTHER // ECO_FRIENDLY was removed in 2.12.0 (a generic environmental claim, Directive (EU) 2024/825); those stores became OTHER
+}
+
+// Who a product is for (since 2.12.0). Unisex products appear under both Women and Men; beauty defaults to Unisex.
+enum Audience {
+  WOMEN
+  MEN
+  KIDS
+  UNISEX
 }
 
 enum ProductCondition {
@@ -175,15 +182,17 @@ model User {
 
   // Language for push notifications and emails ("fi" | "en"), from the apps' Accept-Language or PATCH /me.
   // null = never told: messages go out in English.
-  locale           String?
+  locale               String?
   // Access tokens issued before this moment are refused (a password reset signs every device out)
-  tokensValidAfter DateTime?
+  tokensValidAfter     DateTime?
   // Agreement accepted at registration (customer terms / seller terms / courier agreement) and its version
-  termsAcceptedAt  DateTime?
-  termsVersion     String?
+  termsAcceptedAt      DateTime?
+  termsVersion         String?
   // Users this user blocked (their comments and reviews are hidden for this user), and who blocked this user
-  blocks           UserBlock[] @relation("Blocker")
-  blockedBy        UserBlock[] @relation("Blocked")
+  blocks               UserBlock[]           @relation("Blocker")
+  blockedBy            UserBlock[]           @relation("Blocked")
+  // Every agreement version the user accepted, with proof (since 2.11.0)
+  agreementAcceptances AgreementAcceptance[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -206,17 +215,16 @@ model RefreshToken {
 // ─────────────────────────────────────────────
 
 model Store {
-  id            Int           @id @default(autoincrement())
-  ownerId       Int           @unique
-  owner         User          @relation(fields: [ownerId], references: [id])
-  name          String
-  description   String?
-  category      StoreCategory
-  logoUrl       String?
-  bannerUrl     String?
-  isHomeBased   Boolean       @default(false)
-  isVerified    Boolean       @default(false)
-  isEcoFriendly Boolean       @default(false)
+  id          Int           @id @default(autoincrement())
+  ownerId     Int           @unique
+  owner       User          @relation(fields: [ownerId], references: [id])
+  name        String
+  description String?
+  category    StoreCategory
+  logoUrl     String?
+  bannerUrl   String?
+  isHomeBased Boolean       @default(false)
+  isVerified  Boolean       @default(false)
 
   address   String?
   latitude  Float?
@@ -257,11 +265,29 @@ model Store {
   taxReminderCount Int       @default(0) // reminders sent in taxReminderYear
   taxReminderYear  Int?
 
+  // Automatic business check (since 2.11.0): the Y-tunnus looked up in the PRH/YTJ open data. Pre-fills the admin's
+  // decision, never approves by itself. Status: matched | name_mismatch | not_found | inactive | unavailable (null = not checked)
+  businessCheckStatus    String?
+  businessRegisteredName String?
+  businessRegisteredAt   DateTime? @db.Date
+  businessCheckedAt      DateTime?
+  // Every onboarding step except approval done: set once, when the admin was told (System → ready for approval)
+  readyForApprovalAt     DateTime?
+
+  // Product-safety self-certification (GPSR Art. 22(10)(b), since 2.12.0): "I only offer products that comply with EU
+  // law", given once before the first product is published; the version is a hash of the pledge text accepted
+  safetyPledgeAt      DateTime?
+  safetyPledgeVersion String?
+
+  economicOperators EconomicOperator[]
+  certificates      Certificate[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Query-path indexes (Postgres does not index foreign keys automatically)
   @@index([isVerified, rating])
+  @@index([isVerified, readyForApprovalAt])
 }
 
 // Seller identity and tax data the platform must collect and report to Vero once a year (DAC7, Council
@@ -297,10 +323,43 @@ model Product {
 
   name        String
   description String?
-  category    String // "Dress", "Lipstick", "Vintage Bag", etc.
+  // Legacy free text kept for older app builds: since 2.12.0 the subcategory's English name ("Dresses")
+  category    String
   condition   ProductCondition @default(NEW)
   images      String[] // Cloudinary URLs
-  tags        String[] // ["eco-friendly", "handmade", "vintage"]
+  tags        String[] // ["handmade", "vintage"]; generic green words are never stored
+
+  // Taxonomy and category-specific data (since 2.12.0). categoryId is always a subcategory (a leaf of the tree);
+  // null = not categorised yet (cannot be published). attributes are validated per template (catalog/attributes.ts).
+  categoryId    Int?
+  categoryRef   Category? @relation(fields: [categoryId], references: [id])
+  audience      Audience  @default(UNISEX)
+  attributes    Json      @default("{}")
+  // Nominal content of the pack (cosmetics, fragrance): the unit price per litre / kg is computed from it
+  contentAmount Float?
+  contentUnit   String? // "ml" | "g" | "pcs"
+
+  // Hygiene seal (cosmetics, fragrance, sealed piercing jewellery/earrings only): no right of withdrawal once opened
+  hygieneSealed Boolean @default(false)
+
+  // Product safety (GPSR Art. 19): manufacturer, EU responsible person, type/model, identifiers, warnings FI + SV
+  manufacturerId      Int?
+  manufacturer        EconomicOperator? @relation("ProductManufacturer", fields: [manufacturerId], references: [id])
+  responsiblePersonId Int?
+  responsiblePerson   EconomicOperator? @relation("ProductResponsiblePerson", fields: [responsiblePersonId], references: [id])
+  productModel        String?
+  batchOrSerial       String?
+  warningsFi          String?
+  warningsSv          String?
+  warningsEn          String?
+  noWarnings          Boolean           @default(false) // the label carries no warnings (an explicit choice, not a blank)
+  safetyImages        String[] // photos of the label, warning panel, instructions
+
+  // Locked by Malvoya: the store cannot make it visible again ("RECALL" = product safety recall, "ADMIN" = notice decision)
+  lockedAt     DateTime?
+  lockedReason String?
+  // Catalogue import put it on hold (out-of-scope goods, e.g. candles or food supplements): cannot be published
+  importHold   String?
 
   // Sale
   canBeSold      Boolean @default(true)
@@ -328,10 +387,9 @@ model Product {
   deletedAt DateTime?
 
   // Flags
-  isEcoFriendly Boolean @default(false)
-  isHandmade    Boolean @default(false)
-  isSecondHand  Boolean @default(false)
-  isFeatured    Boolean @default(false)
+  isHandmade   Boolean @default(false)
+  isSecondHand Boolean @default(false)
+  isFeatured   Boolean @default(false)
 
   variants     ProductVariant[]
   orderItems   OrderItem[]
@@ -340,6 +398,10 @@ model Product {
   favorites    Favorite[]
   drops        Drop[]
   videos       ProductVideo[]
+  facets       ProductFacet[]
+  certificates ProductCertificate[]
+  reports      ProductReport[]
+  recalls      RecallProduct[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -349,6 +411,10 @@ model Product {
   @@index([storeId, isAvailable])
   @@index([importJobId])
   @@index([storeId, deletedAt])
+  @@index([categoryId, isAvailable])
+  @@index([manufacturerId])
+  @@index([responsiblePersonId])
+  @@index([gtin])
 }
 
 // Every sale price a product has had. A "was" price may only be shown when it is the lowest
@@ -389,6 +455,17 @@ model ProductVariant {
   sku              String? @unique
   stock            Int     @default(1)
   priceAdjustCents Int     @default(0) // adds to base price
+
+  // Option data (since 2.12.0): colour family, shade (makeup/nails), size measurements in cm, content per option
+  colourFamily  String?
+  shadeName     String?
+  shadeHex      String? // "#RRGGBB"
+  shadeFamily   String?
+  undertone     String?
+  finish        String?
+  measurements  Json? // { chest, waist, hips, insideLeg, height, length, footLengthCm, ... } in cm
+  contentAmount Float?
+  contentUnit   String? // "ml" | "g" | "pcs"
 
   orderItems  OrderItem[]
   rentalItems RentalItem[]
@@ -529,8 +606,10 @@ model OrderItem {
   variantId Int?
   variant   ProductVariant? @relation(fields: [variantId], references: [id])
 
-  quantity  Int
-  unitCents Int // price snapshot at time of purchase
+  quantity      Int
+  unitCents     Int // price snapshot at time of purchase
+  // The product was hygiene-sealed when bought (snapshot): no withdrawal once the seal is opened (KSL 6:16)
+  hygieneSealed Boolean @default(false)
 
   returnItems ReturnItem[]
 
@@ -615,6 +694,7 @@ model Return {
   storeNote      String? // the store's reason or notes (required when it rejects), shown to the customer
   refundCents    Int? // calculated after inspection
   damageDedCents Int?         @default(0) // deducted if damaged
+  sealIntact     Boolean? // the customer's answer for hygiene-sealed items (null = no sealed item, or a fault reason)
 
   status ReturnStatus @default(REQUESTED)
 
@@ -673,6 +753,12 @@ model Courier {
   rating       Float @default(0)
   totalRatings Int   @default(0)
 
+  // Onboarding (since 2.11.0): vehicle (bicycle | ebike | moped | scooter | car | on_foot), when the courier
+  // acknowledged how location is used, and when every step except approval was done (admin told once)
+  vehicleType          String?
+  locationDisclosureAt DateTime?
+  readyForApprovalAt   DateTime?
+
   orders  Order[]
   rentals Rental[]
   returns Return[]
@@ -684,6 +770,7 @@ model Courier {
 
   // Query-path indexes (Postgres does not index foreign keys automatically)
   @@index([isApproved, isActive])
+  @@index([isApproved, readyForApprovalAt])
 }
 
 // ─────────────────────────────────────────────
@@ -1142,4 +1229,234 @@ model AdminAuditLog {
   createdAt DateTime @default(now())
 
   @@index([entity, entityId, createdAt])
+}
+
+// ─────────────────────────────────────────────
+// LEGAL DOCUMENT VERSIONS AND ACCEPTANCES (since 2.11.0)
+// ─────────────────────────────────────────────
+
+// One row per published version of a legal text, with the full text as it was published. The first version of each
+// document is created at start-up (effective at once); every later one only when an admin publishes it with a notice
+// period (seller terms ≥ 15 days, EU P2B Art. 3; courier agreement ≥ 15 days; customer terms and privacy ≥ 0 days),
+// so a deploy never changes a contract by itself. The current version is the newest one whose effectiveAt has passed.
+model LegalVersion {
+  id                    Int       @id @default(autoincrement())
+  doc                   String // "terms" | "seller-terms" | "courier-agreement" | "privacy"
+  version               String // "<file>@<first 12 hex of the SHA-256 of the text>", same format as User.termsVersion
+  textSnapshot          String // the full Markdown text of this version
+  sha256                String
+  publishedAt           DateTime  @default(now())
+  effectiveAt           DateTime
+  summaryEn             String
+  summaryFi             String
+  noticeDays            Int // whole days between publishing and taking effect
+  legalObligation       Boolean   @default(false) // shorter notice because the law requires the change
+  legalObligationReason String?
+  publishedById         Int? // admin user; null for the first version created at start-up
+  notifiedAt            DateTime? // when the change notices went out
+  notifiedCount         Int       @default(0)
+
+  @@unique([doc, version])
+  @@index([doc, effectiveAt])
+}
+
+// Clickwrap proof: who accepted which version of which document, when, from where (IP truncated to /24 or /48),
+// with which app. Kept for the life of the account + 10 years (contract proof), also after the account is deleted.
+model AgreementAcceptance {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  doc        String
+  version    String
+  acceptedAt DateTime @default(now())
+  ip         String? // truncated: IPv4 /24, IPv6 /48
+  userAgent  String? // at most 200 characters
+  appVersion String? // X-App-Version header, when the app sends it
+  method     String // "register" | "in_app" | "admin_import"
+
+  @@unique([userId, doc, version])
+  @@index([doc, version])
+}
+
+// ─────────────────────────────────────────────
+// CATEGORY TAXONOMY, PRODUCT FACETS, SAFETY AND CERTIFICATES (since 2.12.0)
+// ─────────────────────────────────────────────
+
+// The category tree (docs/compliance/product-data-spec.md §1.3), seeded at start-up from catalog/taxonomy.ts. Slugs never
+// change; admins may rename, reorder and hide nodes. template = the attribute template of a subcategory (null for top
+// levels); collections (second-hand) are saved filters with no products filed under them.
+model Category {
+  id           Int        @id @default(autoincrement())
+  slug         String     @unique
+  parentId     Int?
+  parent       Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children     Category[] @relation("CategoryTree")
+  nameEn       String
+  nameFi       String
+  icon         String // Material icon name
+  tileColor    String // Birch palette name: lilac, clay, mint, sunshineLight, peach, sand
+  sort         Int        @default(0)
+  template     String?
+  isCollection Boolean    @default(false)
+  active       Boolean    @default(true)
+  products     Product[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([parentId, sort])
+}
+
+// Filterable values of a product (product attributes and option values), rewritten on every save, so search filters and
+// facet counts use one index instead of JSON scans.
+model ProductFacet {
+  productId Int
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  key       String
+  value     String
+
+  @@id([productId, key, value])
+  @@index([key, value])
+}
+
+// Manufacturer / EU responsible person / cosmetics responsible person records of a store, reusable across products
+// (GPSR Art. 19(a)-(b), Cosmetics Regulation Art. 4 and 19(1)(a)). One record can serve in several roles.
+model EconomicOperator {
+  id          Int      @id @default(autoincrement())
+  storeId     Int
+  store       Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  name        String
+  addressLine String
+  postalCode  String
+  city        String
+  countryCode String // ISO 3166-1 alpha-2
+  email       String?
+  url         String?
+  phone       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  manufacturedProducts Product[] @relation("ProductManufacturer")
+  responsibleProducts  Product[] @relation("ProductResponsiblePerson")
+
+  @@index([storeId])
+}
+
+enum CertificateStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+// A third-party certificate a store holds (EU Ecolabel, Nordic Swan, GOTS, ...), replacing the old self-declared eco flag.
+// Only VERIFIED certificates whose validUntil has not passed are shown to shoppers or used in filters.
+model Certificate {
+  id                   Int                  @id @default(autoincrement())
+  storeId              Int
+  store                Store                @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  scheme               String // key from catalog/certificates.ts (fixed list)
+  licenceNumber        String
+  holderName           String
+  scope                String // "whole_product" | "component"
+  componentDescription String?
+  validUntil           DateTime             @db.Date
+  evidenceUrl          String // the certificate file, uploaded to the store's own folder
+  publicVerifyUrl      String?
+  status               CertificateStatus    @default(PENDING)
+  reviewedById         Int?
+  reviewedAt           DateTime?
+  rejectionReason      String?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  products             ProductCertificate[]
+
+  @@index([status, createdAt])
+  @@index([storeId])
+}
+
+model ProductCertificate {
+  productId     Int
+  product       Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  certificateId Int
+  certificate   Certificate @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+
+  @@id([productId, certificateId])
+  @@index([certificateId])
+}
+
+// "Report this product" (DSA Art. 16 notice, GPSR Art. 22(8): product-safety notices handled within 3 working days).
+// Works signed in or not; reporterEmail is an optional contact for the outcome. Personal data: removed with the account.
+model ProductReport {
+  id             Int          @id @default(autoincrement())
+  productId      Int
+  product        Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  reporterId     Int?
+  reporterEmail  String?
+  reason         String // unsafe | counterfeit | illegal | misleading | other
+  details        String?
+  status         ReportStatus @default(OPEN)
+  resolution     String? // "dismissed" | "listing_removed"
+  resolutionNote String?
+  resolvedById   Int?
+  resolvedAt     DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@index([status, createdAt])
+  @@index([productId])
+  @@index([reporterId])
+}
+
+enum RecallStatus {
+  ACTIVE
+  CLOSED
+}
+
+// Product safety recall (GPSR Art. 22(12), 35-37): every identical listing is locked and every buyer is told directly.
+model Recall {
+  id               Int                  @id @default(autoincrement())
+  title            String
+  reasonFi         String // the hazard, without softening words
+  reasonEn         String
+  reasonSv         String?
+  remedyFi         String // what to do and how the remedy works
+  remedyEn         String
+  remedySv         String?
+  remedies         String[] // repair | replacement | refund
+  contact          String // free phone number or online service
+  status           RecallStatus         @default(ACTIVE)
+  createdById      Int
+  closedAt         DateTime?
+  buyersNotifiedAt DateTime?
+  notifiedUsers    Int                  @default(0)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  products         RecallProduct[]
+  notifications    RecallNotification[]
+
+  @@index([status, createdAt])
+}
+
+model RecallProduct {
+  recallId  Int
+  recall    Recall  @relation(fields: [recallId], references: [id], onDelete: Cascade)
+  productId Int
+  product   Product @relation(fields: [productId], references: [id])
+  matchedBy String // "selected" | "gtin" | "brand_model"
+
+  @@id([recallId, productId])
+  @@index([productId])
+}
+
+// One direct recall notice to a buyer per channel (a legal obligation: sent even when marketing is switched off).
+model RecallNotification {
+  id        Int      @id @default(autoincrement())
+  recallId  Int
+  recall    Recall   @relation(fields: [recallId], references: [id], onDelete: Cascade)
+  userId    Int
+  channel   String // "push" | "email"
+  delivered Boolean
+  locale    String
+  sentAt    DateTime @default(now())
+
+  @@unique([recallId, userId, channel])
+  @@index([userId])
 }

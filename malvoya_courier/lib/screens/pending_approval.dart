@@ -7,9 +7,12 @@ import '../core/delete_account_tile.dart';
 import '../core/legal_links.dart';
 import '../core/push_service.dart';
 import '../core/strings.dart';
+import '../widgets/onboarding_checklist.dart';
+import 'agreements_screen.dart';
 import 'help_screen.dart';
 
-/// Shown until an admin approves the courier on the server.
+/// Shown until an admin approves the courier on the server, with the server's onboarding checklist
+/// (API 2.11; older servers get the plain explanation instead).
 /// Identity and right-to-work documents are checked by the Malvoya team, never collected in this app.
 /// This screen checks the status itself: when the app comes back to the foreground, when a push
 /// arrives while it is open, and every minute while it is on screen. Once approved, the app's home
@@ -25,6 +28,9 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> with Widg
   bool _checking = false;
   DateTime? _lastChecked;
   Timer? _timer;
+  final _checklist = GlobalKey<OnboardingChecklistState>();
+  // From the checklist: null = no checklist from the server (older API or not loaded)
+  bool? _readyForApproval;
 
   @override
   void initState() {
@@ -66,6 +72,8 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> with Widg
     setState(() => _checking = true);
     final approved = await Provider.of<AuthService>(context, listen: false).refreshApprovalStatus();
     if (!mounted) return;
+    final checklist = _checklist.currentState;
+    if (!approved && checklist != null) unawaited(checklist.reload());
     setState(() {
       _checking = false;
       _lastChecked = DateTime.now();
@@ -110,11 +118,40 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> with Widg
               ),
               const SizedBox(height: 10),
               Text(
-                tr(context, 'Your courier application is being reviewed.', 'Lähettihakemuksesi on tarkistettavana.'),
+                _readyForApproval == false
+                    ? tr(context, 'Finish the steps below. Then the Malvoya team reviews your application.',
+                        'Tee alla olevat vaiheet. Sen jälkeen Malvoyan tiimi käsittelee hakemuksesi.')
+                    : tr(context, 'Your courier application is being reviewed.', 'Lähettihakemuksesi on tarkistettavana.'),
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 16, height: 1.4, color: AppTheme.textSecondary),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 24),
+              OnboardingChecklist(
+                key: _checklist,
+                onLoaded: (data) {
+                  final ready = data == null ? null : data['readyForApproval'] == true;
+                  if (mounted && ready != _readyForApproval) setState(() => _readyForApproval = ready);
+                },
+                // Servers before 2.11 have no checklist: the plain explanation
+                fallback: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  _step(Icons.description_outlined, tr(context, 'Courier agreement', 'Lähettisopimus'),
+                      tr(context, 'You deliver as an independent entrepreneur under the courier agreement. Please read it before your first delivery.',
+                          'Toimitat itsenäisenä yrittäjänä lähettisopimuksen mukaisesti. Lue se ennen ensimmäistä toimitusta.')),
+                  _step(Icons.check_circle_outline, tr(context, 'Then: start delivering', 'Sitten: aloita toimitukset'),
+                      tr(context, 'Once approved, go online when it suits you and accept the jobs you want. Malvoya is just starting, so jobs may be rare at first.',
+                          'Hyväksynnän jälkeen mene linjoille silloin kun sinulle sopii ja ota haluamasi keikat. Malvoya on vasta aloittamassa, joten keikkoja voi aluksi olla harvoin.')),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                      onPressed: () => openLegal('couriers'),
+                      icon: const Icon(Icons.gavel_rounded),
+                      label: Text(tr(context, 'Read the courier agreement', 'Lue lähettisopimus')),
+                    ),
+                  ),
+                ]),
+              ),
+              const SizedBox(height: 24),
               _step(Icons.person_search_outlined, tr(context, 'A person reviews it', 'Hakemuksen käsittelee ihminen'),
                   tr(context,
                       'Approval is done by hand by the Malvoya team, not automatically. They check your identity, that you are at least 18 and your right to work in Finland. No documents are uploaded in this app; if the team needs something from you, they use the contact details you signed up with.',
@@ -123,20 +160,6 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> with Widg
                   tr(context,
                       'This screen checks your status by itself every minute while it is open, and whenever you come back to the app. When you are approved, the app opens your courier view here.',
                       'Tämä näkymä tarkistaa tilanteesi itse minuutin välein, kun se on auki, ja aina kun palaat sovellukseen. Kun hakemuksesi on hyväksytty, sovellus avaa lähettinäkymän tähän.')),
-              _step(Icons.description_outlined, tr(context, 'Courier agreement', 'Lähettisopimus'),
-                  tr(context, 'You deliver as an independent entrepreneur under the courier agreement. Please read it before your first delivery.',
-                      'Toimitat itsenäisenä yrittäjänä lähettisopimuksen mukaisesti. Lue se ennen ensimmäistä toimitusta.')),
-              _step(Icons.check_circle_outline, tr(context, 'Then: start delivering', 'Sitten: aloita toimitukset'),
-                  tr(context, 'Once approved, go online when it suits you and accept the jobs you want. Malvoya is just starting, so jobs may be rare at first.',
-                      'Hyväksynnän jälkeen mene linjoille silloin kun sinulle sopii ja ota haluamasi keikat. Malvoya on vasta aloittamassa, joten keikkoja voi aluksi olla harvoin.')),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: () => openLegal('couriers'),
-                  icon: const Icon(Icons.gavel_rounded),
-                  label: Text(tr(context, 'Read the courier agreement', 'Lue lähettisopimus')),
-                ),
-              ),
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
@@ -164,6 +187,13 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> with Widg
                     title: Text(tr(context, 'Help and contact', 'Apua ja yhteydenotto'), style: const TextStyle(fontWeight: FontWeight.w600)),
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HelpScreen())),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.gavel_rounded),
+                    title: Text(tr(context, 'Agreements', 'Sopimukset'), style: const TextStyle(fontWeight: FontWeight.w600)),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AgreementsScreen())),
                   ),
                   const Divider(height: 1),
                   const DeleteAccountTile(),

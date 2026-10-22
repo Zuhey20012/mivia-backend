@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { verifyAccessToken } from "../utils/jwt";
 import { prisma } from "../lib/prisma";
 import { localeFromHeader } from "../lib/i18n";
+import { publish, subscribe } from "../lib/redis";
 
 export type Role = "CUSTOMER" | "VENDOR" | "COURIER" | "ADMIN";
 
@@ -43,10 +44,17 @@ async function sessionState(userId: number): Promise<SessionState | null> {
   }
 }
 
-/** Called after a password reset, ban or deletion so this instance stops accepting old tokens right away. */
+/**
+ * Called after a password reset, ban or deletion so this instance stops accepting old tokens right away. With
+ * REDIS_URL every other instance drops its cached copy too (pub/sub), so the change applies everywhere at once
+ * instead of within 30 s.
+ */
 export function forgetSessionState(userId: number) {
   states.delete(userId);
+  publish(SESSION_FORGET_CHANNEL, String(userId));
 }
+const SESSION_FORGET_CHANNEL = "session-forget";
+subscribe(SESSION_FORGET_CHANNEL, (message) => states.delete(Number(message)));
 
 /** The apps send Accept-Language on every request; the user's language is written only when it changes. */
 function rememberLocale(req: Request, userId: number, state: SessionState) {

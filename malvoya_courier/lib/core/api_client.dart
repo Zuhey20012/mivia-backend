@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../auth_service.dart';
 import '../config/constants.dart';
+import 'app_version.dart';
 import 'connectivity.dart';
 import 'server_messages.dart';
 
@@ -39,6 +40,8 @@ class ApiClient {
       'Content-Type': 'application/json',
       // The server stores the language and sends notifications and emails in it
       'Accept-Language': ServerMessages.languageCode,
+      // Recorded by the server with agreement acceptances (API 2.11)
+      ...AppVersion.headers,
       if (auth?.accessToken != null) 'Authorization': 'Bearer ${auth!.accessToken}',
     };
     try {

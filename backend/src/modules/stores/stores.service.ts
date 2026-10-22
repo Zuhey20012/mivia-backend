@@ -8,6 +8,7 @@ import { priceInfoFor, presentProduct, productInclude } from "../products/pricin
 import { followInfo } from "../drops/social";
 import { storeAvailability } from "../../utils/openingHours";
 import { taxInfoComplete, taxRowSelect } from "../sellers/taxInfo";
+import { businessCheckOf, runBusinessCheck } from "./businessCheck";
 
 /** Trader information shoppers are entitled to see (DSA Art. 30, Omnibus Art. 6a CRD). */
 const publicStoreFields = {
@@ -48,7 +49,7 @@ export async function getStores(query: {
   if (query.search)      where.name        = { contains: query.search, mode: "insensitive" };
 
   const [stores, total] = await Promise.all([
-    prisma.store.findMany({ where, skip, take: limit, select: publicStoreFields, orderBy: [{ rating: "desc" }] }),
+    prisma.store.findMany({ where, skip, take: limit, select: publicStoreFields, orderBy: [{ rating: "desc" }, { id: "asc" }] }), // id: stable pages when ratings tie
     prisma.store.count({ where }),
   ]);
 
@@ -105,6 +106,8 @@ export async function getMyStore(ownerId: number) {
     ...storeAvailability(store),
     // DAC7: whether the seller has given the identity and tax data Malvoya must report (GET/PUT /stores/my/tax-info)
     taxInfoComplete: taxInfoComplete(store, taxInfo),
+    // PRH/YTJ check of the Y-tunnus (2.11): { required, businessId, verificationStatus, registeredName, registeredAt, checkedAt }
+    businessCheck: businessCheckOf(store),
     products: store.products.map((p) => presentProduct(p, info.get(p.id), { owner: true })),
   };
 }
@@ -130,14 +133,21 @@ export async function createStore(ownerId: number, input: any) {
     // A reviewed store cannot relabel itself (e.g. business → private) without a new review
     const { sellerType, businessId, ...rest } = data;
     assertOwnStoreImages(rest, existing.id);
-    return prisma.store.update({
+    const updated = await prisma.store.update({
       where: { ownerId },
       data: existing.isVerified ? rest : { ...rest, ...(sellerType ? { sellerType } : {}), ...(businessId ? { businessId } : {}) },
     });
+    // A new or changed Y-tunnus is looked up in the PRH register in the background (it never approves anything)
+    if (!existing.isVerified && businessId && (businessId !== existing.businessId || !existing.businessCheckedAt || existing.businessCheckStatus === "unavailable")) {
+      runBusinessCheck(updated.id).catch(() => {});
+    }
+    return updated;
   }
   const { logoUrl, bannerUrl, ...fields } = data; // pictures can only be added once the store exists
   // New stores start unverified and are reviewed by an admin before going live.
-  return prisma.store.create({ data: { ...fields, ownerId, isVerified: false } });
+  const created = await prisma.store.create({ data: { ...fields, ownerId, isVerified: false } });
+  if (created.businessId) runBusinessCheck(created.id).catch(() => {});
+  return created;
 }
 
 export async function updateStore(id: number, ownerId: number, input: any) {

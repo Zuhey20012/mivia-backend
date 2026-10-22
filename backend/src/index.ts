@@ -1,7 +1,7 @@
 import "dotenv/config";
+import "./instrument"; // optional Sentry (SENTRY_DSN), loaded before express and http
 import express from "express";
 import http from "http";
-import crypto from "crypto";
 import cors from "cors";
 import pino from "pino";
 import pinoHttp from "pino-http";
@@ -11,8 +11,16 @@ import { env } from "./config/env";
 import { errorHandler } from "./middleware/errorHandler";
 import { notFound } from "./middleware/notFound";
 import { globalLimiter } from "./middleware/rateLimiter";
-import { initSocket, getIo } from "./lib/socket";
-import { prisma } from "./lib/prisma";
+import { initSocket } from "./lib/socket";
+import { genReqId, requestContextMiddleware } from "./lib/requestContext";
+import { metricsMiddleware, startLatencyLog } from "./lib/metrics";
+import { setupSentryErrorHandler } from "./lib/sentry";
+import { installGracefulShutdown } from "./lib/lifecycle";
+import { startQueueWorker } from "./lib/queue";
+import { idempotencyRoutes } from "./middleware/idempotency";
+import { publicCacheRoutes } from "./middleware/httpCache";
+import { opsRoutes } from "./modules/ops/ops.routes";
+import { scale } from "./config/scale";
 
 // Routes
 import authRoutes     from "./modules/auth/auth.routes";
@@ -34,10 +42,11 @@ import appConfigRoutes from "./modules/appConfig/appConfig.routes";
 import { integrationStatus } from "./modules/admin/system";
 import payoutsRoutes  from "./modules/payouts/payouts.routes";
 import legalRoutes    from "./modules/legal/legal.routes";
+import { ensureLegalVersions } from "./modules/legal/legalDocs";
 import supportRoutes  from "./modules/support/support.routes";
 import importRoutes, { csvBodyParser } from "./modules/imports/imports.routes";
 import { failStaleImports } from "./modules/imports/imports.service";
-import { startScheduler, stopScheduler } from "./services/scheduler";
+import { startScheduler } from "./services/scheduler";
 
 const logger = pino({ level: env.logLevel });
 const app    = express();
@@ -51,11 +60,7 @@ app.disable("x-powered-by");
 // One log line per request with a request id; tokens, cookies and bodies are never logged.
 app.use(pinoHttp({
   logger,
-  genReqId: (req, res) => {
-    const id = (req.headers["x-request-id"] as string) || crypto.randomUUID();
-    res.setHeader("x-request-id", id);
-    return id;
-  },
+  genReqId, // X-Request-Id in (when well-formed) and out
   redact: ["req.headers.authorization", "req.headers.cookie", "req.headers['stripe-signature']"],
   // Status code only: response headers are the same on every request and only bloat the logs
   serializers: {
@@ -64,6 +69,8 @@ app.use(pinoHttp({
   },
   autoLogging: { ignore: (req) => req.url === "/health" },
 }));
+app.use(requestContextMiddleware); // logs and error reports of this request carry its id
+app.use(metricsMiddleware);        // per-route counts and latency (GET /api/v1/admin/metrics, 5-minute log summary)
 
 app.use(helmet());
 app.use(cors({
@@ -71,7 +78,7 @@ app.use(cors({
   origin: env.allowedOrigins.length ? env.allowedOrigins : false,
   credentials: true,
 }));
-app.use(compression());
+app.use(compression()); // br or gzip, whichever the client accepts
 
 // Stripe and Cloudinary webhooks need the raw body, so they are mounted before the JSON parser.
 app.use("/api/v1", paymentsRoutes);
@@ -82,16 +89,11 @@ app.use("/api/v1/products/import/csv", ...csvBodyParser);
 app.use(express.json({ limit: "100kb" }));
 app.use(globalLimiter);
 
-// Liveness: the process is up. Readiness: it can also reach the database.
-app.get("/health", (_req, res) => res.json({ ok: true, status: "healthy", version: "2.10.0" }));
-app.get("/health/ready", async (_req, res) => {
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    res.json({ ok: true, database: "up" });
-  } catch {
-    res.status(503).json({ ok: false, database: "down" });
-  }
-});
+// /health (liveness), /health/ready (database + Redis when configured) and /api/v1/admin/metrics
+app.use(opsRoutes);
+// Idempotency-Key on order, handover, refund and payout routes; Cache-Control on public GETs
+app.use("/api/v1", idempotencyRoutes);
+app.use(publicCacheRoutes);
 
 // API routes. Courier routes come before orders so /orders/available etc. are matched first.
 app.use("/api/v1/auth",   authRoutes);
@@ -115,34 +117,27 @@ app.use(shareRoutes); // /s/:storeId, /r/:code and /.well-known/assetlinks.json
 app.use(legalRoutes); // public legal pages: /legal/privacy, /legal/terms, …
 
 app.use(notFound);
+setupSentryErrorHandler(app); // no-op without SENTRY_DSN
 app.use(errorHandler);
 
 server.keepAliveTimeout = 65_000; // longer than typical load-balancer idle timeouts
 server.headersTimeout = 66_000;
 server.listen(env.port, () => {
-  logger.info(`Malvoya API v2.10 listening on port ${env.port} (${env.nodeEnv})`);
+  logger.info(`Malvoya API v2.11 listening on port ${env.port} (${env.nodeEnv})`);
   // Yes/no per integration (never secrets), so the deploy log shows at a glance what is switched on
   const on = integrationStatus();
   logger.info({ integrations: Object.fromEntries(Object.entries(on).map(([k, v]) => [k, "mode" in v ? v.mode : v.configured ? "on" : "off"])) }, "Integrations");
-  if (process.env.DISABLE_SCHEDULER !== "true") startScheduler();
+  // WORKER_MODE=api (with Redis): a separate `node dist/worker.js` runs the scheduler and the queued jobs
+  if (process.env.DISABLE_SCHEDULER !== "true" && scale.workerMode === "inline") startScheduler();
+  if (scale.workerMode === "inline") startQueueWorker(); // only does something with REDIS_URL
+  if (scale.workerModeRequested === "api" && scale.workerMode !== "api") logger.warn("WORKER_MODE=api needs REDIS_URL; running background work in this process");
+  startLatencyLog();
   // Imports interrupted by a restart: marked FAILED once they have made no progress for 15 minutes
   failStaleImports().catch(() => {});
+  // First version of each legal text (later changes take effect only when an admin publishes them)
+  ensureLegalVersions().catch((e) => logger.error({ err: e?.message }, "Legal versions not recorded"));
 });
 
-// Zero-downtime deploys: stop taking new work, let in-flight requests finish, then exit.
-let shuttingDown = false;
-function shutdown(signal: string) {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  logger.info({ signal }, "Shutting down gracefully");
-  stopScheduler();
-  getIo()?.close();
-  server.close(async () => {
-    await prisma.$disconnect().catch(() => {});
-    process.exit(0);
-  });
-  setTimeout(() => process.exit(1), 25_000).unref();
-}
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT", () => shutdown("SIGINT"));
+// Zero-downtime deploys: stop taking new work, let in-flight requests finish, close sockets, queue, Redis and DB.
+installGracefulShutdown(server, logger);
 process.on("unhandledRejection", (reason) => logger.error({ reason }, "Unhandled promise rejection"));

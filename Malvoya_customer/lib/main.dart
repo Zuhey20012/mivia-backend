@@ -7,6 +7,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
 import 'config/constants.dart';
 import 'core/font_licenses.dart';
+import 'core/agreements.dart';
+import 'core/api_client.dart';
 import 'core/app_gate.dart';
 import 'core/app_language.dart';
 import 'core/blocked_users.dart';
@@ -89,6 +91,9 @@ void main() async {
     }
   };
 
+  // An order refused with 428 AGREEMENT_REQUIRED opens the agreement sheet, then is sent again
+  ApiClient.onAgreementRequired = Agreements.instance.handleRequired;
+
   // Verified https links to drops, stores and invites (Android App Links)
   DeepLinks.instance.start(navigatorKey);
 
@@ -109,6 +114,8 @@ class MalvoyaApp extends StatelessWidget {
           AppLanguage.attach(auth);
           // People this customer blocked: their comments and reviews stay hidden
           auth.addListener(() => BlockedUsers.instance.load(auth));
+          // Terms not accepted (e.g. Google, phone or Apple accounts): ask once after sign-in
+          Agreements.instance.attach(auth, navigatorKey);
           return auth;
         }),
         ChangeNotifierProvider(create: (_) => CartService()),

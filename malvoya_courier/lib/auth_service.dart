@@ -8,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'config/constants.dart';
 import 'core/api_client.dart';
+import 'core/app_version.dart';
 import 'core/server_messages.dart';
 
 const _secureStorage = FlutterSecureStorage();
@@ -16,7 +17,7 @@ const _secureStorage = FlutterSecureStorage();
 String _t(String en, String fi) => ServerMessages.pick(en, fi);
 
 /// Every request names the app language, so the server can send notifications and emails in it.
-Map<String, String> get _jsonHeaders => {'Content-Type': 'application/json', 'Accept-Language': ServerMessages.languageCode};
+Map<String, String> get _jsonHeaders => {'Content-Type': 'application/json', 'Accept-Language': ServerMessages.languageCode, ...AppVersion.headers};
 
 /// The account role this app is for. Other roles are refused at sign-in.
 const String kAppRole = 'COURIER';
@@ -401,6 +402,16 @@ class AuthService extends ChangeNotifier {
     }
   }
 
+  /// After `PATCH /me/profile` succeeded: shows the new name everywhere without signing in again.
+  Future<void> updateLocalName(String name) async {
+    final user = _currentUser;
+    if (user == null) return;
+    _currentUser = User.fromJson({...user.toJson(), 'name': name});
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('user', jsonEncode(_currentUser!.toJson()));
+    notifyListeners();
+  }
+
   // ── Courier approval ──────────────────────────────────────────────────────
 
   /// Reads the approval state from the server (the only source of truth).
@@ -409,7 +420,7 @@ class AuthService extends ChangeNotifier {
     if (token == null) return false;
     try {
       final res = await http
-          .get(Uri.parse('${AppConstants.apiBase}/courier/me'), headers: {'Authorization': 'Bearer $token', 'Accept-Language': ServerMessages.languageCode})
+          .get(Uri.parse('${AppConstants.apiBase}/courier/me'), headers: {'Authorization': 'Bearer $token', 'Accept-Language': ServerMessages.languageCode, ...AppVersion.headers})
           .timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         _isApproved = jsonDecode(res.body)['courier']?['isApproved'] == true;

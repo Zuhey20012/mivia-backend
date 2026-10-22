@@ -4,7 +4,8 @@ import { prisma } from "../../lib/prisma";
 import { verifyRefreshToken } from "../../utils/jwt";
 import { RegisterInput, LoginInput } from "./auth.schema";
 import { issueSession, hashToken, revokeAllSessions } from "./session";
-import { termsVersionFor } from "../legal/legal.routes";
+import { AcceptContext, recordAcceptances, registrationVersions } from "../legal/agreements";
+import { mainDocForRole } from "../legal/legalDocs";
 import { forgetSessionState } from "../../middleware/auth";
 import { deleteFirebaseUser, deleteStoreMedia } from "./accountCleanup";
 
@@ -42,7 +43,7 @@ export function assertVerifiedSignInAllowed(user: { passwordHash: string }) {
   }
 }
 
-export async function registerUser(input: RegisterInput) {
+export async function registerUser(input: RegisterInput, ctx: AcceptContext = { ip: null, userAgent: null, appVersion: null }) {
   const identifier = input.email.trim();
   const isPhone = isPhoneIdentifier(identifier);
   const email = isPhone ? phoneToSyntheticEmail(identifier) : identifier.toLowerCase();
@@ -65,13 +66,19 @@ export async function registerUser(input: RegisterInput) {
   if (existing) throw new AuthError("An account with this email or phone already exists. Please sign in.", 409);
 
   const passwordHash = await bcrypt.hash(input.password, 12);
+  // The versions in force of the role's documents (customers: Terms of Service + Privacy Policy acknowledgement)
+  const accepted = input.acceptTerms ? await registrationVersions(input.role) : [];
+  const main = accepted.find((a) => a.doc === mainDocForRole(input.role));
+  const now = new Date();
   const user = await prisma.user.create({
     data: {
       name: input.name, email, phone, passwordHash, role: input.role,
-      ...(input.acceptTerms ? { termsAcceptedAt: new Date(), termsVersion: termsVersionFor(input.role) } : {}),
+      ...(input.acceptTerms ? { termsAcceptedAt: now, termsVersion: main?.version ?? null } : {}),
     },
     select: { id: true, name: true, email: true, role: true, passwordHash: true },
   });
+  // Clickwrap proof: one AgreementAcceptance per document, with time, version, truncated address and app version
+  await recordAcceptances(user.id, accepted, "register", ctx);
 
   if (input.role === "COURIER") {
     // Couriers start unapproved; an admin approves them after identity / right-to-work checks.
@@ -155,6 +162,8 @@ function exportUser(userId: number) {
       id: true, email: true, name: true, phone: true, role: true, avatarUrl: true, googleSub: true,
       address: true, latitude: true, longitude: true, createdAt: true, updatedAt: true,
       locale: true, termsAcceptedAt: true, termsVersion: true,
+      // Every agreement version accepted, with time, method, truncated address and app version (2.11)
+      agreementAcceptances: { select: { doc: true, version: true, acceptedAt: true, method: true, ip: true, userAgent: true, appVersion: true } },
       blocks: { select: { blockedId: true, createdAt: true } },
       orders: { include: { items: true } },
       rentals: { include: { items: true } },

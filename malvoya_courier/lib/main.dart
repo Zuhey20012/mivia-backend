@@ -7,6 +7,8 @@ import 'config/theme.dart';
 import 'core/font_licenses.dart';
 import 'core/app_gate.dart';
 import 'core/connectivity.dart';
+import 'core/app_version.dart';
+import 'core/location_disclosure.dart';
 import 'screens/courier_welcome.dart';
 import 'screens/courier_dashboard.dart';
 import 'screens/pending_approval.dart';
@@ -20,6 +22,8 @@ import 'locale_provider.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   registerFontLicenses();
+  // "1.7.0+9", sent as X-App-Version with every API request
+  await AppVersion.load();
   // Shows a "No internet" strip and lets screens refresh when the connection comes back
   ConnectivityService.instance.start();
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
@@ -51,6 +55,8 @@ class MalvoyaCourierApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) {
           final auth = AuthService();
+          // Accepting the location disclosure is also recorded on the server (API 2.11 onboarding)
+          LocationDisclosure.attach(auth);
           // Job offers and payouts arrive as notifications when the app is in the background
           PushService.instance.attach(auth);
           // The location fallback over HTTP needs the current access token, which is refreshed every 15 min

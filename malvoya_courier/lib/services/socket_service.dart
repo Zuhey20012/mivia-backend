@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import '../config/constants.dart';
+import '../core/app_version.dart';
 
 /// Live connection for job offers, order updates and chat with the customer.
 class CourierSocketService extends ChangeNotifier {
@@ -33,6 +34,7 @@ class CourierSocketService extends ChangeNotifier {
           // A fresh manager each time, so a new sign-in token is really used (the client caches sockets per host)
           .enableForceNew()
           .setAuth({'token': accessToken})
+          .setExtraHeaders(AppVersion.headers)
           .enableAutoConnect()
           .enableReconnection()
           .setReconnectionDelay(2000)

@@ -81,13 +81,18 @@ export async function searchProducts(q: {
   const and: Prisma.ProductWhereInput[] = [{ isAvailable: true, deletedAt: null, canBeSold: true, store: { isVerified: true } }];
   if (q.q) {
     const term = q.q;
+    // Stores whose name matches are looked up first, so every branch of the OR is on Product itself and Postgres can
+    // combine indexes (trigram indexes, docs/scaling/indexes.md) instead of scanning every product joined to its store
+    const storeIds = (await prisma.store.findMany({
+      where: { isVerified: true, name: { contains: term, mode: "insensitive" } }, select: { id: true }, take: 1000,
+    })).map((s) => s.id);
     and.push({
       OR: [
         { name: { contains: term, mode: "insensitive" } },
         { description: { contains: term, mode: "insensitive" } },
         { category: { contains: term, mode: "insensitive" } },
         { tags: { has: term.toLowerCase() } },
-        { store: { name: { contains: term, mode: "insensitive" } } },
+        ...(storeIds.length ? [{ storeId: { in: storeIds } }] : []),
       ],
     });
   }

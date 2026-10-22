@@ -61,12 +61,14 @@ export async function startOnboarding(actor: Actor) {
     accountId = account.id;
     await saveAccount(party, accountId, false);
   }
+  // Onboarding links expire within minutes, so the idempotency key only spans one minute: a double tap gets the same
+  // link, a later tap a fresh one
   const link = await stripe.accountLinks.create({
     account: accountId,
     type: "account_onboarding",
     refresh_url: `${env.publicApiUrl}/api/v1/payouts/refresh`,
     return_url: `${env.publicApiUrl}/api/v1/payouts/return`,
-  });
+  }, { idempotencyKey: `acctlink-${accountId}-${Math.floor(Date.now() / 60_000)}` });
   return { url: link.url };
 }
 
@@ -89,7 +91,7 @@ export async function refreshStatus(actor: Actor) {
 export async function dashboardLink(actor: Actor) {
   const party = await partyFor(actor);
   if (!party.accountId) throw new ApiError("Set up payouts first", 409);
-  const link = await getStripe().accounts.createLoginLink(party.accountId);
+  const link = await getStripe().accounts.createLoginLink(party.accountId, {}, { idempotencyKey: `loginlink-${party.accountId}-${Math.floor(Date.now() / 60_000)}` });
   return { url: link.url };
 }
 

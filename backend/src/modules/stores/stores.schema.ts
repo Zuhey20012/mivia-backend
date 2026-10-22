@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { openingHoursSchema } from "../../utils/openingHours";
+import { isValidYTunnus } from "./businessCheck";
 
 // Availability: pause switch and weekly opening hours (Finnish time); null clears the hours (always open)
 const availability = {
@@ -30,7 +31,8 @@ export const createStoreSchema = z.object({
   bannerUrl:     z.string().url().startsWith("https://").optional(),
   // Business sellers give their Y-tunnus (format 1234567-8); private people selling their own items do not
   sellerType:    z.enum(["BUSINESS", "PRIVATE"]).optional(), // older app builds do not send it
-  businessId:    z.string().trim().regex(/^\d{7}-\d$/, "Y-tunnus format is 1234567-8").optional(),
+  businessId:    z.string().trim().regex(/^\d{7}-\d$/, "Y-tunnus format is 1234567-8")
+    .refine(isValidYTunnus, "This Y-tunnus is not valid: check the last digit").optional(),
   prepMinutes:   z.number().int().min(0).max(120).optional(),
   ...availability,
 }).refine((d) => d.sellerType !== "BUSINESS" || !!d.businessId, {

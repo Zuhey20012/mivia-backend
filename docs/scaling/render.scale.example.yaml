@@ -1,0 +1,69 @@
+# DOCUMENTATION ONLY: not applied anywhere. A Render Blueprint sketch for the "1k+ orders/day" stages of
+# docs/scaling/scaling-plan.md: the API on several instances, Redis (Render Key Value), an optional background worker.
+# Prices as listed on render.com/pricing on 22 Oct 2026. Merge into the root render.yaml only when switching these on.
+services:
+  - type: web
+    name: malvoya-api                 # the live service is malvoya-api-eu (Frankfurt)
+    runtime: node
+    region: frankfurt                 # every resource in Frankfurt: GDPR (EEA) and private networking
+    plan: standard                    # 1 CPU / 2 GB, $25/month per instance
+    numInstances: 2                   # or scaling: below (autoscaling)
+    # scaling:
+    #   minInstances: 2
+    #   maxInstances: 6
+    #   targetCPUPercent: 70
+    rootDir: backend
+    buildCommand: npm ci --include=dev && npx prisma generate && npx prisma migrate deploy && npm run build
+    startCommand: npm start
+    healthCheckPath: /health/ready    # readiness: database + Redis; 503 while draining on deploys
+    maxShutdownDelaySeconds: 30       # SIGTERM → finish in-flight requests (SHUTDOWN_TIMEOUT_MS=25000)
+    envVars:
+      - fromGroup: malvoya-shared     # DATABASE_URL, JWT_*, STRIPE_*, CLOUDINARY_*, SMTP_*, FIREBASE_*, … as today
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: malvoya-redis
+          property: connectionString
+      - key: DB_POOL_MAX
+        value: "15"                   # instances × DB_POOL_MAX must stay below the Postgres connection limit
+      - key: WORKER_MODE
+        value: api                    # only together with the worker below; leave unset to run jobs in the API
+      - key: METRICS_TOKEN
+        generateValue: true
+      - key: SENTRY_DSN
+        sync: false                   # optional; EU region recommended
+
+  # Optional: background jobs (push fan-out, emails, catalogue imports) and the scheduler (watchdog, payouts, …)
+  - type: worker
+    name: malvoya-worker
+    runtime: node
+    region: frankfurt
+    plan: standard                    # $25/month
+    rootDir: backend
+    buildCommand: npm ci --include=dev && npx prisma generate && npm run build
+    startCommand: node dist/worker.js
+    envVars:
+      - fromGroup: malvoya-shared
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: malvoya-redis
+          property: connectionString
+      - key: DB_POOL_MAX
+        value: "10"
+      - key: SENTRY_DSN
+        sync: false
+
+  # Redis for shared rate limits, socket rooms, session revocation, idempotency keys and the job queue
+  - type: keyvalue
+    name: malvoya-redis
+    region: frankfurt
+    plan: starter                     # 256 MB, $10/month; "standard" (1 GB) $20 from ~10k orders/day
+    maxmemoryPolicy: noeviction       # the job queue must never be evicted
+    ipAllowList: []                   # private network only
+
+envVarGroups:
+  - name: malvoya-shared
+    envVars:
+      - key: NODE_ENV
+        value: production

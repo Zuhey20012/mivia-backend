@@ -4,6 +4,7 @@ import pino from "pino";
 import { env } from "../config/env";
 import { prisma } from "./prisma";
 import { Locale, Text, asLocale, pick } from "./i18n";
+import { defineJob, enqueue } from "./queue";
 
 const logger = pino({ name: "push" });
 
@@ -57,14 +58,21 @@ export async function pushToUsers(userIds: number[], msg: PushMessage) {
   });
   if (!devices.length) return;
 
-  // One send per language; FCM takes at most 500 tokens per multicast
+  // One send per language; FCM takes at most 500 tokens per multicast. Each batch is a background job
+  // (lib/queue.ts): retried on its own with backoff, so a failure never re-sends to the other batches.
   for (const locale of ["fi", "en"] as Locale[]) {
     const tokens = devices.filter((d) => asLocale(d.user.locale) === locale).map((d) => d.token);
     for (let i = 0; i < tokens.length; i += 500) {
-      await sendBatch(m, tokens.slice(i, i + 500), msg, locale);
+      await enqueue<PushBatch>("push-batch", { tokens: tokens.slice(i, i + 500), msg, locale });
     }
   }
 }
+
+type PushBatch = { tokens: string[]; msg: PushMessage; locale: Locale };
+defineJob<PushBatch>("push-batch", async ({ tokens, msg, locale }) => {
+  const m = pushClient();
+  if (m) await sendBatch(m, tokens, msg, locale);
+}, { attempts: 4, backoffMs: 2_000 });
 
 async function sendBatch(m: Messaging, tokens: string[], msg: PushMessage, locale: Locale) {
   try {
@@ -82,6 +90,7 @@ async function sendBatch(m: Messaging, tokens: string[], msg: PushMessage, local
     if (dead.length) await prisma.deviceToken.deleteMany({ where: { token: { in: dead } } });
   } catch (err: any) {
     logger.warn({ err: err?.message }, "Push send failed");
+    throw err; // retried by the queue
   }
 }
 

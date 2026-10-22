@@ -8,6 +8,9 @@ import { haversineKm } from "../utils/distance";
 import { pushToUser } from "./push";
 import { t } from "./i18n";
 import { canReadChat, chatHistory, postMessage } from "../modules/orders/chat";
+import { createAdapter } from "@socket.io/redis-adapter";
+import { Emitter } from "@socket.io/redis-emitter";
+import { createRedisClient, redis, redisEnabled, rkey } from "./redis";
 
 let io: SocketServer | null = null;
 
@@ -32,6 +35,11 @@ export function initSocket(httpServer: HttpServer): SocketServer {
     cors: { origin: env.allowedOrigins.length ? env.allowedOrigins : false, credentials: true },
     maxHttpBufferSize: 16 * 1024,
   });
+  // Several instances: rooms and emits are shared through Redis, so an event emitted on one instance reaches a
+  // client connected to another. Without REDIS_URL rooms are local to this process, as before.
+  if (redisEnabled()) {
+    io.adapter(createAdapter(createRedisClient("socket-pub"), createRedisClient("socket-sub", { blocking: true }), { key: SOCKET_KEY }));
+  }
 
   io.use((socket, next) => {
     try {
@@ -185,18 +193,38 @@ export function getIo(): SocketServer | null {
   return io;
 }
 
+/** Sockets connected to this instance (metrics). */
+export function localSocketConnections(): number {
+  return io?.engine?.clientsCount ?? 0;
+}
+
+const SOCKET_KEY = rkey("socket.io");
+let emitter: Emitter | null = null;
+
+/**
+ * Where emits go: this process's socket server, or (in the separate background worker, which has no socket server)
+ * the Redis emitter, which hands the event to whichever API instance holds the room's clients.
+ */
+function target(): { to(room: string): { emit(event: string, ...args: any[]): unknown } } | null {
+  if (io) return io;
+  const r = redis();
+  if (!r) return null;
+  if (!emitter) emitter = new Emitter(r, { key: SOCKET_KEY });
+  return emitter;
+}
+
 export function emitOrderStatus(orderId: number, payload: Record<string, unknown>) {
-  io?.to(`order:${orderId}`).emit("order:status", { orderId, ...payload, timestamp: new Date().toISOString() });
+  target()?.to(`order:${orderId}`).emit("order:status", { orderId, ...payload, timestamp: new Date().toISOString() });
 }
 
 export function emitToStore(storeId: number, event: string, payload: unknown) {
-  io?.to(`store:${storeId}`).emit(event, payload);
+  target()?.to(`store:${storeId}`).emit(event, payload);
 }
 
 export function emitToCourier(courierId: number, event: string, payload: unknown) {
-  io?.to(`courier:${courierId}`).emit(event, payload);
+  target()?.to(`courier:${courierId}`).emit(event, payload);
 }
 
 export function emitToAllCouriers(event: string, payload: unknown) {
-  io?.to("couriers").emit(event, payload);
+  target()?.to("couriers").emit(event, payload);
 }

@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react';
 import { Search, Store, CheckCircle, XCircle, RefreshCw, Pencil } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../utils/api';
+import { BusinessCheckBadge, type BusinessCheck } from '../components/BusinessCheckBadge';
 
 interface Vendor {
   id: number; name: string; category: string;
   email: string | null; isVerified: boolean;
   rating: number; commissionRate: number;
   taxInfoComplete?: boolean; // DAC7 seller data given (GET/PUT /stores/my/tax-info in the store app)
+  businessCheck?: BusinessCheck; // PRH/YTJ lookup of the Y-tunnus (2.11); pre-fills the decision, never approves
+  readyForApprovalAt?: string | null; // every onboarding step but approval done
   owner: { name: string; email: string };
   _count: { products: number; orders: number };
   createdAt: string;
@@ -40,6 +43,13 @@ export default function Vendors() {
     setActionId(id);
     try { await api.patch(`/admin/vendors/${id}/approve`); await load(); }
     catch { alert('Failed to approve vendor.'); }
+    finally { setActionId(null); }
+  };
+
+  const recheck = async (id: number) => {
+    setActionId(id);
+    try { await api.post(`/admin/vendors/${id}/business-check`); await load(); }
+    catch { alert('The business check could not be run.'); }
     finally { setActionId(null); }
   };
 
@@ -115,7 +125,7 @@ export default function Vendors() {
           <table style={{ width:'100%', fontSize:'0.875rem', borderCollapse:'collapse' }}>
             <thead>
               <tr style={{ borderBottom:'1px solid #F5F5F7' }}>
-                {['Store','Owner','Category','Products','Orders','Commission','Tax data','Status','Actions'].map(h => (
+                {['Store','Owner','Category','Products','Orders','Commission','Tax data','Business check','Status','Actions'].map(h => (
                   <th key={h} style={{ textAlign:'left',padding:'1rem 1.5rem',fontSize:'0.6875rem',fontWeight:500,color:'#8E8E93',textTransform:'uppercase',letterSpacing:'0.05em' }}>{h}</th>
                 ))}
               </tr>
@@ -162,10 +172,21 @@ export default function Vendors() {
                       ? <span className="badge-green" title="DAC7 identity and tax data complete">Complete</span>
                       : <a href="#/dac7" className="badge-yellow" title="Missing DAC7 data: see the DAC7 page">Missing</a>}
                   </td>
+                  <td style={{ padding:'1rem 1.5rem',whiteSpace:'nowrap' }}>
+                    <BusinessCheckBadge check={v.businessCheck} />
+                    {v.businessCheck?.required && !v.isVerified && (
+                      <button title="Look the Y-tunnus up in PRH again" onClick={() => recheck(v.id)} disabled={actionId === v.id}
+                        style={{ marginLeft:'0.375rem',background:'none',border:'none',cursor:'pointer',color:'#0071E3' }}>
+                        <RefreshCw style={{ width:'12px',height:'12px' }} />
+                      </button>
+                    )}
+                  </td>
                   <td style={{ padding:'1rem 1.5rem' }}>
                     {v.isVerified
                       ? <span className="badge-green"><CheckCircle style={{width:'10px',height:'10px',marginRight:'4px'}} />Verified</span>
-                      : <span className="badge-yellow">Pending</span>
+                      : v.readyForApprovalAt
+                        ? <span className="badge-blue" title="Every onboarding step except your approval is done">Ready for approval</span>
+                        : <span className="badge-yellow">Pending</span>
                     }
                   </td>
                   <td style={{ padding:'1rem 1.5rem' }}>

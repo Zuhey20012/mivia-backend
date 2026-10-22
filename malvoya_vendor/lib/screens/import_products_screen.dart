@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
+import '../core/agreements.dart';
 import '../core/api_client.dart';
 import '../core/strings.dart';
 
@@ -284,7 +285,9 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
 
   Future<void> _publish(Map<String, dynamic> job) async {
     setState(() => _publishing = true);
-    final res = await _api.post('/products/import/${_id(job)}/publish');
+    final api = _api;
+    // Publishing needs the Seller Terms in force (428 → agreement sheet → published right after)
+    final res = await withAgreement(context, api, () => api.post('/products/import/${_id(job)}/publish'));
     if (!mounted) return;
     setState(() => _publishing = false);
     if (!res.ok) {

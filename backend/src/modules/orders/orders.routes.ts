@@ -8,18 +8,22 @@ import {
   getOrderPayment, reportDeliveryProblem, returnToStore, confirmReturnReceived,
 } from "./orders.controller";
 import { chatRoutes } from "./chat";
+import { requireAgreement } from "../legal/agreements";
 
 const router = Router();
 
 // Orders — `:id(\\d+)` keeps paths like /orders/available (courier router) from being captured here.
-router.post("/orders",                        auth, requireRole("CUSTOMER"), createOrder);
+// Placing an order needs the Terms of Service in force to be accepted (428 AGREEMENT_REQUIRED)
+router.post("/orders",                        auth, requireRole("CUSTOMER"), requireAgreement(), createOrder);
 // Exact price (fees, promo discount, total) before payment; reserves and creates nothing
 router.post("/orders/quote",                  auth, requireRole("CUSTOMER"), quoteOrder);
 router.get("/orders",                         auth, listOrders);
 router.get("/orders/:id(\\d+)",               auth, getOrder);
 router.post("/orders/:id(\\d+)/cancel",       auth, requireRole("CUSTOMER"), cancelOrder);
 // Store, assigned courier and admin share one endpoint; the service enforces who may do which transition.
-router.patch("/orders/:id(\\d+)/status",      auth, requireRole("VENDOR", "COURIER", "ADMIN"), updateOrderStatus);
+router.patch("/orders/:id(\\d+)/status",      auth, requireRole("VENDOR", "COURIER", "ADMIN"),
+  // A store accepting an order needs the Seller Terms in force to be accepted
+  requireAgreement((req) => req.user?.role === "VENDOR" && req.body?.status === "CONFIRMED"), updateOrderStatus);
 // Courier completes the delivery (in person, or at the door with a photo)
 router.post("/orders/:id(\\d+)/deliver",      auth, requireRole("COURIER"), deliverOrder);
 router.get("/orders/:id(\\d+)/proof",         auth, getDeliveryProof);
@@ -37,7 +41,7 @@ router.post("/orders/:id(\\d+)/returned-received", auth, requireRole("VENDOR"), 
 router.use(chatRoutes);
 
 // Rentals
-router.post("/rentals",                       auth, requireRole("CUSTOMER"), createRental);
+router.post("/rentals",                       auth, requireRole("CUSTOMER"), requireAgreement(), createRental);
 router.get("/rentals",                        auth, listRentals);
 router.get("/rentals/:id(\\d+)",              auth, getRental);
 

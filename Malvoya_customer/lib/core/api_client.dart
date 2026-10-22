@@ -26,13 +26,20 @@ class ApiClient {
 
   static const _timeout = Duration(seconds: 15);
 
+  /// Called when the server answers 428 `AGREEMENT_REQUIRED` (an order or rental before the customer
+  /// accepted the Terms in force). It shows the agreement sheet and returns true once the customer
+  /// accepted; the request is then sent once more. The server refuses such a request before doing
+  /// anything, so sending it again is safe. Set in main.dart.
+  static Future<bool> Function(Map<String, dynamic> data, AuthService? auth)? onAgreementRequired;
+
   Future<ApiResult> get(String path, {Map<String, String>? query}) => _send('GET', path, query: query);
   Future<ApiResult> post(String path, [Object? body]) => _send('POST', path, body: body);
   Future<ApiResult> put(String path, [Object? body]) => _send('PUT', path, body: body);
   Future<ApiResult> patch(String path, [Object? body]) => _send('PATCH', path, body: body);
   Future<ApiResult> delete(String path, [Object? body]) => _send('DELETE', path, body: body);
 
-  Future<ApiResult> _send(String method, String path, {Object? body, Map<String, String>? query, bool retried = false}) async {
+  Future<ApiResult> _send(String method, String path,
+      {Object? body, Map<String, String>? query, bool retried = false, bool agreementAsked = false}) async {
     final uri = Uri.parse('${AppConstants.apiBase}$path').replace(
       queryParameters: query == null || query.isEmpty ? null : query,
     );
@@ -48,7 +55,9 @@ class ApiClient {
       final res = await http.Response.fromStream(streamed).timeout(_timeout);
 
       if (res.statusCode == 401 && !retried && auth?.accessToken != null) {
-        if (await auth!.refreshSession()) return await _send(method, path, body: body, query: query, retried: true);
+        if (await auth!.refreshSession()) {
+          return await _send(method, path, body: body, query: query, retried: true, agreementAsked: agreementAsked);
+        }
       }
 
       Map<String, dynamic> data = {};
@@ -56,6 +65,13 @@ class ApiClient {
         final decoded = jsonDecode(res.body);
         if (decoded is Map<String, dynamic>) data = decoded;
       } catch (_) {}
+
+      final askAgreement = onAgreementRequired;
+      if (res.statusCode == 428 && data['code'] == 'AGREEMENT_REQUIRED' && !agreementAsked && askAgreement != null) {
+        if (await askAgreement(data, auth)) {
+          return await _send(method, path, body: body, query: query, retried: retried, agreementAsked: true);
+        }
+      }
 
       if (res.statusCode >= 200 && res.statusCode < 300) return ApiResult(res.statusCode, data, null);
       return ApiResult(res.statusCode, data, _messageFor(res.statusCode, data));

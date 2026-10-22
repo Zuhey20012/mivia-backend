@@ -31,7 +31,9 @@ Malvoya is a marketplace. Stores that sell through Malvoya are independent selle
 | Payout details (for stores and couriers) — collected by Stripe, not by Malvoya | Pay stores and couriers | Contract; legal obligation (anti-money-laundering) |
 | Order chat messages between the customer and the courier | Let you and your courier agree on the handover, also after a lost connection | Contract (6(1)(b)) |
 | Your language choice (Finnish or English), from your app's language setting | Send notifications and emails in your language | Contract (6(1)(b)) |
-| When you accepted our terms, and which version | Show which agreement applies to you | Contract; legitimate interest (6(1)(f)) |
+| Acceptance records: which document (terms, seller terms, courier agreement, privacy policy) and exact version you accepted, when, how (when signing up or in the app), your network address shortened to its first part (IPv4: the first three of four numbers; IPv6: the first three of eight groups), your phone's or browser's user-agent text (at most 200 characters) and the app version | Prove which agreement applies to you and that you accepted it; send you a copy of what you accepted | Contract (6(1)(b)); legitimate interest in being able to prove the contract (6(1)(f)) |
+| For business sellers: the result of looking up the business ID (Y-tunnus) in the Finnish Patent and Registration Office's open company register (YTJ) — whether it was found, the registered name, the registration date and whether the company is still active | Check the trader information sellers give us, as the Digital Services Act (Art. 30) asks marketplaces to do with free official databases. The result only helps our team; a person always decides on approval. We send PRH only the business ID | Legal obligation (6(1)(c)); legitimate interest (6(1)(f)) |
+| For couriers: vehicle type, and when you confirmed you read how your location is used | Onboarding and offering suitable jobs | Contract (6(1)(b)) |
 | Users you blocked, and reports you make about comments or reviews | Hide blocked users' content for you; let our team review reported content | Legitimate interest (6(1)(f)); legal obligation (Digital Services Act) |
 | Technical logs (IP address, error logs) | Security and abuse prevention | Legitimate interest (6(1)(f)) |
 
@@ -60,6 +62,7 @@ Delivery jobs are offered to approved, online couriers within 7.5 km of the stor
   - Render (hosting and database)
   - Twilio (SMS codes)
   - [EMAIL PROVIDER] (email)
+- **The Finnish Patent and Registration Office (PRH)**, for business sellers only: we look up the business ID in its free open data service (avoindata.prh.fi). PRH receives only the business ID, not who asked.
 - **Authorities**, where the law requires it (for example the Finnish Tax Administration for DAC7 seller reporting).
 
 **Seller tax details (DAC7).** A seller's tax identification number is stored encrypted (AES-256) and is shown to the seller only in part (its last characters). It is decrypted only for Malvoya's yearly report, which only Malvoya's administrators can open, and it is sent only to the Finnish Tax Administration; that authority may share it with the tax authorities of other EU countries where the seller lives, as the directive provides. Sellers who stay under the directive's threshold (fewer than 30 sales and at most 2 000 € in a year) are not reported, but their details are kept as the law requires.
@@ -83,6 +86,8 @@ Hosting is provided by Render. [STATE REGION: "in Frankfurt, Germany (EU)" once 
 | Password reset codes | 15 minutes |
 | Order chat messages | 30 days after the order is completed or cancelled (deleted with your account) |
 | Blocks and reports you made | Until you remove the block or delete your account |
+| Acceptance records (agreement versions you accepted) | For as long as you have an account and 10 years after it is deleted, then deleted automatically. Why: they are our proof of which contract applied and that you agreed to it, and claims based on a contract or its breach can in some cases still be made up to 10 years later under Finnish law (Act on the Limitation of Debts 728/2003). The record holds only what that proof needs: the network address is shortened so it does not identify a single connection |
+| Business ID check results (sellers) | Kept with the store; replaced when the check is run again; deleted with the store |
 | Refresh tokens (sessions) | 7 days |
 | Security logs | [30] days |
 
@@ -112,4 +117,4 @@ Malvoya is intended for people aged 18 or over. Couriers and sellers must be adu
 
 ## 11. Changes
 
-We will notify you in the app before material changes take effect.
+Every change to this policy is published as a new version with a summary of what changed and the date it takes effect. We tell you by push notification and email, in your language, before the change takes effect (or at the latest when it does, if the law requires a change at once). Every version, with its dates, stays readable at [malvoya-api-eu.onrender.com/legal/privacy/versions](https://malvoya-api-eu.onrender.com/legal/privacy/versions). The app asks you to confirm you have read the new version; this is an acknowledgement, not consent, and it never blocks you from using your account, exporting your data or deleting it.

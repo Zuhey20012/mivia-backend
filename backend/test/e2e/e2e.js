@@ -1,4 +1,4 @@
-// End-to-end test for API v2.10 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
+// End-to-end test for API v2.11 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
 const { execSync, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -62,6 +62,28 @@ async function startFeeApi(extraEnv) {
 }
 process.on("exit", () => { if (feeApi) feeApi.kill(); });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// PRH/YTJ open data mock (2.11): the API's business-ID lookup goes here (PRH_API_TEST_HOST=localhost:12224), never to
+// the real register. Fixture companies are made up for the test ("Testi …") and exist only in this mock.
+const prhRequests = [];
+const prhFixtures = {
+  "7654321-2": { names: [{ name: "Testi Kauppa Oy", type: "1", version: 1, registrationDate: "2015-03-01" }], status: "2", tradeRegisterStatus: "1", registrationDate: "2015-03-01" },
+  "1112223-0": { names: [{ name: "Testi Lopetettu Oy", type: "1", version: 1 }], status: "2", tradeRegisterStatus: "4", registrationDate: "2001-05-02", endDate: "2020-01-31" },
+  "9876543-0": { names: [{ name: "Iiro Ateljee Oy", type: "1", version: 1 }, { name: "Vanha Nimi Oy", type: "1", version: 2, endDate: "2019-01-01" }], status: "2", tradeRegisterStatus: "1", registrationDate: "2019-06-10" },
+};
+let prhDownOnce = new Set(["9876543-0"]); // the first lookup of this one gets a 503 (register unavailable)
+const prhServer = require("http").createServer((req, res) => {
+  const u = new URL(req.url, "http://localhost");
+  prhRequests.push(u.pathname + u.search);
+  const id = u.searchParams.get("businessId");
+  if (u.pathname !== "/opendata-ytj-api/v3/companies" || !id) { res.writeHead(400); return res.end("{}"); }
+  if (prhDownOnce.has(id)) { prhDownOnce.delete(id); res.writeHead(503, { "Content-Type": "application/json" }); return res.end('{"message":"down"}'); }
+  const f = prhFixtures[id];
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(f ? { totalResults: 1, companies: [{ businessId: { value: id, registrationDate: f.registrationDate, source: "3" }, ...f }] } : { totalResults: 0, companies: [] }));
+});
+prhServer.listen(12224);
+process.on("exit", () => prhServer.close());
 // Finnish wall-clock date/time/weekday of an instant (scheduled delivery slots are in Europe/Helsinki)
 function hel(d = new Date()) {
   const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Helsinki", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short", hourCycle: "h23" }).formatToParts(d);
@@ -98,15 +120,16 @@ async function seedResource(publicId, info) {
   await fetch("http://localhost:12222/__seed", { method: "POST", body: JSON.stringify({ publicId, info }) });
 }
 async function register(name, role, extra = {}) {
-  // Stores and couriers must accept their agreement (2.10)
-  const terms = role === "VENDOR" || role === "COURIER" ? { acceptTerms: true } : {};
+  // Everyone accepts their agreement at sign-up (stores and couriers must, 2.10; customers too, since 2.11 orders need it)
+  const terms = extra.acceptTerms === false ? {} : { acceptTerms: true };
+  if (extra.acceptTerms === false) { extra = { ...extra }; delete extra.acceptTerms; }
   const r = await call("POST", "/auth/register", { name, email: `${name.toLowerCase().replace(/\W/g, "")}${uniq}@example.fi`, password: "strong-pass-123", ...(role ? { role } : {}), ...terms, ...extra });
   return r.body;
 }
 
 (async () => {
   console.log("\n— Auth");
-  const regA = await call("POST", "/auth/register", { name: "Aino Korhonen", email: `aino${uniq}@example.fi`, password: "correct-horse-1" });
+  const regA = await call("POST", "/auth/register", { name: "Aino Korhonen", email: `aino${uniq}@example.fi`, password: "correct-horse-1", acceptTerms: true });
   check("customer can register", regA.status === 201 && regA.body.accessToken, regA);
   const takeover = await call("POST", "/auth/register", { name: "Evil", email: `aino${uniq}@example.fi`, password: "whatever12", role: "VENDOR", acceptTerms: true });
   check("register with existing email is refused and returns no tokens", takeover.status === 409 && !takeover.body.accessToken, takeover);
@@ -222,7 +245,7 @@ async function register(name, role, extra = {}) {
 
   console.log("\n— Stores, trader info and approval");
   const vendor = await register("Vera", "VENDOR");
-  const store = await call("POST", "/stores", { name: `Vera Vintage ${uniq}`, category: "THRIFT", sellerType: "BUSINESS", businessId: "2345678-9", latitude: 60.17, longitude: 24.94, address: "Mannerheimintie 1, Helsinki", prepMinutes: 8 }, vendor.accessToken);
+  const store = await call("POST", "/stores", { name: `Vera Vintage ${uniq}`, category: "THRIFT", sellerType: "BUSINESS", businessId: "2345678-0", latitude: 60.17, longitude: 24.94, address: "Mannerheimintie 1, Helsinki", prepMinutes: 8 }, vendor.accessToken);
   check("vendor creates a business store with Y-tunnus", store.status === 201 && store.body.store.sellerType === "BUSINESS", store);
   const storeId = store.body.store.id;
   check("business seller must give a valid Y-tunnus", (await call("POST", "/stores", { name: "No ID", category: "APPAREL", sellerType: "BUSINESS" }, (await register("Nina", "VENDOR")).accessToken)).status === 400);
@@ -243,7 +266,7 @@ async function register(name, role, extra = {}) {
   check("admin approves store", (await call("PATCH", `/admin/vendors/${storeId}/approve`, null, adminToken)).status === 200);
   const pub2 = await call("GET", `/stores?search=Vera Vintage ${uniq}&lat=60.18&lng=24.95`);
   const listed = pub2.body.stores[0];
-  check("approved store is public with trader info and ETA window", listed?.businessId === "2345678-9" && listed?.etaMinutes > 0 && listed?.etaMaxMinutes === listed?.etaMinutes + 10, listed);
+  check("approved store is public with trader info and ETA window", listed?.businessId === "2345678-0" && listed?.etaMinutes > 0 && listed?.etaMaxMinutes === listed?.etaMinutes + 10, listed);
   check("reviewed store cannot relabel itself as a private seller", (await call("POST", "/stores", { name: `Vera Vintage ${uniq}`, category: "THRIFT", sellerType: "PRIVATE" }, vendor.accessToken)).body.store?.sellerType === "BUSINESS");
   const listedFee = listed.deliveryFeeCents;
 
@@ -422,7 +445,7 @@ async function register(name, role, extra = {}) {
   const vslot = (await call("POST", "/media/sign", { kind: "drop_video" }, vendor.accessToken)).body;
   check("video slot is signed, scoped to the store and asks for streaming versions", vslot.publicId?.startsWith(`malvoya/drops/s${storeId}/`) && /sp_auto/.test(vslot.params?.eager || "") && vslot.params?.signature?.length === 40, vslot);
   const otherVendor = await register("Otto", "VENDOR");
-  await call("POST", "/stores", { name: `Otto Outlet ${uniq}`, category: "APPAREL", sellerType: "BUSINESS", businessId: "1234567-8", latitude: 60.2, longitude: 24.9 }, otherVendor.accessToken);
+  await call("POST", "/stores", { name: `Otto Outlet ${uniq}`, category: "APPAREL", sellerType: "BUSINESS", businessId: "1234567-1", latitude: 60.2, longitude: 24.9 }, otherVendor.accessToken);
   const stolen = await call("POST", "/media/confirm", { kind: "drop_video", publicId: vslot.publicId, version: 5, signature: uploadSig(vslot.publicId, 5) }, otherVendor.accessToken);
   check("another store cannot claim someone else's upload", stolen.status === 403, stolen.body);
   const confirmed = await call("POST", "/media/confirm", { kind: "drop_video", publicId: vslot.publicId, version: 5, signature: uploadSig(vslot.publicId, 5) }, vendor.accessToken);
@@ -770,7 +793,7 @@ async function register(name, role, extra = {}) {
   }));
 
   const sysDefault = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.10.0", sysDefault.pricing);
+  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.11.0", sysDefault.pricing);
   const stockBeforeQuote = stockOf(productId);
   const ordersBeforeQuote = sql(`select count(*) from "Order" where "userId"=${otherCust.user.id}`);
   const q0 = await quote(quoteBody, otherCust.accessToken);
@@ -1206,7 +1229,7 @@ async function register(name, role, extra = {}) {
   });
   await new Promise((r) => wooSrv.listen(12223, r));
   const wilma = await register("Wilma", "VENDOR");
-  const wStore = (await call("POST", "/stores", { name: `Wilma Woo ${uniq}`, category: "APPAREL", sellerType: "BUSINESS", businessId: "4567890-1", latitude: 60.17, longitude: 24.94 }, wilma.accessToken)).body.store;
+  const wStore = (await call("POST", "/stores", { name: `Wilma Woo ${uniq}`, category: "APPAREL", sellerType: "BUSINESS", businessId: "4567890-7", latitude: 60.17, longitude: 24.94 }, wilma.accessToken)).body.store;
   await call("PATCH", `/admin/vendors/${wStore.id}/approve`, null, adminToken);
   const wooImport = (body, tok = wilma.accessToken) => call("POST", "/products/import/woocommerce", body, tok);
   const wooBody = { siteUrl: "http://localhost:12223/shop", consumerKey: CK, consumerSecret: CS, rightsConfirmed: true };
@@ -1240,7 +1263,7 @@ async function register(name, role, extra = {}) {
 
   console.log("\n— DAC7 seller data (tax info)");
   const stinaV = await register("Stina", "VENDOR");
-  const stina = (await call("POST", "/stores", { name: `Stina <b>Studio</b> ${uniq}`, category: "APPAREL", sellerType: "BUSINESS", businessId: "3456789-0", latitude: 60.16, longitude: 24.93, address: "Bulevardi 3, Helsinki" }, stinaV.accessToken)).body.store;
+  const stina = (await call("POST", "/stores", { name: `Stina <b>Studio</b> ${uniq}`, category: "APPAREL", sellerType: "BUSINESS", businessId: "3334445-9", latitude: 60.16, longitude: 24.93, address: "Bulevardi 3, Helsinki" }, stinaV.accessToken)).body.store;
   await call("PATCH", `/admin/vendors/${stina.id}/approve`, null, adminToken);
   const paulaV = await register("Paula", "VENDOR");
   const paula = (await call("POST", "/stores", { name: `Paula's wardrobe ${uniq}`, category: "THRIFT", sellerType: "PRIVATE", latitude: 60.19, longitude: 24.96 }, paulaV.accessToken)).body.store;
@@ -1255,10 +1278,10 @@ async function register(name, role, extra = {}) {
   const stinaTax = { legalName: "+Stina Studio Oy", addressLine: "Bulevardi 3 A 5", postalCode: "00120", city: "Helsinki", country: "fi" };
   check("a Finnish postal code has 5 digits", (await taxPut({ ...stinaTax, postalCode: "120" }, stinaV.accessToken)).status === 400);
   const badVat = await taxPut({ ...stinaTax, vatNumber: "FI12345678" }, stinaV.accessToken);
-  check("a Finnish VAT number must match the store's Y-tunnus", badVat.status === 400 && /FI34567890/.test(badVat.body.error || ""), badVat.body);
+  check("a Finnish VAT number must match the store's Y-tunnus", badVat.status === 400 && /FI33344459/.test(badVat.body.error || ""), badVat.body);
   check("unknown fields are refused", (await taxPut({ ...stinaTax, iban: "FI00" }, stinaV.accessToken)).status === 400);
-  const t1 = await taxPut({ ...stinaTax, vatNumber: "fi 3456 7890" }, stinaV.accessToken);
-  check("business seller saves legal name, VAT number and registered address; Y-tunnus comes from the store", t1.status === 200 && t1.body.taxInfoComplete === true && t1.body.taxInfo.vatNumber === "FI34567890" && t1.body.taxInfo.businessId === "3456789-0" && t1.body.taxInfo.country === "FI" && t1.body.taxInfo.dateOfBirth === null && t1.body.taxInfo.tinMasked === null, t1.body);
+  const t1 = await taxPut({ ...stinaTax, vatNumber: "fi 3334 4459" }, stinaV.accessToken);
+  check("business seller saves legal name, VAT number and registered address; Y-tunnus comes from the store", t1.status === 200 && t1.body.taxInfoComplete === true && t1.body.taxInfo.vatNumber === "FI33344459" && t1.body.taxInfo.businessId === "3334445-9" && t1.body.taxInfo.country === "FI" && t1.body.taxInfo.dateOfBirth === null && t1.body.taxInfo.tinMasked === null, t1.body);
   check("/stores/my and the admin vendor list say the tax data is complete", (await call("GET", "/stores/my", null, stinaV.accessToken)).body.store?.taxInfoComplete === true && (await call("GET", "/admin/vendors", null, adminToken)).body.stores?.find((x) => x.id === stina.id)?.taxInfoComplete === true && !JSON.stringify((await call("GET", "/admin/vendors", null, adminToken)).body).includes("tinEncrypted"));
   const paulaTax = { legalName: "Paula Virtanen", dateOfBirth: "1952-10-13", addressLine: "Mannerheimintie 100 B 7", postalCode: "00250", city: "Helsinki" };
   const noTin = await taxPut(paulaTax, paulaV.accessToken);
@@ -1302,7 +1325,7 @@ async function register(name, role, extra = {}) {
   check("statements are per store and owner-only; the month is validated", (await call("GET", `/stores/my/statements?month=${month}`, null, paulaV.accessToken)).body.orders?.length === 0 && (await call("GET", `/stores/my/statements?month=${month}`, null, otherCust.accessToken)).status === 403 && (await call("GET", "/stores/my/statements?month=2026-13", null, stinaV.accessToken)).status === 400);
   const stRes = await fetch(`${API}/stores/my/statements/${month}.html`, { headers: { Authorization: `Bearer ${stinaV.accessToken}` } });
   const stHtml = await stRes.text();
-  check("printable statement: titled 'not a VAT invoice', store name escaped, Y-tunnus, Malvoya's details as placeholders, no scripts", stRes.status === 200 && /text\/html/.test(stRes.headers.get("content-type") || "") && stHtml.includes("Statement — not a VAT invoice") && stHtml.includes("Stina &lt;b&gt;Studio&lt;/b&gt;") && !stHtml.includes("<b>Studio") && stHtml.includes("3456789-0") && stHtml.includes("+Stina Studio Oy") && stHtml.includes("[COMPANY LEGAL NAME]") && stHtml.includes(`#${sA}`) && !/<script/i.test(stHtml) && (stRes.headers.get("content-security-policy") || "").startsWith("default-src 'none'"), stHtml.slice(0, 400));
+  check("printable statement: titled 'not a VAT invoice', store name escaped, Y-tunnus, Malvoya's details as placeholders, no scripts", stRes.status === 200 && /text\/html/.test(stRes.headers.get("content-type") || "") && stHtml.includes("Statement — not a VAT invoice") && stHtml.includes("Stina &lt;b&gt;Studio&lt;/b&gt;") && !stHtml.includes("<b>Studio") && stHtml.includes("3334445-9") && stHtml.includes("+Stina Studio Oy") && stHtml.includes("[COMPANY LEGAL NAME]") && stHtml.includes(`#${sA}`) && !/<script/i.test(stHtml) && (stRes.headers.get("content-security-policy") || "").startsWith("default-src 'none'"), stHtml.slice(0, 400));
   check("the printable statement needs the owner's token", (await fetch(`${API}/stores/my/statements/${month}.html`)).status === 401 && (await fetch(`${API}/stores/my/statements/2026-1.html`, { headers: { Authorization: `Bearer ${stinaV.accessToken}` } })).status === 404);
 
   console.log("\n— DAC7 report (admin)");
@@ -1316,7 +1339,7 @@ async function register(name, role, extra = {}) {
   const dP = d7.body.sellers?.find((x) => x.storeId === paula.id);
   const q = `q${Math.floor((Number(hel().date.slice(5, 7)) - 1) / 3) + 1}`;
   check("DAC7: sales count excludes fully refunded orders; consideration is net of commission; fees per quarter", d7.status === 200 && dS?.sales === 2 + (cInYear ? 1 : 0) && dS.considerationCents.total === 10800 + (cInYear ? 1800 : 0) && dS.feesCents.total === 1200 + (cInYear ? 200 : 0) && dS.considerationCents[q] >= 10800 && dS.feesCents[q] >= 1200, dS);
-  check("DAC7: business identity (legal name, Y-tunnus, VAT number, address)", dS?.identity?.legalName === "+Stina Studio Oy" && dS.identity.businessId === "3456789-0" && dS.identity.vatNumber === "FI34567890" && dS.identity.address?.postalCode === "00120" && dS.identity.tin === null && dS.taxInfoComplete === true, dS?.identity);
+  check("DAC7: business identity (legal name, Y-tunnus, VAT number, address)", dS?.identity?.legalName === "+Stina Studio Oy" && dS.identity.businessId === "3334445-9" && dS.identity.vatNumber === "FI33344459" && dS.identity.address?.postalCode === "00120" && dS.identity.tin === null && dS.taxInfoComplete === true, dS?.identity);
   check("DAC7: the private seller's tax ID is decrypted for the admin report only", dP?.identity?.tin === "131052-308T" && dP.identity.dateOfBirth === "1952-10-13" && dP.sales === 1 && dP.considerationCents.total === 2250 && dP.feesCents.total === 250, dP);
   check("DAC7: sellers under the de-minimis (< 30 sales and ≤ 2 000 €) are flagged exempt", dS?.exempt === true && dP?.exempt === true && d7.body.deMinimis?.salesBelow === 30 && d7.body.dueBy === `${year + 1}-01-31`);
   check("DAC7: live stores missing tax data are listed", d7.body.missingTaxData?.some((x) => x.storeId === impStore.id && x.missing.includes("tin")) && d7.body.missingTaxData.every((x) => Array.isArray(x.missing) && x.missing.length > 0) && !d7.body.missingTaxData.some((x) => x.storeId === stina.id), d7.body.missingTaxData);
@@ -1687,6 +1710,195 @@ async function register(name, role, extra = {}) {
   await reminders.sendTaxInfoReminders();
   check("…and at most twice a year; stores with complete details are never reminded", remCount() === `2|${thisYear}` && sql(`select "taxReminderCount" from "Store" where id=${stina.id}`) === "0", remCount());
 
+  console.log("\n— Legal versions, acceptance records, business check and onboarding (2.11)");
+  { // own scope: the 2.11 checks reuse short names
+  const waitFor = async (fn, ms = 8000) => { const end = Date.now() + ms; let v; while (Date.now() < end) { v = await fn(); if (v) return v; await sleep(200); } return v; };
+  const verTerms = await (await fetch(`${BASE}/legal/terms/versions`)).json();
+  check("each legal document has its first version on record, effective now", verTerms.ok && verTerms.versions.length === 1 && verTerms.versions[0].status === "current" && /^terms_of_service@[0-9a-f]{12}$/.test(verTerms.currentVersion) && verTerms.pendingVersion === null && verTerms.versions[0].url.includes("/legal/terms/v/"), verTerms);
+  const verSell = await (await call("GET", "/legal/sellers/versions")).body;
+  const sellV1 = verSell.currentVersion;
+  check("the versions list answers to the page names too (and under /api/v1)", verSell.doc === "seller-terms" && /^vendor_terms@/.test(sellV1) && (await fetch(`${BASE}/legal/vendor-terms/versions`)).status === 200);
+  const exactPage = await fetch(`${BASE}/legal/sellers/v/${encodeURIComponent(sellV1)}`);
+  const exactHtml = await exactPage.text();
+  check("GET /legal/:doc/v/:version renders that exact stored text", exactPage.status === 200 && exactHtml.includes("Seller Terms") && exactHtml.includes(sellV1) && (exactPage.headers.get("content-security-policy") || "").startsWith("default-src 'none'"));
+  check("unknown versions and documents are 404", (await fetch(`${BASE}/legal/terms/v/terms_of_service@000000000000`)).status === 404 && (await fetch(`${BASE}/legal/nope/versions`)).status === 404);
+  check("the public page shows the version in force", (await (await fetch(`${BASE}/legal/terms`)).text()).includes(verTerms.currentVersion));
+
+  // Registration writes the acceptance records (customer: terms + privacy acknowledgement)
+  const lauriReg = await call("POST", "/auth/register", { name: "Lauri", email: `lauri${uniq}@example.fi`, password: "strong-pass-123", acceptTerms: true }, null, { headers: { "X-App-Version": "1.8.0+10", "User-Agent": "MalvoyaCustomer/1.8.0 " + "x".repeat(300) } });
+  const lauri = lauriReg.body;
+  const lauriAg = (await call("GET", "/me/agreements", null, lauri.accessToken)).body;
+  check("registering with acceptTerms records terms + privacy for a customer", lauriAg.ok && lauriAg.required.map((r) => r.doc).join(",") === "terms,privacy" && lauriAg.required.every((r) => r.accepted && r.acceptedAt && r.currentVersion && r.url && r.title?.fi) && lauriAg.history.length === 2 && lauriAg.history.every((h) => h.method === "register"), lauriAg);
+  const lauriRow = sql(`select ip || '|' || length("userAgent") || '|' || "appVersion" from "AgreementAcceptance" where "userId"=${lauri.user.id} and doc='terms'`);
+  check("the record keeps a truncated IP (/24), at most 200 chars of user agent and the app version", /^10\.9\.\d+\.0\/24\|200\|1\.8\.0\+10$/.test(lauriRow), lauriRow);
+  check("termsVersion still matches the accepted version", sql(`select "termsVersion" from "User" where id=${lauri.user.id}`) === verTerms.currentVersion);
+  const pekka = await register("Pekka Testi", "VENDOR");
+  const pekkaAg = (await call("GET", "/me/agreements", null, pekka.accessToken)).body;
+  check("a store accepts the seller terms; the privacy notice is listed as a non-blocking acknowledgement", pekkaAg.required[0]?.doc === "seller-terms" && pekkaAg.required[0].accepted === true && pekkaAg.required[0].blocking === true && pekkaAg.required[1]?.doc === "privacy" && pekkaAg.required[1].accepted === false && pekkaAg.required[1].blocking === false, pekkaAg.required);
+  const expData = (await call("GET", "/auth/me/data", null, lauri.accessToken)).body;
+  check("acceptance records are part of the data export", expData.data?.agreementAcceptances?.length === 2);
+
+  // Backfill: 2.10 accounts that only have termsVersion get a record for exactly that version (migration SQL)
+  const helmi = await register("Helmi");
+  sql(`delete from "AgreementAcceptance" where "userId"=${helmi.user.id}; update "User" set "termsVersion"='terms_of_service@0123456789ab' where id=${helmi.user.id}`);
+  const migSql = fs.readFileSync(path.join(__dirname, "..", "..", "prisma", "migrations", fs.readdirSync(path.join(__dirname, "..", "..", "prisma", "migrations")).find((d) => d.endsWith("_agreements_onboarding")), "migration.sql"), "utf8");
+  sql(migSql.slice(migSql.indexOf('INSERT INTO "AgreementAcceptance"')));
+  check("existing users with only termsVersion are backfilled as accepted for that version", sql(`select doc || '|' || version || '|' || method from "AgreementAcceptance" where "userId"=${helmi.user.id}`) === "terms|terms_of_service@0123456789ab|register");
+  const helmi428 = await call("POST", "/orders", {}, helmi.accessToken);
+  check("…and must accept the version in force before ordering (428 AGREEMENT_REQUIRED)", helmi428.status === 428 && helmi428.body.code === "AGREEMENT_REQUIRED" && helmi428.body.doc === "terms" && helmi428.body.version === verTerms.currentVersion && /changed/.test(helmi428.body.error), helmi428.body);
+
+  // Accepting in the app
+  const sanni = await register("Sanni", undefined, { acceptTerms: false });
+  const sanni428 = await call("POST", "/orders", {}, sanni.accessToken);
+  check("an account that never accepted (e.g. social sign-up) cannot order (428)", sanni428.status === 428 && sanni428.body.code === "AGREEMENT_REQUIRED" && /accept/.test(sanni428.body.error) && sanni428.body.url.includes("/legal/terms/v/"), sanni428.body);
+  check("428 also guards rentals; quotes and reading stay open", (await call("POST", "/rentals", {}, sanni.accessToken)).status === 428 && (await call("POST", "/orders/quote", {}, sanni.accessToken)).status !== 428 && (await call("GET", "/orders", null, sanni.accessToken)).status === 200 && (await call("GET", "/auth/me/data", null, sanni.accessToken)).status === 200);
+  check("only the current or the announced version can be accepted (409)", (await call("POST", "/me/agreements/accept", { doc: "terms", version: "terms_of_service@000000000000" }, sanni.accessToken)).status === 409);
+  check("a customer cannot accept the seller terms (400)", (await call("POST", "/me/agreements/accept", { doc: "seller-terms", version: sellV1 }, sanni.accessToken)).status === 400);
+  const acc1 = await call("POST", "/me/agreements/accept", { doc: "terms", version: verTerms.currentVersion }, sanni.accessToken, { headers: { "X-App-Version": "1.8.0+10" } });
+  const acc2 = await call("POST", "/me/agreements/accept", { doc: "terms", version: verTerms.currentVersion }, sanni.accessToken);
+  check("accepting records it and emails a copy", acc1.status === 201 && acc1.body.alreadyAccepted === false && acc1.body.emailed === true && acc1.body.acceptance?.method === "in_app" && acc1.body.acceptance.copyUrl.endsWith(`/me/agreements/${acc1.body.acceptance.id}/copy`), acc1.body);
+  check("accepting again is idempotent (same record, no second email)", acc2.status === 200 && acc2.body.alreadyAccepted === true && acc2.body.acceptance.id === acc1.body.acceptance.id && acc2.body.emailed === false && sql(`select count(*) from "AgreementAcceptance" where "userId"=${sanni.user.id}`) === "1");
+  check("after accepting, ordering is no longer refused for the agreement", (await call("POST", "/orders", {}, sanni.accessToken)).status === 400);
+  const copyId = acc1.body.acceptance.id;
+  const copyRes = await fetch(`${API}/me/agreements/${copyId}/copy`, { headers: { Authorization: `Bearer ${sanni.accessToken}` } });
+  const copyHtml = await copyRes.text();
+  check("the copy shows the account, version, time and the full accepted text", copyRes.status === 200 && copyHtml.includes("Your copy: Terms of Service") && copyHtml.includes(verTerms.currentVersion) && copyHtml.includes(`sanni${uniq}@example.fi`) && copyHtml.includes("Right of withdrawal") && copyHtml.includes("1.8.0+10") && copyRes.headers.get("cache-control") === "private, no-store");
+  check("copies are the owner's only (404 for others, 401 without a token)", (await call("GET", `/me/agreements/${copyId}/copy`, null, lauri.accessToken)).status === 404 && (await call("GET", `/me/agreements/${copyId}/copy`, null, adminToken)).status === 404 && (await fetch(`${API}/me/agreements/${copyId}/copy`)).status === 401);
+  const copyLink = await call("GET", `/me/agreements/${copyId}/copy/link`, null, sanni.accessToken);
+  check("a signed 10-minute link opens the copy without a token", copyLink.status === 200 && copyLink.body.url.startsWith(`${BASE}/api/v1/agreements/copy/${copyId}.html?exp=`) && Math.abs(new Date(copyLink.body.expiresAt).getTime() - Date.now() - 600_000) < 30_000 && (await fetch(copyLink.body.url)).status === 200, copyLink.body);
+  check("a changed signature or record id is refused (403); links are the owner's", (await fetch(copyLink.body.url.replace(/sig=[^&]+/, "sig=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"))).status === 403 && (await fetch(copyLink.body.url.replace(`/copy/${copyId}.html`, `/copy/${copyId + 1}.html`))).status === 403 && (await call("GET", `/me/agreements/${copyId}/copy/link`, null, lauri.accessToken)).status === 404);
+
+  // Business check (PRH/YTJ mock)
+  const badY = await call("POST", "/stores", { name: `Bad Y ${uniq}`, category: "APPAREL", sellerType: "BUSINESS", businessId: "1234567-8" }, pekka.accessToken);
+  check("a Y-tunnus with a wrong check digit is refused (400)", badY.status === 400 && /not valid/.test(badY.body.error || JSON.stringify(badY.body)), badY.body);
+  const pekkaStore = (await call("POST", "/stores", { name: "Testi Kauppa", category: "APPAREL", sellerType: "BUSINESS", businessId: "7654321-2", address: "Testikatu 1, Helsinki", phone: "+358401111111", latitude: 60.17, longitude: 24.94 }, pekka.accessToken)).body.store;
+  const vendorRow = async (id) => (await call("GET", "/admin/vendors", null, adminToken)).body.stores?.find((x) => x.id === id);
+  const pekkaCheck = await waitFor(async () => { const v = await vendorRow(pekkaStore.id); return v?.businessCheck?.verificationStatus ? v.businessCheck : null; });
+  check("saving a Y-tunnus looks it up in PRH: matched, registered name and date shown to the admin", pekkaCheck?.verificationStatus === "matched" && pekkaCheck.registeredName === "Testi Kauppa Oy" && String(pekkaCheck.registeredAt).startsWith("2015-03-01") && !!pekkaCheck.checkedAt, pekkaCheck);
+  check("the check never approves the store", (await vendorRow(pekkaStore.id))?.isVerified === false);
+  check("the lookup used the PRH v3 companies endpoint on the test host", prhRequests.includes("/opendata-ytj-api/v3/companies?businessId=7654321-2"), prhRequests);
+  const toini = await register("Toini", "VENDOR");
+  const toiniStore = (await call("POST", "/stores", { name: "Aivan Muu Puoti", category: "APPAREL", sellerType: "BUSINESS", businessId: "7654321-2" }, toini.accessToken)).body.store;
+  const toiniCheck = await waitFor(async () => (await vendorRow(toiniStore.id))?.businessCheck?.verificationStatus);
+  check("a different name is flagged name_mismatch (and the answer came from the cache)", toiniCheck === "name_mismatch" && prhRequests.filter((r) => r.endsWith("7654321-2")).length === 1, [toiniCheck, prhRequests]);
+  const kerttu = await register("Kerttu", "VENDOR");
+  const kStore = (await call("POST", "/stores", { name: "Testi Lopetettu", category: "APPAREL", sellerType: "BUSINESS", businessId: "1112223-0" }, kerttu.accessToken)).body.store;
+  const veikko = await register("Veikko", "VENDOR");
+  const vStore = (await call("POST", "/stores", { name: "Ei Rekisterissä", category: "APPAREL", sellerType: "BUSINESS", businessId: "5555555-6" }, veikko.accessToken)).body.store;
+  const iiro = await register("Iiro", "VENDOR");
+  const iStore = (await call("POST", "/stores", { name: "Iiro Ateljee", category: "APPAREL", sellerType: "BUSINESS", businessId: "9876543-0" }, iiro.accessToken)).body.store;
+  const aarne = await register("Aarne", "VENDOR");
+  const aStore = (await call("POST", "/stores", { name: "Aarnen Kirpputori", category: "THRIFT", sellerType: "PRIVATE" }, aarne.accessToken)).body.store;
+  const kChk = await waitFor(async () => (await vendorRow(kStore.id))?.businessCheck?.verificationStatus);
+  const vChk = await waitFor(async () => (await vendorRow(vStore.id))?.businessCheck?.verificationStatus);
+  const iChk = await waitFor(async () => (await vendorRow(iStore.id))?.businessCheck?.verificationStatus);
+  check("ceased companies are inactive, unknown IDs not_found, an outage unavailable", kChk === "inactive" && vChk === "not_found" && iChk === "unavailable", [kChk, vChk, iChk]);
+  const recheck = await call("POST", `/admin/vendors/${iStore.id}/business-check`, null, adminToken);
+  check("the admin can run the check again (current name only, old names ignored)", recheck.status === 200 && recheck.body.businessCheck?.verificationStatus === "matched" && recheck.body.businessCheck.registeredName === "Iiro Ateljee Oy", recheck.body);
+  const aRow = await vendorRow(aStore.id);
+  check("private sellers skip the check (and the admin re-check says so)", aRow?.businessCheck?.required === false && aRow.businessCheckStatus === null && (await call("POST", `/admin/vendors/${aStore.id}/business-check`, null, adminToken)).status === 409);
+  check("the store app sees its own check result", (await call("GET", "/stores/my", null, pekka.accessToken)).body.store?.businessCheck?.verificationStatus === "matched");
+
+  // Onboarding checklists
+  let ob = (await call("GET", "/stores/my/onboarding", null, pekka.accessToken)).body;
+  check("store onboarding lists the steps in order with titles and actions", ob.ok && ob.steps.map((s) => s.key).join(",") === "details,map_pin,hours,payouts,first_product,tax_info,agreement,business_check" && ob.steps.every((s) => s.title?.en && s.title?.fi && s.action) && ob.readyForApproval === false && ob.percent === 50, ob);
+  await call("PATCH", `/stores/${pekkaStore.id}`, { openingHours: { mon: [["09:00", "18:00"]], tue: [["09:00", "18:00"]] } }, pekka.accessToken);
+  await call("POST", "/products", { name: "Testi paita", category: "Shirt", salePriceCents: 2500, stockQuantity: 1, images: [ownImage(pekkaStore.id, "paita")] }, pekka.accessToken);
+  await call("PUT", "/stores/my/tax-info", { legalName: "Testi Kauppa Oy", addressLine: "Testikatu 1", postalCode: "00100", city: "Helsinki", country: "fi" }, pekka.accessToken);
+  ob = (await call("GET", "/stores/my/onboarding", null, pekka.accessToken)).body;
+  check("steps turn done as the store completes them (payouts still missing)", ob.steps.filter((s) => !s.done).map((s) => s.key).join(",") === "payouts" && ob.readyForApproval === false && sql(`select "readyForApprovalAt" is null from "Store" where id=${pekkaStore.id}`) === "t", ob.steps);
+  sql(`update "Store" set "payoutsEnabled"=true where id=${pekkaStore.id}`);
+  ob = (await call("GET", "/stores/my/onboarding", null, pekka.accessToken)).body;
+  const readyAt1 = sql(`select "readyForApprovalAt" from "Store" where id=${pekkaStore.id}`);
+  check("everything but approval done: ready for approval, admin told once", ob.percent === 100 && ob.readyForApproval === true && ob.approved === false && readyAt1 !== "");
+  await call("GET", "/stores/my/onboarding", null, pekka.accessToken);
+  check("…only once (the time is not reset)", sql(`select "readyForApprovalAt" from "Store" where id=${pekkaStore.id}`) === readyAt1);
+  const aOb = (await call("GET", "/stores/my/onboarding", null, aarne.accessToken)).body;
+  check("a private seller's business check step is skipped (done)", aOb.steps.find((s) => s.key === "business_check")?.done === true && aOb.steps.find((s) => s.key === "business_check")?.skipped === true);
+  const onni = await register("Onni", "COURIER");
+  let cob = (await call("GET", "/courier/me/onboarding", null, onni.accessToken)).body;
+  check("courier onboarding lists profile, vehicle, payouts, agreement, location disclosure, approval", cob.ok && cob.steps.map((s) => s.key).join(",") === "profile,vehicle,payouts,agreement,location_disclosure,approved" && cob.steps.find((s) => s.key === "agreement").done === true && cob.readyForApproval === false, cob);
+  check("vehicle types are validated (400)", (await call("PATCH", "/courier/me", { vehicleType: "rocket" }, onni.accessToken)).status === 400);
+  const setV = await call("PATCH", "/courier/me", { vehicleType: "ebike", phone: "+358 40 222 3333" }, onni.accessToken);
+  check("the courier sets vehicle and phone", setV.status === 200 && setV.body.courier.vehicleType === "ebike");
+  check("the location disclosure must be confirmed explicitly (400 otherwise)", (await call("POST", "/courier/me/disclosures", { locationDisclosure: false }, onni.accessToken)).status === 400);
+  const disc1 = await call("POST", "/courier/me/disclosures", { locationDisclosure: true }, onni.accessToken);
+  const disc2 = await call("POST", "/courier/me/disclosures", { locationDisclosure: true }, onni.accessToken);
+  check("the disclosure acknowledgement is recorded once", disc1.status === 200 && !!disc1.body.locationDisclosureAt && disc2.body.locationDisclosureAt === disc1.body.locationDisclosureAt);
+  sql(`update "Courier" set "payoutsEnabled"=true where "userId"=${onni.user.id}`);
+  cob = (await call("GET", "/courier/me/onboarding", null, onni.accessToken)).body;
+  check("courier ready for approval when everything but approval is done", cob.readyForApproval === true && cob.approved === false && cob.percent === 83 && sql(`select "readyForApprovalAt" is not null from "Courier" where "userId"=${onni.user.id}`) === "t", cob);
+  const sys211 = (await call("GET", "/admin/system", null, adminToken)).body;
+  check("System lists them as ready for approval", sys211.version === "2.11.0" && sys211.attention.some((a) => a.includes(`(#${pekkaStore.id}) is ready for approval`)) && sys211.attention.some((a) => a.includes("Courier \"Onni\"") && a.includes("ready for approval")) && sys211.readyForApproval?.stores?.some((s) => s.id === pekkaStore.id), sys211.attention);
+  check("admin courier list shows vehicle, disclosure and readiness", (await call("GET", "/admin/couriers", null, adminToken)).body.couriers?.find((c) => c.user?.id === onni.user.id)?.vehicleType === "ebike");
+
+  // Publishing changes (second instance reading a copy of the legal texts, same database)
+  const legalTmp = fs.mkdtempSync(path.join(require("os").tmpdir(), "malvoya-legal-"));
+  for (const f of fs.readdirSync(path.join(__dirname, "..", "..", "..", "legal"))) if (f.endsWith(".md")) fs.copyFileSync(path.join(__dirname, "..", "..", "..", "legal", f), path.join(legalTmp, f));
+  const changeText = (file, n) => fs.appendFileSync(path.join(legalTmp, file), `\n\nTest change ${n} (e2e only).\n`);
+  check("second instance with a copy of the legal texts starts", await startFeeApi({ LEGAL_DIR: legalTmp }));
+  const pub = (doc, body) => callAt(FEE_API, "POST", `/admin/legal/${doc}/publish`, body, adminToken);
+  const inDays = (d) => new Date(Date.now() + d * 86_400_000 + 60_000).toISOString();
+  const summ = { summaryEn: "Clearer rules for returns and payouts.", summaryFi: "Selkeämmät säännöt palautuksille ja tilityksille." };
+  check("publishing an unchanged text is refused (409)", (await pub("terms", { effectiveAt: inDays(0), ...summ })).status === 409);
+  check("only admins publish", (await callAt(FEE_API, "POST", "/admin/legal/terms/publish", { effectiveAt: inDays(0), ...summ }, pekka.accessToken)).status === 403);
+  changeText("vendor_terms.md", 1);
+  const short = await pub("seller-terms", { effectiveAt: inDays(3), ...summ });
+  check("seller terms need at least 15 days' notice (P2B) (400 NOTICE_TOO_SHORT)", short.status === 400 && short.body.code === "NOTICE_TOO_SHORT" && short.body.minNoticeDays === 15, short.body);
+  changeText("courier_agreement.md", 1);
+  check("the courier agreement needs 15 days too", (await pub("courier-agreement", { effectiveAt: inDays(10), ...summ })).body.code === "NOTICE_TOO_SHORT");
+  check("a legal obligation needs a reason (400)", (await pub("seller-terms", { effectiveAt: inDays(0), ...summ, legalObligation: true })).status === 400);
+  check("summaries in both languages are required (400)", (await pub("seller-terms", { effectiveAt: inDays(16), summaryEn: "x", summaryFi: "y" })).status === 400);
+  const pubSell = await pub("seller-terms", { effectiveAt: inDays(16), ...summ });
+  check("seller terms with 16 days' notice are published as pending", pubSell.status === 201 && pubSell.body.version.noticeDays === 16 && pubSell.body.notifying >= 1 && /^vendor_terms@/.test(pubSell.body.version.version) && pubSell.body.version.version !== sellV1, pubSell.body);
+  const sellV2 = pubSell.body.version.version;
+  const notified = await waitFor(async () => { const n = Number(sql(`select "notifiedCount" from "LegalVersion" where version='${sellV2}'`)); return n >= 5 ? n : 0; }, 20000);
+  check("every store is told (push + email in their language)", Number(notified) >= 5, notified);
+  const vers2 = (await callAt(FEE_API, "GET", "/legal/seller-terms/versions")).body;
+  check("the versions list shows the pending one; the old one stays current", vers2.currentVersion === sellV1 && vers2.pendingVersion === sellV2 && vers2.versions.find((v) => v.version === sellV2)?.status === "pending" && vers2.versions.find((v) => v.version === sellV2)?.summary?.fi === summ.summaryFi);
+  const pendAg = (await callAt(FEE_API, "GET", "/me/agreements", null, toini.accessToken)).body.required[0];
+  check("GET /me/agreements shows the pending version, its date, summary and the right to terminate before it", pendAg.pendingVersion === sellV2 && !!pendAg.pendingEffectiveAt && pendAg.summary?.en === summ.summaryEn && pendAg.canTerminateBefore === pendAg.pendingEffectiveAt && pendAg.accepted === true && pendAg.pendingAccepted === false, pendAg);
+  changeText("vendor_terms.md", 2);
+  check("a second change while one is announced is refused (409)", (await pub("seller-terms", { effectiveAt: inDays(20), ...summ })).status === 409);
+  const adminLegal = (await callAt(FEE_API, "GET", "/admin/legal", null, adminToken)).body;
+  const aSell = adminLegal.docs?.find((d) => d.doc === "seller-terms");
+  check("admin Legal lists documents, versions, notice rules, acceptance counts and the unpublished file change", adminLegal.docs?.length === 4 && aSell.minNoticeDays === 15 && aSell.versions.length === 2 && aSell.versions.find((v) => v.version === sellV1).acceptances >= 5 && aSell.unpublishedChange === true && aSell.pendingVersion === sellV2, aSell);
+  check("System says the repository text changed but is not published", (await callAt(FEE_API, "GET", "/admin/system", null, adminToken)).body.attention.some((a) => a.startsWith("Seller Terms: the text in the repository has changed")));
+  check("the announced version can be accepted early", (await callAt(FEE_API, "POST", "/me/agreements/accept", { doc: "seller-terms", version: sellV2 }, pekka.accessToken)).status === 201);
+  check("before it takes effect nothing is blocked", (await callAt(FEE_API, "POST", "/products", { name: "Ennen", category: "Shirt", salePriceCents: 1000, images: [] }, toini.accessToken)).status !== 428);
+  // Time passes: the announced version takes effect
+  sql(`update "LegalVersion" set "effectiveAt" = now() - interval '1 second' where version='${sellV2}'`);
+  await sleep(10_500); // version cache (10 s)
+  const sell428 = await callAt(FEE_API, "POST", "/products", { name: "Jälkeen", category: "Shirt", salePriceCents: 1000, images: [] }, toini.accessToken);
+  check("once in effect, a store that has not accepted cannot publish products (428)", sell428.status === 428 && sell428.body.code === "AGREEMENT_REQUIRED" && sell428.body.doc === "seller-terms" && sell428.body.version === sellV2, sell428.body);
+  check("…nor accept orders (428); drafts, reading, payouts and support stay open", (await callAt(FEE_API, "PATCH", "/orders/999999/status", { status: "CONFIRMED" }, toini.accessToken)).status === 428 && (await callAt(FEE_API, "POST", "/products", { name: "Luonnos", category: "Shirt", salePriceCents: 1000, images: [], isAvailable: false }, toini.accessToken)).status !== 428 && (await callAt(FEE_API, "GET", "/stores/my", null, toini.accessToken)).status === 200 && (await callAt(FEE_API, "GET", "/payouts", null, toini.accessToken)).status !== 428 && (await callAt(FEE_API, "GET", "/auth/me/data", null, toini.accessToken)).status === 200);
+  check("the store that accepted early is not blocked", (await callAt(FEE_API, "POST", "/products", { name: "Hyväksytty", category: "Shirt", salePriceCents: 1000, images: [] }, pekka.accessToken)).status !== 428);
+  check("the page now shows the new version", (await (await fetch(`${FEE_BASE}/legal/sellers`)).text()).includes(sellV2));
+  // Required by law: shorter notice, reason audited
+  changeText("courier_agreement.md", 2);
+  const pubCour = await pub("courier-agreement", { effectiveAt: new Date().toISOString(), ...summ, legalObligation: true, reason: "Platform Work Directive transposition requires new wording now" });
+  check("a change required by law may take effect at once, with the reason in the audit log", pubCour.status === 201 && pubCour.body.version.legalObligation === true && sql(`select action || '|' || ("newValue"->>'reason') from "AdminAuditLog" where entity='LegalVersion' and "entityId"=${pubCour.body.version.id}`) === "legal.publish.legal_obligation|Platform Work Directive transposition requires new wording now");
+  const cOn = await callAt(FEE_API, "POST", "/courier/status", { isOnline: true, latitude: 60.17, longitude: 24.94 }, c1.accessToken);
+  check("a courier who has not accepted cannot go online or take jobs (428); going offline works", cOn.status === 428 && cOn.body.doc === "courier-agreement" && (await callAt(FEE_API, "PATCH", "/orders/999999/assign-courier", null, c1.accessToken)).status === 428 && (await callAt(FEE_API, "POST", "/courier/status", { isOnline: false }, c1.accessToken)).status === 200, cOn.body);
+  await callAt(FEE_API, "POST", "/me/agreements/accept", { doc: "courier-agreement", version: pubCour.body.version.version }, c1.accessToken);
+  check("after accepting, the courier can go online again", (await callAt(FEE_API, "POST", "/courier/status", { isOnline: false }, c1.accessToken)).status === 200 && (await callAt(FEE_API, "POST", "/courier/status", { isOnline: true }, c1.accessToken)).status === 200);
+  await callAt(FEE_API, "POST", "/courier/status", { isOnline: false }, c1.accessToken);
+  // Customer terms: no minimum, announced; customers on the old version must accept before ordering
+  changeText("terms_of_service.md", 1);
+  const pubTerms = await pub("terms", { effectiveAt: new Date().toISOString(), ...summ });
+  const lauri428 = await callAt(FEE_API, "POST", "/orders", {}, lauri.accessToken);
+  check("customer terms may take effect at once (0 days) and then block ordering until accepted", pubTerms.status === 201 && pubTerms.body.version.noticeDays === 0 && lauri428.status === 428 && /have changed/.test(lauri428.body.error) && lauri428.body.version === pubTerms.body.version.version, [pubTerms.body, lauri428.body]);
+  const lauriFi = await callAt(FEE_API, "POST", "/orders", {}, lauri.accessToken, { headers: { "Accept-Language": "fi" } });
+  check("the 428 message follows the app's language", /uusi versio/.test(lauriFi.body.error || ""), lauriFi.body);
+  await callAt(FEE_API, "POST", "/me/agreements/accept", { doc: "terms", version: pubTerms.body.version.version }, lauri.accessToken);
+  const lauriAfter = (await callAt(FEE_API, "GET", "/me/agreements", null, lauri.accessToken)).body;
+  check("after accepting, the history keeps both versions", (await callAt(FEE_API, "POST", "/orders", {}, lauri.accessToken)).status === 400 && lauriAfter.history.filter((h) => h.doc === "terms").length === 2 && lauriAfter.required[0].accepted === true);
+  const uHist = (await callAt(FEE_API, "GET", `/admin/users/${lauri.user.id}/agreements`, null, adminToken)).body;
+  check("admin sees a user's acceptance history", uHist.ok && uHist.acceptances.length === 3 && uHist.acceptances.every((a) => a.version && a.acceptedAt && a.method), uHist);
+  feeApi.kill(); feeApi = null;
+  fs.rmSync(legalTmp, { recursive: true, force: true });
+  }
+
   console.log("\n— Background jobs and input hardening");
   const leaseSql = `INSERT INTO "JobLease" ("name","lockedUntil") VALUES ('t${uniq}', now() + interval '1 minute') ON CONFLICT ("name") DO UPDATE SET "lockedUntil" = now() + interval '1 minute' WHERE "JobLease"."lockedUntil" < now() RETURNING "name"`;
   const firstLine = (q) => sql(q).split(/\r?\n/)[0];
@@ -1697,7 +1909,7 @@ async function register(name, role, extra = {}) {
   check("huge search input rejected", (await call("GET", `/products/search?q=${"a".repeat(200)}`)).status === 400);
   const cors = await fetch(`${API}/stores`, { headers: { Origin: "https://evil.example" } });
   check("CORS does not allow unknown origins", !cors.headers.get("access-control-allow-origin"));
-  check("health reports v2.10.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.10.0");
+  check("health reports v2.11.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.11.0");
 
   [vendorSock, custSock, otherSock, c1Sock, c2Sock].forEach((s) => s.close());
   console.log(`\n${pass} passed, ${fail} failed`);

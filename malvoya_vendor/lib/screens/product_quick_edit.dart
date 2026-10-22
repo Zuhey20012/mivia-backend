@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../config/theme.dart';
+import '../core/agreements.dart';
 import '../core/api_client.dart';
 import '../core/haptics.dart';
 import '../core/images.dart';
@@ -12,7 +13,10 @@ sealed class QuickEditResult {}
 class QuickEditSaved extends QuickEditResult {
   final Map<String, dynamic>? product;
   final Map<String, dynamic> sent;
-  QuickEditSaved(this.product, this.sent);
+
+  /// "Seller Terms accepted…" when the agreement sheet was shown on the way (API 2.11).
+  final String? notice;
+  QuickEditSaved(this.product, this.sent, {this.notice});
 }
 
 /// Open the full editor instead.
@@ -91,7 +95,8 @@ class _QuickEditSheetState extends State<_QuickEditSheet> {
             }
         ],
     };
-    final res = await widget.api.patch('/products/${p['id']}', body);
+    // A visible product needs the Seller Terms in force (428 → agreement sheet → saved again)
+    final res = await withAgreement(context, widget.api, () => widget.api.patch('/products/${p['id']}', body), announce: false);
     if (!mounted) return;
     if (!res.ok) {
       Haptics.warning();
@@ -103,7 +108,7 @@ class _QuickEditSheetState extends State<_QuickEditSheet> {
     }
     Haptics.success();
     final updated = res.data['product'] is Map ? Map<String, dynamic>.from(res.data['product']) : null;
-    Navigator.pop(context, QuickEditSaved(updated, body));
+    Navigator.pop(context, QuickEditSaved(updated, body, notice: res.notice));
   }
 
   Widget _stepper({required int value, required ValueChanged<int> onChanged, required String label}) => Row(mainAxisSize: MainAxisSize.min, children: [

@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../auth_service.dart';
 import '../config/theme.dart';
+import 'api_client.dart';
 import 'strings.dart';
 
 /// Google Play's "prominent disclosure" for location (User Data and Location policies).
@@ -14,6 +17,38 @@ class LocationDisclosure {
 
   static const _key = 'location_disclosure_accepted_v1';
 
+  static AuthService? _auth;
+
+  /// Set once at start-up, so an accepted disclosure is also recorded on the server.
+  static void attach(AuthService auth) => _auth = auth;
+
+  /// Records on the server that the courier read the disclosure (`POST /courier/me/disclosures`,
+  /// API 2.11: an onboarding step). Idempotent on the server. False when it could not be sent
+  /// (signed out, offline, or an older server without the endpoint).
+  static Future<bool> report() async {
+    final auth = _auth;
+    if (auth == null || !auth.isAuthenticated) return false;
+    final res = await ApiClient(auth).post('/courier/me/disclosures', {'locationDisclosure': true});
+    return res.ok;
+  }
+
+  static bool _syncing = false;
+
+  /// Couriers who accepted the disclosure on this phone before the server recorded it: when the
+  /// server's [courier] (from `GET /courier/me` or the onboarding checklist) has
+  /// `locationDisclosureAt: null` but this phone remembers the acceptance, it is sent once.
+  /// Servers without the field are left alone. True when it was recorded now.
+  static Future<bool> syncIfMissing(Map? courier) async {
+    if (_syncing || courier == null || !courier.containsKey('locationDisclosureAt') || courier['locationDisclosureAt'] != null) return false;
+    if (!await isAccepted()) return false;
+    _syncing = true;
+    try {
+      return await report();
+    } finally {
+      _syncing = false;
+    }
+  }
+
   static Future<bool> isAccepted() async {
     try {
       return (await SharedPreferences.getInstance()).getBool(_key) ?? false;
@@ -24,8 +59,9 @@ class LocationDisclosure {
 
   static bool isGranted(LocationPermission p) => p == LocationPermission.whileInUse || p == LocationPermission.always;
 
-  /// Shows the disclosure. True when the courier tapped Continue (remembered on this phone).
-  static Future<bool> show(BuildContext context) async {
+  /// Shows the disclosure. True when the courier tapped Continue (remembered on this phone and
+  /// recorded on the server; [awaitReport] waits for the server, otherwise it is sent alongside).
+  static Future<bool> show(BuildContext context, {bool awaitReport = false}) async {
     final ok = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -50,6 +86,12 @@ class LocationDisclosure {
     try {
       await (await SharedPreferences.getInstance()).setBool(_key, true);
     } catch (_) {}
+    // Also on the server; going online does not wait for it
+    if (awaitReport) {
+      await report();
+    } else {
+      unawaited(report());
+    }
     return true;
   }
 
