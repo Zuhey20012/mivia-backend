@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../core/api_client.dart';
-import '../core/strings.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../l10n.dart';
-import '../locale_provider.dart';
 
 class ChatbotScreen extends StatefulWidget {
   const ChatbotScreen({super.key});
@@ -148,12 +147,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
     final inputBg = AppTheme.inputBackground(context);
     final cardBorder = AppTheme.cardBorder(context);
 
-    showModalBottomSheet(
-      showDragHandle: false,
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
+    showMSheet(context, builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModal) => Container(
           padding: EdgeInsets.only(
             top: 20, left: 24, right: 24,
@@ -161,19 +155,14 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
           ),
           decoration: BoxDecoration(
             color: cardBg,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(MRadius.lg)),
           ),
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Center(
-                  child: Container(
-                    width: 40, height: 4,
-                    decoration: BoxDecoration(color: Colors.grey.shade400, borderRadius: BorderRadius.circular(2)),
-                  ),
-                ),
+                const MSheetHandle(),
                 const SizedBox(height: 18),
                 Row(
                   children: [
@@ -181,7 +170,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                       width: 42, height: 42,
                       decoration: BoxDecoration(
                         color: AppTheme.primaryLight,
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(MRadius.sm),
                       ),
                       child: const Icon(Icons.mark_email_read_rounded, color: AppTheme.primary, size: 24),
                     ),
@@ -190,39 +179,39 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(l10n.translate('directEmailSupport'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textPrimary)),
-                          Text(l10n.translate('directEmailSupportSub'), style: TextStyle(fontSize: 12, color: textSecondary)),
+                          Text(l10n.translate('directEmailSupport'), style: TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w800, color: textPrimary)),
+                          Text(l10n.translate('directEmailSupportSub'), style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
                         ],
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 18),
-                Text(l10n.translate('yourEmailAddress'), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: textPrimary)),
+                Text(l10n.translate('yourEmailAddress'), style: TextStyle(fontSize: MTextSize.label, fontWeight: FontWeight.w700, color: textPrimary)),
                 const SizedBox(height: 6),
                 TextField(
                   controller: emailCtrl,
                   keyboardType: TextInputType.emailAddress,
-                  style: TextStyle(color: textPrimary, fontSize: 14),
+                  style: TextStyle(color: textPrimary, fontSize: MTextSize.bodyM),
                   decoration: InputDecoration(
                     hintText: 'your.name@example.com',
                     hintStyle: TextStyle(color: textSecondary),
                     filled: true,
                     fillColor: inputBg,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: cardBorder)),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: cardBorder)),
-                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppTheme.primary, width: 1.5)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm), borderSide: BorderSide(color: cardBorder)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm), borderSide: BorderSide(color: cardBorder)),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm), borderSide: const BorderSide(color: AppTheme.primary, width: 1.5)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: MSpace.md),
                   ),
                 ),
                 const SizedBox(height: 14),
-                Text(l10n.translate('category'), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: textPrimary)),
+                Text(l10n.translate('category'), style: TextStyle(fontSize: MTextSize.label, fontWeight: FontWeight.w700, color: textPrimary)),
                 const SizedBox(height: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14),
                   decoration: BoxDecoration(
                     color: inputBg,
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(MRadius.sm),
                     border: Border.all(color: cardBorder),
                   ),
                   child: DropdownButtonHideUnderline(
@@ -230,7 +219,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                       value: selectedCategory,
                       dropdownColor: cardBg,
                       isExpanded: true,
-                      style: TextStyle(color: textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
+                      style: TextStyle(color: textPrimary, fontSize: MTextSize.label, fontWeight: FontWeight.w600),
                       items: [
                         DropdownMenuItem(value: l10n.translate('catExpressDelivery'), child: Text(l10n.translate('catExpressDelivery'))),
                         DropdownMenuItem(value: l10n.translate('catReturns14d'), child: Text(l10n.translate('catReturns14d'))),
@@ -245,56 +234,54 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                   ),
                 ),
                 const SizedBox(height: 14),
-                Text(l10n.translate('subject'), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: textPrimary)),
+                Text(l10n.translate('subject'), style: TextStyle(fontSize: MTextSize.label, fontWeight: FontWeight.w700, color: textPrimary)),
                 const SizedBox(height: 6),
                 TextField(
                   controller: subjectCtrl,
-                  style: TextStyle(color: textPrimary, fontSize: 14),
+                  style: TextStyle(color: textPrimary, fontSize: MTextSize.bodyM),
                   decoration: InputDecoration(
                     hintText: tr(context, 'e.g. Question about order #123', 'esim. Kysymys tilauksesta #123'),
                     hintStyle: TextStyle(color: textSecondary),
                     filled: true,
                     fillColor: inputBg,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: cardBorder)),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: cardBorder)),
-                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppTheme.primary, width: 1.5)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm), borderSide: BorderSide(color: cardBorder)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm), borderSide: BorderSide(color: cardBorder)),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm), borderSide: const BorderSide(color: AppTheme.primary, width: 1.5)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: MSpace.md),
                   ),
                 ),
                 const SizedBox(height: 14),
-                Text(l10n.translate('messageDetails'), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: textPrimary)),
+                Text(l10n.translate('messageDetails'), style: TextStyle(fontSize: MTextSize.label, fontWeight: FontWeight.w700, color: textPrimary)),
                 const SizedBox(height: 6),
                 TextField(
                   controller: messageCtrl,
                   maxLines: 4,
-                  style: TextStyle(color: textPrimary, fontSize: 14),
+                  style: TextStyle(color: textPrimary, fontSize: MTextSize.bodyM),
                   decoration: InputDecoration(
                     hintText: l10n.translate('describeYourRequest'),
                     hintStyle: TextStyle(color: textSecondary),
                     filled: true,
                     fillColor: inputBg,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: cardBorder)),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: cardBorder)),
-                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppTheme.primary, width: 1.5)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm), borderSide: BorderSide(color: cardBorder)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm), borderSide: BorderSide(color: cardBorder)),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm), borderSide: const BorderSide(color: AppTheme.primary, width: 1.5)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: MSpace.md),
                   ),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: MSpace.xl),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.primary,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      padding: const EdgeInsets.symmetric(vertical: MSpace.lg),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     ),
-                    icon: const Icon(Icons.send_rounded, color: Colors.white, size: 20),
-                    label: Text(l10n.translate('sendTicket'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                    icon: const Icon(Icons.send_rounded, color: AppTheme.onBrand, size: 20),
+                    label: Text(l10n.translate('sendTicket'), style: const TextStyle(fontSize: MTextSize.bodyL, fontWeight: FontWeight.bold, color: AppTheme.onBrand)),
                     onPressed: () async {
                       if (subjectCtrl.text.trim().isEmpty || messageCtrl.text.trim().isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(l10n.translate('pleaseEnterSubjectMsg'))),
-                        );
+                        MSnack.show(context, l10n.translate('pleaseEnterSubjectMsg'));
                         return;
                       }
                       final auth = Provider.of<AuthService>(context, listen: false);
@@ -315,7 +302,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                             }));
                         _scrollToBottom();
                       } else {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.errorText(context)!)));
+                        MSnack.show(context, res.errorText(context)!);
                       }
                     },
                   ),
@@ -324,8 +311,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
             ),
           ),
         ),
-      ),
-    );
+      ), transparent: true, isScrollControlled: true, useSafeArea: false);
   }
 
   @override
@@ -347,8 +333,8 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
             title: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(tr(context, 'Help assistant · automatic answers', 'Apuri · automaattiset vastaukset'), style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: textPrimary)),
-                Text(l10n.translate('onlineOfficialSupport'), style: const TextStyle(fontSize: 12, color: Color(0xFF248A52), fontWeight: FontWeight.w600)),
+                Text(tr(context, 'Help assistant · automatic answers', 'Apuri · automaattiset vastaukset'), style: TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w800, color: textPrimary)),
+                Text(l10n.translate('onlineOfficialSupport'), style: const TextStyle(fontSize: MTextSize.caption, color: MPalette.green, fontWeight: FontWeight.w600)),
               ],
             ),
             backgroundColor: cardBg,
@@ -362,10 +348,10 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
               TextButton.icon(
                 style: TextButton.styleFrom(
                   foregroundColor: AppTheme.primary,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: MSpace.md),
                 ),
                 icon: const Icon(Icons.email_outlined, size: 18),
-                label: Text(l10n.translate('emailDesk'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                label: Text(l10n.translate('emailDesk'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: MTextSize.label)),
                 onPressed: () => _showEmailSupportModal(context, l10n),
               ),
             ],
@@ -375,18 +361,18 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
               children: [
                 // Quick Suggestions Rail
                 Container(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.symmetric(vertical: MSpace.sm),
                   color: cardBg,
                   child: SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.symmetric(horizontal: 14),
                     child: Row(
                       children: suggestions.map((q) => Padding(
-                        padding: const EdgeInsets.only(right: 8),
+                        padding: const EdgeInsets.only(right: MSpace.sm),
                         child: ActionChip(
                           backgroundColor: inputBg,
                           side: BorderSide(color: cardBorder),
-                          label: Text(q, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textPrimary)),
+                          label: Text(q, style: TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w600, color: textPrimary)),
                           onPressed: () => _handleSuggestionTap(q, l10n),
                         ),
                       )).toList(),
@@ -400,7 +386,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                 Expanded(
                   child: ListView.builder(
                     controller: _scrollController,
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(MSpace.lg),
                     itemCount: _messages.length,
                     itemBuilder: (context, i) {
                       final msg = _messages[i];
@@ -409,7 +395,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                         alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
                         child: Container(
                           margin: const EdgeInsets.only(bottom: 14),
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          padding: const EdgeInsets.symmetric(horizontal: MSpace.lg, vertical: 14),
                           constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.82),
                           decoration: BoxDecoration(
                             color: isUser ? AppTheme.primary : cardBg,
@@ -422,7 +408,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                             border: isUser ? null : Border.all(color: cardBorder),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.03),
+                                color: MPalette.night.withValues(alpha: 0.03),
                                 blurRadius: 8,
                                 offset: const Offset(0, 2),
                               ),
@@ -434,18 +420,18 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                               Text(
                                 msg['text'],
                                 style: TextStyle(
-                                  color: isUser ? Colors.white : textPrimary,
-                                  fontSize: 14,
+                                  color: isUser ? AppTheme.onBrand : textPrimary,
+                                  fontSize: MTextSize.bodyM,
                                   height: 1.45,
                                   fontWeight: isUser ? FontWeight.w500 : FontWeight.w400,
                                 ),
                               ),
-                              const SizedBox(height: 4),
+                              const SizedBox(height: MSpace.xs),
                               Text(
                                 msg['time'] ?? '',
                                 style: TextStyle(
-                                  color: isUser ? Colors.white70 : textSecondary,
-                                  fontSize: 10,
+                                  color: isUser ? AppTheme.onBrand.withValues(alpha: 0.7) : textSecondary,
+                                  fontSize: MTextSize.caption,
                                 ),
                               ),
                             ],
@@ -458,12 +444,12 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
 
                 // Input Bar
                 Container(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(MSpace.md),
                   decoration: BoxDecoration(
                     color: cardBg,
                     border: Border(top: BorderSide(color: cardBorder)),
                     boxShadow: [
-                      BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, -2)),
+                      BoxShadow(color: MPalette.night.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, -2)),
                     ],
                   ),
                   child: SafeArea(
@@ -473,26 +459,26 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                           child: TextField(
                             controller: _ctrl,
                             onSubmitted: (_) => _sendMessage(l10n),
-                            style: TextStyle(fontSize: 14, color: textPrimary),
+                            style: TextStyle(fontSize: MTextSize.bodyM, color: textPrimary),
                             decoration: InputDecoration(
                               hintText: l10n.translate('botInputHint'),
-                              hintStyle: TextStyle(color: textSecondary, fontSize: 14),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide(color: cardBorder)),
-                              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide(color: cardBorder)),
-                              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: const BorderSide(color: AppTheme.primary, width: 1.5)),
+                              hintStyle: TextStyle(color: textSecondary, fontSize: MTextSize.bodyM),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.lg), borderSide: BorderSide(color: cardBorder)),
+                              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.lg), borderSide: BorderSide(color: cardBorder)),
+                              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.lg), borderSide: const BorderSide(color: AppTheme.primary, width: 1.5)),
                               filled: true,
                               fillColor: inputBg,
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: MSpace.md),
                             ),
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: MSpace.sm),
                         GestureDetector(
                           onTap: () => _sendMessage(l10n),
                           child: const CircleAvatar(
                             radius: 22,
                             backgroundColor: AppTheme.primary,
-                            child: Icon(Icons.arrow_upward_rounded, color: Colors.white, size: 20),
+                            child: Icon(Icons.arrow_upward_rounded, color: AppTheme.onBrand, size: 20),
                           ),
                         ),
                       ],

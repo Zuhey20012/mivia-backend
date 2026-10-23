@@ -1,16 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
-import '../core/strings.dart';
 import '../widgets/add_to_bag_sheet.dart';
 import '../widgets/app_image.dart';
-import '../widgets/price_tag.dart';
 import '../widgets/product_gallery.dart';
-import '../widgets/skeleton.dart';
 import 'store_detail.dart';
-import '../core/haptics.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   final int productId;
@@ -70,7 +67,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     }
   }
 
-  void _snack(String text) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text), behavior: SnackBarBehavior.floating));
+  void _snack(String text) => MSnack.show(context, text);
 
   @override
   Widget build(BuildContext context) {
@@ -84,11 +81,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Padding(padding: EdgeInsets.all(4), child: BackButton()),
+                  const Padding(padding: EdgeInsets.all(MSpace.xs), child: BackButton()),
                   Expanded(
                     child: _error == null
-                        ? SkeletonDetail(heroHeight: MediaQuery.of(context).size.width)
-                        : StateMessage.error(
+                        ? MSkeletonDetail(heroHeight: MediaQuery.of(context).size.width)
+                        : MStateMessage.error(
                             message: _error!,
                             onRetry: () {
                               setState(() => _error = null);
@@ -128,7 +125,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   flexibleSpace: FlexibleSpaceBar(background: _gallery(p)),
                 ),
                 SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 120),
+                  padding: const EdgeInsets.fromLTRB(MSpace.xl, MSpace.xl, MSpace.xl, 120),
                   sliver: SliverList(delegate: SliverChildListDelegate(_details(p))),
                 ),
               ],
@@ -141,7 +138,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     return Tooltip(
       message: tooltip,
       child: Material(
-        color: Colors.white,
+        color: MPalette.white,
         shape: const CircleBorder(),
         child: InkWell(
           customBorder: const CircleBorder(),
@@ -171,19 +168,19 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                 child: AppImage(widget.heroImage, previewUrl: widget.heroPreview),
               ),
             ),
-            const Skeleton(
+            const MSkeleton(
               child: Padding(
-                padding: EdgeInsets.fromLTRB(20, 20, 20, 0),
+                padding: EdgeInsets.fromLTRB(MSpace.xl, MSpace.xl, MSpace.xl, 0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SkeletonBox(width: 220, height: 26),
-                    SizedBox(height: 12),
-                    SkeletonBox(width: 90, height: 20),
+                    MSkeletonBox(width: 220, height: 26),
+                    SizedBox(height: MSpace.md),
+                    MSkeletonBox(width: 90, height: 20),
                     SizedBox(height: 22),
-                    SkeletonBox(height: 14),
-                    SizedBox(height: 8),
-                    SkeletonBox(width: 240, height: 14),
+                    MSkeletonBox(height: 14),
+                    SizedBox(height: MSpace.sm),
+                    MSkeletonBox(width: 240, height: 14),
                   ],
                 ),
               ),
@@ -212,17 +209,17 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     // Each fact gets its own soft colour: condition lilac, second hand butter, eco mint, handmade peach
     final chips = <(String, Color, Color)>[
       (_conditionLabel(p['condition']), AppTheme.lilac, AppTheme.primary),
-      if (p['isSecondHand'] == true) (tr(context, 'Second hand', 'Käytetty'), AppTheme.sunshineLight, const Color(0xFF8A5A00)),
-      if (p['isEcoFriendly'] == true) (tr(context, 'Eco-friendly', 'Ympäristöystävällinen'), AppTheme.mint, const Color(0xFF1D6B44)),
+      if (p['isSecondHand'] == true) (tr(context, 'Second hand', 'Käytetty'), AppTheme.sunshineLight, MPalette.amberInk),
+      if (p['isEcoFriendly'] == true) (tr(context, 'Eco-friendly', 'Ympäristöystävällinen'), AppTheme.mint, MPalette.greenDark),
       if (p['isHandmade'] == true) (tr(context, 'Handmade', 'Käsintehty'), AppTheme.peach, AppTheme.lingon),
     ].where((c) => c.$1.isNotEmpty).toList();
 
     return [
       Text(p['name'] ?? '', style: AppTheme.display(context, size: 27)),
-      const SizedBox(height: 8),
-      PriceTag(pricing: p['pricing'] as Map<String, dynamic>?, size: 20, showReferenceLabel: true),
-      const SizedBox(height: 4),
-      Text(tr(context, 'Price includes VAT where the seller is VAT-registered', 'Hinta sisältää ALV:n, jos myyjä on arvonlisäverovelvollinen'), style: TextStyle(fontSize: 12, color: muted)),
+      const SizedBox(height: MSpace.sm),
+      MPrice.fromPricing(p['pricing'] as Map<String, dynamic>?, size: MPriceSize.lg, showReferenceLabel: true),
+      const SizedBox(height: MSpace.xs),
+      Text(tr(context, 'Price includes VAT where the seller is VAT-registered', 'Hinta sisältää ALV:n, jos myyjä on arvonlisäverovelvollinen'), style: TextStyle(fontSize: MTextSize.caption, color: muted)),
       if (chips.isNotEmpty) ...[
         const SizedBox(height: 14),
         Wrap(
@@ -230,16 +227,16 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           runSpacing: 8,
           children: chips
               .map((c) => Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                    decoration: BoxDecoration(color: AppTheme.pastel(context, c.$2, c.$3), borderRadius: BorderRadius.circular(16)),
-                    child: Text(c.$1, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: dark ? Color.lerp(c.$3, Colors.white, 0.5) : c.$3)),
+                    padding: const EdgeInsets.symmetric(horizontal: MSpace.md, vertical: 7),
+                    decoration: BoxDecoration(color: AppTheme.pastel(context, c.$2, c.$3), borderRadius: BorderRadius.circular(MRadius.md)),
+                    child: Text(c.$1, style: TextStyle(fontSize: MTextSize.label, fontWeight: FontWeight.w700, color: dark ? Color.lerp(c.$3, MPalette.white, 0.5) : c.$3)),
                   ))
               .toList(),
         ),
       ],
       if ((p['description'] ?? '').toString().isNotEmpty) ...[
         const SizedBox(height: 18),
-        Text(p['description'], style: TextStyle(fontSize: 15, height: 1.5, color: text)),
+        Text(p['description'], style: TextStyle(fontSize: MTextSize.bodyL, height: 1.5, color: text)),
       ],
       const SizedBox(height: 18),
       // The body-measurement chart is for clothes; shoes, bags, jewellery, beauty and home items skip it
@@ -253,7 +250,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             Navigator.push(context, MaterialPageRoute(builder: (_) => StoreDetailScreen(store: store)));
           },
           child: Ink(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(MSpace.md),
             decoration: BoxDecoration(
               color: AppTheme.cardBackground(context),
               borderRadius: BorderRadius.circular(AppTheme.radiusMd + 2),
@@ -267,18 +264,18 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   backgroundImage: store['logoUrl'] != null ? sizedImageProvider(context, store['logoUrl'], 44) : null,
                   child: store['logoUrl'] == null ? const Icon(Icons.storefront_rounded, color: AppTheme.primary) : null,
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: MSpace.md),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(store['name'] ?? '', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: text)),
+                      Text(store['name'] ?? '', style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyL, color: text)),
                       Text(
                         [
                           store['sellerType'] == 'PRIVATE' ? tr(context, 'Private seller', 'Yksityinen myyjä') : tr(context, 'Business seller', 'Yritysmyyjä'),
                           if ((asInt(store['totalReviews']) ?? 0) > 0) '★ ${store['rating']} (${store['totalReviews']})',
                         ].join(' · '),
-                        style: TextStyle(fontSize: 12.5, color: muted),
+                        style: TextStyle(fontSize: MTextSize.caption, color: muted),
                       ),
                     ],
                   ),
@@ -288,7 +285,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             ),
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: MSpace.sm),
         _row(Icons.info_outline_rounded, tr(context, 'Seller information', 'Myyjän tiedot'), () => _showTraderInfo(store)),
       ],
     ];
@@ -303,8 +300,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           padding: const EdgeInsets.symmetric(vertical: 10),
           child: Row(children: [
             Icon(icon, size: 20, color: AppTheme.primaryText(context)),
-            const SizedBox(width: 12),
-            Expanded(child: Text(label, style: TextStyle(fontSize: 15, color: AppTheme.primaryText(context)))),
+            const SizedBox(width: MSpace.md),
+            Expanded(child: Text(label, style: TextStyle(fontSize: MTextSize.bodyL, color: AppTheme.primaryText(context)))),
             Icon(Icons.chevron_right_rounded, color: AppTheme.secondaryText(context)),
           ]),
         ),
@@ -329,10 +326,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   /// Seller identity shown to shoppers (DSA Art. 30 trader traceability).
   void _showTraderInfo(Map<String, dynamic> store) {
     final isPrivate = store['sellerType'] == 'PRIVATE';
-    showModalBottomSheet(
-      context: context,
-      builder: (_) => Padding(
-        padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+    showMSheet(context, builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(MSpace.xxl, MSpace.xxl, MSpace.xxl, MSpace.x3l),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -342,7 +337,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             Text(store['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
             if (!isPrivate && store['businessId'] != null) Text('Y-tunnus ${store['businessId']}'),
             if (!isPrivate && store['address'] != null) Text(store['address']),
-            const SizedBox(height: 12),
+            const SizedBox(height: MSpace.md),
             Text(
               isPrivate
                   ? tr(
@@ -355,8 +350,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             ),
           ],
         ),
-      ),
-    );
+      ), isScrollControlled: false, useSafeArea: false);
   }
 
   void _showSizeGuide() {
@@ -368,34 +362,31 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       ['XL', '48–50', '106–114', '88–96'],
       ['XXL', '52–54', '114–122', '96–104'],
     ];
-    showModalBottomSheet(
-      context: context,
-      builder: (_) => Padding(
-        padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+    showMSheet(context, builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(MSpace.xxl, MSpace.xxl, MSpace.xxl, MSpace.x3l),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(tr(context, 'Size guide (EU)', 'Kokotaulukko (EU)'), style: AppTheme.display(context, size: 21)),
-            const SizedBox(height: 4),
+            const SizedBox(height: MSpace.xs),
             Text(
                 tr(context, 'Body measurements in cm. Brands vary — check the description for the store\'s own sizing.',
                     'Vartalon mitat senttimetreinä. Merkkien koot vaihtelevat — katso kaupan oma mitoitus kuvauksesta.'),
-                style: TextStyle(fontSize: 12.5, color: AppTheme.secondaryText(context))),
+                style: TextStyle(fontSize: MTextSize.caption, color: AppTheme.secondaryText(context))),
             const SizedBox(height: 14),
             Table(
               children: [
                 TableRow(children: [
                   for (final h in [tr(context, 'Size', 'Koko'), 'EU', tr(context, 'Chest', 'Rinta'), tr(context, 'Waist', 'Vyötärö')])
-                    Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(h, style: const TextStyle(fontWeight: FontWeight.w700))),
+                    Padding(padding: const EdgeInsets.only(bottom: MSpace.sm), child: Text(h, style: const TextStyle(fontWeight: FontWeight.w700))),
                 ]),
                 for (final r in rows) TableRow(children: [for (final c in r) Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Text(c))]),
               ],
             ),
           ],
         ),
-      ),
-    );
+      ), isScrollControlled: false, useSafeArea: false);
   }
 
   /// Stores type the category freely ("Dress", "Lipstick"), so anything clearly not worn as
@@ -416,11 +407,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       decoration: BoxDecoration(
         color: AppTheme.cardBackground(context),
         borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 20, offset: const Offset(0, -4))],
+        boxShadow: [BoxShadow(color: MPalette.night.withValues(alpha: 0.06), blurRadius: 20, offset: const Offset(0, -4))],
       ),
       child: Row(
         children: [
-          Expanded(child: PriceTag(pricing: p['pricing'] as Map<String, dynamic>?, size: 18)),
+          Expanded(child: MPrice.fromPricing(p['pricing'] as Map<String, dynamic>?, size: MPriceSize.lg)),
           SizedBox(
             height: 54,
             child: FilledButton.icon(

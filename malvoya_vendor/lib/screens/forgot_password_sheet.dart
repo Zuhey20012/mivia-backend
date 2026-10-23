@@ -2,10 +2,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
-import '../core/strings.dart';
 
 /// What the sign-in screen does after the sheet closes without signing in: fill in [email] and show
 /// [message] (e.g. "Password changed, sign in with it" when the automatic sign-in was refused).
@@ -19,12 +19,7 @@ class ForgotPasswordResult {
 /// POST /auth/password/forgot never says whether an account exists; POST /auth/password/reset
 /// checks the code (15 minutes, a few tries) and signs out every other session of the account.
 Future<ForgotPasswordResult?> showForgotPasswordSheet(BuildContext context, {String? email}) {
-  return showModalBottomSheet<ForgotPasswordResult>(
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    builder: (_) => _ForgotPasswordSheet(initialEmail: email),
-  );
+  return showMSheet<ForgotPasswordResult>(context, builder: (_) => _ForgotPasswordSheet(initialEmail: email), isScrollControlled: true, useSafeArea: true);
 }
 
 enum _Step { email, code, password, unavailable }
@@ -42,7 +37,7 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
   static const _resendSeconds = 60;
   static const _minPassword = 8;
   static const _maxPassword = 72; // the server's limit (bcrypt uses the first 72 bytes)
-  static const _red = Color(0xFFD93025);
+  static const _red = MPalette.red;
 
   late final _email = TextEditingController(text: _looksLikeEmail(widget.initialEmail ?? '') ? widget.initialEmail!.trim() : '');
   final _code = TextEditingController();
@@ -244,7 +239,7 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+        padding: const EdgeInsets.fromLTRB(MSpace.xxl, 0, MSpace.xxl, MSpace.xxl),
         child: AnimatedSize(
           duration: const Duration(milliseconds: 200),
           alignment: Alignment.topCenter,
@@ -266,19 +261,19 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
   Widget _title(String text) => Text(text, style: AppTheme.display(size: 22));
 
   Widget _body(String text) => Padding(
-        padding: const EdgeInsets.only(top: 8, bottom: 18),
-        child: Text(text, style: const TextStyle(fontSize: 14.5, color: AppTheme.textSecondary, height: 1.45)),
+        padding: const EdgeInsets.only(top: MSpace.sm, bottom: 18),
+        child: Text(text, style: const TextStyle(fontSize: MTextSize.bodyM, color: AppTheme.textSecondary, height: 1.45)),
       );
 
   Widget _errorBox() {
     if (_error == null) return const SizedBox.shrink();
     return Container(
-      margin: const EdgeInsets.only(top: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: const Color(0xFFFDECEA), borderRadius: BorderRadius.circular(14)),
+      margin: const EdgeInsets.only(top: MSpace.md),
+      padding: const EdgeInsets.all(MSpace.md),
+      decoration: BoxDecoration(color: MPalette.redLight, borderRadius: BorderRadius.circular(14)),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Icon(Icons.error_outline_rounded, color: _red, size: 20),
-        const SizedBox(width: 8),
+        const SizedBox(width: MSpace.sm),
         Expanded(child: Text(_error!, style: const TextStyle(color: _red, fontWeight: FontWeight.w600, height: 1.35))),
       ]),
     );
@@ -288,12 +283,7 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
         padding: const EdgeInsets.only(top: 18),
         child: SizedBox(
           width: double.infinity,
-          child: FilledButton(
-            onPressed: _busy ? null : onPressed,
-            child: _busy
-                ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white))
-                : Text(label),
-          ),
+          child: MButton(label: label, loading: _busy, onPressed: _busy ? null : onPressed),
         ),
       );
 
@@ -335,7 +325,7 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
                 style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w600)),
           ),
         _errorBox(),
-        const SizedBox(height: 8),
+        const SizedBox(height: MSpace.sm),
         Wrap(alignment: WrapAlignment.spaceBetween, crossAxisAlignment: WrapCrossAlignment.center, spacing: 8, children: [
           TextButton.icon(
             style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
@@ -352,7 +342,7 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
           ),
         ]),
         _primary(tr(context, 'Continue', 'Jatka'), _goToPassword),
-        const SizedBox(height: 4),
+        const SizedBox(height: MSpace.xs),
         TextButton(
           style: TextButton.styleFrom(minimumSize: const Size(48, 48), foregroundColor: AppTheme.textSecondary),
           onPressed: _busy
@@ -369,8 +359,8 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
         padding: const EdgeInsets.only(top: 6),
         child: Row(children: [
           Icon(ok ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded, size: 18, color: ok ? AppTheme.success : AppTheme.textSecondary),
-          const SizedBox(width: 8),
-          Expanded(child: Text(text, style: TextStyle(fontSize: 13.5, color: ok ? AppTheme.success : AppTheme.textSecondary, fontWeight: FontWeight.w600))),
+          const SizedBox(width: MSpace.sm),
+          Expanded(child: Text(text, style: TextStyle(fontSize: MTextSize.label, color: ok ? AppTheme.success : AppTheme.textSecondary, fontWeight: FontWeight.w600))),
         ]),
       );
 
@@ -398,23 +388,23 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
           ),
         ),
       ),
-      const SizedBox(height: 4),
+      const SizedBox(height: MSpace.xs),
       _rule(length >= _minPassword, tr(context, 'At least $_minPassword characters', 'Vähintään $_minPassword merkkiä')),
       if (length > _maxPassword)
         Padding(
           padding: const EdgeInsets.only(top: 6),
           child: Row(children: [
             const Icon(Icons.cancel_rounded, size: 18, color: _red),
-            const SizedBox(width: 8),
+            const SizedBox(width: MSpace.sm),
             Expanded(
               child: Text(tr(context, 'At most $_maxPassword characters', 'Enintään $_maxPassword merkkiä'),
-                  style: const TextStyle(fontSize: 13.5, color: _red, fontWeight: FontWeight.w600)),
+                  style: const TextStyle(fontSize: MTextSize.label, color: _red, fontWeight: FontWeight.w600)),
             ),
           ]),
         ),
       _errorBox(),
       _primary(tr(context, 'Save and sign in', 'Tallenna ja kirjaudu'), _passwordOk ? _save : null),
-      const SizedBox(height: 4),
+      const SizedBox(height: MSpace.xs),
       TextButton(
         style: TextButton.styleFrom(minimumSize: const Size(48, 48), foregroundColor: AppTheme.textSecondary),
         onPressed: _busy
@@ -434,7 +424,7 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
           height: 56,
           alignment: Alignment.center,
           decoration: const BoxDecoration(color: AppTheme.sunshineLight, shape: BoxShape.circle),
-          child: const Icon(Icons.support_agent_rounded, color: Color(0xFF6A4500), size: 30),
+          child: const Icon(Icons.support_agent_rounded, color: MPalette.amberInk, size: 30),
         ),
         const SizedBox(height: 14),
         _title(tr(context, 'We can help you get back in', 'Autamme sinut takaisin tilillesi')),
@@ -457,17 +447,17 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
           ),
         if (_supportNote != null)
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(MSpace.md),
             decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(14)),
             child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Icon(Icons.check_circle_rounded, color: AppTheme.primary, size: 20),
-              const SizedBox(width: 8),
+              const SizedBox(width: MSpace.sm),
               Expanded(child: Text(_supportNote!, style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w600, height: 1.35))),
             ]),
           ),
         _errorBox(),
         if (!_supportSent) _primary(tr(context, 'Ask support for help', 'Pyydä apua tuelta'), _askSupport),
-        const SizedBox(height: 4),
+        const SizedBox(height: MSpace.xs),
         TextButton(
           style: TextButton.styleFrom(minimumSize: const Size(48, 48), foregroundColor: AppTheme.textSecondary),
           onPressed: () => Navigator.of(context).pop(ForgotPasswordResult(_email.text.trim())),
@@ -502,7 +492,7 @@ class _CodeBoxes extends StatelessWidget {
                 for (var i = 0; i < length; i++)
                   Expanded(
                     child: Padding(
-                      padding: EdgeInsets.only(left: i == 0 ? 0 : 4, right: i == length - 1 ? 0 : 4),
+                      padding: EdgeInsets.only(left: i == 0 ? 0 : MSpace.xs, right: i == length - 1 ? 0 : MSpace.xs),
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 120),
                         alignment: Alignment.center,

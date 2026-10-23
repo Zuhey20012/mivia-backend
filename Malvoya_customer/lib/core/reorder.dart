@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
 import '../auth_service.dart';
 import '../cart.dart';
 import '../checkout.dart';
 import '../models.dart';
 import '../widgets/add_to_bag_sheet.dart' show confirmBagStore, variantLabel;
-import 'api_client.dart';
-import 'strings.dart';
 
 /// The order being put back in the bag (null = none). Buttons show a spinner and stay disabled
 /// meanwhile, so the items are never added twice.

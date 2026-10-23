@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
-import 'haptics.dart';
 import 'push_service.dart';
-import 'strings.dart';
 
 /// Why the app is about to ask for notifications; each moment gets its own words.
 enum PrimerReason { order, storeAlert }
@@ -27,21 +27,15 @@ class NotificationPrimer {
       if (!force && (prefs.getBool(_askedKey) ?? false)) return false;
     } catch (_) {}
     if (!context.mounted) return false;
-    final yes = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) => _PrimerSheet(reason: reason),
-    );
+    final yes = await showMSheet<bool>(context, builder: (ctx) => _PrimerSheet(reason: reason), isScrollControlled: true, useSafeArea: false);
     try {
       await prefs?.setBool(_askedKey, true);
     } catch (_) {}
     if (yes != true) return false;
     final on = await push.enable();
     if (!on && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(tr(context, 'Notifications are off for Malvoya. You can turn them on in your phone’s settings.',
-            'Malvoyan ilmoitukset ovat pois päältä. Voit laittaa ne päälle puhelimen asetuksista.')),
-      ));
+      MSnack.show(context, tr(context, 'Notifications are off for Malvoya. You can turn them on in your phone’s settings.',
+            'Malvoyan ilmoitukset ovat pois päältä. Voit laittaa ne päälle puhelimen asetuksista.'));
     }
     return on;
   }
@@ -58,15 +52,15 @@ class _PrimerSheet extends StatelessWidget {
     Widget point(IconData icon, String text) => Padding(
           padding: const EdgeInsets.only(top: 10),
           child: Row(children: [
-            Icon(icon, size: 20, color: AppTheme.isDarkMode(context) ? const Color(0xFFC9A3DD) : AppTheme.primary),
+            Icon(icon, size: 20, color: AppTheme.isDarkMode(context) ? MPalette.malvaOnDark : AppTheme.primary),
             const SizedBox(width: 10),
-            Expanded(child: Text(text, style: TextStyle(fontSize: 14.5, color: AppTheme.primaryText(context)))),
+            Expanded(child: Text(text, style: TextStyle(fontSize: MTextSize.bodyM, color: AppTheme.primaryText(context)))),
           ]),
         );
 
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 4, 24, 20),
+        padding: const EdgeInsets.fromLTRB(MSpace.xxl, MSpace.xs, MSpace.xxl, MSpace.xl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -76,10 +70,10 @@ class _PrimerSheet extends StatelessWidget {
                 width: 76,
                 height: 76,
                 decoration: BoxDecoration(color: AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine), shape: BoxShape.circle),
-                child: const Icon(Icons.notifications_active_rounded, size: 36, color: Color(0xFF8A5A00)),
+                child: const Icon(Icons.notifications_active_rounded, size: 36, color: MPalette.amberInk),
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: MSpace.lg),
             Text(
               order
                   ? tr(context, 'Get updates when your order is on its way', 'Saat tiedon, kun tilauksesi on matkalla')
@@ -89,14 +83,14 @@ class _PrimerSheet extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               tr(context, 'Only about your orders and stores you ask about. No ads.', 'Vain tilauksistasi ja kaupoista, joista kysyit. Ei mainoksia.'),
-              style: TextStyle(fontSize: 14, color: muted, height: 1.4),
+              style: TextStyle(fontSize: MTextSize.bodyM, color: muted, height: 1.4),
             ),
             if (order) ...[
               point(Icons.storefront_rounded, tr(context, 'The shop accepted your order', 'Kauppa hyväksyi tilauksesi')),
               point(Icons.pedal_bike_rounded, tr(context, 'Your courier is on the way or at the door', 'Kuriiri on matkalla tai ovellasi')),
               point(Icons.chat_bubble_outline_rounded, tr(context, 'A message from your courier', 'Viesti kuriiriltasi')),
             ],
-            const SizedBox(height: 20),
+            const SizedBox(height: MSpace.xl),
             SizedBox(
               width: double.infinity,
               child: FilledButton(

@@ -2,14 +2,13 @@ import 'dart:async';
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../screens/drops_feed.dart';
 import '../screens/store_detail.dart';
-import 'api_client.dart';
 import 'pending_promo.dart';
-import 'strings.dart';
-import 'haptics.dart';
 
 /// Android App Links (verified https links on the API host, see AndroidManifest.xml):
 ///   /d/<dropId>  → that drop in its store's drops
@@ -101,12 +100,9 @@ class DeepLinks {
     final store = drop is Map ? drop['store'] : null;
     final storeId = store is Map ? asInt(store['id']) : null;
     if (!res.ok || storeId == null) {
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
-        behavior: SnackBarBehavior.floating,
-        content: Text(res.status == 404
+      MSnack.show(context, res.status == 404
             ? tr(context, 'This drop is no longer available.', 'Tämä drop ei ole enää saatavilla.')
-            : (res.errorText(context) ?? tr(context, 'The drop could not be opened.', 'Droppia ei voitu avata.'))),
-      ));
+            : (res.errorText(context) ?? tr(context, 'The drop could not be opened.', 'Droppia ei voitu avata.')));
       return;
     }
     nav.push(MaterialPageRoute(
@@ -116,12 +112,9 @@ class DeepLinks {
 
   void _showInvite(BuildContext context, String code) {
     Haptics.light();
-    showModalBottomSheet(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(
+    showMSheet(context, builder: (ctx) => SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+          padding: const EdgeInsets.fromLTRB(MSpace.xxl, 0, MSpace.xxl, MSpace.xxl),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -136,13 +129,13 @@ class DeepLinks {
                 ),
                 child: Text(code, style: AppTheme.display(ctx, size: 22).copyWith(letterSpacing: 2)),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: MSpace.md),
               Text(
                 tr(
                     ctx,
                     'We saved your friend’s invite code. It’s filled in at checkout, and Malvoya checks it there: invite codes work on a new customer’s first order.',
                     'Tallensimme ystäväsi kutsukoodin. Se täytetään kassalla valmiiksi, ja Malvoya tarkistaa sen siellä: kutsukoodi toimii uuden asiakkaan ensimmäiseen tilaukseen.'),
-                style: TextStyle(fontSize: 14, height: 1.45, color: AppTheme.secondaryText(ctx)),
+                style: TextStyle(fontSize: MTextSize.bodyM, height: 1.45, color: AppTheme.secondaryText(ctx)),
               ),
               const SizedBox(height: 18),
               SizedBox(
@@ -159,7 +152,6 @@ class DeepLinks {
             ],
           ),
         ),
-      ),
-    );
+      ), isScrollControlled: false, useSafeArea: false);
   }
 }

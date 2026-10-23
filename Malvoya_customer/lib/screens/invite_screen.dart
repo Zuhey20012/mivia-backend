@@ -2,12 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
-import '../core/strings.dart';
-import '../widgets/skeleton.dart';
-import '../core/haptics.dart';
 
 /// Loads the customer's invite programme (`GET /me/referral`). Returns null when the server has
 /// no referral endpoint, the programme is switched off or the request fails, so callers can hide
@@ -74,7 +72,7 @@ class _InviteScreenState extends State<InviteScreen> {
     Haptics.selection();
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(done), behavior: SnackBarBehavior.floating));
+    MSnack.show(context, done);
   }
 
   Future<void> _share() async {
@@ -103,8 +101,8 @@ class _InviteScreenState extends State<InviteScreen> {
       appBar: AppBar(title: Text(tr(context, 'Invite a friend', 'Kutsu ystävä'))),
       body: _data == null
           ? (_loading || !_unavailable
-              ? const SkeletonDetail(heroHeight: 160)
-              : StateMessage.error(
+              ? const MSkeletonDetail(heroHeight: 160)
+              : MStateMessage.error(
                   message: tr(context, 'Invites aren’t available right now.', 'Kutsut eivät ole juuri nyt käytettävissä.'),
                   onRetry: _load,
                 ))
@@ -112,7 +110,7 @@ class _InviteScreenState extends State<InviteScreen> {
               onRefresh: _load,
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
+                padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.md, MSpace.lg, MSpace.x4l),
                 children: [
                   _hero(context),
                   const SizedBox(height: 14),
@@ -130,8 +128,8 @@ class _InviteScreenState extends State<InviteScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(tr(context, 'How it works', 'Näin se toimii'), style: AppTheme.display(context, size: 18)),
-                          const SizedBox(height: 8),
-                          Text(_terms(context), style: TextStyle(fontSize: 14, height: 1.45, color: muted)),
+                          const SizedBox(height: MSpace.sm),
+                          Text(_terms(context), style: TextStyle(fontSize: MTextSize.bodyM, height: 1.45, color: muted)),
                         ],
                       ),
                     ),
@@ -144,7 +142,7 @@ class _InviteScreenState extends State<InviteScreen> {
   Widget _hero(BuildContext context) {
     final link = _link;
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(MSpace.xl),
       decoration: BoxDecoration(
         color: AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine),
         borderRadius: BorderRadius.circular(AppTheme.radiusLg),
@@ -176,7 +174,7 @@ class _InviteScreenState extends State<InviteScreen> {
               button: true,
               label: tr(context, 'Copy invite link', 'Kopioi kutsulinkki'),
               child: InkWell(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(MRadius.sm),
                 onTap: () => _copy(link, tr(context, 'Link copied', 'Linkki kopioitu')),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 6),
@@ -187,7 +185,7 @@ class _InviteScreenState extends State<InviteScreen> {
                       child: Text(link,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 13, color: AppTheme.primaryText(context), decoration: TextDecoration.underline)),
+                          style: TextStyle(fontSize: MTextSize.label, color: AppTheme.primaryText(context), decoration: TextDecoration.underline)),
                     ),
                   ]),
                 ),
@@ -212,12 +210,12 @@ class _InviteScreenState extends State<InviteScreen> {
   Widget _stats(BuildContext context) {
     Widget tile(String value, String label, Color light, Color hue) => Expanded(
           child: Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(MSpace.lg),
             decoration: BoxDecoration(color: AppTheme.pastel(context, light, hue), borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(value, style: AppTheme.display(context, size: 26)),
               const SizedBox(height: 2),
-              Text(label, style: TextStyle(fontSize: 12.5, color: AppTheme.primaryText(context))),
+              Text(label, style: TextStyle(fontSize: MTextSize.caption, color: AppTheme.primaryText(context))),
             ]),
           ),
         );

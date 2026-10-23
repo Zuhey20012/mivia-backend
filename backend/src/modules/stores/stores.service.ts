@@ -9,11 +9,13 @@ import { followInfo } from "../drops/social";
 import { storeAvailability } from "../../utils/openingHours";
 import { taxInfoComplete, taxRowSelect } from "../sellers/taxInfo";
 import { businessCheckOf, runBusinessCheck } from "./businessCheck";
+import { ownerPublishCheck } from "../catalog/productWrite";
+import { safetyPledgeOf } from "../catalog/safety";
 
 /** Trader information shoppers are entitled to see (DSA Art. 30, Omnibus Art. 6a CRD). */
 const publicStoreFields = {
   id: true, name: true, description: true, category: true,
-  logoUrl: true, bannerUrl: true, isHomeBased: true, isEcoFriendly: true,
+  logoUrl: true, bannerUrl: true, isHomeBased: true,
   isVerified: true, address: true, latitude: true, longitude: true,
   rating: true, totalReviews: true, sellerType: true, businessId: true, prepMinutes: true,
   acceptingOrders: true, openingHours: true,
@@ -108,7 +110,9 @@ export async function getMyStore(ownerId: number) {
     taxInfoComplete: taxInfoComplete(store, taxInfo),
     // PRH/YTJ check of the Y-tunnus (2.11): { required, businessId, verificationStatus, registeredName, registeredAt, checkedAt }
     businessCheck: businessCheckOf(store),
-    products: store.products.map((p) => presentProduct(p, info.get(p.id), { owner: true })),
+    // Product-safety pledge (GPSR Art. 22(10)(b), 2.12): { accepted, acceptedAt, version, currentVersion }
+    safetyPledge: safetyPledgeOf(store),
+    products: store.products.map((p) => ({ ...presentProduct(p, info.get(p.id), { owner: true }), publishCheck: ownerPublishCheck(p, store) })),
   };
 }
 

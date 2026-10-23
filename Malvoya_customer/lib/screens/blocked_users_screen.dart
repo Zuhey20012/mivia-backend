@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart' show localizeServerMessage;
+
 import '../core/blocked_users.dart';
-import '../core/strings.dart';
 
 /// People this customer blocked (Profile → Blocked users). Unblocking shows their comments and
 /// reviews again.
@@ -43,11 +44,9 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
     if (!mounted) return;
     setState(() => _busy.remove(user.id));
     final name = user.name.isEmpty ? tr(context, 'The person', 'Henkilö') : user.name;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(error == null
+    MSnack.show(context, error == null
           ? tr(context, '$name is unblocked.', 'Henkilön $name esto on poistettu.')
-          : tr(context, 'Could not unblock: ${localizeServerMessage(context, error)}', 'Eston poistaminen ei onnistunut: ${localizeServerMessage(context, error)}')),
-    ));
+          : tr(context, 'Could not unblock: ${localizeServerMessage(context, error)}', 'Eston poistaminen ei onnistunut: ${localizeServerMessage(context, error)}'));
   }
 
   @override
@@ -69,18 +68,18 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
           return RefreshIndicator(
             onRefresh: _refresh,
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+              padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.md, MSpace.lg, MSpace.x3l),
               children: [
                 Text(
                   tr(context, 'You do not see comments or reviews from these people. They are not told that you blocked them.',
                       'Et näe näiden henkilöiden kommentteja etkä arvioita. Heille ei kerrota, että estit heidät.'),
-                  style: TextStyle(fontSize: 13, height: 1.4, color: muted),
+                  style: TextStyle(fontSize: MTextSize.label, height: 1.4, color: muted),
                 ),
                 if (_error != null) ...[
-                  const SizedBox(height: 12),
-                  Text(localizeServerMessage(context, _error!), style: const TextStyle(color: Color(0xFFD93025), fontSize: 13)),
+                  const SizedBox(height: MSpace.md),
+                  Text(localizeServerMessage(context, _error!), style: const TextStyle(color: MPalette.red, fontSize: MTextSize.label)),
                 ],
-                const SizedBox(height: 16),
+                const SizedBox(height: MSpace.lg),
                 if (users.isEmpty)
                   _message(context, Icons.check_circle_outline_rounded,
                       tr(context, 'You have not blocked anyone', 'Et ole estänyt ketään'),
@@ -126,14 +125,14 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
   }
 
   Widget _message(BuildContext context, IconData icon, String title, String body) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+        padding: const EdgeInsets.symmetric(horizontal: MSpace.xxl, vertical: MSpace.x4l),
         child: Column(
           children: [
             Icon(icon, size: 40, color: AppTheme.secondaryText(context)),
-            const SizedBox(height: 12),
+            const SizedBox(height: MSpace.md),
             Text(title, textAlign: TextAlign.center, style: AppTheme.display(context, size: 18)),
             const SizedBox(height: 6),
-            Text(body, textAlign: TextAlign.center, style: TextStyle(fontSize: 13, height: 1.4, color: AppTheme.secondaryText(context))),
+            Text(body, textAlign: TextAlign.center, style: TextStyle(fontSize: MTextSize.label, height: 1.4, color: AppTheme.secondaryText(context))),
           ],
         ),
       );

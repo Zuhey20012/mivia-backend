@@ -2,11 +2,11 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
-import '../core/strings.dart';
-import '../widgets/loading_states.dart';
+import '../widgets/error_banner.dart';
 import 'create_drop.dart';
 import 'drop_comments.dart';
 
@@ -66,35 +66,34 @@ class DropsManagerState extends State<DropsManager> {
     HapticFeedback.mediumImpact();
     final res = await ApiClient(Provider.of<AuthService>(context, listen: false)).delete('/drops/${d['id']}');
     if (!mounted) return;
-    if (!res.ok) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.errorMessage)));
+    if (!res.ok) MSnack.show(context, res.errorMessage);
     load();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const SkeletonList(thumbnail: true, lines: 4, padding: EdgeInsets.fromLTRB(16, 16, 16, 100));
+    if (_loading) return const MSkeletonList(thumbnail: true, lines: 4, padding: EdgeInsets.fromLTRB(MSpace.lg, MSpace.lg, MSpace.lg, 100));
     return RefreshIndicator(
       onRefresh: load,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+        padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.lg, MSpace.lg, 100),
         children: [
           if (_error != null && _drops.isEmpty)
-            ErrorState(message: _error, onRetry: _retry, top: 24)
+            MStateMessage.error(scrollable: false, message: _error, onRetry: _retry, top: 24)
           else ...[
             _summary(),
-            const SizedBox(height: 16),
+            const SizedBox(height: MSpace.lg),
             if (_error != null) ErrorBanner(message: _error!, onRetry: _retry),
           ],
           if (_drops.isEmpty && _error == null)
-            EmptyState(
-              icon: Icons.video_camera_back_outlined,
+            MStateMessage(scrollable: false, icon: Icons.video_camera_back_outlined,
               top: 24,
               message: tr(context, 'Show your items in a short video. Drops appear in the customer app\'s Drops feed with a buy button.',
                   'Esittele tuotteitasi lyhyellä videolla. Julkaisut näkyvät asiakkaiden Drops-syötteessä osta-painikkeen kanssa.'),
-              actions: [
+              action: Column(mainAxisSize: MainAxisSize.min, children: [
                 FilledButton.icon(onPressed: create, icon: const Icon(Icons.add_rounded), label: Text(tr(context, 'Create your first drop', 'Luo ensimmäinen julkaisu'))),
-              ],
+              ]),
             ),
           for (final d in _drops) _card(d),
         ],
@@ -106,13 +105,13 @@ class DropsManagerState extends State<DropsManager> {
     int sum(String k) => _drops.fold(0, (s, d) => s + (asInt(d[k]) ?? 0));
     Widget stat(String label, int value) => Expanded(
           child: Column(children: [
-            Text('$value', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: AppTheme.textPrimary)),
-            Text(label, style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+            Text('$value', style: const TextStyle(fontSize: MTextSize.displayS, fontWeight: FontWeight.w800, color: AppTheme.textPrimary)),
+            Text(label, style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
           ]),
         );
     return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppTheme.divider)),
+      padding: const EdgeInsets.all(MSpace.lg),
+      decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppTheme.divider)),
       child: Row(children: [
         stat(tr(context, 'Live', 'Julkaistu'), _drops.where((d) => d['status'] == 'READY').length),
         stat(tr(context, 'Views', 'Katselut'), sum('viewCount')),
@@ -135,9 +134,9 @@ class DropsManagerState extends State<DropsManager> {
     final completion = views > 0 ? ((asInt(d['completeCount']) ?? 0) * 100 / views).round() : 0;
     final poster = d['media']?['poster'];
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: MSpace.md),
       padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.divider)),
+      decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(MRadius.md), border: Border.all(color: AppTheme.divider)),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -147,27 +146,27 @@ class DropsManagerState extends State<DropsManager> {
               width: 72,
               height: 110,
               child: poster != null && status == 'READY'
-                  ? CachedNetworkImage(imageUrl: poster, fit: BoxFit.cover, placeholder: (_, __) => const Shimmering(child: SkeletonBox(height: double.infinity, radius: 0)))
+                  ? CachedNetworkImage(imageUrl: poster, fit: BoxFit.cover, placeholder: (_, __) => const MSkeleton(child: MSkeletonBox(height: double.infinity, radius: 0)))
                   : Container(color: AppTheme.primaryLight, child: const Icon(Icons.play_circle_outline, color: AppTheme.primary)),
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: MSpace.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(d['product']?['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w700)),
                 if ((d['caption'] ?? '').toString().isNotEmpty)
-                  Text(d['caption'], maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary)),
+                  Text(d['caption'], maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
                 const SizedBox(height: 6),
-                Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 12.5)),
+                Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: MTextSize.caption)),
                 if (status == 'REMOVED' && d['removedReason'] != null && d['removedReason'] != 'Deleted by store')
-                  Text('${tr(context, 'Reason', 'Syy')}: ${d['removedReason']}', style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                  Text('${tr(context, 'Reason', 'Syy')}: ${d['removedReason']}', style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
                 const SizedBox(height: 6),
                 Text(
                   '$views ${tr(context, 'views', 'katselua')} · ${d['likeCount'] ?? 0} ♥ · ${d['shareCount'] ?? 0} ${tr(context, 'shares', 'jakoa')}'
                   '${d['kind'] == 'VIDEO' && views > 0 ? ' · $completion % ${tr(context, 'watched to the end', 'katsoi loppuun')}' : ''}',
-                  style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                  style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary),
                 ),
                 if (status == 'READY')
                   TextButton.icon(

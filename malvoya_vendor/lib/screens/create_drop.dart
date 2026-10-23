@@ -4,11 +4,11 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
 import '../core/media_upload.dart';
-import '../core/strings.dart';
 
 /// Record or pick a short video (or a photo), link it to one of your products and post it.
 class CreateDropScreen extends StatefulWidget {
@@ -120,13 +120,11 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
       if (!mounted) return;
       if (!res.ok) throw UploadException(res.errorMessage);
       final live = res.data['drop']?['status'] == 'READY';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(!_storeApproved
+      MSnack.show(context, !_storeApproved
             ? tr(context, 'Saved — it goes live when your store is approved.', 'Tallennettu — julkaisu näkyy, kun kauppasi on hyväksytty.')
             : live
             ? tr(context, 'Your drop is live!', 'Julkaisusi on julki!')
-            : tr(context, 'Posted! The video is being prepared. It usually goes live within a few minutes; you can see its status under Drops.', 'Julkaistu! Videota valmistellaan. Se näkyy yleensä muutaman minuutin kuluessa; näet tilan Julkaisut-välilehdellä.')),
-      ));
+            : tr(context, 'Posted! The video is being prepared. It usually goes live within a few minutes; you can see its status under Drops.', 'Julkaistu! Videota valmistellaan. Se näkyy yleensä muutaman minuutin kuluessa; näet tilan Julkaisut-välilehdellä.'));
       Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
@@ -145,14 +143,14 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
       backgroundColor: AppTheme.background,
       appBar: AppBar(title: Text(tr(context, 'New drop', 'Uusi julkaisu'))),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
+        padding: const EdgeInsets.fromLTRB(MSpace.xl, MSpace.lg, MSpace.xl, MSpace.x4l),
         children: [
           AspectRatio(
             aspectRatio: 9 / 16 * 1.6,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(20),
               child: Container(
-                color: Colors.black,
+                color: MPalette.night,
                 child: _file == null
                     ? _chooser()
                     : _isVideo
@@ -162,7 +160,7 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
                                 clipBehavior: Clip.hardEdge,
                                 child: SizedBox(width: _preview!.value.size.width, height: _preview!.value.size.height, child: VideoPlayer(_preview!)),
                               )
-                            : const Center(child: CircularProgressIndicator(color: Colors.white)))
+                            : const Center(child: CircularProgressIndicator(color: AppTheme.onPrimary)))
                         : Image.file(_file!, fit: BoxFit.cover),
               ),
             ),
@@ -179,7 +177,7 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
               icon: const Icon(Icons.refresh_rounded),
               label: Text(tr(context, 'Choose another', 'Valitse toinen')),
             ),
-          const SizedBox(height: 16),
+          const SizedBox(height: MSpace.lg),
           DropdownButtonFormField<int>(
             value: _productId,
             isExpanded: true,
@@ -193,9 +191,9 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text(tr(context, 'Add a product first — every drop sells one of your products.', 'Lisää ensin tuote — jokainen julkaisu myy yhtä tuotettasi.'),
-                  style: const TextStyle(color: AppTheme.accent, fontSize: 12.5)),
+                  style: const TextStyle(color: AppTheme.accent, fontSize: MTextSize.caption)),
             ),
-          const SizedBox(height: 12),
+          const SizedBox(height: MSpace.md),
           TextField(
             controller: _caption,
             enabled: !uploading,
@@ -203,15 +201,15 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
             maxLines: 3,
             decoration: InputDecoration(labelText: tr(context, 'Caption', 'Kuvateksti'), hintText: tr(context, 'What makes it special? Fit, material, styling tips', 'Mikä tekee siitä erityisen? Istuvuus, materiaali, tyylivinkit')),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: MSpace.sm),
           Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(12)),
+            padding: const EdgeInsets.all(MSpace.md),
+            decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(MRadius.sm)),
             child: Text(
               tr(context,
                   'Show the real item you are selling. Only use music, logos and people you have permission for. Drops that break the rules or the law are removed, and you are told why.',
                   'Näytä todellinen myytävä tuote. Käytä vain musiikkia, logoja ja ihmisiä, joihin sinulla on lupa. Sääntöjen tai lain vastaiset julkaisut poistetaan, ja sinulle kerrotaan syy.'),
-              style: const TextStyle(fontSize: 12.5, height: 1.4, color: AppTheme.primaryDark),
+              style: const TextStyle(fontSize: MTextSize.caption, height: 1.4, color: AppTheme.primaryDark),
             ),
           ),
           CheckboxListTile(
@@ -223,24 +221,24 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
               tr(context,
                   'I made this video or photo, or I have permission to use everything in it — including the music, any logos, and everyone who appears in it.',
                   'Tein tämän videon tai kuvan itse tai minulla on lupa käyttää kaikkea siinä olevaa — myös musiikkia, logoja ja kaikkia siinä näkyviä ihmisiä.'),
-              style: const TextStyle(fontSize: 13, height: 1.35),
+              style: const TextStyle(fontSize: MTextSize.label, height: 1.35),
             ),
           ),
           if (!_storeApproved)
             Padding(
-              padding: const EdgeInsets.only(top: 8),
+              padding: const EdgeInsets.only(top: MSpace.sm),
               child: Text(
                 tr(context, 'Your store is in review. Drops you save now go live when Malvoya approves the store.',
                     'Kauppasi on tarkistuksessa. Nyt tallentamasi julkaisut näkyvät, kun Malvoya hyväksyy kaupan.'),
-                style: const TextStyle(fontSize: 12.5, color: Color(0xFF6A4500)),
+                style: const TextStyle(fontSize: MTextSize.caption, color: MPalette.amberInk),
               ),
             ),
           if (_error != null)
-            Padding(padding: const EdgeInsets.only(top: 12), child: Text(_error!, style: const TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w600))),
-          const SizedBox(height: 20),
+            Padding(padding: const EdgeInsets.only(top: MSpace.md), child: Text(_error!, style: const TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w600))),
+          const SizedBox(height: MSpace.xl),
           if (uploading) ...[
             LinearProgressIndicator(value: _progress, minHeight: 6, borderRadius: BorderRadius.circular(3)),
-            const SizedBox(height: 8),
+            const SizedBox(height: MSpace.sm),
             Text('${tr(context, 'Uploading', 'Ladataan')} ${((_progress ?? 0) * 100).round()} %', textAlign: TextAlign.center),
           ] else
             SizedBox(
@@ -260,8 +258,8 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.videocam_outlined, color: Colors.white70, size: 48),
-            const SizedBox(height: 16),
+            Icon(Icons.videocam_outlined, color: AppTheme.onPrimary.withValues(alpha: 0.7), size: 48),
+            const SizedBox(height: MSpace.lg),
             _choice(Icons.fiber_manual_record_rounded, tr(context, 'Record a video (max $_maxVideoSeconds s)', 'Kuvaa video (max $_maxVideoSeconds s)'), () => _pick(true, ImageSource.camera)),
             _choice(Icons.video_library_outlined, tr(context, 'Choose a video', 'Valitse video'), () => _pick(true, ImageSource.gallery)),
             _choice(Icons.photo_outlined, tr(context, 'Use a photo instead', 'Käytä kuvaa'), () => _pick(false, ImageSource.gallery)),
@@ -272,7 +270,7 @@ class _CreateDropScreenState extends State<CreateDropScreen> {
   Widget _choice(IconData icon, String label, VoidCallback onTap) => Padding(
         padding: const EdgeInsets.only(bottom: 10),
         child: OutlinedButton.icon(
-          style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Colors.white38), minimumSize: const Size(240, 46)),
+          style: OutlinedButton.styleFrom(foregroundColor: AppTheme.onPrimary, side: BorderSide(color: AppTheme.onPrimary.withValues(alpha: 0.38)), minimumSize: const Size(240, 46)),
           onPressed: onTap,
           icon: Icon(icon),
           label: Text(label),

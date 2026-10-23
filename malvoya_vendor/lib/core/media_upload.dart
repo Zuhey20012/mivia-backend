@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
-import 'api_client.dart';
+import 'package:malvoya_core/malvoya_core.dart';
 
 class UploadException implements Exception {
   final String message;

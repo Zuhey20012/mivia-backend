@@ -2,18 +2,25 @@ import { Response } from "express";
 import pino from "pino";
 import { reportError } from "./sentry";
 import { currentRequestId } from "./requestContext";
+import { localeFromHeader } from "./i18n";
 
 const logger = pino({ name: "api" });
 
 /** An error whose message is safe to show to the user, with the HTTP status to send. */
 export class ApiError extends Error {
+  /** Extra fields for the error body, e.g. { code: "PRODUCT_LOCKED" } or field-level issues */
+  extra?: Record<string, unknown>;
   constructor(message: string, public status = 400) {
     super(message);
   }
 }
 
 export function sendError(res: Response, e: any) {
-  if (typeof e?.status === "number" && e.status < 500) return res.status(e.status).json({ ok: false, error: e.message });
+  if (typeof e?.status === "number" && e.status < 500) {
+    // Field-level errors (catalog FieldsError) build their own body in the request's language
+    if (typeof e.body === "function") return res.status(e.status).json(e.body(localeFromHeader(res.req?.headers["accept-language"]) ?? "en"));
+    return res.status(e.status).json({ ok: false, error: e.message, ...(e.extra ?? {}) });
+  }
   if (typeof e?.type === "string" && e.type.startsWith("Stripe")) {
     logger.error({ reqId: currentRequestId(), err: e?.message, code: e?.code }, "Stripe error");
     reportError(e, { tags: { area: "stripe" } });

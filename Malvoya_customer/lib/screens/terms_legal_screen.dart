@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
-import '../core/legal_links.dart';
-import '../core/strings.dart';
 
 /// Terms, privacy policy and the rules for sellers and couriers — always the current version
 /// from Malvoya's server.
@@ -19,7 +19,7 @@ class TermsLegalScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: Text(tr(context, 'Legal', 'Juridiset tiedot'))),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(MSpace.lg),
         children: [
           for (final d in docs)
             Card(
@@ -41,12 +41,12 @@ class TermsLegalScreen extends StatelessWidget {
               onTap: () => showLicensePage(context: context, applicationName: 'Malvoya', applicationLegalese: '© Malvoya'),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: MSpace.md),
           Text(
             tr(context,
                 'Consumer disputes: you can contact the Consumer Advisory Service (kkv.fi) and take the matter to the Consumer Disputes Board (kuluttajariita.fi).',
                 'Kuluttajariidat: voit ottaa yhteyttä kuluttajaneuvontaan (kkv.fi) ja viedä asian kuluttajariitalautakuntaan (kuluttajariita.fi).'),
-            style: TextStyle(color: AppTheme.secondaryText(context), fontSize: 13, height: 1.4),
+            style: TextStyle(color: AppTheme.secondaryText(context), fontSize: MTextSize.label, height: 1.4),
           ),
         ],
       ),

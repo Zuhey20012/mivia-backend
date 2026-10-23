@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/legal_links.dart';
-import '../core/strings.dart';
 import '../l10n.dart';
-import '../locale_provider.dart';
 import '../realtime_notification_service.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -87,7 +86,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(MRadius.lg)),
       ),
       builder: (ctx) {
         return Consumer<LocaleProvider>(
@@ -97,27 +96,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
               constraints: BoxConstraints(
                 maxHeight: MediaQuery.of(context).size.height * 0.75,
               ),
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              padding: const EdgeInsets.fromLTRB(MSpace.xl, MSpace.lg, MSpace.xl, MSpace.xxl),
               decoration: BoxDecoration(
                 color: cardBg,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(MRadius.lg)),
                 border: Border.all(color: cardBorder),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Center(
-                    child: Container(
-                      width: 40, height: 4,
-                      decoration: BoxDecoration(color: Colors.grey.shade400, borderRadius: BorderRadius.circular(2)),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(l10n.translate('selectLanguagePrompt'), style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: textPrimary)),
-                  const SizedBox(height: 4),
-                  Text(l10n.translate('languagesSubtitle'), style: TextStyle(fontSize: 13, color: textSecondary)),
-                  const SizedBox(height: 12),
+                  const MSheetHandle(),
+                  const SizedBox(height: MSpace.lg),
+                  Text(l10n.translate('selectLanguagePrompt'), style: TextStyle(fontSize: MTextSize.displayS, fontWeight: FontWeight.bold, color: textPrimary)),
+                  const SizedBox(height: MSpace.xs),
+                  Text(l10n.translate('languagesSubtitle'), style: TextStyle(fontSize: MTextSize.label, color: textSecondary)),
+                  const SizedBox(height: MSpace.md),
                   Divider(height: 1, color: cardBorder),
                   Expanded(
                     child: ListView(
@@ -125,12 +119,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       children: AppLocalizations.languages.entries.map((entry) {
                         final isSelected = provider.locale.languageCode == entry.key;
                         return ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: MSpace.sm, vertical: 2),
                           title: Text(
                             entry.value,
                             style: TextStyle(
                               fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                              fontSize: 16,
+                              fontSize: MTextSize.bodyL,
                               color: isSelected ? AppTheme.primary : textPrimary,
                             ),
                           ),
@@ -175,11 +169,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
         ),
         actions: [
           Padding(
-            padding: const EdgeInsets.only(right: 16),
+            padding: const EdgeInsets.only(right: MSpace.lg),
             child: GestureDetector(
               onTap: () => _showLanguageSelector(context),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: MSpace.md, vertical: 6),
                 decoration: BoxDecoration(
                   color: cardBg,
                   borderRadius: BorderRadius.circular(20),
@@ -192,9 +186,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     const SizedBox(width: 6),
                     Text(
                       currentLangLabel.split(' ').first,
-                      style: const TextStyle(fontSize: 14),
+                      style: const TextStyle(fontSize: MTextSize.bodyM),
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: MSpace.xs),
                     Icon(Icons.arrow_drop_down, size: 18, color: textSecondary),
                   ],
                 ),
@@ -205,11 +199,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
+          padding: const EdgeInsets.symmetric(horizontal: MSpace.xxl),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: 12),
+              const SizedBox(height: MSpace.md),
               // Brand Icon
               Container(
                 width: 52,
@@ -220,15 +214,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(MRadius.md),
                 ),
-                child: const Icon(Icons.shopping_bag_outlined, color: Colors.white, size: 28),
+                child: const Icon(Icons.shopping_bag_outlined, color: AppTheme.onBrand, size: 28),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: MSpace.xxl),
               Text(
                 l10n.translate('createYourAccount'),
                 style: TextStyle(
-                  fontSize: 28,
+                  fontSize: MTextSize.displayM,
                   fontWeight: FontWeight.w800,
                   color: textPrimary,
                   letterSpacing: -0.5,
@@ -237,9 +231,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
               const SizedBox(height: 6),
               Text(
                 l10n.translate('signUpSubtitle'),
-                style: TextStyle(fontSize: 15, color: textSecondary),
+                style: TextStyle(fontSize: MTextSize.bodyL, color: textSecondary),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: MSpace.x3l),
 
               // Full Name
               TextField(
@@ -291,31 +285,31 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFF0F0),
+                    color: MPalette.redLight,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.error_outline, color: Color(0xFFD93025), size: 18),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFD93025), fontSize: 13))),
+                      const Icon(Icons.error_outline, color: MPalette.red, size: 18),
+                      const SizedBox(width: MSpace.sm),
+                      Expanded(child: Text(_error!, style: const TextStyle(color: MPalette.red, fontSize: MTextSize.label))),
                     ],
                   ),
                 ),
               ],
 
-              const SizedBox(height: 20),
+              const SizedBox(height: MSpace.xl),
 
               // Legal Terms & Privacy Policy Checkbox (Ultra-High Contrast OLED & Light Compliant)
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   color: isDark
-                      ? (_agreeToTerms ? const Color(0xFF27174A) : const Color(0xFF2A2331))
-                      : (_agreeToTerms ? const Color(0xFFF1E7F6) : const Color(0xFFF6F4FB)),
-                  borderRadius: BorderRadius.circular(16),
+                      ? (_agreeToTerms ? MPalette.nightRaised : MPalette.nightSurfaceVariant)
+                      : (_agreeToTerms ? MPalette.lilac : MPalette.sand),
+                  borderRadius: BorderRadius.circular(MRadius.md),
                   border: Border.all(
-                    color: _agreeToTerms ? AppTheme.primary : (isDark ? const Color(0xFF6D2E8C) : const Color(0xFFDDD6FE)),
+                    color: _agreeToTerms ? AppTheme.primary : (isDark ? MPalette.malva : MPalette.lilac),
                     width: 1.5,
                   ),
                 ),
@@ -328,10 +322,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       child: Checkbox(
                         value: _agreeToTerms,
                         activeColor: AppTheme.primary,
-                        checkColor: Colors.white,
+                        checkColor: AppTheme.onBrand,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                         side: BorderSide(
-                          color: isDark ? const Color(0xFF9B5DB8) : const Color(0xFF6D2E8C),
+                          color: isDark ? MPalette.malvaOnDark : MPalette.malva,
                           width: 1.8,
                         ),
                         onChanged: (v) {
@@ -344,7 +338,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         },
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: MSpace.md),
                     Expanded(
                       child: GestureDetector(
                         onTap: () {
@@ -358,8 +352,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         child: Text(
                           l10n.translate('agreeTermsText'),
                           style: TextStyle(
-                            fontSize: 13,
-                            color: isDark ? const Color(0xFFF6F3EE) : const Color(0xFF1C1820),
+                            fontSize: MTextSize.label,
+                            color: isDark ? MPalette.birch : MPalette.ink,
                             fontWeight: FontWeight.w700,
                             height: 1.45,
                           ),
@@ -379,25 +373,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ],
               ),
 
-              const SizedBox(height: 16),
+              const SizedBox(height: MSpace.lg),
 
               // Sign Up Button
-              SizedBox(
-                width: double.infinity,
-                child: _loading
-                    ? const Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5)))
-                    : ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _agreeToTerms ? AppTheme.primary : Colors.grey.shade400,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        ),
-                        onPressed: _handleRegister,
-                        child: Text(l10n.translate('createAccount'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-                      ),
+              // Soft until the terms are ticked; tapping then explains what is missing
+              MButton(
+                label: l10n.translate('createAccount'),
+                expand: true,
+                loading: _loading,
+                variant: _agreeToTerms ? MButtonVariant.primary : MButtonVariant.secondary,
+                onPressed: _handleRegister,
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: MSpace.xxl),
 
               // Already have an account? Sign in
               Center(
@@ -406,7 +394,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   child: Text.rich(
                     TextSpan(
                       text: '${l10n.translate('alreadyHaveAccount')} ',
-                      style: TextStyle(color: textSecondary, fontSize: 14),
+                      style: TextStyle(color: textSecondary, fontSize: MTextSize.bodyM),
                       children: [
                         TextSpan(
                           text: l10n.translate('signIn'),
@@ -418,7 +406,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: MSpace.xxl),
             ],
           ),
         ),

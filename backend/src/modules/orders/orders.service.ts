@@ -27,7 +27,7 @@ import { Text, euros, joinText, lowerFirst, t } from "../../lib/i18n";
 const logger = pino({ name: "orders" });
 
 export class OrderError extends Error {
-  constructor(message: string, public status = 400) {
+  constructor(message: string, public status = 400, public extra?: Record<string, unknown>) {
     super(message);
   }
 }
@@ -118,7 +118,8 @@ async function priceItems(db: Db, storeId: number, items: ItemInput[], reserve: 
     }
 
     subtotalCents += unitCents * item.quantity;
-    lines.push({ productId: product.id, variantId: item.variantId, quantity: item.quantity, unitCents });
+    // The hygiene seal is snapshotted: the return rules follow what was disclosed at purchase, not later edits
+    lines.push({ productId: product.id, variantId: item.variantId, quantity: item.quantity, unitCents, hygieneSealed: product.hygieneSealed });
   }
   return { subtotalCents, lines };
 }
@@ -417,7 +418,7 @@ export async function markOrderPaid(orderId: number, paymentIntentId: string, am
     customerName: order.user.name,
     email: order.user.email,
     storeName: order.store.name,
-    items: order.items.map((i) => ({ name: i.product.name, quantity: i.quantity, unitCents: i.unitCents })),
+    items: order.items.map((i) => ({ name: i.product.name, quantity: i.quantity, unitCents: i.unitCents, hygieneSealed: i.hygieneSealed })),
     subtotalCents: order.subtotalCents,
     deliveryFeeCents: order.deliveryFeeCents,
     serviceFeeCents: order.serviceFeeCents,
@@ -1247,15 +1248,19 @@ function presentReturn<R extends PlanReturn>(ret: R, order: PlanOrder | null) {
 const returnItemsSelect = { select: { orderItemId: true, quantity: true } } as const;
 const planOrderSelect = {
   subtotalCents: true, deliveryFeeCents: true, serviceFeeCents: true, smallOrderFeeCents: true, discountCents: true,
-  items: { select: { id: true, quantity: true, unitCents: true, productId: true, variantId: true, product: { select: { name: true } } } },
+  items: { select: { id: true, quantity: true, unitCents: true, productId: true, variantId: true, hygieneSealed: true, product: { select: { name: true } } } },
   returns: { select: { id: true, status: true, refundCents: true, damageDedCents: true, items: returnItemsSelect } },
 } satisfies Prisma.OrderSelect;
 
+/** Reasons that use the 14-day right of withdrawal; faults (wrong, damaged, not as described) are always returnable. */
+const WITHDRAWAL_REASONS = ["CHANGED_MIND", "OTHER"];
+
 export async function createReturn(userId: number, input: {
-  orderId?: number; rentalId?: number; reason: string; conditionNote?: string; items?: ReturnLine[];
+  orderId?: number; rentalId?: number; reason: string; conditionNote?: string; items?: ReturnLine[]; sealIntact?: boolean;
 }) {
   let lines: ReturnLine[] = [];
   let storeOf: { id: number; ownerId: number } | null = null;
+  let sealIntact: boolean | null = null;
   if (input.orderId) {
     const order = await prisma.order.findUnique({
       where: { id: input.orderId },
@@ -1291,6 +1296,26 @@ export async function createReturn(userId: number, input: {
       lines = [...left].filter(([, q]) => q > 0).map(([orderItemId, quantity]) => ({ orderItemId, quantity }));
       if (!lines.length) throw new OrderError("A return for this order already exists", 409);
     }
+    // Hygiene seal (KSL 6:16, CRD Art. 16(e)): a sealed item whose seal was opened cannot be withdrawn from; the
+    // customer was told on the product page and in the order confirmation. Faulty items stay returnable.
+    const sealed = lines.filter((ln) => order.items.find((i) => i.id === ln.orderItemId)?.hygieneSealed);
+    if (sealed.length && WITHDRAWAL_REASONS.includes(input.reason)) {
+      if (typeof input.sealIntact !== "boolean") {
+        throw new OrderError("Is the hygiene seal unbroken? Answer sealIntact: true or false. / Onko hygieniasinetti ehjä? Vastaa sealIntact: true tai false.", 400, {
+          code: "SEAL_STATUS_REQUIRED",
+          question: { en: "Is the hygiene seal unbroken?", fi: "Onko hygieniasinetti ehjä?" },
+          items: sealed.map((x) => x.orderItemId),
+        });
+      }
+      if (!input.sealIntact) {
+        const reason = {
+          en: "This item was sold hygiene-sealed and the seal has been opened, so it cannot be returned under the 14-day right of withdrawal (Consumer Protection Act ch. 6 §16). This was shown on the product page and in your order confirmation. If the item is faulty, wrong or not as described, choose that reason instead.",
+          fi: "Tuote myytiin hygieniasinetöitynä ja sinetti on avattu, joten sitä ei voi palauttaa 14 päivän peruuttamisoikeudella (kuluttajansuojalaki 6 luku 16 §). Tästä kerrottiin tuotesivulla ja tilausvahvistuksessa. Jos tuote on virheellinen, väärä tai ei vastaa kuvausta, valitse se syyksi.",
+        };
+        throw new OrderError(`${reason.en} / ${reason.fi}`, 422, { code: "HYGIENE_SEAL_OPENED", reason, items: sealed.map((x) => x.orderItemId) });
+      }
+      sealIntact = true;
+    }
   }
 
   if (input.rentalId) {
@@ -1301,7 +1326,7 @@ export async function createReturn(userId: number, input: {
 
   const created = await prisma.return.create({
     data: {
-      userId, orderId: input.orderId, rentalId: input.rentalId, reason: input.reason as any, conditionNote: input.conditionNote,
+      userId, orderId: input.orderId, rentalId: input.rentalId, reason: input.reason as any, conditionNote: input.conditionNote, sealIntact,
       ...(lines.length ? { items: { createMany: { data: lines } } } : {}),
     },
     include: { items: returnItemsSelect },

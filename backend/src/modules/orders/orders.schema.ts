@@ -67,6 +67,8 @@ export const createReturnSchema = z.object({
   rentalId: z.number().int().positive().optional(),
   reason:   z.enum(["WRONG_ITEM","DAMAGED_ON_ARRIVAL","NOT_AS_DESCRIBED","CHANGED_MIND","RENTAL_RETURN","OTHER"]),
   conditionNote: z.string().max(500).optional(),
+  // Hygiene-sealed items returned under the right of withdrawal: the customer says whether the seal is unbroken (2.12)
+  sealIntact: z.boolean().optional(),
   // Only some of the items (order lines and how many of each); without it the whole order (what is left of it)
   items: z.array(z.object({
     orderItemId: z.number().int().positive(),

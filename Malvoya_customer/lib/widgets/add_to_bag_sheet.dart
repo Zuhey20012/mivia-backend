@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../cart.dart';
 import '../checkout.dart';
 import '../config/theme.dart';
-import '../core/strings.dart';
 import '../models.dart';
-import 'price_tag.dart';
-import '../core/haptics.dart';
 import 'app_image.dart';
 
 String variantLabel(Map v) => [v['size'], v['color']].where((x) => x != null && '$x'.isNotEmpty).join(' · ');
@@ -21,13 +20,7 @@ Future<bool> showAddToBagSheet(BuildContext context, Map<String, dynamic> produc
   if (variants is List && variants.isEmpty && product['inStock'] != false && asInt(product['id']) != null) {
     return addProductToBag(context, product, store: shop);
   }
-  final added = await showModalBottomSheet<bool>(
-    showDragHandle: false,
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (_) => _AddToBagSheet(product: product, store: shop),
-  );
+  final added = await showMSheet<bool>(context, builder: (_) => _AddToBagSheet(product: product, store: shop), transparent: true, isScrollControlled: true, useSafeArea: false);
   return added == true;
 }
 
@@ -151,11 +144,11 @@ class _AddToBagSheetState extends State<_AddToBagSheet> {
           Center(
             child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppTheme.cardBorder(context), borderRadius: BorderRadius.circular(2))),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: MSpace.lg),
           Row(
             children: [
               ClipRRect(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(MRadius.md),
                 child: SizedBox(
                   width: 64,
                   height: 80,
@@ -174,16 +167,16 @@ class _AddToBagSheetState extends State<_AddToBagSheet> {
                   children: [
                     Text(p['name'] ?? '', style: AppTheme.display(context, size: 19)),
                     if (widget.store?['name'] != null)
-                      Text(widget.store!['name'], style: TextStyle(fontSize: 13, color: AppTheme.secondaryText(context))),
-                    const SizedBox(height: 4),
-                    PriceTag(pricing: p['pricing'] as Map<String, dynamic>?, overrideCents: asInt(chosen?['priceCents']), size: 16),
+                      Text(widget.store!['name'], style: TextStyle(fontSize: MTextSize.label, color: AppTheme.secondaryText(context))),
+                    const SizedBox(height: MSpace.xs),
+                    MPrice.fromPricing(p['pricing'] as Map<String, dynamic>?, overrideCents: asInt(chosen?['priceCents']), size: MPriceSize.md),
                   ],
                 ),
               ),
             ],
           ),
           if (needsChoice) ...[
-            const SizedBox(height: 20),
+            const SizedBox(height: MSpace.xl),
             Text(tr(context, 'Choose size / colour', 'Valitse koko / väri'),
                 style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
             const SizedBox(height: 10),
@@ -195,7 +188,7 @@ class _AddToBagSheetState extends State<_AddToBagSheet> {
                 final available = v['inStock'] == true;
                 final selected = id == _variantId;
                 final dark = AppTheme.isDarkMode(context);
-                final brand = dark ? const Color(0xFFC9A3DD) : AppTheme.primary;
+                final brand = dark ? MPalette.malvaOnDark : AppTheme.primary;
                 return Semantics(
                   button: true,
                   selected: selected,
@@ -217,7 +210,7 @@ class _AddToBagSheetState extends State<_AddToBagSheet> {
                         color: selected
                             ? AppTheme.pastel(context, AppTheme.lilac, AppTheme.primary)
                             : (available ? AppTheme.cardBackground(context) : AppTheme.inputBackground(context)),
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(MRadius.md),
                         border: Border.all(color: selected ? brand : AppTheme.cardBorder(context), width: selected ? 2 : 1.5),
                       ),
                       // widthFactor/heightFactor keep the tile as small as its label (min 60 × 48)
@@ -227,7 +220,7 @@ class _AddToBagSheetState extends State<_AddToBagSheet> {
                        child: Text(
                         variantLabel(v),
                         style: TextStyle(
-                          fontSize: 15,
+                          fontSize: MTextSize.bodyL,
                           fontWeight: FontWeight.w800,
                           color: selected ? brand : (available ? AppTheme.primaryText(context) : AppTheme.secondaryText(context)),
                           decoration: available ? null : TextDecoration.lineThrough,
@@ -240,12 +233,12 @@ class _AddToBagSheetState extends State<_AddToBagSheet> {
               }).toList(),
             ),
           ],
-          const SizedBox(height: 16),
+          const SizedBox(height: MSpace.lg),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Icon(isPrivate ? Icons.person_outline_rounded : Icons.verified_outlined, size: 18, color: AppTheme.secondaryText(context)),
-              const SizedBox(width: 8),
+              const SizedBox(width: MSpace.sm),
               Expanded(
                 child: Text(
                   isPrivate
@@ -253,7 +246,7 @@ class _AddToBagSheetState extends State<_AddToBagSheet> {
                           'Myyjä on yksityishenkilö. Kuluttajan 14 päivän peruuttamisoikeus koskee vain yrityksiltä ostettuja tuotteita.')
                       : tr(context, 'Sold by a business. You can return it within 14 days of delivery.',
                           'Myyjä on yritys. Voit palauttaa tuotteen 14 päivän kuluessa toimituksesta.'),
-                  style: TextStyle(fontSize: 12.5, height: 1.35, color: AppTheme.secondaryText(context)),
+                  style: TextStyle(fontSize: MTextSize.caption, height: 1.35, color: AppTheme.secondaryText(context)),
                 ),
               ),
             ],
@@ -270,7 +263,7 @@ class _AddToBagSheetState extends State<_AddToBagSheet> {
                     : (needsChoice && chosen == null)
                         ? tr(context, 'Choose a size', 'Valitse koko')
                         : tr(context, 'Add to bag', 'Lisää kassiin'),
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                style: const TextStyle(fontSize: MTextSize.bodyL, fontWeight: FontWeight.w700),
               ),
             ),
           ),

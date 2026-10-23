@@ -6,19 +6,17 @@ import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/constants.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
 import '../core/reorder.dart';
 import '../core/network_status.dart';
-import '../core/strings.dart';
 import '../services/socket_service.dart';
 import '../core/notification_primer.dart';
 import '../widgets/paid_moment.dart';
-import '../widgets/skeleton.dart';
 import 'returns_screen.dart';
-import '../core/haptics.dart';
 
 /// One order: live map while it is on its way, a timeline with real times, chat with the
 /// courier, and — once delivered — the delivery photo, a rating and returns.
@@ -341,7 +339,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
     if (_courier != null && !_fittedWithCourier) WidgetsBinding.instance.addPostFrameCallback((_) => _fitCamera());
   }
 
-  void _snack(String t) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t), behavior: SnackBarBehavior.floating));
+  void _snack(String t) => MSnack.show(context, t);
 
   // ── Derived values ──────────────────────────────────────────────────────
 
@@ -452,7 +450,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
           children: [
             if (url != null) CachedNetworkImage(imageUrl: url, fit: BoxFit.cover),
             Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(MSpace.lg),
               child: Text(
                 url != null
                     ? tr(context, 'Photo taken by your courier at delivery. Kept for 30 days.', 'Kuriirin toimitushetkellä ottama kuva. Säilytetään 30 päivää.')
@@ -471,10 +469,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
     int courier = 0;
     final comment = TextEditingController();
     final hasCourier = _order?['courier'] != null;
-    final sent = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
+    final sent = await showMSheet<bool>(context, builder: (ctx) => StatefulBuilder(
         builder: (ctx, set) {
           Widget stars(int value, void Function(int) onPick) => Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -483,7 +478,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                   (i) => IconButton(
                     tooltip: tr(context, '${i + 1} of 5 stars', '${i + 1}/5 tähteä'),
                     iconSize: 36,
-                    icon: Icon(i < value ? Icons.star_rounded : Icons.star_outline_rounded, color: const Color(0xFFE08A00)),
+                    icon: Icon(i < value ? Icons.star_rounded : Icons.star_outline_rounded, color: MPalette.amber),
                     onPressed: () {
                       Haptics.selection();
                       set(() => onPick(i + 1));
@@ -496,8 +491,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(tr(context, 'How was your order?', 'Millainen tilauksesi oli?'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-                const SizedBox(height: 12),
+                Text(tr(context, 'How was your order?', 'Millainen tilauksesi oli?'), style: const TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w700)),
+                const SizedBox(height: MSpace.md),
                 Text(_order?['store']?['name'] ?? ''),
                 stars(store, (v) => store = v),
                 if (hasCourier) ...[
@@ -510,7 +505,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                   maxLines: 3,
                   decoration: InputDecoration(hintText: tr(context, 'Tell others about the store (optional)', 'Kerro muille kaupasta (valinnainen)')),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: MSpace.sm),
                 SizedBox(
                   width: double.infinity,
                   height: 50,
@@ -527,7 +522,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                             if (res.ok) {
                               Navigator.pop(ctx, true);
                             } else {
-                              ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text(res.errorText(context)!)));
+                              MSnack.show(ctx, res.errorText(context)!);
                             }
                           },
                     child: Text(tr(context, 'Send review', 'Lähetä arvio')),
@@ -538,14 +533,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                   tr(context, 'Your first name and last initial are shown with your review. Only customers with a delivered order can review.',
                       'Etunimesi ja sukunimen alkukirjain näkyvät arviossa. Vain asiakkaat, joiden tilaus on toimitettu, voivat arvioida.'),
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12, color: AppTheme.secondaryText(context)),
+                  style: TextStyle(fontSize: MTextSize.caption, color: AppTheme.secondaryText(context)),
                 ),
               ],
             ),
           );
         },
-      ),
-    );
+      ), isScrollControlled: true, useSafeArea: false);
     if (sent == true && mounted) {
       _snack(tr(context, 'Thanks for your review!', 'Kiitos arviostasi!'));
       _load();
@@ -605,10 +599,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
       tr(context, 'Please leave it at the door', 'Jätä ovelle'),
       tr(context, 'The door code is ', 'Ovikoodi on '),
     ];
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) => SizedBox(
+    await showMSheet(context, builder: (ctx) => SizedBox(
         height: MediaQuery.of(ctx).size.height * 0.7,
         child: Padding(
           padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
@@ -628,7 +619,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                     toNewest();
                     return ListView.builder(
                       controller: scroll,
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(MSpace.lg),
                       itemCount: messages.length,
                       itemBuilder: (_, i) {
                         final m = messages[i];
@@ -636,14 +627,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                         return Align(
                           alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
                           child: Container(
-                            margin: const EdgeInsets.only(bottom: 8),
+                            margin: const EdgeInsets.only(bottom: MSpace.sm),
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                             constraints: const BoxConstraints(maxWidth: 280),
                             decoration: BoxDecoration(
                               color: mine ? AppTheme.primary : AppTheme.inputBackground(context),
-                              borderRadius: BorderRadius.circular(16),
+                              borderRadius: BorderRadius.circular(MRadius.md),
                             ),
-                            child: Text('${m['text'] ?? ''}', style: TextStyle(color: mine ? Colors.white : AppTheme.primaryText(context))),
+                            child: Text('${m['text'] ?? ''}', style: TextStyle(color: mine ? AppTheme.onBrand : AppTheme.primaryText(context))),
                           ),
                         );
                       },
@@ -653,18 +644,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
               ),
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                padding: const EdgeInsets.symmetric(horizontal: MSpace.md),
                 child: Row(
                   children: quick
                       .map((q) => Padding(
-                            padding: const EdgeInsets.only(right: 8),
+                            padding: const EdgeInsets.only(right: MSpace.sm),
                             child: ActionChip(label: Text(q), onPressed: () => q.endsWith(' ') ? input.text = q : send(q)),
                           ))
                       .toList(),
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                padding: const EdgeInsets.fromLTRB(MSpace.md, MSpace.sm, MSpace.md, MSpace.md),
                 child: Row(
                   children: [
                     Expanded(
@@ -690,8 +681,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
             ],
           ),
         ),
-      ),
-    );
+      ), isScrollControlled: true, useSafeArea: false);
     _chatOpen = false;
     scroll.dispose();
     input.dispose();
@@ -720,11 +710,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
 
   Widget _body(Map<String, dynamic>? o) {
     return o == null
-          ? (_error == null ? const SkeletonDetail(heroHeight: 240) : StateMessage.error(message: _error!, onRetry: _load))
+          ? (_error == null ? const MSkeletonDetail(heroHeight: 240) : MStateMessage.error(message: _error!, onRetry: _load))
           : RefreshIndicator(
               onRefresh: _load,
               child: ListView(
-                padding: const EdgeInsets.only(bottom: 32),
+                padding: const EdgeInsets.only(bottom: MSpace.x3l),
                 children: [
                   if (_deliveryProblem(o)) _deliveryProblemCard(o),
                   if (!_isPickup && _active.contains(o['status']) && (_storePos != null || _homePos != null)) _mapCard(),
@@ -749,13 +739,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
     return _card(Column(
       children: [
         Text(tr(context, 'How was it?', 'Millaista oli?'), style: AppTheme.display(context, size: 20)),
-        const SizedBox(height: 4),
+        const SizedBox(height: MSpace.xs),
         Text(
           storeName.isEmpty
               ? tr(context, 'Your rating helps other shoppers.', 'Arviosi auttaa muita ostajia.')
               : tr(context, 'Rate $storeName. It helps other shoppers.', 'Arvioi $storeName. Se auttaa muita ostajia.'),
           textAlign: TextAlign.center,
-          style: TextStyle(color: AppTheme.secondaryText(context), fontSize: 13.5),
+          style: TextStyle(color: AppTheme.secondaryText(context), fontSize: MTextSize.label),
         ),
         const SizedBox(height: 6),
         Row(
@@ -766,7 +756,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                 tooltip: tr(context, '$i of 5 stars', '$i/5 tähteä'),
                 iconSize: 38,
                 constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-                icon: const Icon(Icons.star_outline_rounded, color: Color(0xFFE08A00)),
+                icon: const Icon(Icons.star_outline_rounded, color: MPalette.amber),
                 onPressed: () {
                   Haptics.selection();
                   _rate(initial: i);
@@ -783,14 +773,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
     Widget pin(IconData icon, Color color, String label) => Semantics(
           label: label,
           child: Container(
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3),
-                boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 6)]),
-            child: Icon(icon, color: Colors.white, size: 18),
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: Border.all(color: MPalette.white, width: 3),
+                boxShadow: [BoxShadow(color: MPalette.night.withValues(alpha: 0.26), blurRadius: 6)]),
+            child: Icon(icon, color: AppTheme.onBrand, size: 18),
           ),
         );
     return Container(
       height: 280,
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      margin: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.sm, MSpace.lg, 0),
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(borderRadius: BorderRadius.circular(AppTheme.radiusLg)),
       child: Stack(
@@ -844,7 +834,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
               ),
               const Align(
                 alignment: Alignment.bottomRight,
-                child: Padding(padding: EdgeInsets.all(8), child: Text('© OpenStreetMap', style: TextStyle(fontSize: 10, color: Colors.black87))),
+                child: Padding(padding: EdgeInsets.all(MSpace.sm), child: Text('© OpenStreetMap', style: TextStyle(fontSize: MTextSize.caption, color: AppTheme.ink))),
               ),
             ],
           ),
@@ -853,7 +843,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
               top: 8,
               right: 8,
               child: Material(
-                color: Colors.white,
+                color: MPalette.white,
                 shape: const CircleBorder(),
                 elevation: 2,
                 child: IconButton(
@@ -905,7 +895,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
     final code = o['pickupCode']?.toString() ?? '';
     final showCode = code.isNotEmpty && (status == 'CONFIRMED' || status == 'PROCESSING');
     final muted = AppTheme.secondaryText(context);
-    final brand = AppTheme.isDarkMode(context) ? const Color(0xFFC9A3DD) : AppTheme.primary;
+    final brand = AppTheme.isDarkMode(context) ? MPalette.malvaOnDark : AppTheme.primary;
     final ready = _time('readyAt');
     final hasPlace = (store['address'] ?? '').toString().isNotEmpty || store['latitude'] != null;
     final spaced = code.length == 6 ? '${code.substring(0, 3)} ${code.substring(3)}' : code;
@@ -916,7 +906,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
         if (showCode) ...[
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+            padding: const EdgeInsets.symmetric(vertical: MSpace.xl, horizontal: MSpace.lg),
             decoration: BoxDecoration(
               color: AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine),
               borderRadius: BorderRadius.circular(AppTheme.radiusMd),
@@ -924,7 +914,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
             child: Column(children: [
               Text(tr(context, 'Show this code at the shop', 'Näytä tämä koodi kaupassa'),
                   style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
-              const SizedBox(height: 8),
+              const SizedBox(height: MSpace.sm),
               Semantics(
                 label: '${tr(context, 'Pickup code', 'Noutokoodi')} ${code.split('').join(' ')}',
                 excludeSemantics: true,
@@ -941,11 +931,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                     ? tr(context, 'Your order is ready. Please collect it within 3 days.', 'Tilauksesi on valmis. Nouda se 3 päivän kuluessa.')
                     : tr(context, 'Wait until the shop marks it ready before you go.', 'Odota, että kauppa merkitsee tilauksen valmiiksi, ennen kuin lähdet.'),
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 13, color: AppTheme.primaryText(context), height: 1.35),
+                style: TextStyle(fontSize: MTextSize.label, color: AppTheme.primaryText(context), height: 1.35),
               ),
             ]),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: MSpace.lg),
         ],
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -956,23 +946,23 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
               decoration: BoxDecoration(color: AppTheme.pastel(context, AppTheme.lilac, AppTheme.primary), shape: BoxShape.circle),
               child: Icon(Icons.storefront_rounded, color: brand),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: MSpace.md),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(store['name']?.toString() ?? '', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: AppTheme.primaryText(context))),
+                  Text(store['name']?.toString() ?? '', style: TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.bodyL, color: AppTheme.primaryText(context))),
                   if ((store['address'] ?? '').toString().isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
-                      child: Text(store['address'].toString(), style: TextStyle(fontSize: 13, color: muted, height: 1.35)),
+                      child: Text(store['address'].toString(), style: TextStyle(fontSize: MTextSize.label, color: muted, height: 1.35)),
                     ),
                   if (status == 'PROCESSING' && ready != null)
                     Padding(
-                      padding: const EdgeInsets.only(top: 4),
+                      padding: const EdgeInsets.only(top: MSpace.xs),
                       child: Text(
                         tr(context, 'Ready since ${ready.day}.${ready.month}. ${_clock(ready)}', 'Valmiina ${ready.day}.${ready.month}. klo ${_clock(ready)} alkaen'),
-                        style: TextStyle(fontSize: 12.5, color: muted),
+                        style: TextStyle(fontSize: MTextSize.caption, color: muted),
                       ),
                     ),
                 ],
@@ -995,14 +985,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
           Text(
             tr(context, 'If it isn’t collected within 3 days of being ready, the order is cancelled and refunded.',
                 'Jos tilausta ei noudeta 3 päivän kuluessa valmistumisesta, se perutaan ja rahat palautetaan.'),
-            style: TextStyle(fontSize: 12, color: muted, height: 1.35),
+            style: TextStyle(fontSize: MTextSize.caption, color: muted, height: 1.35),
           ),
       ],
     ));
   }
 
   Widget _card(Widget child) => Container(
-        margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+        margin: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.lg, MSpace.lg, 0),
         padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
           color: AppTheme.cardBackground(context),
@@ -1040,7 +1030,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
     final stale = _courierSeenAt != null && DateTime.now().difference(_courierSeenAt!) > const Duration(minutes: 2);
 
     final done = steps.where((s) => s.$3).length;
-    final brand = AppTheme.isDarkMode(context) ? const Color(0xFFC9A3DD) : AppTheme.primary;
+    final brand = AppTheme.isDarkMode(context) ? MPalette.malvaOnDark : AppTheme.primary;
     final showCourier = !_isPickup && courierName.isNotEmpty && _active.contains(status);
 
     return _card(Column(
@@ -1055,11 +1045,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
           style: AppTheme.display(context, size: 25),
         ),
         Padding(
-          padding: const EdgeInsets.only(top: 4),
+          padding: const EdgeInsets.only(top: MSpace.xs),
           child: Text('#${o['id']} · ${o['store']?['name'] ?? ''}', style: TextStyle(color: AppTheme.secondaryText(context))),
         ),
         if (cancelled && o['cancelReason'] != null) ...[
-          Padding(padding: const EdgeInsets.only(top: 4), child: Text(_cancelReason(o['cancelReason'].toString()), style: TextStyle(color: AppTheme.secondaryText(context)))),
+          Padding(padding: const EdgeInsets.only(top: MSpace.xs), child: Text(_cancelReason(o['cancelReason'].toString()), style: TextStyle(color: AppTheme.secondaryText(context)))),
           if (_unreachable(o))
             Padding(
               padding: const EdgeInsets.only(top: 6),
@@ -1067,12 +1057,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                 tr(context,
                     'Your courier came to your address but could not reach you, so the order went back to the shop. The items are refunded to your card. The delivery fee and tip are not refunded, because the delivery was made.',
                     'Kuriiri tuli osoitteeseesi mutta ei tavoittanut sinua, joten tilaus palautettiin kauppaan. Tuotteiden hinta hyvitetään kortillesi. Toimitusmaksua ja tippiä ei hyvitetä, koska toimitus tehtiin.'),
-                style: TextStyle(fontSize: 13.5, height: 1.4, color: AppTheme.primaryText(context)),
+                style: TextStyle(fontSize: MTextSize.label, height: 1.4, color: AppTheme.primaryText(context)),
               ),
             ),
         ],
         if (unpaid && !confirming) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: MSpace.md),
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
@@ -1080,7 +1070,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
               borderRadius: BorderRadius.circular(AppTheme.radiusMd),
             ),
             child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Icon(Icons.info_outline_rounded, color: Color(0xFF8A5A00), size: 20),
+              const Icon(Icons.info_outline_rounded, color: MPalette.amberInk, size: 20),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -1089,7 +1079,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                           'Maksu jäi kesken – mitään ei veloitettu. Tuotteet pidetään varattuina 30 minuuttia.')
                       : tr(context, 'Payment not finished — nothing was charged. The items are held for 30 minutes (until ${_clock(heldUntil)}), then the order is cancelled.',
                           'Maksu jäi kesken – mitään ei veloitettu. Tuotteet pidetään varattuina 30 minuuttia (klo ${_clock(heldUntil)} asti), minkä jälkeen tilaus perutaan.'),
-                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, height: 1.35, color: AppTheme.primaryText(context)),
+                  style: TextStyle(fontSize: MTextSize.label, fontWeight: FontWeight.w600, height: 1.35, color: AppTheme.primaryText(context)),
                 ),
               ),
             ]),
@@ -1101,10 +1091,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
           Row(
             children: [
               for (var i = 0; i < steps.length; i++) ...[
-                if (i > 0) const SizedBox(width: 4),
+                if (i > 0) const SizedBox(width: MSpace.xs),
                 Expanded(
                   child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 400),
+                    duration: MMotion.slow,
                     height: 6,
                     decoration: BoxDecoration(
                       color: i < done ? brand : AppTheme.cardBorder(context),
@@ -1128,7 +1118,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                     decoration: BoxDecoration(color: AppTheme.pastel(context, AppTheme.peach, AppTheme.lingon), shape: BoxShape.circle),
                     child: const Icon(Icons.pedal_bike_rounded, color: AppTheme.lingon, size: 22),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: MSpace.md),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1137,7 +1127,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                             style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
                         if (stale)
                           Text(tr(context, 'Location updating…', 'Sijaintia päivitetään…'),
-                              style: TextStyle(fontSize: 12.5, color: AppTheme.secondaryText(context))),
+                              style: TextStyle(fontSize: MTextSize.caption, color: AppTheme.secondaryText(context))),
                       ],
                     ),
                   ),
@@ -1159,7 +1149,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                             child: Stack(
                               alignment: Alignment.center,
                               children: [
-                                const Icon(Icons.chat_bubble_outline_rounded, color: Colors.white, size: 20),
+                                const Icon(Icons.chat_bubble_outline_rounded, color: AppTheme.onBrand, size: 20),
                                 // A courier message the customer has not opened yet
                                 if (_unread)
                                   Positioned(
@@ -1188,7 +1178,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
               ),
             ),
           ],
-          const SizedBox(height: 16),
+          const SizedBox(height: MSpace.lg),
           for (var i = 0; i < steps.length; i++)
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1203,13 +1193,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                         shape: BoxShape.circle,
                         border: Border.all(color: steps[i].$3 ? brand : AppTheme.cardBorder(context), width: 2),
                       ),
-                      child: steps[i].$3 ? const Icon(Icons.check_rounded, size: 12, color: Colors.white) : null,
+                      child: steps[i].$3 ? const Icon(Icons.check_rounded, size: 12, color: AppTheme.onBrand) : null,
                     ),
                     if (i < steps.length - 1)
                       Container(width: 2, height: 22, color: steps[i + 1].$3 ? brand : AppTheme.cardBorder(context)),
                   ],
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: MSpace.md),
                 Expanded(
                   child: Text(steps[i].$1,
                       style: TextStyle(
@@ -1217,7 +1207,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                         color: steps[i].$3 ? AppTheme.primaryText(context) : AppTheme.secondaryText(context),
                       )),
                 ),
-                if (steps[i].$2 != null) Text(_clock(steps[i].$2!), style: TextStyle(color: AppTheme.secondaryText(context), fontSize: 13)),
+                if (steps[i].$2 != null) Text(_clock(steps[i].$2!), style: TextStyle(color: AppTheme.secondaryText(context), fontSize: MTextSize.label)),
               ],
             ),
         ],
@@ -1241,16 +1231,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
   bool _deliveryProblem(Map<String, dynamic> o) => o['deliveryProblemAt'] != null && o['status'] == 'SHIPPED' && !_isPickup;
 
   Widget _deliveryProblemCard(Map<String, dynamic> o) {
-    const red = Color(0xFFD93025);
+    const red = MPalette.red;
     final wrongAddress = o['deliveryProblemReason'] == 'WRONG_ADDRESS';
     final since = _time('deliveryProblemAt');
     final returnAt = since?.add(const Duration(minutes: 10));
     final dark = AppTheme.isDarkMode(context);
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      margin: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.lg, MSpace.lg, 0),
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: dark ? red.withValues(alpha: 0.18) : const Color(0xFFFDECEA),
+        color: dark ? red.withValues(alpha: 0.18) : MPalette.redLight,
         borderRadius: BorderRadius.circular(AppTheme.radiusLg),
         border: Border.all(color: red, width: 1.5),
       ),
@@ -1267,24 +1257,24 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                   wrongAddress
                       ? tr(context, 'Your courier can\'t find your address — open the chat', 'Kuriiri ei löydä osoitettasi – avaa chat')
                       : tr(context, 'Your courier can\'t reach you — open the chat', 'Kuriiri ei tavoita sinua – avaa chat'),
-                  style: AppTheme.display(context, size: 19, color: dark ? Colors.white : const Color(0xFF8C1D18)),
+                  style: AppTheme.display(context, size: 19, color: dark ? MPalette.white : MPalette.redInk),
                 ),
               ),
             ]),
-            const SizedBox(height: 8),
+            const SizedBox(height: MSpace.sm),
             Text(
               returnAt == null
                   ? tr(context, 'Reply in the chat or come to the door. If the courier cannot reach you, the order goes back to the shop: the items are refunded, the delivery fee and tip are not.',
                       'Vastaa chatissa tai tule ovelle. Jos kuriiri ei tavoita sinua, tilaus palautetaan kauppaan: tuotteet hyvitetään, mutta toimitusmaksua ja tippiä ei.')
                   : tr(context, 'Reply in the chat or come to the door. From ${_clock(returnAt)} the courier may take the order back to the shop: the items are then refunded, the delivery fee and tip are not.',
                       'Vastaa chatissa tai tule ovelle. Klo ${_clock(returnAt)} alkaen kuriiri voi viedä tilauksen takaisin kauppaan. Tuotteet hyvitetään silloin, mutta toimitusmaksua ja tippiä ei.'),
-              style: TextStyle(fontSize: 14, height: 1.4, color: AppTheme.primaryText(context)),
+              style: TextStyle(fontSize: MTextSize.bodyM, height: 1.4, color: AppTheme.primaryText(context)),
             ),
             const SizedBox(height: 14),
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
-                style: FilledButton.styleFrom(backgroundColor: red, foregroundColor: Colors.white),
+                style: FilledButton.styleFrom(backgroundColor: red, foregroundColor: AppTheme.onBrand),
                 onPressed: () {
                   Haptics.medium();
                   _openChat();
@@ -1321,21 +1311,21 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
       children: [
         Row(children: [
           Expanded(child: Text(o['store']?['name'] ?? '', style: AppTheme.display(context, size: 18))),
-          Text(tr(context, 'Receipt', 'Kuitti'), style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: muted)),
+          Text(tr(context, 'Receipt', 'Kuitti'), style: TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w700, color: muted)),
         ]),
         if (_isPickup)
-          Text(tr(context, 'Collect from the shop', 'Nouto kaupasta'), style: TextStyle(color: muted, fontSize: 13))
+          Text(tr(context, 'Collect from the shop', 'Nouto kaupasta'), style: TextStyle(color: muted, fontSize: MTextSize.label))
         else if (o['deliveryAddress'] != null)
-          Text(o['deliveryAddress'], style: TextStyle(color: muted, fontSize: 13)),
+          Text(o['deliveryAddress'], style: TextStyle(color: muted, fontSize: MTextSize.label)),
         if (!_isPickup && scheduledWindow(context, o['scheduledStart'], o['scheduledEnd']) != null)
           Text(
             '${tr(context, 'Delivery time', 'Toimitusaika')}: ${scheduledWindow(context, o['scheduledStart'], o['scheduledEnd'])}',
-            style: TextStyle(color: muted, fontSize: 13),
+            style: TextStyle(color: muted, fontSize: MTextSize.label),
           ),
         const Divider(height: 24),
         for (final i in items)
           Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.only(bottom: MSpace.sm),
             child: Row(children: [
               Text('${i['quantity']}×  '),
               Expanded(
@@ -1377,7 +1367,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
         _button(Icons.photo_camera_outlined, tr(context, 'Delivery photo', 'Toimituskuva'), _showProof),
       if (_review != null)
         Padding(
-          padding: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.only(bottom: MSpace.sm),
           child: Semantics(
             label: '${tr(context, 'Your rating', 'Arviosi')}: ${asInt(_review!['storeRating']) ?? 0}/5',
             excludeSemantics: true,
@@ -1408,7 +1398,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
         }),
     ];
     if (buttons.isEmpty) return const SizedBox.shrink();
-    return Padding(padding: const EdgeInsets.fromLTRB(16, 16, 16, 0), child: Column(children: buttons));
+    return Padding(padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.lg, MSpace.lg, 0), child: Column(children: buttons));
   }
 
   Widget _button(IconData icon, String label, VoidCallback onTap, {bool primary = false, bool busy = false}) {

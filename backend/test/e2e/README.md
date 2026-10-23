@@ -9,8 +9,13 @@ password and session revocation, agreement acceptance, language storage, finishi
 return notes and notifications, product deletion and the store's paged catalogue, "courier cannot deliver" and return to the
 shop (items-only refund, courier payout), order chat history, blocking and review reports, approval messages, account-deletion
 media clean-up, signed statement links and DAC7 reminders, and (2.11) legal versions, acceptance records with copies and signed
-links, 428 enforcement, publishing with notice periods, the PRH/YTJ business check (local mock) and onboarding checklists
-(672 checks; one slot check only runs when a today slot starts within the next hour or has passed, so the count can be 671). The chat-purge and DAC7-reminder checks load
+links, 428 enforcement, publishing with notice periods, the PRH/YTJ business check (local mock) and onboarding checklists, and
+(2.12) the category taxonomy and its counts within reach, search by category, audience, age group and attribute facets,
+per-template publishing rules (422 with field-level FI/EN messages), unit prices per litre/kg and the under-50 ml/g
+exemption, removal of the eco claim, certificates and their admin verification, product reports, recalls with direct buyer
+notices and the public recalls page, the hygiene-seal return rules, import category mapping, collections, admin categories,
+payout onboarding before approval and the empty DELIVERY_SLOTS default (about 800 checks; one slot check only runs when a
+today slot starts within the next hour or has passed, so the count can be one lower). The chat-purge and DAC7-reminder checks load
 `dist/modules/orders/chat.js` and `dist/modules/sellers/taxReminders.js` directly (same database); the referral instance
 on port 4556 runs with `NODE_ENV=production` and no SMTP, for the "password reset by email is not available" (503) check.
 
@@ -34,7 +39,10 @@ starts a second API instance itself (`dist/index.js` on port 4556, same database
 and stops it again; later it starts it once more with `REFERRAL_DISCOUNT_CENTS` / `REFERRAL_REWARD_CENTS` and
 `ANDROID_APP_SHA256` set for the referral and assetlinks checks. The first instance also runs with `DELIVERY_SLOTS=00:00-23:59`,
 `SCHEDULED_DELIVERY_DISCOUNT_CENTS=100` and no `DATA_ENCRYPTION_KEY` (scheduled-discount and "tax IDs cannot be saved" checks);
-`test.env` has a throwaway `DATA_ENCRYPTION_KEY`. Start the Cloudinary mock fresh for every run (the import checks read its upload list). So run `npm run build` first. The courier-pay checks also load `dist/utils/courierPay.js` directly.
+`test.env` has a throwaway `DATA_ENCRYPTION_KEY`. Since 2.12 scheduled delivery is off unless `DELIVERY_SLOTS` is set, so `test.env` sets the slots the test expects
+(`17:00-19:00,19:00-21:00`) and `CATALOG_COLLECTION_MIN_ITEMS=2` (collections show from 2 nearby items instead of 8); the
+referral instance runs with `DELIVERY_SLOTS=` (empty) to check the default. The import-mapping checks load
+`dist/modules/catalog/matcher.js` directly. Start the Cloudinary mock fresh for every run (the import checks read its upload list). So run `npm run build` first. The courier-pay checks also load `dist/utils/courierPay.js` directly.
 
 The business-check checks use a PRH/YTJ open-data mock the test starts on port 12224 (`test.env` sets
 `PRH_API_TEST_HOST=localhost:12224`; never the real register). The legal-publishing checks start the second instance on

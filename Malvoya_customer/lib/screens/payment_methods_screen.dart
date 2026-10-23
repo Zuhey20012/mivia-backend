@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
-import '../core/strings.dart';
 
 /// Malvoya never sees, types in or stores card numbers or bank details.
 /// Payment details are entered only in Stripe's secure payment sheet at checkout
@@ -36,9 +37,9 @@ class PaymentInfoView extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                    Text(title, style: const TextStyle(fontSize: MTextSize.bodyL, fontWeight: FontWeight.w600)),
                     const SizedBox(height: 2),
-                    Text(body, style: TextStyle(fontSize: 14, height: 1.35, color: secondary)),
+                    Text(body, style: TextStyle(fontSize: MTextSize.bodyM, height: 1.35, color: secondary)),
                   ],
                 ),
               ),
@@ -47,18 +48,18 @@ class PaymentInfoView extends StatelessWidget {
         );
 
     return ListView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(MSpace.xl),
       children: [
         Container(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(MSpace.xl),
           decoration: BoxDecoration(color: cardColor, borderRadius: BorderRadius.circular(20)),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(tr(context, 'You pay at checkout', 'Maksat kassalla'), style: AppTheme.display(context, size: 20)),
-              const SizedBox(height: 4),
-              Text(tr(context, 'Nothing is saved in the app.', 'Sovellukseen ei tallenneta mitään.'), style: TextStyle(fontSize: 15, color: secondary)),
-              const SizedBox(height: 12),
+              const SizedBox(height: MSpace.xs),
+              Text(tr(context, 'Nothing is saved in the app.', 'Sovellukseen ei tallenneta mitään.'), style: TextStyle(fontSize: MTextSize.bodyL, color: secondary)),
+              const SizedBox(height: MSpace.md),
               row(Icons.credit_card_rounded, tr(context, 'Card or Google Pay', 'Kortti tai Google Pay'),
                   tr(context, 'You choose how to pay in Stripe\'s payment sheet when you place an order.',
                       'Valitset maksutavan Stripen maksuikkunassa, kun teet tilauksen.')),

@@ -38,6 +38,7 @@ Malvoya arranges payment and local delivery by independent couriers.
 - **Drops** are short videos and photos posted by stores. How the feed is ranked is explained in the app ("Why am I seeing this?") and in the Privacy Policy. You can switch to the chronological "Latest" view.
 - **Reviews** can only be written by customers whose order was delivered, once per order, within 30 days. We do not edit reviews or pay for them. Reviews that break the law are hidden, which also removes them from the store's rating.
 - **Reporting:** you can report any drop that you think is illegal or breaks these terms, also without an account. A person reviews every report. Three reports from different users hide the drop until it has been reviewed. You can also report a comment or a review; a person on the Malvoya team decides whether to hide it.
+- **Reporting a product:** every product has "Report this product" (unsafe, counterfeit, illegal, misleading or other), also without an account; you may leave an email address to hear the outcome. Product-safety reports are reviewed within three working days.
 - **Blocking:** you can block another user. Their comments and reviews are then hidden for you. They are not told. You can unblock them at any time.
 
 ## 5a. Delivery
@@ -77,10 +78,17 @@ A checkout you did not pay for is cancelled automatically after 30 minutes, or a
 - A refund may be delayed until the item has been received back.
 - You pay the cost of returning the item unless the seller has agreed otherwise [OR: "Malvoya arranges and pays for courier pick-up"].
 - A deduction may be made only if the item has lost value because it was handled beyond what is necessary to establish its nature, characteristics and functioning. Any deduction is explained to you in writing.
+- **Hygiene-sealed items.** Some cosmetics, fragrances and piercing jewellery or earrings are delivered sealed for health and hygiene reasons. The product page, your basket and your order confirmation say which. You cannot withdraw from the purchase of such an item once you have opened the seal (Consumer Protection Act chapter 6 §16); unopened, you can return it within 14 days as above. When you return a sealed item the app asks whether the seal is unbroken. Clothing, including underwear and swimwear, is never sold under this rule. A faulty item can always be returned (section 8).
 
 ## 8. Defects
 
 If an item is defective or not as described, you have the rights of the Consumer Protection Act, chapter 5 (repair, replacement, price reduction or cancellation), regardless of the withdrawal period.
+
+## 8b. Product information, certificates and recalls
+
+- The product information (materials, ingredients, content, the manufacturer and its safety information) is given by the seller from the product's label; always check the label too. The price per litre or per kilogram is calculated by Malvoya from the content the seller gives.
+- Certificate marks (for example EU Ecolabel, Nordic Swan, GOTS) are shown only after Malvoya's team has checked the seller's licence, only while it is valid, and they name the scheme, the licence number and what part of the product they cover. Malvoya does not show general claims like "eco".
+- **Recalls.** If a product you bought on Malvoya is recalled for safety reasons, we tell you directly by push notification and email, even if you have switched marketing off, and the recall is published at [malvoya-api-eu.onrender.com/recalls](https://malvoya-api-eu.onrender.com/recalls). Stop using the product and follow the instructions in the notice; the remedies (repair, replacement or refund) are free of charge.
 
 ## 8a. Invite a friend (referrals)
 

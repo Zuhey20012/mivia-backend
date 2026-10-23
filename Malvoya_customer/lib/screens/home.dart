@@ -2,14 +2,12 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import '../core/app_language.dart';
 import 'dart:convert';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/constants.dart';
 import '../config/theme.dart';
 import '../l10n.dart';
-import '../locale_provider.dart';
 import 'store_detail.dart';
 import 'category_detail.dart';
 import 'order_detail.dart';
@@ -19,11 +17,10 @@ import 'returns_screen.dart';
 import 'search.dart';
 import '../core/delivery_location.dart';
 import '../core/network_status.dart';
-import '../core/strings.dart';
 import '../core/store_hours.dart';
-import '../core/api_client.dart';
 import 'package:shimmer/shimmer.dart';
-import '../core/haptics.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../widgets/app_image.dart';
 import '../core/notification_primer.dart';
 
@@ -67,7 +64,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _Category('Clothing', Icons.checkroom_rounded, AppTheme.lilac, AppTheme.primary),
     _Category('Shoes', Icons.snowshoeing_rounded, AppTheme.clay, AppTheme.clayInk),
     _Category('Bags', Icons.shopping_bag_outlined, AppTheme.mint, AppTheme.moss),
-    _Category('Accessories', Icons.watch_outlined, AppTheme.sunshineLight, Color(0xFF8A5A00)),
+    _Category('Accessories', Icons.watch_outlined, AppTheme.sunshineLight, MPalette.amberInk),
     _Category('Jewelry', Icons.diamond_outlined, AppTheme.lilac, AppTheme.primary),
     _Category('Vintage', Icons.auto_awesome_outlined, AppTheme.peach, AppTheme.lingon),
     _Category('Beauty', Icons.spa_outlined, AppTheme.peach, AppTheme.lingon),
@@ -190,7 +187,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       final q = DeliveryLocation.instance.query;
       final res = await http
           .get(Uri.parse('${AppConstants.apiBase}/stores').replace(queryParameters: q.isEmpty ? null : q),
-              headers: AppLanguage.header)
+              headers: AppLanguage.headers)
           .timeout(const Duration(seconds: 12));
       if (!mounted) return;
       if (res.statusCode == 200) {
@@ -230,16 +227,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   void _pickAddress() {
     Haptics.selection();
-    showModalBottomSheet(
-      showDragHandle: false,
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => LocationSelectorModal(
+    showMSheet(context, builder: (_) => LocationSelectorModal(
         currentLocation: _currentDeliveryCity,
         onLocationSelected: (newCity) => setState(() => _currentDeliveryCity = newCity),
-      ),
-    );
+      ), transparent: true, isScrollControlled: true, useSafeArea: false);
   }
 
   // ── Header ───────────────────────────────────────────────────────────────
@@ -250,7 +241,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   Widget _header(BuildContext context, AppLocalizations l10n) {
     final textPrimary = AppTheme.primaryText(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 12, 4),
+      padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.sm, MSpace.md, MSpace.xs),
       child: Row(
         children: [
           Expanded(
@@ -262,15 +253,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 borderRadius: BorderRadius.circular(14),
                 onTap: _pickAddress,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  padding: const EdgeInsets.symmetric(vertical: MSpace.xs),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         l10n.translate('deliveringTo'),
                         style: TextStyle(
-                          color: AppTheme.isDarkMode(context) ? const Color(0xFFC9A3DD) : AppTheme.primary,
-                          fontSize: 12,
+                          color: AppTheme.isDarkMode(context) ? MPalette.malvaOnDark : AppTheme.primary,
+                          fontSize: MTextSize.caption,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -281,7 +272,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                               _addressLabel(context),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textPrimary, letterSpacing: -0.2),
+                              style: TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w800, color: textPrimary, letterSpacing: -0.2),
                             ),
                           ),
                           Icon(Icons.keyboard_arrow_down_rounded, size: 22, color: textPrimary),
@@ -293,7 +284,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: MSpace.sm),
           _roundButton(
             context,
             icon: Icons.notifications_none_rounded,
@@ -314,11 +305,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       child: Material(
         color: AppTheme.cardBackground(context),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(MRadius.md),
           side: BorderSide(color: AppTheme.cardBorder(context)),
         ),
         child: InkWell(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(MRadius.md),
           onTap: onTap,
           child: SizedBox(width: 48, height: 48, child: Icon(icon, size: 22, color: AppTheme.primaryText(context))),
         ),
@@ -329,7 +320,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   Widget _searchPill(BuildContext context) {
     final sub = AppTheme.secondaryText(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+      padding: const EdgeInsets.fromLTRB(MSpace.lg, 10, MSpace.lg, MSpace.xs),
       child: Material(
         color: AppTheme.inputBackground(context),
         shape: const StadiumBorder(),
@@ -349,7 +340,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 Expanded(
                   child: Text(
                     tr(context, 'Search items and stores', 'Hae tuotteita ja kauppoja'),
-                    style: TextStyle(color: sub, fontSize: 15.5, fontWeight: FontWeight.w500),
+                    style: TextStyle(color: sub, fontSize: MTextSize.bodyL, fontWeight: FontWeight.w500),
                   ),
                 ),
               ],
@@ -373,7 +364,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     };
     final window = order['status'] == 'SHIPPED' ? null : scheduledWindow(context, order['scheduledStart'], order['scheduledEnd']);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      padding: const EdgeInsets.fromLTRB(MSpace.lg, 14, MSpace.lg, 0),
       child: Material(
         color: AppTheme.primary,
         borderRadius: BorderRadius.circular(AppTheme.radiusLg),
@@ -392,18 +383,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   child: Container(
                     width: 48,
                     height: 48,
-                    decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.16), shape: BoxShape.circle),
-                    child: const Icon(Icons.delivery_dining_rounded, color: Colors.white, size: 26),
+                    decoration: BoxDecoration(color: MPalette.white.withValues(alpha: 0.16), shape: BoxShape.circle),
+                    child: const Icon(Icons.delivery_dining_rounded, color: AppTheme.onBrand, size: 26),
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: MSpace.md),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
+                      Text(label, style: const TextStyle(color: AppTheme.onBrand, fontWeight: FontWeight.w800, fontSize: MTextSize.bodyL)),
                       Text([order['store']?['name'] ?? '', '#${order['id']}', if (window != null) window].join(' · '),
-                          maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                          maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: AppTheme.onBrand.withValues(alpha: 0.7), fontSize: MTextSize.label)),
                     ],
                   ),
                 ),
@@ -411,7 +402,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
                   decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(20)),
                   child: Text(tr(context, 'Track', 'Seuraa'),
-                      style: const TextStyle(color: AppTheme.ink, fontWeight: FontWeight.w800, fontSize: 13.5)),
+                      style: const TextStyle(color: AppTheme.ink, fontWeight: FontWeight.w800, fontSize: MTextSize.label)),
                 ),
               ],
             ),
@@ -426,7 +417,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     // Grows with the phone's text size (up to 1.5×) so the labels never overflow
     final grow = (MediaQuery.textScalerOf(context).scale(100) / 100).clamp(1.0, 1.5);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
+      padding: const EdgeInsets.fromLTRB(MSpace.lg, 18, MSpace.lg, 0),
       child: SizedBox(
         height: 214 * grow,
         child: Row(
@@ -445,16 +436,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     Positioned(
                       right: -18,
                       bottom: 26,
-                      child: Icon(Icons.play_circle_outline_rounded, size: 120, color: Colors.white.withValues(alpha: 0.18)),
+                      child: Icon(Icons.play_circle_outline_rounded, size: 120, color: AppTheme.onBrand.withValues(alpha: 0.18)),
                     ),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                          decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(12)),
+                          decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(MRadius.sm)),
                           child: Text(tr(context, 'Watch & shop', 'Katso ja osta'),
-                              style: const TextStyle(color: AppTheme.ink, fontSize: 12, fontWeight: FontWeight.w800)),
+                              style: const TextStyle(color: AppTheme.ink, fontSize: MTextSize.caption, fontWeight: FontWeight.w800)),
                         ),
                         const Spacer(),
                         Flexible(
@@ -464,7 +455,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                             alignment: Alignment.bottomLeft,
                             child: Text(
                               tr(context, 'Drops\nnear you', 'Dropit\nlähelläsi'),
-                              style: AppTheme.display(context, size: 26, color: Colors.white),
+                              style: AppTheme.display(context, size: 26, color: MPalette.white),
                             ),
                           ),
                         ),
@@ -490,7 +481,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       'Eco-Friendly',
                       Icons.eco_outlined,
                       AppTheme.pastel(context, AppTheme.mint, AppTheme.emerald),
-                      AppTheme.isDarkMode(context) ? const Color(0xFF8FD5AE) : const Color(0xFF1D6B44),
+                      AppTheme.isDarkMode(context) ? MPalette.mossOnDark : MPalette.greenDark,
                     ),
                   ),
                 ],
@@ -542,7 +533,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       // Icon tile + label; the label line grows with the phone's text size
       height: 82 + MediaQuery.textScalerOf(context).scale(18),
       child: ListView.separated(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: MSpace.lg),
         physics: const BouncingScrollPhysics(),
         scrollDirection: Axis.horizontal,
         itemCount: _categories.length,
@@ -567,14 +558,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                         color: AppTheme.pastel(context, c.tile, c.hue),
                         borderRadius: BorderRadius.circular(22),
                       ),
-                      child: Icon(c.icon, size: 28, color: dark ? Color.lerp(c.hue, Colors.white, 0.45) : c.hue),
+                      child: Icon(c.icon, size: 28, color: dark ? Color.lerp(c.hue, MPalette.white, 0.45) : c.hue),
                     ),
                     const SizedBox(height: 7),
                     Text(label,
                         textAlign: TextAlign.center,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: textPrimary)),
+                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: MTextSize.caption, color: textPrimary)),
                   ],
                 ),
               ),
@@ -595,7 +586,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     final closed = closedLabel(context, store);
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.only(bottom: MSpace.lg),
       child: Material(
         color: AppTheme.cardBackground(context),
         shape: RoundedRectangleBorder(
@@ -629,12 +620,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       ),
                     if (closed != null)
                       Container(
-                        color: Colors.white.withValues(alpha: AppTheme.isDarkMode(context) ? 0.12 : 0.45),
+                        color: MPalette.white.withValues(alpha: AppTheme.isDarkMode(context) ? 0.12 : 0.45),
                         alignment: Alignment.center,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                          decoration: BoxDecoration(color: AppTheme.ink, borderRadius: BorderRadius.circular(16)),
-                          child: Text(closed, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: MSpace.sm),
+                          decoration: BoxDecoration(color: AppTheme.ink, borderRadius: BorderRadius.circular(MRadius.md)),
+                          child: Text(closed, style: const TextStyle(color: AppTheme.onBrand, fontWeight: FontWeight.w800, fontSize: MTextSize.label)),
                         ),
                       ),
                     if (eta != null && closed == null)
@@ -648,8 +639,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               const Icon(Icons.schedule_rounded, size: 15, color: AppTheme.ink),
-                              const SizedBox(width: 4),
-                              Text(eta, style: const TextStyle(color: AppTheme.ink, fontWeight: FontWeight.w800, fontSize: 12.5)),
+                              const SizedBox(width: MSpace.xs),
+                              Text(eta, style: const TextStyle(color: AppTheme.ink, fontWeight: FontWeight.w800, fontSize: MTextSize.caption)),
                             ],
                           ),
                         ),
@@ -658,7 +649,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                padding: const EdgeInsets.fromLTRB(MSpace.lg, 14, MSpace.lg, MSpace.lg),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -668,16 +659,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                           child: Text(store['name'] ?? '',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: textPrimary)),
+                              style: TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w800, color: textPrimary)),
                         ),
                         if (reviews > 0) ...[
                           const Icon(Icons.star_rounded, size: 18, color: AppTheme.warning),
                           const SizedBox(width: 3),
                           Text('${store['rating']} ($reviews)',
-                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textPrimary)),
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.label, color: textPrimary)),
                         ] else
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: MSpace.xs),
                             decoration: BoxDecoration(
                               color: AppTheme.pastel(context, AppTheme.lilac, AppTheme.primary),
                               borderRadius: BorderRadius.circular(10),
@@ -685,8 +676,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                             child: Text(tr(context, 'New', 'Uusi'),
                                 style: TextStyle(
                                   fontWeight: FontWeight.w800,
-                                  fontSize: 12,
-                                  color: AppTheme.isDarkMode(context) ? const Color(0xFFC9A3DD) : AppTheme.primary,
+                                  fontSize: MTextSize.caption,
+                                  color: AppTheme.isDarkMode(context) ? MPalette.malvaOnDark : AppTheme.primary,
                                 )),
                           ),
                       ],
@@ -694,7 +685,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     if ((store['description'] ?? '').toString().isNotEmpty) ...[
                       const SizedBox(height: 6),
                       Text(store['description'],
-                          maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: textSecondary, fontSize: 13.5, height: 1.35)),
+                          maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: textSecondary, fontSize: MTextSize.label, height: 1.35)),
                     ],
                     const SizedBox(height: 10),
                     Wrap(
@@ -708,11 +699,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     ),
                     if (!DeliveryLocation.instance.hasCoordinates)
                       Padding(
-                        padding: const EdgeInsets.only(top: 8),
+                        padding: const EdgeInsets.only(top: MSpace.sm),
                         child: Text(
                           tr(context, 'Pin your address on the map to see the exact delivery fee and time.',
                               'Merkitse osoitteesi kartalle nähdäksesi tarkan toimitusmaksun ja -ajan.'),
-                          style: TextStyle(fontSize: 12, color: textSecondary),
+                          style: TextStyle(fontSize: MTextSize.caption, color: textSecondary),
                         ),
                       ),
                   ],
@@ -729,15 +720,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: 16, color: color),
-          const SizedBox(width: 4),
-          Text(text, style: TextStyle(color: color, fontWeight: FontWeight.w600, fontSize: 13)),
+          const SizedBox(width: MSpace.xs),
+          Text(text, style: TextStyle(color: color, fontWeight: FontWeight.w600, fontSize: MTextSize.label)),
         ],
       );
 
   Widget _emptyState(BuildContext context, AppLocalizations l10n) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(24, 28, 24, 26),
+      padding: const EdgeInsets.fromLTRB(MSpace.xxl, 28, MSpace.xxl, 26),
       decoration: BoxDecoration(
         color: AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine),
         borderRadius: BorderRadius.circular(AppTheme.radiusLg),
@@ -753,11 +744,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ),
           const SizedBox(height: 14),
           Text(l10n.translate('launchingCityTitle'), textAlign: TextAlign.center, style: AppTheme.display(context, size: 20)),
-          const SizedBox(height: 8),
+          const SizedBox(height: MSpace.sm),
           Text(
             l10n.translate('launchingCitySubtitle'),
             textAlign: TextAlign.center,
-            style: TextStyle(color: AppTheme.secondaryText(context), fontSize: 14, height: 1.45),
+            style: TextStyle(color: AppTheme.secondaryText(context), fontSize: MTextSize.bodyM, height: 1.45),
           ),
           const SizedBox(height: 18),
           if (_alertSaved) ...[
@@ -765,7 +756,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const Icon(Icons.notifications_active_rounded, color: AppTheme.success, size: 20),
-                const SizedBox(width: 8),
+                const SizedBox(width: MSpace.sm),
                 Flexible(
                   child: Text(tr(context, 'We will tell you when a store opens near you.', 'Kerromme, kun lähellesi avautuu kauppa.'),
                       style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
@@ -786,7 +777,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   Widget _shimmerCard(BuildContext context, bool isDark) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
+      margin: const EdgeInsets.only(bottom: MSpace.lg),
       decoration: BoxDecoration(
         color: AppTheme.cardBackground(context),
         borderRadius: BorderRadius.circular(AppTheme.radiusLg),
@@ -794,20 +785,20 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       ),
       clipBehavior: Clip.antiAlias,
       child: Shimmer.fromColors(
-        baseColor: isDark ? const Color(0xFF2A2331) : AppTheme.sand,
-        highlightColor: isDark ? const Color(0xFF3A3242) : Colors.white,
+        baseColor: isDark ? MPalette.nightSurfaceVariant : AppTheme.sand,
+        highlightColor: isDark ? MPalette.nightRaised : MPalette.white,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(height: 136, width: double.infinity, color: Colors.white),
+            Container(height: 136, width: double.infinity, color: MPalette.white),
             Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(MSpace.lg),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(height: 18, width: 180, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(9))),
+                  Container(height: 18, width: 180, decoration: BoxDecoration(color: MPalette.white, borderRadius: BorderRadius.circular(9))),
                   const SizedBox(height: 10),
-                  Container(height: 14, width: 120, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(7))),
+                  Container(height: 14, width: 120, decoration: BoxDecoration(color: MPalette.white, borderRadius: BorderRadius.circular(7))),
                 ],
               ),
             ),
@@ -818,7 +809,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   Widget _sectionTitle(BuildContext context, String text) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 24, 16, 12),
+        padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.xxl, MSpace.lg, MSpace.md),
         child: Text(text, style: AppTheme.display(context, size: 21)),
       );
 
@@ -852,7 +843,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   _categoryRow(context, l10n),
                   _sectionTitle(context, l10n.translate('storesNearYou')),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    padding: const EdgeInsets.symmetric(horizontal: MSpace.lg),
                     child: Column(
                       children: [
                         if (loading)

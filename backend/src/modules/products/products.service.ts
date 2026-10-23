@@ -3,17 +3,29 @@ import { prisma } from "../../lib/prisma";
 import { ApiError } from "../../lib/errors";
 import { destroyResource, isOwnImageUrl, mediaConfigured } from "../../lib/cloudinary";
 import { priceInfoFor, presentProduct, productInclude, recordPrice } from "./pricing";
+import { NAMED_FILTERS } from "./products.schema";
+import { assertPublishable, ownerPublishCheck, prepareCatalogWrite } from "../catalog/productWrite";
+import { audienceWhere, categoryFilter, categoryIndex, invalidateCategoryCounts, presentMatchedCategories, syncFacets, templatesOf } from "../catalog/categories";
+import { ALL_FACET_KEYS, facetKeysFor, facetLabel } from "../catalog/attributes";
+import { categoriesForQuery } from "../catalog/matcher";
+import { liveCertificateWhere } from "../catalog/certificates";
+import { PublishStore } from "../catalog/publish";
+import { collectionFilter } from "../catalog/collections";
 
-type VariantInput = { id?: number; size?: string; color?: string; sku?: string; stock: number; priceAdjustCents: number };
+type VariantInput = { id?: number; size?: string; color?: string; sku?: string; stock: number; priceAdjustCents: number } & Record<string, unknown>;
 
 const publicStoreSelect = {
   id: true, name: true, logoUrl: true, rating: true, totalReviews: true, sellerType: true,
   businessId: true, address: true, isVerified: true,
 } as const;
 
-async function present<T extends Parameters<typeof presentProduct>[0]>(products: T[], opts: { owner?: boolean } = {}) {
+async function present<T extends Parameters<typeof presentProduct>[0]>(products: T[], opts: { owner?: boolean; store?: PublishStore } = {}) {
   const info = await priceInfoFor(products);
-  return products.map((p) => presentProduct(p, info.get(p.id), opts));
+  // Owners also get the completeness meter: { ready, missing: [field issues], warnings }
+  return products.map((p) => ({
+    ...presentProduct(p, info.get(p.id), opts),
+    ...(opts.owner && opts.store ? { publishCheck: ownerPublishCheck(p, opts.store) } : {}),
+  }));
 }
 
 /** Photos must be uploads into this store's own folder (when uploads are switched on). */
@@ -26,7 +38,7 @@ export function assertOwnImages(images: string[] | undefined, storeId: number) {
 export async function getProductsByStore(storeId: number, query: Record<string, string>, viewerId?: number) {
   const page  = Math.max(1, Number(query.page || 1));
   const limit = Math.min(50, Math.max(1, Number(query.limit || 20)));
-  const store = await prisma.store.findUnique({ where: { id: storeId }, select: { isVerified: true, ownerId: true } });
+  const store = await prisma.store.findUnique({ where: { id: storeId }, select: { isVerified: true, ownerId: true, sellerType: true, safetyPledgeAt: true } });
   const isOwner = !!store && store.ownerId === viewerId;
   if (!store || (!store.isVerified && !isOwner)) return { products: [], total: 0, page, limit };
   // Owners also see their hidden products so they can re-enable them; deleted products are gone for everyone
@@ -34,9 +46,12 @@ export async function getProductsByStore(storeId: number, query: Record<string, 
 
   if (query.canBeSold)     where.canBeSold     = query.canBeSold === "true";
   if (query.canBeRented)   where.canBeRented   = query.canBeRented === "true";
-  if (query.isEcoFriendly) where.isEcoFriendly = query.isEcoFriendly === "true";
   if (query.isSecondHand)  where.isSecondHand  = query.isSecondHand === "true";
   if (query.condition)     where.condition     = query.condition as any;
+  if (query.category) {
+    const f = await categoryFilter(query.category);
+    if (f) where.AND = [f];
+  }
   if (query.search)        where.name          = { contains: query.search, mode: "insensitive" };
   if (query.minPrice || query.maxPrice) {
     where.salePriceCents = {
@@ -53,7 +68,7 @@ export async function getProductsByStore(storeId: number, query: Record<string, 
     }),
     prisma.product.count({ where }),
   ]);
-  return { products: await present(products, { owner: isOwner }), total, page, limit };
+  return { products: await present(products, { owner: isOwner, store }), total, page, limit };
 }
 
 export async function getProductById(id: number, viewerId?: number) {
@@ -62,8 +77,10 @@ export async function getProductById(id: number, viewerId?: number) {
     include: { ...productInclude, store: { select: { ...publicStoreSelect, ownerId: true } } },
   });
   const isOwner = !!product && product.store.ownerId === viewerId;
-  // Hidden products (drafts, deleted) and products of unapproved stores are for the owner only
-  if (!product || ((!product.store.isVerified || !product.isAvailable) && !isOwner)) throw new ApiError("Product not found", 404);
+  // Hidden products (drafts, deleted) are for the owner only; a recalled one stays readable so buyers who open it from an
+  // order see the recall banner (GPSR Art. 22(12), 35(4)), but it cannot be bought
+  const recalled = !!product && product.recalls.length > 0;
+  if (!product || ((!product.store.isVerified || !product.isAvailable) && !isOwner && !recalled)) throw new ApiError("Product not found", 404);
   const { ownerId, ...store } = product.store;
   const [presented] = await present([{ ...product, store }], { owner: isOwner });
   const favorite = viewerId
@@ -72,13 +89,23 @@ export async function getProductById(id: number, viewerId?: number) {
   return { ...presented, isFavorite: favorite };
 }
 
-/** Catalogue search across all verified stores, with size/colour/price filters. */
-export async function searchProducts(q: {
-  q?: string; category?: string; size?: string; color?: string; condition?: string; secondHand?: string;
-  eco?: string; handmade?: string; storeId?: number;
-  minPrice?: number; maxPrice?: number; sort: string; page: number; limit: number;
-}) {
+type SearchQuery = {
+  q?: string; category?: string; audience?: string; ageGroup?: string; collection?: string; size?: string; color?: string; condition?: string; secondHand?: string;
+  handmade?: string; storeId?: number; minPrice?: number; maxPrice?: number; sort: string; page: number; limit: number;
+  certificate?: string; attr?: Record<string, string>;
+} & Partial<Record<(typeof NAMED_FILTERS)[number], string>>;
+
+const splitValues = (v: string) => v.split(",").map((x) => x.trim()).filter(Boolean).slice(0, 10);
+
+/**
+ * Catalogue search across all verified stores: text, category (descendants included), audience, size/colour, price and
+ * the attribute filters of the category's template (2.12). `eco` is ignored since 2.12.0. Also returns the categories a
+ * query names ("huulipuna" → Makeup › Lips).
+ */
+export async function searchProducts(q: SearchQuery) {
   const and: Prisma.ProductWhereInput[] = [{ isAvailable: true, deletedAt: null, canBeSold: true, store: { isVerified: true } }];
+  const matched = q.q ? categoriesForQuery(q.q) : [];
+  const idx = await categoryIndex();
   if (q.q) {
     const term = q.q;
     // Stores whose name matches are looked up first, so every branch of the OR is on Product itself and Postgres can
@@ -86,6 +113,8 @@ export async function searchProducts(q: {
     const storeIds = (await prisma.store.findMany({
       where: { isVerified: true, name: { contains: term, mode: "insensitive" } }, select: { id: true }, take: 1000,
     })).map((s) => s.id);
+    // A query that names a subcategory ("huulipuna") also finds the products filed there
+    const catIds = matched.map((slug) => idx.bySlug.get(slug)).filter((n) => !!n?.template).map((n) => n!.id).slice(0, 1);
     and.push({
       OR: [
         { name: { contains: term, mode: "insensitive" } },
@@ -93,13 +122,28 @@ export async function searchProducts(q: {
         { category: { contains: term, mode: "insensitive" } },
         { tags: { has: term.toLowerCase() } },
         ...(storeIds.length ? [{ storeId: { in: storeIds } }] : []),
+        ...(catIds.length ? [{ categoryId: { in: catIds } }] : []),
       ],
     });
   }
-  if (q.category) and.push({ category: { equals: q.category, mode: "insensitive" } });
+  let allowedKeys: Set<string> | null = null;
+  if (q.category) {
+    const f = await categoryFilter(q.category);
+    if (f) {
+      and.push(f);
+      allowedKeys = new Set((await templatesOf(q.category)).flatMap((t) => facetKeysFor(t)));
+    } else {
+      and.push({ category: { equals: q.category, mode: "insensitive" } }); // legacy free text (older app builds)
+    }
+  }
+  if (q.audience || q.ageGroup) and.push(audienceWhere(q.audience, q.ageGroup));
+  if (q.collection) {
+    const f = await collectionFilter(q.collection);
+    if (!f) throw Object.assign(new ApiError("Unknown collection", 400), { extra: { code: "UNKNOWN_COLLECTION" } });
+    and.push(f);
+  }
   if (q.condition) and.push({ condition: q.condition as any });
   if (q.secondHand) and.push({ isSecondHand: q.secondHand === "true" });
-  if (q.eco) and.push({ isEcoFriendly: true });
   if (q.handmade) and.push({ isHandmade: true });
   if (q.storeId) and.push({ storeId: q.storeId });
   if (q.size || q.color) {
@@ -113,6 +157,19 @@ export async function searchProducts(q: {
       },
     });
   }
+  // Attribute filters: named params and attr[key]=value; only the keys of the category's template
+  const filters: [string, string][] = [];
+  for (const k of NAMED_FILTERS) if (q[k]) filters.push([k, q[k]!]);
+  for (const [k, v] of Object.entries(q.attr ?? {})) if (typeof v === "string" && v) filters.push([k, v]);
+  for (const [key, raw] of filters) {
+    if (!ALL_FACET_KEYS.includes(key)) throw Object.assign(new ApiError(`Unknown filter "${key}"`, 400), { extra: { code: "UNKNOWN_FILTER" } });
+    if (allowedKeys && !allowedKeys.has(key)) {
+      throw Object.assign(new ApiError(`The filter "${facetLabel(key).en}" is not available in this category`, 400), { extra: { code: "FILTER_NOT_AVAILABLE" } });
+    }
+    const values = splitValues(raw).map((v) => (key === "brand" || key === "size" ? v.toLowerCase() : v));
+    and.push({ facets: { some: { key, value: { in: values } } } });
+  }
+  if (q.certificate) and.push({ certificates: { some: { certificate: { ...liveCertificateWhere(), scheme: { in: splitValues(q.certificate) } } } } });
   if (q.minPrice !== undefined || q.maxPrice !== undefined) {
     and.push({ salePriceCents: { ...(q.minPrice !== undefined ? { gte: q.minPrice } : {}), ...(q.maxPrice !== undefined ? { lte: q.maxPrice } : {}) } });
   }
@@ -125,14 +182,15 @@ export async function searchProducts(q: {
     [{ isFeatured: "desc" }, { createdAt: "desc" }];
 
   const where = { AND: and };
-  const [products, total] = await Promise.all([
+  const [products, total, categories] = await Promise.all([
     prisma.product.findMany({
       where, orderBy, skip: (q.page - 1) * q.limit, take: q.limit,
       include: { ...productInclude, store: { select: publicStoreSelect } },
     }),
     prisma.product.count({ where }),
+    presentMatchedCategories(matched),
   ]);
-  return { products: await present(products), total, page: q.page, limit: q.limit };
+  return { products: await present(products), total, page: q.page, limit: q.limit, categories };
 }
 
 async function storeForOwner(ownerId: number) {
@@ -141,12 +199,20 @@ async function storeForOwner(ownerId: number) {
   return store;
 }
 
+/**
+ * Creates a product from the app. The catalogue part is validated per template (422 INVALID_PRODUCT_DATA) and a
+ * visible product must meet its publishing rules (422 PUBLISH_REQUIREMENTS); drafts (isAvailable: false) may be
+ * incomplete. `warnings` = claims-checker hits on the name and description.
+ */
 export async function createProduct(ownerId: number, data: any) {
   const store = await storeForOwner(ownerId);
   assertOwnImages(data.images, store.id);
-  const created = await createProductRecord(store.id, data);
-  const [presented] = await present([created], { owner: true });
-  return presented;
+  assertOwnImages(data.safetyImages, store.id);
+  const prepared = await prepareCatalogWrite(store, null, data);
+  if (data.isAvailable !== false) await assertPublishable(prepared, store);
+  const created = await createProductRecord(store.id, prepared.data, {}, prepared.certificateIds);
+  const [presented] = await present([created], { owner: true, store });
+  return { product: presented, warnings: prepared.warnings };
 }
 
 /**
@@ -155,7 +221,7 @@ export async function createProduct(ownerId: number, data: any) {
  * output; `extra` carries import bookkeeping (externalSource, externalId, gtin, importJobId).
  * The caller checks the images first.
  */
-export async function createProductRecord(storeId: number, data: any, extra: Partial<Prisma.ProductUncheckedCreateInput> = {}) {
+export async function createProductRecord(storeId: number, data: any, extra: Partial<Prisma.ProductUncheckedCreateInput> = {}, certificateIds?: number[]) {
   const { variants, ...productData } = data as { variants: VariantInput[] } & Record<string, any>;
   const clean = (variants ?? []).map(({ id, ...v }) => v);
   // With options, the product's stock is the sum of its options' stock
@@ -171,19 +237,31 @@ export async function createProductRecord(storeId: number, data: any, extra: Par
       include: productInclude,
     });
     await recordPrice(tx, product.id, product.salePriceCents);
-    return product;
-  });
+    if (certificateIds?.length) await tx.productCertificate.createMany({ data: certificateIds.map((certificateId) => ({ productId: product.id, certificateId })) });
+    await syncFacets(tx, product.id);
+    return tx.product.findUniqueOrThrow({ where: { id: product.id }, include: productInclude });
+  }).finally(invalidateCategoryCounts);
 }
 
 export async function updateProduct(id: number, ownerId: number, data: any) {
-  const product = await prisma.product.findUnique({ where: { id }, include: { store: true, variants: true } });
+  const product = await prisma.product.findUnique({ where: { id }, include: { ...productInclude, store: true } });
   if (!product || product.deletedAt) throw new ApiError("Product not found", 404);
   if (product.store.ownerId !== ownerId) throw new ApiError("Forbidden", 403);
+  // A recall (or an admin decision on a notice) locks the listing: the store cannot show it again
+  if (product.lockedAt && data.isAvailable === true) {
+    throw Object.assign(new ApiError(product.lockedReason === "RECALL"
+      ? "This product is part of a product safety recall and cannot be shown again"
+      : "Malvoya removed this listing; it cannot be shown again", 409), { extra: { code: "PRODUCT_LOCKED" } });
+  }
   assertOwnImages(data.images, product.storeId);
+  assertOwnImages(data.safetyImages, product.storeId);
+  const prepared = await prepareCatalogWrite(product.store, product, data);
+  const visible = data.isAvailable ?? product.isAvailable;
+  if (visible && !product.lockedAt) await assertPublishable(prepared, product.store, product.id);
   // Once the store shows or hides a product itself, publishing an import never changes it again
-  const updated = await applyProductUpdate(product, data, data.isAvailable !== undefined ? { importDraft: false } : {});
-  const [presented] = await present([updated], { owner: true });
-  return presented;
+  const updated = await applyProductUpdate(product, prepared.data, data.isAvailable !== undefined ? { importDraft: false } : {}, prepared.certificateIds);
+  const [presented] = await present([updated], { owner: true, store: product.store });
+  return { product: presented, warnings: prepared.warnings };
 }
 
 /**
@@ -195,6 +273,7 @@ export async function applyProductUpdate(
   product: { id: number; salePriceCents: number | null; variants: { id: number }[] },
   data: any,
   extra: Prisma.ProductUncheckedUpdateInput = {},
+  certificateIds?: number[],
 ) {
   const id = product.id;
   const { variants, ...productData } = data as { variants?: VariantInput[] } & Record<string, any>;
@@ -225,12 +304,17 @@ export async function applyProductUpdate(
       if (all.length) productData.stockQuantity = all.reduce((s, v) => s + v.stock, 0);
     }
 
-    const next = await tx.product.update({ where: { id }, data: { ...productData, ...extra }, include: productInclude });
+    await tx.product.update({ where: { id }, data: { ...productData, ...extra } });
     if (productData.salePriceCents !== undefined && productData.salePriceCents !== product.salePriceCents) {
       await recordPrice(tx, id, productData.salePriceCents);
     }
-    return next;
-  });
+    if (certificateIds) {
+      await tx.productCertificate.deleteMany({ where: { productId: id, certificateId: { notIn: certificateIds } } });
+      if (certificateIds.length) await tx.productCertificate.createMany({ data: certificateIds.map((certificateId) => ({ productId: id, certificateId })), skipDuplicates: true });
+    }
+    await syncFacets(tx, id);
+    return tx.product.findUniqueOrThrow({ where: { id }, include: productInclude });
+  }).finally(invalidateCategoryCounts);
 }
 
 /**
@@ -242,11 +326,12 @@ export async function applyProductUpdate(
 export async function deleteProduct(id: number, ownerId: number): Promise<"hard" | "soft"> {
   const product = await prisma.product.findUnique({
     where: { id },
-    include: { store: true, videos: { select: { publicId: true } }, _count: { select: { orderItems: true, rentalItems: true, drops: true } } },
+    include: { store: true, videos: { select: { publicId: true } }, _count: { select: { orderItems: true, rentalItems: true, drops: true, reports: true, recalls: true } } },
   });
   if (!product || product.deletedAt) throw new ApiError("Product not found", 404);
   if (product.store.ownerId !== ownerId) throw new ApiError("Forbidden", 403);
-  const keep = product._count.orderItems + product._count.rentalItems + product._count.drops > 0 || !!product.externalSource;
+  // Reported or recalled products are kept too: the notice and recall records must keep pointing at them
+  const keep = product._count.orderItems + product._count.rentalItems + product._count.drops + product._count.reports + product._count.recalls > 0 || !!product.externalSource;
   if (!keep) {
     try {
       await prisma.product.delete({ where: { id } });
@@ -280,5 +365,5 @@ export async function listMyProducts(ownerId: number, q: { page: number; limit: 
     prisma.product.findMany({ where, include: productInclude, orderBy: [{ createdAt: "desc" }, { id: "desc" }], skip: (q.page - 1) * q.limit, take: q.limit }),
     prisma.product.count({ where }),
   ]);
-  return { products: await present(products, { owner: true }), total, page: q.page, pageSize: q.limit };
+  return { products: await present(products, { owner: true, store }), total, page: q.page, pageSize: q.limit };
 }

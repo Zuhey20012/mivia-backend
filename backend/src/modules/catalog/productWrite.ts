@@ -39,12 +39,13 @@ export function candidateFromRow(row: any, recalled = false): PublishCandidate {
     categorySlug: row.categoryRef?.slug ?? null,
     template: (row.categoryRef?.template as Template) ?? null,
     audience: row.audience ?? "UNISEX",
+    ageGroup: row.ageGroup ?? null,
     condition: row.condition ?? "NEW",
     isSecondHand: !!row.isSecondHand,
     attributes: (row.attributes ?? {}) as Record<string, any>,
     contentAmount: row.contentAmount ?? null,
     contentUnit: row.contentUnit ?? null,
-    variants: (row.variants ?? []).map((v: any) => ({ contentAmount: v.contentAmount ?? null, contentUnit: v.contentUnit ?? null, colourFamily: v.colourFamily ?? null })),
+    variants: (row.variants ?? []).map((v: any) => ({ contentAmount: v.contentAmount ?? null, contentUnit: v.contentUnit ?? null, colourFamily: v.colourFamily ?? null, size: v.size ?? null })),
     manufacturer: row.manufacturer ? { countryCode: row.manufacturer.countryCode } : null,
     responsiblePerson: row.responsiblePerson ? { countryCode: row.responsiblePerson.countryCode } : null,
     productModel: row.productModel ?? null,
@@ -160,6 +161,23 @@ export async function prepareCatalogWrite(store: StoreRow, existing: any | null,
   if (!!amount !== !!unit) issues.push({ field: "contentAmount", code: "invalid", message: l("Give the content with its unit (ml, g or pcs).", "Anna sisältö yksikköineen (ml, g tai kpl).") });
   for (const [i, v] of (input.variants ?? []).entries()) {
     if (!!v.contentAmount !== !!v.contentUnit) issues.push({ field: `variants.${i}.contentAmount`, code: "invalid", message: l("Give the option's content with its unit.", "Anna vaihtoehdon sisältö yksikköineen.") });
+  }
+
+  // Audience and age group: baby–junior are children; adult is not
+  const audience = input.audience ?? existing?.audience ?? "UNISEX";
+  const ageGroup = input.ageGroup !== undefined ? input.ageGroup : existing?.ageGroup ?? null;
+  if (ageGroup && ["BABY", "TODDLER", "KIDS", "JUNIOR"].includes(ageGroup) && audience !== "KIDS") {
+    issues.push({ field: "ageGroup", code: "invalid", message: l("Baby, toddler, kids and junior sizes are for the Kids audience.", "Vauva-, taapero-, lasten- ja junioriikäryhmät kuuluvat lapsille.") });
+  }
+  if (ageGroup === "ADULT" && audience === "KIDS") issues.push({ field: "ageGroup", code: "invalid", message: l("An adult product can't be for kids.", "Aikuisten tuote ei voi olla lapsille.") });
+  // Kids' sizes in cm: with the kids' height size system an option size is a height 50–176
+  if (audience === "KIDS" && attrs.sizeSystem === "kids_height") {
+    for (const [i, v] of ((input.variants ?? existing?.variants ?? []) as any[]).entries()) {
+      const n = Number(String(v.size ?? "").replace(/\s*cm$/i, ""));
+      if (v.size && !(Number.isInteger(n) && n >= 50 && n <= 176)) {
+        issues.push({ field: `variants.${i}.size`, code: "invalid", message: l("Kids' sizes are heights in cm, 50–176 (e.g. 110).", "Lasten koot ovat pituuksia senttimetreinä, 50–176 (esim. 110).") });
+      }
+    }
   }
 
   // Manufacturer / responsible person records must be the store's own

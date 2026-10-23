@@ -6,10 +6,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import 'config/constants.dart';
-import 'core/api_client.dart';
-import 'core/server_errors.dart';
-import 'locale_provider.dart';
 
 const _secureStorage = FlutterSecureStorage();
 
@@ -41,7 +40,7 @@ class User {
 
 /// Handles sign-in, secure token storage and automatic access-token refresh.
 /// Access tokens live 15 minutes; they are refreshed a minute before expiry.
-class AuthService extends ChangeNotifier {
+class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccount {
   // Resolved on first use so the app still opens if Firebase failed to initialise.
   fb_auth.FirebaseAuth get _firebaseAuth => fb_auth.FirebaseAuth.instance;
   String? _verificationId;
@@ -55,6 +54,7 @@ class AuthService extends ChangeNotifier {
   User? get currentUser => _currentUser;
   bool get isAuthenticated => _currentUser != null && _accessToken != null;
   bool get isAdmin => _currentUser?.role == 'ADMIN';
+  @override
   String? get accessToken => _accessToken;
   bool get isReady => _ready;
 
@@ -152,7 +152,7 @@ class AuthService extends ChangeNotifier {
   Future<void> syncLocale() async {
     if (!isAuthenticated) return;
     try {
-      await ApiClient(this).patch('/me', {'locale': LocaleProvider.currentCode});
+      await ApiClient(this).patch('/me', {'locale': AppLanguage.code});
     } catch (_) {}
   }
 
@@ -175,6 +175,7 @@ class AuthService extends ChangeNotifier {
   }
 
   /// Exchanges the refresh token for a new pair. Signs out if the session is no longer valid.
+  @override
   Future<bool> refreshSession() async {
     final refresh = _refreshToken;
     if (refresh == null) return false;
@@ -198,11 +199,11 @@ class AuthService extends ChangeNotifier {
   String _errorFrom(http.Response res, String fallback) {
     try {
       final body = jsonDecode(res.body);
-      if (body['error'] is String) return localizeServerError(body['error']);
+      if (body['error'] is String) return ServerMessages.localize(body['error']);
       final fieldErrors = body['errors']?['fieldErrors'] as Map<String, dynamic>?;
-      if (fieldErrors != null && fieldErrors.isNotEmpty) return localizeServerError((fieldErrors.values.first as List).first.toString());
+      if (fieldErrors != null && fieldErrors.isNotEmpty) return ServerMessages.localize((fieldErrors.values.first as List).first.toString());
     } catch (_) {}
-    return localizeServerError(fallback);
+    return ServerMessages.localize(fallback);
   }
 
   // ── Email / password ───────────────────────────────────────────────────────
@@ -280,9 +281,11 @@ class AuthService extends ChangeNotifier {
 
   // ── Linking Google to the signed-in account ──────────────────────────────
 
+  @override
   bool get googleLinked => _currentUser?.googleLinked ?? false;
 
   /// Links a Google account to this account, so "Sign in with Google" opens it from now on.
+  @override
   Future<String?> linkGoogle() async {
     try {
       final google = GoogleSignIn();
@@ -309,6 +312,7 @@ class AuthService extends ChangeNotifier {
     return null;
   }
 
+  @override
   Future<String?> unlinkGoogle() async {
     final res = await ApiClient(this).delete('/auth/google/link');
     if (!res.ok) return res.error;

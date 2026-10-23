@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
-import '../core/haptics.dart';
-import '../core/strings.dart';
 import '../widgets/mini_route.dart';
 
 /// What the full-screen offer shows, worked out by the dashboard from the server's offer and job
@@ -93,7 +93,7 @@ class _OfferScreenState extends State<_OfferScreen> {
       body: SafeArea(
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(4, 4, 16, 0),
+            padding: const EdgeInsets.fromLTRB(MSpace.xs, MSpace.xs, MSpace.lg, 0),
             child: Row(children: [
               IconButton(
                 tooltip: tr(context, 'Not now', 'Ei nyt'),
@@ -103,59 +103,59 @@ class _OfferScreenState extends State<_OfferScreen> {
               ),
               const Spacer(),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: MSpace.md, vertical: 6),
                 decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(14)),
-                child: Text(tr(context, 'New job', 'Uusi keikka'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+                child: Text(tr(context, 'New job', 'Uusi keikka'), style: const TextStyle(color: AppTheme.onPrimary, fontWeight: FontWeight.w800)),
               ),
             ]),
           ),
           Expanded(
-            child: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 16), children: [
+            child: ListView(padding: const EdgeInsets.fromLTRB(MSpace.xl, MSpace.sm, MSpace.xl, MSpace.lg), children: [
               Text(tr(context, 'Your pay for this job', 'Palkkiosi tästä keikasta'), style: const TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.w700)),
               Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 10, runSpacing: 6, children: [
                 Text(o.pay, style: AppTheme.display(size: 48)),
                 if (o.tipCents > 0)
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(12)),
+                    decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(MRadius.sm)),
                     child: Text('${tr(context, 'incl. tip', 'sis. tipin')} ${euro(context, o.tipCents)}',
-                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.label)),
                   ),
               ]),
               if (o.explanation != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
-                  child: Text(o.explanation!, style: const TextStyle(color: AppTheme.textSecondary, height: 1.4, fontSize: 13.5)),
+                  child: Text(o.explanation!, style: const TextStyle(color: AppTheme.textSecondary, height: 1.4, fontSize: MTextSize.label)),
                 ),
               if (o.window != null) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: MSpace.md),
                 Container(
-                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                  padding: const EdgeInsets.fromLTRB(MSpace.md, 10, MSpace.md, 10),
                   decoration: BoxDecoration(color: AppTheme.lilac, borderRadius: BorderRadius.circular(14)),
                   child: Row(children: [
                     const Icon(Icons.schedule_rounded, size: 18, color: AppTheme.malva),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: MSpace.sm),
                     Expanded(child: Text('${tr(context, 'Scheduled', 'Ajastettu')} · ${o.window}', style: const TextStyle(color: AppTheme.malva, fontWeight: FontWeight.w800))),
                   ]),
                 ),
               ],
-              const SizedBox(height: 16),
+              const SizedBox(height: MSpace.lg),
               if (o.store != null) ...[
                 MiniRoute(me: o.me, store: o.store!, dropOff: o.dropOff, toStoreText: o.toStore, dropText: o.drop, height: 150),
                 MiniRouteLegend(showMe: o.me != null),
-                const SizedBox(height: 12),
+                const SizedBox(height: MSpace.md),
               ],
               Row(children: [
                 _tile(Icons.storefront_outlined, tr(context, 'You → shop', 'Sinä → kauppa'), o.toStore ?? '–'),
-                const SizedBox(width: 8),
+                const SizedBox(width: MSpace.sm),
                 _tile(Icons.location_on_outlined, tr(context, 'Shop → drop-off area', 'Kauppa → toimitusalue'), o.drop == null ? '–' : '~${o.drop}'),
               ]),
               const SizedBox(height: 14),
-              Text('${tr(context, 'Pick up', 'Nouto')}: ${o.storeName}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
-              if (o.storeAddress != null) Text(o.storeAddress!, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 15)),
+              Text('${tr(context, 'Pick up', 'Nouto')}: ${o.storeName}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.title)),
+              if (o.storeAddress != null) Text(o.storeAddress!, style: const TextStyle(color: AppTheme.textSecondary, fontSize: MTextSize.bodyL)),
               if (o.items != null)
                 Padding(
-                  padding: const EdgeInsets.only(top: 4),
+                  padding: const EdgeInsets.only(top: MSpace.xs),
                   child: Text(o.items == 1 ? tr(context, '1 item', '1 tuote') : tr(context, '${o.items} items', '${o.items} tuotetta'),
                       style: const TextStyle(fontWeight: FontWeight.w700)),
                 ),
@@ -166,17 +166,17 @@ class _OfferScreenState extends State<_OfferScreen> {
                   tr(context, 'Straight-line distances. The first courier to accept gets the job; the exact address is shown after you accept.',
                       'Linnuntie-etäisyydet. Keikan saa ensimmäinen hyväksyvä lähetti; tarkka osoite näytetään hyväksynnän jälkeen.'),
                 ].join(' · '),
-                style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary, height: 1.35),
+                style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary, height: 1.35),
               ),
             ]),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.sm, MSpace.lg, MSpace.md),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               FilledButton.icon(
-                style: FilledButton.styleFrom(minimumSize: const Size(64, 66), textStyle: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+                style: FilledButton.styleFrom(minimumSize: const Size(64, 66), textStyle: const TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w800)),
                 onPressed: () {
-                  Haptics.tap();
+                  Haptics.medium();
                   Navigator.of(context).pop(true);
                 },
                 icon: const Icon(Icons.check_rounded),
@@ -197,13 +197,13 @@ class _OfferScreenState extends State<_OfferScreen> {
 
   Widget _tile(IconData icon, String label, String value) => Expanded(
         child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.divider)),
+          padding: const EdgeInsets.fromLTRB(MSpace.md, 10, MSpace.md, 10),
+          decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.divider)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Icon(icon, size: 15, color: AppTheme.textSecondary),
-              const SizedBox(width: 4),
-              Expanded(child: Text(label, maxLines: 2, style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary, fontWeight: FontWeight.w600))),
+              const SizedBox(width: MSpace.xs),
+              Expanded(child: Text(label, maxLines: 2, style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary, fontWeight: FontWeight.w600))),
             ]),
             const SizedBox(height: 2),
             FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(value, style: AppTheme.display(size: 22))),

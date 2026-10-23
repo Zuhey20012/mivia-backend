@@ -32,7 +32,7 @@ export const SCHEME_KEYS = Object.keys(SCHEMES) as [string, ...string[]];
 
 const GROUP_OF: Record<Template, Group> = {
   APPAREL: "textile", APPAREL_ACCESSORY: "textile", FOOTWEAR: "footwear", BAG: "bags", ACCESSORY: "bags",
-  EYEWEAR: "any", WATCH: "any", JEWELLERY: "any", BEAUTY_TOOL: "any",
+  EYEWEAR: "any", WATCH: "any", JEWELLERY: "any", BEAUTY_TOOL: "any", HAIR_TOOL: "any",
   COSMETIC_MAKEUP: "cosmetics", COSMETIC_SKIN: "cosmetics", COSMETIC_HAIR: "cosmetics", COSMETIC_NAIL: "cosmetics", FRAGRANCE: "cosmetics",
 };
 

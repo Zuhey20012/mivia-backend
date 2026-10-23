@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
-import '../core/haptics.dart';
 import '../core/images.dart';
-import '../core/strings.dart';
 
 /// How long the store has to answer a paid order before the server refunds it (the order
 /// watchdog's STORE_ACCEPT_MINUTES, 10 by default), counted from `paidAt`.
@@ -31,7 +31,8 @@ Future<void> showIncomingOrder(
   required ValueNotifier<Set<Object?>> waitingIds,
   required Future<bool> Function(String status) onAnswer,
 }) {
-  Haptics.newOrder();
+  // A new order: three strong pulses, felt even with the phone on the counter
+  Haptics.sequence(const [(HapticKind.heavy, Duration.zero), (HapticKind.heavy, Duration(milliseconds: 180)), (HapticKind.heavy, Duration(milliseconds: 180))]);
   return Navigator.of(context).push(PageRouteBuilder<void>(
     opaque: true,
     fullscreenDialog: true,
@@ -55,7 +56,7 @@ class _IncomingOrderScreen extends StatefulWidget {
 }
 
 class _IncomingOrderScreenState extends State<_IncomingOrderScreen> {
-  static const _red = Color(0xFFD93025);
+  static const _red = MPalette.red;
   Timer? _tick;
   String? _busy; // the status being sent
 
@@ -133,7 +134,7 @@ class _IncomingOrderScreenState extends State<_IncomingOrderScreen> {
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             // Header: close (answer later, the alert keeps ringing) and the order number
             Padding(
-              padding: const EdgeInsets.fromLTRB(4, 4, 16, 0),
+              padding: const EdgeInsets.fromLTRB(MSpace.xs, MSpace.xs, MSpace.lg, 0),
               child: Row(children: [
                 IconButton(
                   tooltip: tr(context, 'Answer later', 'Vastaa myöhemmin'),
@@ -146,7 +147,7 @@ class _IncomingOrderScreenState extends State<_IncomingOrderScreen> {
               ]),
             ),
             Expanded(
-              child: ListView(padding: const EdgeInsets.fromLTRB(20, 4, 20, 16), children: [
+              child: ListView(padding: const EdgeInsets.fromLTRB(MSpace.xl, MSpace.xs, MSpace.xl, MSpace.lg), children: [
                 Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
                   Expanded(
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -157,7 +158,7 @@ class _IncomingOrderScreenState extends State<_IncomingOrderScreen> {
                           _pickup ? Icons.storefront_rounded : Icons.delivery_dining_rounded,
                           _pickup ? tr(context, 'Collect in shop', 'Nouto kaupasta') : tr(context, 'Delivery', 'Toimitus'),
                           bg: _pickup ? AppTheme.primary : AppTheme.primaryLight,
-                          fg: _pickup ? Colors.white : AppTheme.primary,
+                          fg: _pickup ? AppTheme.onPrimary : AppTheme.primary,
                         ),
                         _pill(Icons.shopping_bag_outlined, pieces == 1 ? tr(context, '1 item', '1 tuote') : tr(context, '$pieces items', '$pieces tuotetta')),
                       ]),
@@ -166,10 +167,10 @@ class _IncomingOrderScreenState extends State<_IncomingOrderScreen> {
                   if (left != null) _CountdownRing(left: left, total: const Duration(minutes: storeAnswerMinutes), label: _clock(left)),
                 ]),
                 if (slot != null) ...[
-                  const SizedBox(height: 12),
+                  const SizedBox(height: MSpace.md),
                   _note(Icons.schedule_rounded, slot, bg: AppTheme.lilac, fg: AppTheme.malva),
                 ],
-                const SizedBox(height: 12),
+                const SizedBox(height: MSpace.md),
                 if (left != null)
                   _note(
                     Icons.hourglass_bottom_rounded,
@@ -178,31 +179,31 @@ class _IncomingOrderScreenState extends State<_IncomingOrderScreen> {
                             'Vastaa ${_clock(left)} kuluessa, muuten tilaus hyvitetään asiakkaalle automaattisesti.')
                         : tr(context, 'The answer time is up. Answer now — the order is about to be refunded.',
                             'Vastausaika on päättynyt. Vastaa nyt — tilaus hyvitetään pian.'),
-                    bg: left.inMinutes < 3 ? const Color(0xFFFDECEA) : AppTheme.sunshineLight,
-                    fg: left.inMinutes < 3 ? _red : const Color(0xFF6A4500),
+                    bg: left.inMinutes < 3 ? MPalette.redLight : AppTheme.sunshineLight,
+                    fg: left.inMinutes < 3 ? _red : MPalette.amberInk,
                   ),
-                const SizedBox(height: 16),
+                const SizedBox(height: MSpace.lg),
                 for (final i in items) _item(i),
                 const Divider(height: 24),
                 Row(children: [
-                  Expanded(child: Text(tr(context, 'Items total', 'Tuotteet yhteensä'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
+                  Expanded(child: Text(tr(context, 'Items total', 'Tuotteet yhteensä'), style: const TextStyle(fontSize: MTextSize.bodyL, fontWeight: FontWeight.w700))),
                   Text(euro(context, o['subtotalCents']), style: AppTheme.display(size: 24)),
                 ]),
                 if (tip > 0)
                   Padding(
-                    padding: const EdgeInsets.only(top: 4),
+                    padding: const EdgeInsets.only(top: MSpace.xs),
                     child: Text('${tr(context, 'Plus a tip for the courier', 'Lisäksi tippi kuriirille')} ${euro(context, tip)}',
                         style: const TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
                   ),
                 if ('${o['notes'] ?? ''}'.trim().isNotEmpty) ...[
-                  const SizedBox(height: 12),
+                  const SizedBox(height: MSpace.md),
                   _note(Icons.sticky_note_2_outlined, '${o['notes']}'.trim(), bg: AppTheme.sand, fg: AppTheme.textPrimary),
                 ],
               ]),
             ),
             // One-hand reach: both answers at the bottom, Accept the larger one
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.sm, MSpace.lg, MSpace.md),
               child: Row(children: [
                 Expanded(
                   child: OutlinedButton(
@@ -217,14 +218,14 @@ class _IncomingOrderScreenState extends State<_IncomingOrderScreen> {
                         : Text(tr(context, 'Decline', 'Hylkää')),
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: MSpace.md),
                 Expanded(
                   flex: 2,
                   child: FilledButton.icon(
-                    style: FilledButton.styleFrom(minimumSize: const Size(64, 64), textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                    style: FilledButton.styleFrom(minimumSize: const Size(64, 64), textStyle: const TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w800)),
                     onPressed: _busy == null ? () => _answer('CONFIRMED') : null,
                     icon: _busy == 'CONFIRMED'
-                        ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                        ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: AppTheme.onPrimary))
                         : const Icon(Icons.check_rounded),
                     label: Text(tr(context, 'Accept', 'Hyväksy')),
                   ),
@@ -239,20 +240,20 @@ class _IncomingOrderScreenState extends State<_IncomingOrderScreen> {
 
   Widget _pill(IconData icon, String text, {Color bg = AppTheme.sand, Color fg = AppTheme.textPrimary}) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
+        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(MRadius.sm)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(icon, size: 16, color: fg),
           const SizedBox(width: 5),
-          Flexible(child: Text(text, style: TextStyle(color: fg, fontWeight: FontWeight.w800, fontSize: 13))),
+          Flexible(child: Text(text, style: TextStyle(color: fg, fontWeight: FontWeight.w800, fontSize: MTextSize.label))),
         ]),
       );
 
   Widget _note(IconData icon, String text, {required Color bg, required Color fg}) => Container(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        padding: const EdgeInsets.fromLTRB(MSpace.md, 10, MSpace.md, 10),
         decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(14)),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Icon(icon, size: 18, color: fg),
-          const SizedBox(width: 8),
+          const SizedBox(width: MSpace.sm),
           Expanded(child: Text(text, style: TextStyle(color: fg, fontWeight: FontWeight.w700, height: 1.35))),
         ]),
       );
@@ -265,7 +266,7 @@ class _IncomingOrderScreenState extends State<_IncomingOrderScreen> {
       if ('${variant?['color'] ?? ''}'.isNotEmpty) '${tr(context, 'Colour', 'Väri')} ${variant!['color']}',
     ];
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: MSpace.md),
       child: Row(children: [
         SizedBox(
           width: 56,
@@ -277,10 +278,10 @@ class _IncomingOrderScreenState extends State<_IncomingOrderScreen> {
                 )
               : NetImage(images.first, width: 56, height: 68, radius: 10),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: MSpace.md),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('${i['product']?['name'] ?? ''}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            Text('${i['product']?['name'] ?? ''}', style: const TextStyle(fontSize: MTextSize.bodyL, fontWeight: FontWeight.w700)),
             if (options.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 2),
@@ -288,10 +289,10 @@ class _IncomingOrderScreenState extends State<_IncomingOrderScreen> {
               ),
           ]),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: MSpace.sm),
         Container(
           constraints: const BoxConstraints(minWidth: 40),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: MSpace.sm, vertical: MSpace.xs),
           decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(10)),
           child: Text('${i['quantity']}×', textAlign: TextAlign.center, style: AppTheme.display(size: 18, color: AppTheme.primary)),
         ),
@@ -311,7 +312,7 @@ class _CountdownRing extends StatelessWidget {
   Widget build(BuildContext context) {
     final fraction = (left.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0);
     final urgent = left.inMinutes < 3;
-    final color = urgent ? const Color(0xFFD93025) : AppTheme.primary;
+    final color = urgent ? MPalette.red : AppTheme.primary;
     return Semantics(
       label: tr(context, '$label left to answer', '$label aikaa vastata'),
       excludeSemantics: true,
@@ -327,7 +328,7 @@ class _CountdownRing extends StatelessWidget {
                 padding: const EdgeInsets.all(14),
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
                   Text(label, style: AppTheme.display(size: 22, color: color)),
-                  Text(tr(context, 'left', 'jäljellä'), style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary, fontWeight: FontWeight.w700)),
+                  Text(tr(context, 'left', 'jäljellä'), style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary, fontWeight: FontWeight.w700)),
                 ]),
               ),
             ),

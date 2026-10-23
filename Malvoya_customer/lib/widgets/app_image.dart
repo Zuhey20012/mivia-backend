@@ -1,8 +1,8 @@
 import 'dart:math' as math;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:malvoya_core/malvoya_core.dart';
 import '../config/theme.dart';
-import '../core/image_url.dart';
 
 /// Every remote photo in the app: downloaded at the size it is drawn (Cloudinary `w_`, `f_auto`,
 /// `q_auto`), decoded at that size (less memory while scrolling), cached on disk, and faded in

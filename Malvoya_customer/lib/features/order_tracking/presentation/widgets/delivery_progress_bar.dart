@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../../../../config/theme.dart';
 
 class DeliveryProgressBar extends StatelessWidget {
@@ -14,7 +15,7 @@ class DeliveryProgressBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(MSpace.lg),
       decoration: BoxDecoration(
         color: AppTheme.cardBackground(context),
         borderRadius: BorderRadius.circular(20),
@@ -36,7 +37,7 @@ class DeliveryProgressBar extends StatelessWidget {
               Text(
                 stepDescription,
                 style: TextStyle(
-                  fontSize: 13,
+                  fontSize: MTextSize.label,
                   fontWeight: FontWeight.w800,
                   color: AppTheme.primaryText(context),
                 ),
@@ -44,16 +45,16 @@ class DeliveryProgressBar extends StatelessWidget {
               Text(
                 '${(progressPercent * 100).toInt()}%',
                 style: const TextStyle(
-                  fontSize: 13,
+                  fontSize: MTextSize.label,
                   fontWeight: FontWeight.w900,
                   color: AppTheme.primary,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: MSpace.md),
           ClipRRect(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(MRadius.xs),
             child: LinearProgressIndicator(
               value: progressPercent,
               minHeight: 8,

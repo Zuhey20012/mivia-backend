@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
-import '../widgets/brand_mark.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/strings.dart';
 import '../l10n.dart';
-import '../locale_provider.dart';
 import 'forgot_password.dart';
 import 'register.dart';
 
@@ -84,20 +83,15 @@ class _LoginScreenState extends State<LoginScreen> {
     final codeCtrl = TextEditingController();
     bool codeSent = false;
 
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      showDragHandle: false,
-      builder: (ctx) => StatefulBuilder(
+    showMSheet(context, builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) => Container(
           padding: EdgeInsets.only(
             bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
             top: 24, left: 24, right: 24,
           ),
           decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(MRadius.lg)),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -106,15 +100,15 @@ class _LoginScreenState extends State<LoginScreen> {
               Center(
                 child: Container(
                   width: 40, height: 4,
-                  decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+                  decoration: BoxDecoration(color: AppTheme.divider, borderRadius: BorderRadius.circular(2)),
                 ),
               ),
-              const SizedBox(height: 20),
-              Text(tr(context, 'Sign in with your phone', 'Kirjaudu puhelimella'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
+              const SizedBox(height: MSpace.xl),
+              Text(tr(context, 'Sign in with your phone', 'Kirjaudu puhelimella'), style: const TextStyle(fontSize: MTextSize.displayS, fontWeight: FontWeight.bold)),
+              const SizedBox(height: MSpace.sm),
               Text(tr(context, 'We send a code to your mobile number by text message.', 'Lähetämme koodin tekstiviestillä matkapuhelinnumeroosi.'),
                   style: const TextStyle(color: AppTheme.textSecondary)),
-              const SizedBox(height: 20),
+              const SizedBox(height: MSpace.xl),
               if (!codeSent) ...[
                 TextField(
                   controller: phoneCtrl,
@@ -126,15 +120,13 @@ class _LoginScreenState extends State<LoginScreen> {
                     prefixIcon: const Icon(Icons.phone_outlined),
                   ),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: MSpace.xl),
                 SizedBox(
                   width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _loading ? null : () async {
+                  child: MButton(label: tr(context, 'Send code', 'Lähetä koodi'), loading: _loading, onPressed: _loading ? null : () async {
                       final phone = phoneCtrl.text.trim();
                       if (phone.isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(tr(context, 'Please enter your phone number.', 'Anna puhelinnumerosi.'))));
+                        MSnack.show(context, tr(context, 'Please enter your phone number.', 'Anna puhelinnumerosi.'));
                         return;
                       }
                       setModalState(() => _loading = true);
@@ -149,7 +141,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         },
                         onError: (err) {
                           setModalState(() => _loading = false);
-                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+                          MSnack.show(context, err);
                         },
                         // Signing in closes this sheet (the app returns to its home screen); maybePop
                         // never pops that home screen if the sheet is already gone
@@ -157,11 +149,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           if (ctx.mounted) Navigator.maybePop(ctx);
                         },
                       );
-                    },
-                    child: _loading 
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : Text(tr(context, 'Send code', 'Lähetä koodi')),
-                  ),
+                    }),
                 ),
               ] else ...[
                 TextField(
@@ -174,11 +162,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     prefixIcon: const Icon(Icons.password_outlined),
                   ),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: MSpace.xl),
                 SizedBox(
                   width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _loading ? null : () async {
+                  child: MButton(label: tr(context, 'Verify and sign in', 'Vahvista ja kirjaudu'), loading: _loading, onPressed: _loading ? null : () async {
                       final code = codeCtrl.text.trim();
                       if (code.isEmpty) return;
                       setModalState(() => _loading = true);
@@ -186,22 +173,17 @@ class _LoginScreenState extends State<LoginScreen> {
                       final err = await auth.signInWithSmsCode(code);
                       setModalState(() => _loading = false);
                       if (err != null) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+                        MSnack.show(context, err);
                       } else if (ctx.mounted) {
                         Navigator.maybePop(ctx);
                       }
-                    },
-                    child: _loading 
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : Text(tr(context, 'Verify and sign in', 'Vahvista ja kirjaudu')),
-                  ),
+                    }),
                 ),
               ],
             ],
           ),
         ),
-      ),
-    );
+      ), transparent: true, isScrollControlled: true, useSafeArea: false);
   }
 
   void _showLanguageSelector(BuildContext context) {
@@ -211,7 +193,7 @@ class _LoginScreenState extends State<LoginScreen> {
       // This sheet draws its own handle
       showDragHandle: false,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(MRadius.lg)),
       ),
       builder: (ctx) {
         return Consumer<LocaleProvider>(
@@ -220,7 +202,7 @@ class _LoginScreenState extends State<LoginScreen> {
               constraints: BoxConstraints(
                 maxHeight: MediaQuery.of(context).size.height * 0.75,
               ),
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              padding: const EdgeInsets.fromLTRB(MSpace.xl, MSpace.lg, MSpace.xl, MSpace.xxl),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -228,14 +210,14 @@ class _LoginScreenState extends State<LoginScreen> {
                   Center(
                     child: Container(
                       width: 40, height: 4,
-                      decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+                      decoration: BoxDecoration(color: AppTheme.divider, borderRadius: BorderRadius.circular(2)),
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  const Text('Select Language / Valitse kieli', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 4),
-                  const Text('English and Finnish / Englanti ja suomi', style: TextStyle(fontSize: 13, color: Colors.grey)),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: MSpace.lg),
+                  const Text('Select Language / Valitse kieli', style: TextStyle(fontSize: MTextSize.displayS, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: MSpace.xs),
+                  const Text('English and Finnish / Englanti ja suomi', style: TextStyle(fontSize: MTextSize.label, color: AppTheme.textSecondary)),
+                  const SizedBox(height: MSpace.md),
                   const Divider(height: 1),
                   Expanded(
                     child: ListView(
@@ -243,13 +225,13 @@ class _LoginScreenState extends State<LoginScreen> {
                       children: AppLocalizations.languages.entries.map((entry) {
                         final isSelected = provider.locale.languageCode == entry.key;
                         return ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: MSpace.md, vertical: 2),
                           title: Text(
                             entry.value,
                             style: TextStyle(
                               fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                              fontSize: 16,
-                              color: isSelected ? Theme.of(context).primaryColor : Colors.black87,
+                              fontSize: MTextSize.bodyL,
+                              color: isSelected ? Theme.of(context).primaryColor : AppTheme.textPrimary,
                             ),
                           ),
                           trailing: isSelected ? Icon(Icons.check_circle_rounded, color: Theme.of(context).primaryColor) : null,
@@ -277,14 +259,14 @@ class _LoginScreenState extends State<LoginScreen> {
     final currentLangLabel = AppLocalizations.languages[currentLangKey] ?? 'English';
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppTheme.surface,
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
+          padding: const EdgeInsets.symmetric(horizontal: MSpace.xxl),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: 16),
+              const SizedBox(height: MSpace.lg),
 
               // Language selector pill
               Align(
@@ -292,49 +274,49 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: GestureDetector(
                   onTap: () => _showLanguageSelector(context),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: MSpace.md, vertical: 6),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF3F4F6),
+                      color: MPalette.sand,
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.grey.shade300),
+                      border: Border.all(color: AppTheme.divider),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.language_rounded, size: 16, color: Color(0xFF9E3222)),
+                        const Icon(Icons.language_rounded, size: 16, color: MPalette.lingonStrong),
                         const SizedBox(width: 6),
                         Text(
                           currentLangLabel.split(' ').first,
-                          style: const TextStyle(fontSize: 14),
+                          style: const TextStyle(fontSize: MTextSize.bodyM),
                         ),
-                        const SizedBox(width: 4),
-                        const Icon(Icons.arrow_drop_down, size: 18, color: Colors.black54),
+                        const SizedBox(width: MSpace.xs),
+                        const Icon(Icons.arrow_drop_down, size: 18, color: AppTheme.textSecondary),
                       ],
                     ),
                   ),
                 ),
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: MSpace.xxl),
 
               // Logo + Branding (Orange courier gradient)
               Center(
                 child: Column(
                   children: [
                     BrandTile(size: 76, background: AppTheme.primary),
-                    const SizedBox(height: 16),
-                    Text(AppLocalizations.of(context).translate('malvoyaCourier'), style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: AppTheme.textPrimary, letterSpacing: -0.5)),
-                    const SizedBox(height: 4),
-                    Text(tr(context, 'For couriers', 'Läheteille'), style: TextStyle(fontSize: 14, color: Colors.grey.shade500, fontWeight: FontWeight.w500)),
+                    const SizedBox(height: MSpace.lg),
+                    Text(AppLocalizations.of(context).translate('malvoyaCourier'), style: const TextStyle(fontSize: MTextSize.displayM, fontWeight: FontWeight.w900, color: AppTheme.textPrimary, letterSpacing: -0.5)),
+                    const SizedBox(height: MSpace.xs),
+                    Text(tr(context, 'For couriers', 'Läheteille'), style: TextStyle(fontSize: MTextSize.bodyM, color: AppTheme.textSecondary, fontWeight: FontWeight.w500)),
                   ],
                 ),
               ),
 
               const SizedBox(height: 36),
 
-              Text(l10n.translate('welcomeBack'), style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: AppTheme.textPrimary, letterSpacing: -0.5)),
+              Text(l10n.translate('welcomeBack'), style: const TextStyle(fontSize: MTextSize.displayM, fontWeight: FontWeight.w800, color: AppTheme.textPrimary, letterSpacing: -0.5)),
               const SizedBox(height: 6),
-              Text(l10n.translate('signIn'), style: const TextStyle(fontSize: 14, color: AppTheme.textSecondary)),
+              Text(l10n.translate('signIn'), style: const TextStyle(fontSize: MTextSize.bodyM, color: AppTheme.textSecondary)),
               const SizedBox(height: 28),
 
               // Email field
@@ -383,25 +365,25 @@ class _LoginScreenState extends State<LoginScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFF0F0),
+                    color: MPalette.redLight,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFFFFCDD2)),
+                    border: Border.all(color: MPalette.redLine),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
-                          const Icon(Icons.error_outline, color: Color(0xFFD93025), size: 18),
-                          const SizedBox(width: 8),
-                          Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFD93025), fontSize: 13))),
+                          const Icon(Icons.error_outline, color: MPalette.red, size: 18),
+                          const SizedBox(width: MSpace.sm),
+                          Expanded(child: Text(_error!, style: const TextStyle(color: MPalette.red, fontSize: MTextSize.label))),
                         ],
                       ),
                       if (_offerReset && ForgotPasswordSheet.available)
                         Padding(
                           padding: const EdgeInsets.only(top: 6),
                           child: TextButton.icon(
-                            style: TextButton.styleFrom(minimumSize: const Size(48, 48), padding: const EdgeInsets.symmetric(horizontal: 8)),
+                            style: TextButton.styleFrom(minimumSize: const Size(48, 48), padding: const EdgeInsets.symmetric(horizontal: MSpace.sm)),
                             onPressed: _forgotPassword,
                             icon: const Icon(Icons.lock_reset_rounded, size: 20),
                             label: Text(tr(context, 'Forgot your password? Reset it', 'Unohditko salasanan? Vaihda se')),
@@ -412,7 +394,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ],
 
-              const SizedBox(height: 24),
+              const SizedBox(height: MSpace.xxl),
 
               // Login button
               SizedBox(
@@ -420,71 +402,71 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: _loading
                     ? const Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5)))
                     : ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF9E3222)),
+                        style: ElevatedButton.styleFrom(backgroundColor: MPalette.lingonStrong),
                         onPressed: _handleLogin,
                         child: Text(l10n.translate('login')),
                       ),
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: MSpace.xxl),
 
               // Divider
               Row(
                 children: [
-                  Expanded(child: Divider(color: Colors.grey.shade300)),
+                  Expanded(child: Divider(color: AppTheme.divider)),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(tr(context, 'or', 'tai'), style: TextStyle(color: Colors.grey.shade500, fontSize: 13, fontWeight: FontWeight.w500)),
+                    padding: const EdgeInsets.symmetric(horizontal: MSpace.lg),
+                    child: Text(tr(context, 'or', 'tai'), style: TextStyle(color: AppTheme.textSecondary, fontSize: MTextSize.label, fontWeight: FontWeight.w500)),
                   ),
-                  Expanded(child: Divider(color: Colors.grey.shade300)),
+                  Expanded(child: Divider(color: AppTheme.divider)),
                 ],
               ),
 
-              const SizedBox(height: 20),
+              const SizedBox(height: MSpace.xl),
 
               // Google Sign-In button
               OutlinedButton(
                 onPressed: _handleGoogle,
                 style: OutlinedButton.styleFrom(
-                  side: BorderSide(color: Colors.grey.shade300),
+                  side: BorderSide(color: AppTheme.divider),
                   padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  backgroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(MRadius.sm)),
+                  backgroundColor: AppTheme.surface,
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.g_mobiledata_rounded, size: 24, color: Colors.black87),
-                    const SizedBox(width: 8),
+                    const Icon(Icons.g_mobiledata_rounded, size: 24, color: AppTheme.textPrimary),
+                    const SizedBox(width: MSpace.sm),
                     Text(tr(context, 'Continue with Google', 'Jatka Googlella'),
-                        style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.black87, fontSize: 15)),
+                        style: const TextStyle(fontWeight: FontWeight.w600, color: AppTheme.textPrimary, fontSize: MTextSize.bodyL)),
                   ],
                 ),
               ),
 
-              const SizedBox(height: 12),
+              const SizedBox(height: MSpace.md),
 
               // Phone Sign-In button
               OutlinedButton(
                 onPressed: _showPhoneDialog,
                 style: OutlinedButton.styleFrom(
-                  side: BorderSide(color: Colors.grey.shade300),
+                  side: BorderSide(color: AppTheme.divider),
                   padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  backgroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(MRadius.sm)),
+                  backgroundColor: AppTheme.surface,
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.phone_iphone_rounded, size: 20, color: Colors.black87),
-                    const SizedBox(width: 8),
+                    const Icon(Icons.phone_iphone_rounded, size: 20, color: AppTheme.textPrimary),
+                    const SizedBox(width: MSpace.sm),
                     Text(tr(context, 'Continue with phone number', 'Jatka puhelinnumerolla'),
-                        style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.black87, fontSize: 15)),
+                        style: const TextStyle(fontWeight: FontWeight.w600, color: AppTheme.textPrimary, fontSize: MTextSize.bodyL)),
                   ],
                 ),
               ),
 
-              const SizedBox(height: 32),
+              const SizedBox(height: MSpace.x3l),
 
               // Register link
               Center(
@@ -495,11 +477,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Text.rich(
                     TextSpan(
                       text: tr(context, 'New courier? ', 'Uusi lähetti? '),
-                      style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
+                      style: TextStyle(color: AppTheme.textSecondary, fontSize: MTextSize.bodyM),
                       children: [
                         TextSpan(
                           text: tr(context, 'Apply here', 'Hae tästä'),
-                          style: const TextStyle(color: Color(0xFF9E3222), fontWeight: FontWeight.bold),
+                          style: const TextStyle(color: MPalette.lingonStrong, fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
@@ -507,7 +489,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: MSpace.xxl),
             ],
           ),
         ),

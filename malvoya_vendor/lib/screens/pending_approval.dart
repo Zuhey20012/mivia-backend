@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/strings.dart';
 import '../widgets/account_sheet.dart';
 
 /// Welcome for a store account without a store yet (right after registering). Explains the review
@@ -21,11 +22,11 @@ class PendingApprovalScreen extends StatelessWidget {
       backgroundColor: AppTheme.background,
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+          padding: const EdgeInsets.symmetric(horizontal: MSpace.xxl, vertical: MSpace.x3l),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SizedBox(height: 12),
+              const SizedBox(height: MSpace.md),
               Container(
                 width: 88,
                 height: 88,
@@ -44,9 +45,9 @@ class PendingApprovalScreen extends StatelessWidget {
                 tr(context, 'Set up your store now. Shoppers can see it once our team has reviewed it.',
                     'Perusta kauppasi nyt. Asiakkaat näkevät sen, kun tiimimme on tarkistanut sen.'),
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 16, height: 1.4, color: AppTheme.textSecondary),
+                style: const TextStyle(fontSize: MTextSize.bodyL, height: 1.4, color: AppTheme.textSecondary),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: MSpace.x3l),
               _step(Icons.edit_note_rounded, tr(context, 'Create your store', 'Perusta kauppasi'),
                   tr(context, 'Name, category, address and your first products.', 'Nimi, kategoria, osoite ja ensimmäiset tuotteesi.')),
               _step(Icons.verified_user_outlined, tr(context, 'Review', 'Tarkistus'),
@@ -60,7 +61,7 @@ class PendingApprovalScreen extends StatelessWidget {
                   tr(context,
                       'Malvoya is just starting in Finland. There are very few shoppers and couriers so far, so orders may be rare at first. We will not promise sales we cannot guarantee.',
                       'Malvoya on vasta aloittamassa Suomessa. Asiakkaita ja kuriireja on toistaiseksi hyvin vähän, joten tilauksia voi aluksi tulla harvoin. Emme lupaa myyntiä, jota emme voi taata.')),
-              const SizedBox(height: 24),
+              const SizedBox(height: MSpace.xxl),
               SizedBox(
                 height: 52,
                 child: ElevatedButton(
@@ -68,7 +69,7 @@ class PendingApprovalScreen extends StatelessWidget {
                   child: Text(tr(context, 'Set up my store', 'Perusta kauppani')),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: MSpace.md),
               TextButton(
                 onPressed: () => showAccountSheet(context),
                 child: Text(tr(context, 'Help, sign out or delete account', 'Apua, uloskirjautuminen tai tilin poisto'), style: const TextStyle(color: AppTheme.textSecondary)),
@@ -92,9 +93,9 @@ class PendingApprovalScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                Text(title, style: const TextStyle(fontSize: MTextSize.bodyL, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
                 const SizedBox(height: 2),
-                Text(body, style: const TextStyle(fontSize: 14, height: 1.35, color: AppTheme.textSecondary)),
+                Text(body, style: const TextStyle(fontSize: MTextSize.bodyM, height: 1.35, color: AppTheme.textSecondary)),
               ],
             ),
           ),

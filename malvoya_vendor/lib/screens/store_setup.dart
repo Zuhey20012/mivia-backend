@@ -5,11 +5,11 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
 import '../core/media_upload.dart';
-import '../core/strings.dart';
 import '../widgets/account_sheet.dart';
 import '../widgets/opening_hours_editor.dart';
 import 'store_location_picker.dart';
@@ -222,11 +222,11 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
           : Form(
               key: _form,
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
+                padding: const EdgeInsets.fromLTRB(MSpace.xl, MSpace.lg, MSpace.xl, MSpace.x4l),
                 children: [
                   if (_existing != null) ...[
                     _pictures(),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: MSpace.xl),
                   ],
                   TextFormField(
                     controller: _name,
@@ -246,8 +246,8 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                     items: _categories.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(isFinnish(context) ? e.value[1] : e.value[0]))).toList(),
                     onChanged: (v) => setState(() => _category = v!),
                   ),
-                  const SizedBox(height: 20),
-                  Text(tr(context, 'Who is selling?', 'Kuka myy?'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                  const SizedBox(height: MSpace.xl),
+                  Text(tr(context, 'Who is selling?', 'Kuka myy?'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyL)),
                   const SizedBox(height: 6),
                   SegmentedButton<String>(
                     segments: [
@@ -264,15 +264,15 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                             'Yritykset antavat Y-tunnuksensa. Asiakkailla on 14 päivän peruuttamisoikeus, ja he näkevät yrityksesi tiedot.')
                         : tr(context, 'Only for people selling their own items occasionally. If you sell regularly for profit, you are a business.',
                             'Vain omia tavaroitaan satunnaisesti myyville. Jos myyt säännöllisesti voittoa tavoitellen, olet yritys.'),
-                    style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary, height: 1.4),
+                    style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary, height: 1.4),
                   ),
                   if (_verified)
                     Padding(
-                      padding: const EdgeInsets.only(top: 4),
+                      padding: const EdgeInsets.only(top: MSpace.xs),
                       child: Text(
                           tr(context, 'To change this after approval, write to the Malvoya team in Store → Help.',
                               'Muuttaaksesi tätä hyväksynnän jälkeen kirjoita Malvoyan tiimille kohdassa Kauppa → Apua.'),
-                          style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                          style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
                     ),
                   if (_sellerType == 'BUSINESS')
                     TextFormField(
@@ -288,45 +288,40 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                         return null;
                       },
                     ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: MSpace.xl),
                   TextFormField(
                     controller: _address,
                     decoration: InputDecoration(labelText: tr(context, 'Pickup address', 'Noutoosoite'), hintText: 'Mannerheimintie 1, 00100 Helsinki'),
                     validator: (v) => (v ?? '').trim().length < 5 ? tr(context, 'Enter the address couriers pick up from', 'Anna osoite, josta kuriirit noutavat') : null,
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: MSpace.sm),
                   _locationCard(),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: MSpace.sm),
                   TextFormField(
                       controller: _phone,
                       keyboardType: TextInputType.phone,
                       decoration: InputDecoration(labelText: tr(context, 'Phone (for couriers, optional)', 'Puhelin (kuriireille, valinnainen)'))),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: MSpace.xl),
                   Text('${tr(context, 'Time to pack an order', 'Tilauksen pakkausaika')}: ${_prepMinutes.round()} min', style: const TextStyle(fontWeight: FontWeight.w600)),
                   Slider(value: _prepMinutes, min: 0, max: 60, divisions: 12, label: '${_prepMinutes.round()} min', onChanged: (v) => setState(() => _prepMinutes = v)),
                   Text(tr(context, 'Used for the delivery times customers see.', 'Käytetään asiakkaille näytettävissä toimitusajoissa.'),
-                      style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                      style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
                   if (_existing == null) ...[
-                    const SizedBox(height: 24),
-                    Text(tr(context, 'Opening hours', 'Aukioloajat'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: MSpace.xxl),
+                    Text(tr(context, 'Opening hours', 'Aukioloajat'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyL)),
+                    const SizedBox(height: MSpace.xs),
                     Text(
                       tr(context, 'Customers can only order while you are open (Finnish time). You can change these later in Store → Opening hours.',
                           'Asiakkaat voivat tilata vain aukioloaikoina (Suomen aikaa). Voit muuttaa niitä myöhemmin kohdassa Kauppa → Aukioloajat.'),
-                      style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary, height: 1.4),
+                      style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary, height: 1.4),
                     ),
                     OpeningHoursEditor(draft: _hours, onChanged: () => setState(() {})),
                   ],
                   if (_error != null) Padding(padding: const EdgeInsets.only(top: 14), child: Text(_error!, style: const TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w600))),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: MSpace.xl),
                   SizedBox(
                     height: 54,
-                    child: FilledButton(
-                      onPressed: _saving || _uploading != null ? null : _save,
-                      child: _saving
-                          ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : Text(_existing == null ? tr(context, 'Create store', 'Luo kauppa') : tr(context, 'Save', 'Tallenna')),
-                    ),
+                    child: MButton(label: _existing == null ? tr(context, 'Create store', 'Luo kauppa') : tr(context, 'Save', 'Tallenna'), loading: _saving, onPressed: _saving || _uploading != null ? null : _save),
                   ),
                   if (_existing == null)
                     Padding(
@@ -335,7 +330,7 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                           tr(context, 'You can add a logo and cover picture once the store is created. Our team reviews every store before it goes live.',
                               'Voit lisätä logon ja kansikuvan, kun kauppa on luotu. Tiimimme tarkistaa jokaisen kaupan ennen julkaisua.'),
                           textAlign: TextAlign.center,
-                          style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary)),
+                          style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
                     ),
                 ],
               ),
@@ -363,7 +358,7 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
   Widget _locationCard() {
     final pin = _lat != null && _lng != null ? LatLng(_lat!, _lng!) : null;
     return Container(
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(AppTheme.radiusMd), border: Border.all(color: AppTheme.divider)),
+      decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(AppTheme.radiusMd), border: Border.all(color: AppTheme.divider)),
       clipBehavior: Clip.antiAlias,
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         if (pin != null)
@@ -383,15 +378,15 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
             ),
           ),
         Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(MSpace.md),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text(
               pin != null
                   ? tr(context, 'Couriers come to this pin. Map © OpenStreetMap contributors', 'Kuriirit tulevat tähän neulaan. Kartta © OpenStreetMapin tekijät')
                   : tr(context, 'Put your shop on the map so couriers find the door.', 'Merkitse kauppasi kartalle, jotta kuriirit löytävät oven.'),
-              style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary),
+              style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: MSpace.sm),
             OutlinedButton.icon(
               onPressed: _pickLocation,
               icon: Icon(pin != null ? Icons.edit_location_alt_outlined : Icons.add_location_alt_outlined),
@@ -412,7 +407,7 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
             child: GestureDetector(
               onTap: () => _pickImage(false),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(MRadius.md),
                 child: SizedBox(
                   height: 130,
                   width: double.infinity,
@@ -441,7 +436,7 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                 ),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: MSpace.md),
             Expanded(child: Text(tr(context, 'Tap to change the logo or cover picture.', 'Vaihda logo tai kansikuva napauttamalla.'), style: const TextStyle(color: AppTheme.textSecondary))),
             if (_uploading != null) SizedBox(width: 26, height: 26, child: CircularProgressIndicator(value: _uploading, strokeWidth: 3)),
           ]),

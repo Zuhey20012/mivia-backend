@@ -5,12 +5,11 @@ import 'package:provider/provider.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import 'config/constants.dart';
-import 'core/font_licenses.dart';
+import 'core/account_language.dart';
 import 'core/agreements.dart';
-import 'core/api_client.dart';
-import 'core/app_gate.dart';
-import 'core/app_language.dart';
 import 'core/blocked_users.dart';
 import 'screens/main_navigation.dart';
 import 'screens/login.dart';
@@ -18,14 +17,12 @@ import 'screens/onboarding.dart';
 import 'cart.dart';
 import 'auth_service.dart';
 import 'l10n.dart';
-import 'locale_provider.dart';
 import 'theme_provider.dart';
 import 'local_notification_service.dart';
 import 'core/deep_links.dart';
 import 'core/delivery_location.dart';
 import 'core/network_status.dart';
 import 'core/push_service.dart';
-import 'core/strings.dart';
 import 'screens/order_detail.dart';
 import 'screens/store_detail.dart';
 import 'services/socket_service.dart';
@@ -36,7 +33,8 @@ final navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  registerFontLicenses();
+  registerMalvoyaFontLicenses();
+  ApiConfig.baseUrl = AppConstants.apiBase;
 
   // Lock to portrait
   await SystemChrome.setPreferredOrientations([
@@ -69,7 +67,9 @@ void main() async {
     debugPrint('Firebase init error: $e');
   }
 
-  await AppLanguage.load();
+  // The app version (X-App-Version) and the saved language, before the first request goes out
+  await AppLanguage.loadAppVersion();
+  AppLanguage.code = await LocaleProvider.savedCode() ?? AppLanguage.code;
   await Onboarding.load();
   await DeliveryLocation.instance.load();
   unawaited(NetworkStatus.instance.start());
@@ -92,7 +92,7 @@ void main() async {
   };
 
   // An order refused with 428 AGREEMENT_REQUIRED opens the agreement sheet, then is sent again
-  ApiClient.onAgreementRequired = Agreements.instance.handleRequired;
+  ApiConfig.onAgreementRequired = Agreements.instance.handleRequired;
 
   // Verified https links to drops, stores and invites (Android App Links)
   DeepLinks.instance.start(navigatorKey);
@@ -111,7 +111,7 @@ class MalvoyaApp extends StatelessWidget {
           final auth = AuthService();
           PushService.instance.attach(auth);
           // The account's language for pushes and emails, saved after each sign-in
-          AppLanguage.attach(auth);
+          AccountLanguage.attach(auth);
           // People this customer blocked: their comments and reviews stay hidden
           auth.addListener(() => BlockedUsers.instance.load(auth));
           // Terms not accepted (e.g. Google, phone or Apple accounts): ask once after sign-in
@@ -119,7 +119,8 @@ class MalvoyaApp extends StatelessWidget {
           return auth;
         }),
         ChangeNotifierProvider(create: (_) => CartService()),
-        ChangeNotifierProvider(create: (_) => LocaleProvider()),
+        // A new language is saved on the account too (pushes and emails follow it)
+        ChangeNotifierProvider(create: (_) => LocaleProvider()..onUserChange = (_) => AccountLanguage.sync()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
       ],
       child: Consumer2<LocaleProvider, ThemeProvider>(

@@ -3,8 +3,8 @@ import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:malvoya_core/malvoya_core.dart';
 import '../auth_service.dart';
-import 'api_client.dart';
 
 /// Push notifications for order, delivery and payout updates (never marketing).
 ///

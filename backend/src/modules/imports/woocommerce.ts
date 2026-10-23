@@ -2,9 +2,10 @@ import { ApiError } from "../../lib/errors";
 import { fetchPublicJson } from "./safeFetch";
 import {
   ImportIssue, ImportItem, ImportVariant, MAX_IMAGES_PER_PRODUCT, MAX_IMPORT_PRODUCTS, MAX_PRICE_CENTS, MAX_VARIANTS,
-  cleanImageUrl, htmlToText, mapCategory, parseEuroCents, validGtin,
+  cleanImageUrl, htmlToText, parseEuroCents, validGtin,
 } from "./mapping";
 import { COLOR_OPTION, SIZE_OPTION, USED_TAG } from "./shopify";
+import { SHADE_OPTION, legacyCategory, mapTaxonomy, refineItem } from "./mapping";
 
 /**
  * WooCommerce REST API (wc/v3) with the store's own read-only API keys. The keys are sent only as HTTP Basic
@@ -134,17 +135,18 @@ export function mapWooProduct(p: WooProduct, variations: WooVariation[], issues:
       const attrs = v.attributes ?? [];
       let size = attrs.find((a) => SIZE_OPTION.test(attrName(a)))?.option?.trim().slice(0, 20) || undefined;
       const color = attrs.find((a) => COLOR_OPTION.test(attrName(a)))?.option?.trim().slice(0, 40) || undefined;
-      if (!size && !color) {
+      const shadeName = attrs.find((a) => SHADE_OPTION.test(attrName(a)))?.option?.trim().slice(0, 40) || undefined;
+      if (!size && !color && !shadeName) {
         // An attribute that is neither size nor colour (e.g. "Material"): kept as the size label
         size = attrs.map((a) => a.option).filter(Boolean).join(" / ").trim().slice(0, 20) || undefined;
         if (size) otherOption = true;
       }
-      if (!size && !color) continue;
-      const key = `${size ?? ""}|${color ?? ""}`.toLowerCase();
+      if (!size && !color && !shadeName) continue;
+      const key = `${size ?? ""}|${color ?? ""}|${shadeName ?? ""}`.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
       if (out.length >= MAX_VARIANTS) { add(`Only the first ${MAX_VARIANTS} options were imported`); break; }
-      out.push({ size, color, stock: stockOf(v, missing), priceAdjustCents: cents - base });
+      out.push({ size, color, ...(shadeName ? { shadeName } : {}), stock: stockOf(v, missing), priceAdjustCents: cents - base });
       gtin = gtin ?? validGtin(v.global_unique_id);
     }
     if (otherOption) add("An option that is not a size or colour was imported as the size; check it before publishing");
@@ -168,19 +170,26 @@ export function mapWooProduct(p: WooProduct, variations: WooVariation[], issues:
   const used = tags.some((t) => USED_TAG.test(t)) || categories.some((c) => USED_TAG.test(c.toLowerCase()));
   if (used) add("Tagged as used/vintage: condition set to Good, check it before publishing");
 
-  return {
+  const description = htmlToText(p.description || p.short_description) || undefined;
+  // WooCommerce categories are often hierarchical ("Naiset", "Mekot"): the deepest one that names a subcategory wins
+  const match = mapTaxonomy([...[...categories].reverse(), ...tags, name], description);
+  const brandAttr = (p.attributes ?? []).find((a) => /^(brand|merkki|brändi|märke)$/i.test(attrName(a)));
+  const brand = (p as any).brands?.[0]?.name ?? brandAttr?.options?.[0] ?? brandAttr?.option;
+  return refineItem({
     externalId: String(p.id),
     label,
     name,
-    description: htmlToText(p.description || p.short_description) || undefined,
-    category: mapCategory(...categories, ...tags, name),
-    condition: used ? "GOOD" : "NEW",
-    isSecondHand: used,
+    description,
+    category: legacyCategory(match),
+    match,
+    brand: typeof brand === "string" && brand.trim() ? brand.trim().slice(0, 60) : undefined,
+    condition: used || match.secondHand ? "GOOD" : "NEW",
+    isSecondHand: used || match.secondHand,
     tags,
     priceCents: base,
     stockQuantity,
     variants: out,
     imageUrls: images.slice(0, MAX_IMAGES_PER_PRODUCT),
     gtin,
-  };
+  });
 }

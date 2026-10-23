@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
-import '../core/haptics.dart';
-import '../core/strings.dart';
 
 /// The steps of the setup checklist. The dashboard opens the matching screen for each.
 enum SetupStep { details, pin, hours, payouts, product, tax, approval }
@@ -173,12 +173,12 @@ class OnboardingChecklist extends StatelessWidget {
         ),
         if (ready)
           Container(
-            margin: const EdgeInsets.fromLTRB(0, 4, 8, 6),
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            margin: const EdgeInsets.fromLTRB(0, MSpace.xs, MSpace.sm, 6),
+            padding: const EdgeInsets.fromLTRB(MSpace.md, 10, MSpace.md, 10),
             decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(14)),
             child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Icon(Icons.hourglass_top_rounded, size: 18, color: AppTheme.primary),
-              const SizedBox(width: 8),
+              const SizedBox(width: MSpace.sm),
               Expanded(
                 child: Text(
                   tr(context,
@@ -236,11 +236,11 @@ class OnboardingChecklist extends StatelessWidget {
           done: s['done'] == true,
           attention: true,
           trailing: Padding(
-            padding: const EdgeInsets.only(left: 4, right: 4),
+            padding: const EdgeInsets.only(left: MSpace.xs, right: MSpace.xs),
             child: OutlinedButton(
               style: OutlinedButton.styleFrom(minimumSize: const Size(48, 48), padding: const EdgeInsets.symmetric(horizontal: 14)),
               onPressed: () {
-                Haptics.select();
+                Haptics.selection();
                 onAction('edit_business_id');
               },
               child: Text(tr(context, 'Edit', 'Muokkaa')),
@@ -269,7 +269,7 @@ class OnboardingChecklist extends StatelessWidget {
           icon: Icons.fact_check_outlined,
           done: false,
           trailing: const Padding(
-            padding: EdgeInsets.only(left: 8, right: 4),
+            padding: EdgeInsets.only(left: MSpace.sm, right: MSpace.xs),
             child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
           ),
         );
@@ -288,19 +288,19 @@ class _ChecklistCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         margin: const EdgeInsets.only(bottom: 14),
-        padding: const EdgeInsets.fromLTRB(16, 14, 8, 8),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(AppTheme.radiusLg - 2), border: Border.all(color: AppTheme.divider)),
+        padding: const EdgeInsets.fromLTRB(MSpace.lg, 14, MSpace.sm, MSpace.sm),
+        decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(AppTheme.radiusLg - 2), border: Border.all(color: AppTheme.divider)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Padding(
-            padding: const EdgeInsets.only(right: 8),
+            padding: const EdgeInsets.only(right: MSpace.sm),
             child: Row(children: [
               Expanded(child: Text(title, style: AppTheme.display(size: 18))),
-              Text(tr(context, '$done of $total done', '$done/$total valmis'), style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.primary, fontSize: 13)),
+              Text(tr(context, '$done of $total done', '$done/$total valmis'), style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.primary, fontSize: MTextSize.label)),
             ]),
           ),
           const SizedBox(height: 10),
           Padding(
-            padding: const EdgeInsets.only(right: 8),
+            padding: const EdgeInsets.only(right: MSpace.sm),
             child: Semantics(
               label: tr(context, '$done of $total setup steps done', '$done/$total vaihetta valmiina'),
               child: ClipRRect(
@@ -354,16 +354,16 @@ class ChecklistRow extends StatelessWidget {
     final content = ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 56),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(vertical: MSpace.sm),
         child: Row(children: [
           AnimatedContainer(
             duration: const Duration(milliseconds: 250),
             width: 34,
             height: 34,
             decoration: BoxDecoration(shape: BoxShape.circle, color: circle),
-            child: Icon(ticked ? Icons.check_rounded : icon, size: 19, color: ticked ? Colors.white : AppTheme.textPrimary),
+            child: Icon(ticked ? Icons.check_rounded : icon, size: 19, color: ticked ? AppTheme.onPrimary : AppTheme.textPrimary),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: MSpace.md),
           Expanded(
             child: Semantics(
               label: [ticked ? tr(context, '$title, done', '$title, valmis') : title, if (showSubtitle) subtitle!].join('. '),
@@ -375,11 +375,11 @@ class ChecklistRow extends StatelessWidget {
                       color: struck ? AppTheme.textSecondary : AppTheme.textPrimary,
                       decoration: struck ? TextDecoration.lineThrough : null,
                     )),
-                if (showSubtitle) Text(subtitle!, style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary, height: 1.3)),
+                if (showSubtitle) Text(subtitle!, style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary, height: 1.3)),
               ]),
             ),
           ),
-          trailing ?? (onTap != null ? const Icon(Icons.chevron_right_rounded, color: AppTheme.textSecondary) : const SizedBox(width: 24)),
+          trailing ?? (onTap != null ? const Icon(Icons.chevron_right_rounded, color: AppTheme.textSecondary) : const SizedBox(width: MSpace.xxl)),
         ]),
       ),
     );
@@ -389,7 +389,7 @@ class ChecklistRow extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
         onTap: () {
-          Haptics.select();
+          Haptics.selection();
           onTap!();
         },
         child: content,

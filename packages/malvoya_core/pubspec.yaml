@@ -1,0 +1,21 @@
+name: malvoya_core
+description: Shared infrastructure for the Malvoya apps (API client, server-message translations, formatting, agreements, app gate).
+publish_to: "none"
+version: 1.0.0
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.2
+  intl: ^0.20.2
+  package_info_plus: ^10.2.2
+  shared_preferences: ^2.5.5
+  url_launcher: ^6.3.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

@@ -1,19 +1,17 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
 import '../core/network_status.dart';
 import '../core/reorder.dart';
 import '../core/sign_in.dart';
-import '../core/strings.dart';
 import '../services/socket_service.dart';
-import '../widgets/skeleton.dart';
 import 'main_navigation.dart';
 import 'order_detail.dart';
 import 'returns_screen.dart';
-import '../core/haptics.dart';
 import '../widgets/app_image.dart';
 
 /// Your orders: what is on its way first, then everything delivered or cancelled.
@@ -174,30 +172,30 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
         ],
       ),
       body: !auth.isAuthenticated
-          ? StateMessage(
+          ? MStateMessage(
               icon: Icons.receipt_long_outlined,
               message: tr(context, 'Sign in to see your orders.', 'Kirjaudu sisään nähdäksesi tilauksesi.'),
               actionLabel: tr(context, 'Sign in / Create account', 'Kirjaudu / Luo tili'),
-              onRetry: () => openSignIn(context),
+              onAction: () => openSignIn(context),
             )
           : _loading
-              ? const SkeletonCardList()
+              ? const MSkeletonList(thumbnail: true)
               : RefreshIndicator(
                   onRefresh: () => _load(quiet: true),
                   child: _error != null
-                      ? StateMessage.error(message: _error!, onRetry: () => _load())
+                      ? MStateMessage.error(message: _error!, onRetry: () => _load())
                       : _orders.isEmpty
-                          ? StateMessage(
+                          ? MStateMessage(
                               icon: Icons.receipt_long_outlined,
                               title: tr(context, 'No orders yet', 'Ei vielä tilauksia'),
                               message: tr(context, 'When you order, you can follow it here live.',
                                   'Kun tilaat, voit seurata tilaustasi täällä reaaliajassa.'),
                               actionLabel: tr(context, 'Start shopping', 'Aloita ostokset'),
                               actionIcon: Icons.storefront_rounded,
-                              onRetry: () => openMainTab(context, MainTab.home),
+                              onAction: () => openMainTab(context, MainTab.home),
                             )
                           : ListView(
-                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
+                              padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.sm, MSpace.lg, 120),
                               children: [
                                 if (active.isNotEmpty) _section(tr(context, 'In progress', 'Käynnissä')),
                                 ...active.map(_card),
@@ -210,8 +208,8 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
   }
 
   Widget _section(String label) => Padding(
-        padding: const EdgeInsets.fromLTRB(4, 16, 4, 10),
-        child: Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.secondaryText(context), letterSpacing: 0.3)),
+        padding: const EdgeInsets.fromLTRB(MSpace.xs, MSpace.lg, MSpace.xs, 10),
+        child: Text(label, style: TextStyle(fontSize: MTextSize.label, fontWeight: FontWeight.w700, color: AppTheme.secondaryText(context), letterSpacing: 0.3)),
       );
 
   (String, Color) _status(Map<String, dynamic> o) {
@@ -260,7 +258,7 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
         if (mounted) _load(quiet: true);
       },
       child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
+        margin: const EdgeInsets.only(bottom: MSpace.md),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: AppTheme.cardBackground(context),
@@ -270,7 +268,7 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
         child: Row(
           children: [
             ClipRRect(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(MRadius.sm),
               child: SizedBox(
                 width: 56,
                 height: 68,
@@ -279,17 +277,17 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
                     : AppImage(images.first),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: MSpace.md),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(o['store']?['name'] ?? '', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppTheme.primaryText(context))),
+                  Text(o['store']?['name'] ?? '', style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyL, color: AppTheme.primaryText(context))),
                   const SizedBox(height: 2),
                   Text(
                     '${count == 1 ? tr(context, '1 item', '1 tuote') : tr(context, '$count items', '$count tuotetta')} · ${euro(context, o['totalCents'])}'
                     '${created != null ? ' · ${created.day}.${created.month}.' : ''}',
-                    style: TextStyle(fontSize: 13, color: AppTheme.secondaryText(context)),
+                    style: TextStyle(fontSize: MTextSize.label, color: AppTheme.secondaryText(context)),
                   ),
                   // Scheduled delivery: the window it was booked for, while it is still to come
                   if (_active.contains(o['status']) && scheduledWindow(context, o['scheduledStart'], o['scheduledEnd']) != null)
@@ -297,27 +295,27 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
                       padding: const EdgeInsets.only(top: 2),
                       child: Text(
                         '${tr(context, 'Delivery', 'Toimitus')}: ${scheduledWindow(context, o['scheduledStart'], o['scheduledEnd'])}',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.primaryText(context)),
+                        style: TextStyle(fontSize: MTextSize.label, fontWeight: FontWeight.w600, color: AppTheme.primaryText(context)),
                       ),
                     ),
                   const SizedBox(height: 6),
                   Row(children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                      decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12)),
-                      child: Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color)),
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: MSpace.xs),
+                      decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(MRadius.sm)),
+                      child: Text(label, style: TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w700, color: color)),
                     ),
                     if (o['fulfilment'] == 'PICKUP') ...[
                       const SizedBox(width: 6),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: MSpace.xs),
                         decoration: BoxDecoration(
-                            color: AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine), borderRadius: BorderRadius.circular(12)),
+                            color: AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine), borderRadius: BorderRadius.circular(MRadius.sm)),
                         child: Row(mainAxisSize: MainAxisSize.min, children: [
                           Icon(Icons.storefront_rounded, size: 13, color: AppTheme.primaryText(context)),
-                          const SizedBox(width: 4),
+                          const SizedBox(width: MSpace.xs),
                           Text(tr(context, 'Collect', 'Nouto'),
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
+                              style: TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
                         ]),
                       ),
                     ],
@@ -326,7 +324,7 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
                       ValueListenableBuilder<int?>(
                         valueListenable: reorderBusy,
                         builder: (_, busy, __) => TextButton.icon(
-                          style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
+                          style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: MSpace.sm)),
                           onPressed: busy != null
                               ? null
                               : () {

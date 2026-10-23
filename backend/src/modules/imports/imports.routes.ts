@@ -86,7 +86,8 @@ router.post("/products/import/:id(\\d+)/publish", ...vendor, requireAgreement(),
   const id = positiveId(req.params.id);
   if (!id) return res.status(404).json({ ok: false, error: "Import not found" });
   try {
-    res.json({ ok: true, published: await imports.publishJob(req.user!.id, id) });
+    // { published: n, incomplete: [{ productId, name, missing: [field issues] }] } (drafts that miss required information)
+    res.json({ ok: true, ...(await imports.publishJob(req.user!.id, id)) });
   } catch (e) { sendError(res, e); }
 });
 

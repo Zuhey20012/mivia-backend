@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
 import '../l10n.dart';
-import '../locale_provider.dart';
 import 'login.dart';
 import 'register.dart';
 
@@ -10,38 +11,34 @@ class CourierWelcomeScreen extends StatelessWidget {
   const CourierWelcomeScreen({super.key});
 
   void _showLanguagePicker(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
+    showMSheet(context, builder: (ctx) {
         final currentCode = Localizations.localeOf(context).languageCode;
         return Container(
           height: MediaQuery.of(context).size.height * 0.70,
           decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(MRadius.lg)),
           ),
           child: Column(
             children: [
               Container(
-                margin: const EdgeInsets.only(top: 12, bottom: 8),
+                margin: const EdgeInsets.only(top: MSpace.md, bottom: MSpace.sm),
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
+                  color: AppTheme.divider,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                padding: const EdgeInsets.symmetric(horizontal: MSpace.xl, vertical: MSpace.md),
                 child: Row(
                   children: [
                     const Icon(Icons.language_rounded, color: AppTheme.primary, size: 22),
                     const SizedBox(width: 10),
                     Text(
                       AppLocalizations.of(context).translate('selectLanguage'),
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                      style: const TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w800),
                     ),
                   ],
                 ),
@@ -76,8 +73,7 @@ class CourierWelcomeScreen extends StatelessWidget {
             ],
           ),
         );
-      },
-    );
+      }, transparent: true, isScrollControlled: true, useSafeArea: false);
   }
 
   @override
@@ -87,9 +83,9 @@ class CourierWelcomeScreen extends StatelessWidget {
     final currentLangName = AppLocalizations.languages[currentCode] ?? 'English';
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppTheme.surface,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: AppTheme.surface,
         elevation: 0,
         titleSpacing: 20,
         title: Row(
@@ -103,14 +99,14 @@ class CourierWelcomeScreen extends StatelessWidget {
                 ),
                 borderRadius: BorderRadius.circular(9),
               ),
-              child: const Icon(Icons.delivery_dining_rounded, color: Colors.white, size: 18),
+              child: const Icon(Icons.delivery_dining_rounded, color: AppTheme.onPrimary, size: 18),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: MSpace.sm),
             Text(
               AppLocalizations.of(context).translate('malvoyaCourier'),
               style: const TextStyle(
                 fontWeight: FontWeight.w900,
-                fontSize: 17,
+                fontSize: MTextSize.title,
                 letterSpacing: -0.3,
               ),
             ),
@@ -118,7 +114,7 @@ class CourierWelcomeScreen extends StatelessWidget {
         ),
         actions: [
           Padding(
-            padding: const EdgeInsets.only(right: 16),
+            padding: const EdgeInsets.only(right: MSpace.lg),
             child: InkWell(
               onTap: () => _showLanguagePicker(context),
               borderRadius: BorderRadius.circular(20),
@@ -133,13 +129,13 @@ class CourierWelcomeScreen extends StatelessWidget {
                   children: [
                     Text(
                       currentLangName.split(' ').first,
-                      style: const TextStyle(fontSize: 14),
+                      style: const TextStyle(fontSize: MTextSize.bodyM),
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: MSpace.xs),
                     Text(
                       currentCode.toUpperCase(),
                       style: const TextStyle(
-                        fontSize: 11,
+                        fontSize: MTextSize.caption,
                         fontWeight: FontWeight.w800,
                         color: AppTheme.primaryDark,
                       ),
@@ -157,7 +153,7 @@ class CourierWelcomeScreen extends StatelessWidget {
           children: [
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                padding: const EdgeInsets.symmetric(horizontal: MSpace.xl, vertical: MSpace.md),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -167,15 +163,15 @@ class CourierWelcomeScreen extends StatelessWidget {
                       padding: const EdgeInsets.all(22),
                       decoration: BoxDecoration(
                         color: AppTheme.primary,
-                        borderRadius: BorderRadius.circular(24),
+                        borderRadius: BorderRadius.circular(MRadius.lg),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: MSpace.xs),
                             decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.25),
+                              color: AppTheme.surface.withValues(alpha: 0.25),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Row(
@@ -184,8 +180,8 @@ class CourierWelcomeScreen extends StatelessWidget {
                                 Text(
                                   l10n.translate('courierBadge'),
                                   style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 10,
+                                    color: AppTheme.onPrimary,
+                                    fontSize: MTextSize.caption,
                                     fontWeight: FontWeight.w900,
                                     letterSpacing: 0.8,
                                   ),
@@ -197,41 +193,41 @@ class CourierWelcomeScreen extends StatelessWidget {
                           Text(
                             l10n.translate('courierWelcomeTitle'),
                             style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 26,
+                              color: AppTheme.onPrimary,
+                              fontSize: MTextSize.displayM,
                               fontWeight: FontWeight.w900,
                               height: 1.15,
                               letterSpacing: -0.5,
                             ),
                           ),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: MSpace.sm),
                           Text(
                             l10n.translate('courierWelcomeSubtitle'),
                             style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.92),
-                              fontSize: 14,
+                              color: AppTheme.onPrimary.withValues(alpha: 0.92),
+                              fontSize: MTextSize.bodyM,
                               height: 1.4,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: MSpace.lg),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: MSpace.sm),
                             decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(12),
+                              color: MPalette.night.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(MRadius.sm),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 const Icon(Icons.payments_rounded, color: AppTheme.sunshine, size: 18),
-                                const SizedBox(width: 8),
+                                const SizedBox(width: MSpace.sm),
                                 Text(
                                   l10n.translate('courierRate'),
                                   style: const TextStyle(
-                                    color: Colors.white,
+                                    color: AppTheme.onPrimary,
                                     fontWeight: FontWeight.w800,
-                                    fontSize: 13,
+                                    fontSize: MTextSize.label,
                                   ),
                                 ),
                               ],
@@ -241,33 +237,33 @@ class CourierWelcomeScreen extends StatelessWidget {
                       ),
                     ),
 
-                    const SizedBox(height: 16),
+                    const SizedBox(height: MSpace.lg),
 
                     // Honest note: there are few stores and customers yet
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(16)),
+                      decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(MRadius.md)),
                       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        const Icon(Icons.info_outline_rounded, color: Color(0xFF6A4500), size: 22),
-                        const SizedBox(width: 12),
+                        const Icon(Icons.info_outline_rounded, color: MPalette.amberInk, size: 22),
+                        const SizedBox(width: MSpace.md),
                         Expanded(
                           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Text(l10n.translate('earlyTitle'), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF6A4500))),
+                            Text(l10n.translate('earlyTitle'), style: const TextStyle(fontSize: MTextSize.bodyM, fontWeight: FontWeight.w800, color: MPalette.amberInk)),
                             const SizedBox(height: 3),
-                            Text(l10n.translate('earlyDesc'), style: const TextStyle(fontSize: 12.5, color: Color(0xFF6A4500), height: 1.35)),
+                            Text(l10n.translate('earlyDesc'), style: const TextStyle(fontSize: MTextSize.caption, color: MPalette.amberInk, height: 1.35)),
                           ]),
                         ),
                       ]),
                     ),
 
-                    const SizedBox(height: 24),
+                    const SizedBox(height: MSpace.xxl),
 
                     // How delivering with Malvoya works
                     Text(
                       l10n.translate('whyDeliver'),
                       style: const TextStyle(
-                        fontSize: 17,
+                        fontSize: MTextSize.title,
                         fontWeight: FontWeight.w800,
                         letterSpacing: -0.3,
                       ),
@@ -276,28 +272,28 @@ class CourierWelcomeScreen extends StatelessWidget {
 
                     _buildPillarCard(
                       icon: Icons.access_time_filled_rounded,
-                      iconColor: const Color(0xFF6D2E8C),
+                      iconColor: MPalette.malva,
                       title: l10n.translate('perkFlexible'),
                       description: l10n.translate('perkFlexibleDesc'),
                     ),
                     const SizedBox(height: 10),
                     _buildPillarCard(
                       icon: Icons.account_balance_wallet_rounded,
-                      iconColor: const Color(0xFF248A52),
+                      iconColor: MPalette.green,
                       title: l10n.translate('perkEarnings'),
                       description: l10n.translate('perkEarningsDesc'),
                     ),
                     const SizedBox(height: 10),
                     _buildPillarCard(
                       icon: Icons.storefront_rounded,
-                      iconColor: const Color(0xFFFF9F1C),
+                      iconColor: MPalette.amber,
                       title: l10n.translate('perkRetail'),
                       description: l10n.translate('perkRetailDesc'),
                     ),
                     const SizedBox(height: 10),
                     _buildPillarCard(
                       icon: Icons.pedal_bike_rounded,
-                      iconColor: const Color(0xFF0077B6),
+                      iconColor: MPalette.moss,
                       title: l10n.translate('perkVehicle'),
                       description: l10n.translate('perkVehicleDesc'),
                     ),
@@ -309,7 +305,7 @@ class CourierWelcomeScreen extends StatelessWidget {
                       description: l10n.translate('perkEntrepreneurDesc'),
                     ),
 
-                    const SizedBox(height: 20),
+                    const SizedBox(height: MSpace.xl),
                   ],
                 ),
               ),
@@ -317,12 +313,12 @@ class CourierWelcomeScreen extends StatelessWidget {
 
             // Pinned Bottom Actions
             Container(
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+              padding: const EdgeInsets.fromLTRB(MSpace.xl, 14, MSpace.xl, MSpace.xl),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppTheme.surface,
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.06),
+                    color: MPalette.night.withValues(alpha: 0.06),
                     blurRadius: 16,
                     offset: const Offset(0, -4),
                   ),
@@ -344,20 +340,20 @@ class CourierWelcomeScreen extends StatelessWidget {
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.primary,
-                        foregroundColor: Colors.white,
+                        foregroundColor: AppTheme.onPrimary,
                         elevation: 0,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
+                          borderRadius: BorderRadius.circular(MRadius.md),
                         ),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           const Icon(Icons.rocket_launch_rounded, size: 20),
-                          const SizedBox(width: 8),
+                          const SizedBox(width: MSpace.sm),
                           Text(
                             l10n.translate('applyToDeliver'),
-                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                            style: const TextStyle(fontSize: MTextSize.bodyL, fontWeight: FontWeight.w800),
                           ),
                         ],
                       ),
@@ -378,14 +374,14 @@ class CourierWelcomeScreen extends StatelessWidget {
                       },
                       style: OutlinedButton.styleFrom(
                         foregroundColor: AppTheme.textPrimary,
-                        side: BorderSide(color: Colors.grey.shade300, width: 1.2),
+                        side: BorderSide(color: AppTheme.divider, width: 1.2),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
+                          borderRadius: BorderRadius.circular(MRadius.md),
                         ),
                       ),
                       child: Text(
                         l10n.translate('alreadyPartnerSignIn'),
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                        style: const TextStyle(fontSize: MTextSize.bodyM, fontWeight: FontWeight.w700),
                       ),
                     ),
                   ),
@@ -407,9 +403,9 @@ class CourierWelcomeScreen extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFF6F3EE),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.04)),
+        color: MPalette.birch,
+        borderRadius: BorderRadius.circular(MRadius.md),
+        border: Border.all(color: MPalette.night.withValues(alpha: 0.04)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -418,7 +414,7 @@ class CourierWelcomeScreen extends StatelessWidget {
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
               color: iconColor.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(MRadius.sm),
             ),
             child: Icon(icon, color: iconColor, size: 22),
           ),
@@ -430,7 +426,7 @@ class CourierWelcomeScreen extends StatelessWidget {
                 Text(
                   title,
                   style: const TextStyle(
-                    fontSize: 14,
+                    fontSize: MTextSize.bodyM,
                     fontWeight: FontWeight.w800,
                     color: AppTheme.textPrimary,
                   ),
@@ -439,7 +435,7 @@ class CourierWelcomeScreen extends StatelessWidget {
                 Text(
                   description,
                   style: const TextStyle(
-                    fontSize: 12,
+                    fontSize: MTextSize.caption,
                     color: AppTheme.textSecondary,
                     height: 1.3,
                   ),

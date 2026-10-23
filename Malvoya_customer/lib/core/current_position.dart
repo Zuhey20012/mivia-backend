@@ -1,7 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
-import 'strings.dart';
+import 'package:malvoya_core/malvoya_core.dart';
 
 /// Why the phone's position could not be read.
 enum LocateProblem { serviceOff, denied, deniedForever, failed }

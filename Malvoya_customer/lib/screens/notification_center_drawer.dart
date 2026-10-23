@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
-import '../core/strings.dart';
 import 'order_detail.dart';
-import '../core/haptics.dart';
 
 /// Latest status of your orders. Only real events are listed — nothing is shown as "sent"
 /// unless Malvoya actually sent it.
@@ -14,13 +13,7 @@ class NotificationCenterDrawer extends StatefulWidget {
 
   static void show(BuildContext context) {
     Haptics.selection();
-    showModalBottomSheet(
-      showDragHandle: false,
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => const NotificationCenterDrawer(),
-    );
+    showMSheet(context, builder: (_) => const NotificationCenterDrawer(), transparent: true, isScrollControlled: true, useSafeArea: false);
   }
 
   @override
@@ -89,7 +82,7 @@ class _NotificationCenterDrawerState extends State<NotificationCenterDrawer> {
           const SizedBox(height: 10),
           Container(width: 40, height: 4, decoration: BoxDecoration(color: AppTheme.cardBorder(context), borderRadius: BorderRadius.circular(2))),
           ListTile(
-            title: Text(tr(context, 'Updates', 'Ilmoitukset'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+            title: Text(tr(context, 'Updates', 'Ilmoitukset'), style: const TextStyle(fontSize: MTextSize.displayS, fontWeight: FontWeight.w800)),
             subtitle: Text(tr(context, 'Your latest order updates', 'Tilaustesi viimeisimmät tapahtumat')),
           ),
           Expanded(
@@ -98,7 +91,7 @@ class _NotificationCenterDrawerState extends State<NotificationCenterDrawer> {
                 : _orders.isEmpty
                     ? Center(
                         child: Padding(
-                          padding: const EdgeInsets.all(32),
+                          padding: const EdgeInsets.all(MSpace.x3l),
                           child: Text(tr(context, 'Nothing new yet.', 'Ei uutta.'),
                               style: TextStyle(color: AppTheme.secondaryText(context))),
                         ),
@@ -116,7 +109,7 @@ class _NotificationCenterDrawerState extends State<NotificationCenterDrawer> {
                             trailing: t == null
                                 ? null
                                 : Text('${t.day}.${t.month}. ${t.hour.toString().padLeft(2, '0')}.${t.minute.toString().padLeft(2, '0')}',
-                                    style: TextStyle(fontSize: 12, color: AppTheme.secondaryText(context))),
+                                    style: TextStyle(fontSize: MTextSize.caption, color: AppTheme.secondaryText(context))),
                             onTap: () {
                               Navigator.pop(context);
                               Navigator.push(context, MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: asInt(o['id'])!)));

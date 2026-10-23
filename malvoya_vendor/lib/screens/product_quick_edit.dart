@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
 import '../core/agreements.dart';
-import '../core/api_client.dart';
-import '../core/haptics.dart';
 import '../core/images.dart';
-import '../core/strings.dart';
 
 /// What the store chose in the quick-edit sheet.
 sealed class QuickEditResult {}
@@ -28,12 +27,7 @@ class QuickEditRemove extends QuickEditResult {}
 /// Price, stock and visibility without opening the full editor. Saving sends only these fields
 /// (PATCH /products/:id is partial; options keep their sku and price adjustment).
 Future<QuickEditResult?> showProductQuickEdit(BuildContext context, {required Map<String, dynamic> product, required ApiClient api}) =>
-    showModalBottomSheet<QuickEditResult>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => _QuickEditSheet(product: product, api: api),
-    );
+    showMSheet<QuickEditResult>(context, builder: (_) => _QuickEditSheet(product: product, api: api), isScrollControlled: true, useSafeArea: true);
 
 class _QuickEditSheet extends StatefulWidget {
   final Map<String, dynamic> product;
@@ -45,7 +39,7 @@ class _QuickEditSheet extends StatefulWidget {
 }
 
 class _QuickEditSheetState extends State<_QuickEditSheet> {
-  static const _red = Color(0xFFD93025);
+  static const _red = MPalette.red;
   Map<String, dynamic> get p => widget.product;
 
   late final _price = TextEditingController(
@@ -117,7 +111,7 @@ class _QuickEditSheetState extends State<_QuickEditSheet> {
           constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
           onPressed: value > 0 && !_saving
               ? () {
-                  Haptics.select();
+                  Haptics.selection();
                   onChanged(value - 1);
                 }
               : null,
@@ -133,7 +127,7 @@ class _QuickEditSheetState extends State<_QuickEditSheet> {
           constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
           onPressed: value < 10000 && !_saving
               ? () {
-                  Haptics.select();
+                  Haptics.selection();
                   onChanged(value + 1);
                 }
               : null,
@@ -148,7 +142,7 @@ class _QuickEditSheetState extends State<_QuickEditSheet> {
     return Padding(
       padding: EdgeInsets.only(bottom: inset),
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+        padding: const EdgeInsets.fromLTRB(MSpace.xl, 0, MSpace.xl, MSpace.xl),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Row(children: [
             SizedBox(
@@ -161,10 +155,10 @@ class _QuickEditSheetState extends State<_QuickEditSheet> {
                     )
                   : NetImage(images.first, width: 48, height: 58, radius: 10),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: MSpace.md),
             Expanded(child: Text('${p['name'] ?? ''}', style: AppTheme.display(size: 19), maxLines: 2, overflow: TextOverflow.ellipsis)),
           ]),
-          const SizedBox(height: 16),
+          const SizedBox(height: MSpace.lg),
           TextField(
             controller: _price,
             enabled: !_saving,
@@ -172,7 +166,7 @@ class _QuickEditSheetState extends State<_QuickEditSheet> {
             decoration: InputDecoration(labelText: tr(context, 'Price (€, VAT included)', 'Hinta (€, sis. ALV)'), prefixIcon: const Icon(Icons.euro_rounded)),
           ),
           const SizedBox(height: 14),
-          Text(tr(context, 'In stock', 'Varastossa'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+          Text(tr(context, 'In stock', 'Varastossa'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyL)),
           if (_variants.isEmpty)
             Row(children: [
               Expanded(child: Text(tr(context, 'Pieces', 'Kappaletta'), style: const TextStyle(color: AppTheme.textSecondary))),
@@ -196,7 +190,7 @@ class _QuickEditSheetState extends State<_QuickEditSheet> {
                   onChanged: (n) => setState(() => v['stock'] = n),
                 ),
               ]),
-          const SizedBox(height: 4),
+          const SizedBox(height: MSpace.xs),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             value: _visible,
@@ -206,18 +200,12 @@ class _QuickEditSheetState extends State<_QuickEditSheet> {
           ),
           if (_error != null)
             Padding(
-              padding: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.only(bottom: MSpace.sm),
               child: Text(_error!, style: const TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w600)),
             ),
-          const SizedBox(height: 8),
-          FilledButton(
-            style: FilledButton.styleFrom(minimumSize: const Size(64, 56)),
-            onPressed: _saving ? null : _save,
-            child: _saving
-                ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
-                : Text(tr(context, 'Save', 'Tallenna')),
-          ),
-          const SizedBox(height: 8),
+          const SizedBox(height: MSpace.sm),
+          MButton(label: tr(context, 'Save', 'Tallenna'), loading: _saving, onPressed: _saving ? null : _save),
+          const SizedBox(height: MSpace.sm),
           Row(children: [
             Expanded(
               child: OutlinedButton.icon(

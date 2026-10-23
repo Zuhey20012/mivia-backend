@@ -1,7 +1,8 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
-import '../core/strings.dart';
 
 /// A small schematic of a job: you → shop → drop-off area, drawn to scale from the coordinates the
 /// server sent (the drop-off is the rounded delivery area until the job is accepted). It is not a
@@ -85,11 +86,11 @@ class _RoutePainter extends CustomPainter {
       canvas.drawLine(storeAt, at(dropOff!), line);
     }
     void dot(Offset o, Color c, double r) {
-      canvas.drawCircle(o, r + 3, Paint()..color = Colors.white);
+      canvas.drawCircle(o, r + 3, Paint()..color = AppTheme.surface);
       canvas.drawCircle(o, r, Paint()..color = c);
     }
 
-    if (me != null) dot(at(me!), const Color(0xFF2563EB), 7);
+    if (me != null) dot(at(me!), MPalette.locationBlue, 7);
     dot(storeAt, AppTheme.textPrimary, 8);
     if (dropOff != null) {
       // The drop-off is an area until the job is accepted
@@ -113,12 +114,12 @@ class MiniRouteLegend extends StatelessWidget {
     Widget item(Color c, String t) => Row(mainAxisSize: MainAxisSize.min, children: [
           Container(width: 10, height: 10, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
           const SizedBox(width: 5),
-          Text(t, style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
+          Text(t, style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
         ]);
     return Padding(
       padding: const EdgeInsets.only(top: 6),
       child: Wrap(spacing: 14, runSpacing: 4, children: [
-        if (showMe) item(const Color(0xFF2563EB), tr(context, 'You', 'Sinä')),
+        if (showMe) item(MPalette.locationBlue, tr(context, 'You', 'Sinä')),
         item(AppTheme.textPrimary, tr(context, 'Shop', 'Kauppa')),
         item(AppTheme.primary, tr(context, 'Drop-off area', 'Toimitusalue')),
       ]),

@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
 import '../core/blocked_users.dart';
-import '../core/strings.dart';
 import 'ugc_actions.dart';
-import '../core/haptics.dart';
 
 /// Opens the comments of a drop. [onCountChanged] receives the new visible-comment count.
 Future<void> showDropComments(BuildContext context, Map<String, dynamic> drop, {ValueChanged<int>? onCountChanged}) {
@@ -130,7 +129,7 @@ class _DropCommentsState extends State<_DropComments> {
     if (mounted) _snack(res.ok ? tr(context, 'Thanks — we will review it.', 'Kiitos — tarkistamme sen.') : res.errorText(context)!);
   }
 
-  void _snack(String text) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text), behavior: SnackBarBehavior.floating));
+  void _snack(String text) => MSnack.show(context, text);
 
   String _ago(dynamic iso) {
     final t = DateTime.tryParse('$iso');
@@ -154,13 +153,13 @@ class _DropCommentsState extends State<_DropComments> {
         height: MediaQuery.of(context).size.height * 0.7,
         child: Column(
           children: [
-            const SizedBox(height: 8),
+            const SizedBox(height: MSpace.sm),
             Container(width: 36, height: 4, decoration: BoxDecoration(color: textSecondary.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(2))),
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.md, MSpace.lg, MSpace.sm),
               child: Text(
                 _count == 1 ? tr(context, '1 comment', '1 kommentti') : tr(context, '$_count comments', '$_count kommenttia'),
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: textPrimary),
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.bodyL, color: textPrimary),
               ),
             ),
             const Divider(height: 1),
@@ -172,7 +171,7 @@ class _DropCommentsState extends State<_DropComments> {
                       : _comments.isEmpty
                           ? Center(
                               child: Padding(
-                                padding: const EdgeInsets.all(32),
+                                padding: const EdgeInsets.all(MSpace.x3l),
                                 child: Text(tr(context, 'No comments yet. Ask the store about sizes, fabric or fit.', 'Ei vielä kommentteja. Kysy kaupalta koosta, materiaalista tai istuvuudesta.'),
                                     textAlign: TextAlign.center, style: TextStyle(color: textSecondary)),
                               ),
@@ -182,7 +181,7 @@ class _DropCommentsState extends State<_DropComments> {
                               final visible = _comments.where((c) => !BlockedUsers.instance.isBlocked(authorIdOf(c))).toList();
                               return ListView.builder(
                                 controller: _scroll,
-                                padding: const EdgeInsets.symmetric(vertical: 8),
+                                padding: const EdgeInsets.symmetric(vertical: MSpace.sm),
                                 itemCount: visible.length,
                                 itemBuilder: (_, i) => _tile(visible[i], auth, textPrimary, textSecondary),
                               );
@@ -192,7 +191,7 @@ class _DropCommentsState extends State<_DropComments> {
             SafeArea(
               top: false,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+                padding: const EdgeInsets.fromLTRB(MSpace.md, MSpace.sm, MSpace.sm, MSpace.sm),
                 child: auth.isAuthenticated
                     ? Row(children: [
                         Expanded(
@@ -220,7 +219,7 @@ class _DropCommentsState extends State<_DropComments> {
                         ),
                       ])
                     : Padding(
-                        padding: const EdgeInsets.all(8),
+                        padding: const EdgeInsets.all(MSpace.sm),
                         child: Text(tr(context, 'Sign in to comment', 'Kirjaudu sisään kommentoidaksesi'), style: TextStyle(color: textSecondary)),
                       ),
               ),
@@ -249,22 +248,22 @@ class _DropCommentsState extends State<_DropComments> {
       leading: CircleAvatar(
         backgroundColor: byStore ? AppTheme.primary : AppTheme.primaryLight,
         child: byStore
-            ? const Icon(Icons.storefront_rounded, color: Colors.white, size: 20)
+            ? const Icon(Icons.storefront_rounded, color: AppTheme.onBrand, size: 20)
             : Text('${c['author'] ?? '?'}'.characters.first.toUpperCase(), style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w800)),
       ),
       title: Row(children: [
-        Flexible(child: Text('${c['author'] ?? ''}', overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textPrimary))),
+        Flexible(child: Text('${c['author'] ?? ''}', overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.label, color: textPrimary))),
         if (byStore)
           Container(
             margin: const EdgeInsets.only(left: 6),
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
             decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(6)),
-            child: Text(tr(context, 'Store', 'Kauppa'), style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700)),
+            child: Text(tr(context, 'Store', 'Kauppa'), style: const TextStyle(color: AppTheme.onBrand, fontSize: MTextSize.caption, fontWeight: FontWeight.w700)),
           ),
         const SizedBox(width: 6),
-        Text(_ago(c['createdAt']), style: TextStyle(fontSize: 12, color: textSecondary)),
+        Text(_ago(c['createdAt']), style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
       ]),
-      subtitle: Text('${c['body'] ?? ''}', style: TextStyle(color: textPrimary, fontSize: 14, height: 1.3)),
+      subtitle: Text('${c['body'] ?? ''}', style: TextStyle(color: textPrimary, fontSize: MTextSize.bodyM, height: 1.3)),
       trailing: canDelete || canReport
           ? PopupMenuButton<String>(
               tooltip: tr(context, 'More', 'Lisää'),

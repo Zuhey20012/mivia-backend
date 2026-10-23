@@ -13,6 +13,7 @@ import { launchDemand } from "../me/launchAlerts";
 import { getAnalytics } from "./analytics";
 import { adminDac7, adminDac7Csv, adminStoreStatement } from "../sellers/admin.sellers";
 import { adminLegalRoutes } from "../legal/admin.legal";
+import { catalogAdminRoutes } from "../catalog/admin";
 
 const router = Router();
 
@@ -39,6 +40,7 @@ router.get("/dac7",                   adminDac7);             // ?year=YYYY: DAC
 router.get("/dac7.csv",               adminDac7Csv);
 router.get("/stores/:id(\\d+)/statements", adminStoreStatement); // ?month=YYYY-MM
 router.use(adminLegalRoutes); // /legal, /legal/:doc/publish, /users/:id/agreements
+router.use(catalogAdminRoutes); // /categories, /certificates, /product-reports, /recalls, /products/:id (2.12)
 router.use(moderationRoutes);
 router.use(promoRoutes); // /promo-codes
 

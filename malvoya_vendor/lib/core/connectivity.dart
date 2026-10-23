@@ -2,9 +2,10 @@ import 'dart:async';
 import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/constants.dart';
 import '../config/theme.dart';
-import 'strings.dart';
 
 /// Knows whether the phone can reach the internet right now.
 ///
@@ -100,13 +101,13 @@ class OfflineBanner extends StatelessWidget {
               alignment: Alignment.topCenter,
               child: offline
                   ? Material(
-                      color: const Color(0xFF17131C),
+                      color: MPalette.night,
                       child: SafeArea(
                         bottom: false,
                         child: Semantics(
                           liveRegion: true,
                           child: Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                            padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.sm, MSpace.lg, MSpace.sm),
                             child: Row(children: [
                               const Icon(Icons.wifi_off_rounded, size: 18, color: AppTheme.sunshine),
                               const SizedBox(width: 10),
@@ -114,7 +115,7 @@ class OfflineBanner extends StatelessWidget {
                                 child: Text(
                                   tr(context, 'No internet. We will update as soon as you are back online.',
                                       'Ei internetyhteyttä. Päivitämme heti, kun yhteys palaa.'),
-                                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                                  style: const TextStyle(color: AppTheme.onPrimary, fontSize: MTextSize.label, fontWeight: FontWeight.w600),
                                 ),
                               ),
                             ]),

@@ -1,0 +1,45 @@
+name: malvoya_ui
+description: The Birch Market design system for the Malvoya apps (tokens, theme, components, bundled fonts).
+publish_to: "none"
+version: 1.0.0
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  malvoya_core:
+    path: ../malvoya_core
+  shimmer: ^3.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+flutter:
+  assets:
+    - assets/licenses/
+  fonts:
+    - family: HankenGrotesk
+      fonts:
+        - asset: fonts/HankenGrotesk-400.ttf
+        - asset: fonts/HankenGrotesk-500.ttf
+          weight: 500
+        - asset: fonts/HankenGrotesk-600.ttf
+          weight: 600
+        - asset: fonts/HankenGrotesk-700.ttf
+          weight: 700
+        - asset: fonts/HankenGrotesk-800.ttf
+          weight: 800
+    - family: BricolageGrotesque
+      fonts:
+        - asset: fonts/BricolageGrotesque-600.ttf
+          weight: 600
+        - asset: fonts/BricolageGrotesque-700.ttf
+          weight: 700
+        - asset: fonts/BricolageGrotesque-800.ttf
+          weight: 800

@@ -35,6 +35,16 @@ enum Audience {
   UNISEX
 }
 
+// Age group within an audience (since 2.12.0, optional): the Kids / Teens rows of the Home switch. Kids' sizes are in cm.
+enum AgeGroup {
+  BABY // 0-2 years
+  TODDLER // 2-4
+  KIDS // 4-8
+  JUNIOR // 8-14
+  TEEN // 13-17
+  ADULT
+}
+
 enum ProductCondition {
   NEW
   LIKE_NEW
@@ -193,6 +203,8 @@ model User {
   blockedBy            UserBlock[]           @relation("Blocked")
   // Every agreement version the user accepted, with proof (since 2.11.0)
   agreementAcceptances AgreementAcceptance[]
+  // Known or likely under 18 (since 2.12.0): never gets profiling-based recommendations (DSA Art. 28)
+  isMinor              Boolean               @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -334,6 +346,7 @@ model Product {
   categoryId    Int?
   categoryRef   Category? @relation(fields: [categoryId], references: [id])
   audience      Audience  @default(UNISEX)
+  ageGroup      AgeGroup?
   attributes    Json      @default("{}")
   // Nominal content of the pack (cosmetics, fragrance): the unit price per litre / kg is computed from it
   contentAmount Float?
@@ -412,6 +425,7 @@ model Product {
   @@index([importJobId])
   @@index([storeId, deletedAt])
   @@index([categoryId, isAvailable])
+  @@index([audience, ageGroup])
   @@index([manufacturerId])
   @@index([responsiblePersonId])
   @@index([gtin])

@@ -43,6 +43,8 @@ import { integrationStatus } from "./modules/admin/system";
 import payoutsRoutes  from "./modules/payouts/payouts.routes";
 import legalRoutes    from "./modules/legal/legal.routes";
 import { ensureLegalVersions } from "./modules/legal/legalDocs";
+import { catalogRoutes, initCatalog } from "./modules/catalog/routes";
+import { recallPageRoutes } from "./modules/catalog/recalls";
 import supportRoutes  from "./modules/support/support.routes";
 import importRoutes, { csvBodyParser } from "./modules/imports/imports.routes";
 import { failStaleImports } from "./modules/imports/imports.service";
@@ -100,6 +102,7 @@ app.use("/api/v1/auth",   authRoutes);
 app.use("/api/v1/stores", storesRoutes);
 app.use("/api/v1/stores", sellerRoutes); // /stores/my/tax-info, /stores/my/statements
 app.use("/api/v1",        importRoutes); // /products/import/* (before /products/:id routes)
+app.use("/api/v1",        catalogRoutes); // /categories, /stores/my/{operators,certificates,safety-pledge}, /products/:id/report, /recalls (2.12)
 app.use("/api/v1",        productsRoutes);
 app.use("/api/v1",        courierRoutes);
 app.use("/api/v1",        ordersRoutes);
@@ -115,6 +118,7 @@ app.use("/api/v1/admin",  adminRoutes);
 app.use(shareRouter); // public share pages: /d/:id
 app.use(shareRoutes); // /s/:storeId, /r/:code and /.well-known/assetlinks.json
 app.use(legalRoutes); // public legal pages: /legal/privacy, /legal/terms, …
+app.use(recallPageRoutes); // public product safety recalls: /recalls, /recalls/:id
 
 app.use(notFound);
 setupSentryErrorHandler(app); // no-op without SENTRY_DSN
@@ -123,7 +127,7 @@ app.use(errorHandler);
 server.keepAliveTimeout = 65_000; // longer than typical load-balancer idle timeouts
 server.headersTimeout = 66_000;
 server.listen(env.port, () => {
-  logger.info(`Malvoya API v2.11 listening on port ${env.port} (${env.nodeEnv})`);
+  logger.info(`Malvoya API v2.12 listening on port ${env.port} (${env.nodeEnv})`);
   // Yes/no per integration (never secrets), so the deploy log shows at a glance what is switched on
   const on = integrationStatus();
   logger.info({ integrations: Object.fromEntries(Object.entries(on).map(([k, v]) => [k, "mode" in v ? v.mode : v.configured ? "on" : "off"])) }, "Integrations");
@@ -136,6 +140,8 @@ server.listen(env.port, () => {
   failStaleImports().catch(() => {});
   // First version of each legal text (later changes take effect only when an admin publishes them)
   ensureLegalVersions().catch((e) => logger.error({ err: e?.message }, "Legal versions not recorded"));
+  // Category tree (seeded from catalog/taxonomy.ts) and the one-off mapping of products made before 2.12.0
+  initCatalog().catch((e) => logger.error({ err: e?.message }, "Categories not seeded"));
 });
 
 // Zero-downtime deploys: stop taking new work, let in-flight requests finish, close sockets, queue, Redis and DB.

@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
-import '../core/strings.dart';
 import '../screens/product_detail.dart';
 import 'app_image.dart';
-import 'motion.dart';
-import 'price_tag.dart';
-import '../core/haptics.dart';
 
 /// Grid tile used by search, store pages and favourites.
 class ProductTile extends StatelessWidget {
@@ -75,41 +73,41 @@ class ProductTile extends StatelessWidget {
                       left: 8,
                       top: 8,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(horizontal: MSpace.sm, vertical: MSpace.xs),
+                        decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(MRadius.sm)),
                         child: Row(mainAxisSize: MainAxisSize.min, children: [
                           const Icon(Icons.play_arrow_rounded, color: AppTheme.ink, size: 14),
                           const SizedBox(width: 2),
-                          Text(tr(context, 'Video', 'Video'), style: const TextStyle(color: AppTheme.ink, fontSize: 11, fontWeight: FontWeight.w800)),
+                          Text(tr(context, 'Video', 'Video'), style: const TextStyle(color: AppTheme.ink, fontSize: MTextSize.caption, fontWeight: FontWeight.w800)),
                         ]),
                       ),
                     ),
                   if (!inStock)
                     Container(
-                      color: Colors.white.withValues(alpha: 0.55),
+                      color: MPalette.white.withValues(alpha: 0.55),
                       alignment: Alignment.center,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: MSpace.md, vertical: 6),
                         decoration: BoxDecoration(color: AppTheme.ink, borderRadius: BorderRadius.circular(14)),
                         child: Text(tr(context, 'Sold out', 'Loppuunmyyty'),
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12.5)),
+                            style: const TextStyle(color: AppTheme.onBrand, fontWeight: FontWeight.w800, fontSize: MTextSize.caption)),
                       ),
                     ),
                 ],
               ),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: MSpace.sm),
           Text(
             product['name'] ?? '',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5, color: AppTheme.primaryText(context)),
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyM, color: AppTheme.primaryText(context)),
           ),
           if (store != null && '$store'.isNotEmpty)
-            Text(store, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: AppTheme.secondaryText(context))),
+            Text(store, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: MTextSize.caption, color: AppTheme.secondaryText(context))),
           const SizedBox(height: 2),
-          PriceTag(pricing: product['pricing'] as Map<String, dynamic>?, size: 14),
+          MPrice.fromPricing(product['pricing'] as Map<String, dynamic>?, size: MPriceSize.sm),
         ],
       ),
     );

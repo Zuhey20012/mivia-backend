@@ -1,8 +1,10 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
+import '../config/theme.dart';
 import '../core/media_sound.dart';
-import '../core/strings.dart';
 
 /// A product video with sound: shows the poster at once, streams (HLS, with an MP4 fallback) while
 /// [active], loops, and follows the app-wide sound switch. It pauses when it is not the visible
@@ -119,7 +121,7 @@ class _ProductVideoPlayerState extends State<ProductVideoPlayer> with WidgetsBin
       child: Stack(
         fit: StackFit.expand,
         children: [
-          Container(color: Colors.black),
+          Container(color: MPalette.night),
           if (poster != null) CachedNetworkImage(imageUrl: poster, fit: widget.fit, errorWidget: (_, __, ___) => const SizedBox()),
           if (ready)
             FittedBox(
@@ -127,12 +129,12 @@ class _ProductVideoPlayerState extends State<ProductVideoPlayer> with WidgetsBin
               clipBehavior: Clip.hardEdge,
               child: SizedBox(width: c.value.size.width, height: c.value.size.height, child: VideoPlayer(c)),
             ),
-          if (widget.active && !ready && !_failed) const Center(child: CircularProgressIndicator(color: Colors.white70, strokeWidth: 2)),
+          if (widget.active && !ready && !_failed) Center(child: CircularProgressIndicator(color: AppTheme.onMedia.withValues(alpha: 0.7), strokeWidth: 2)),
           if (_failed)
             Center(
-              child: Text(tr(context, 'Video unavailable', 'Video ei ole saatavilla'), style: const TextStyle(color: Colors.white70)),
+              child: Text(tr(context, 'Video unavailable', 'Video ei ole saatavilla'), style: TextStyle(color: AppTheme.onMedia.withValues(alpha: 0.7))),
             ),
-          if (ready && _pausedByUser) const Center(child: Icon(Icons.play_arrow_rounded, color: Colors.white, size: 72)),
+          if (ready && _pausedByUser) const Center(child: Icon(Icons.play_arrow_rounded, color: AppTheme.onMedia, size: 72)),
           if (ready)
             Positioned(
               right: 12,
@@ -144,8 +146,8 @@ class _ProductVideoPlayerState extends State<ProductVideoPlayer> with WidgetsBin
                   onTap: MediaSound.instance.toggle,
                   child: CircleAvatar(
                     radius: 18,
-                    backgroundColor: Colors.black54,
-                    child: Icon(MediaSound.instance.on ? Icons.volume_up_rounded : Icons.volume_off_rounded, color: Colors.white, size: 20),
+                    backgroundColor: AppTheme.scrim,
+                    child: Icon(MediaSound.instance.on ? Icons.volume_up_rounded : Icons.volume_off_rounded, color: AppTheme.onMedia, size: 20),
                   ),
                 ),
               ),

@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
-import '../core/strings.dart';
-import '../widgets/loading_states.dart';
 import 'store_setup.dart';
 
 /// Seller tax information for DAC7 (GET/PUT /stores/my/tax-info). Businesses give their legal name,
@@ -150,7 +149,7 @@ class _TaxInfoScreenState extends State<TaxInfoScreen> {
       _tin.clear();
       _saved = true;
     });
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr(context, 'Tax information saved', 'Verotiedot tallennettu'))));
+    MSnack.show(context, tr(context, 'Tax information saved', 'Verotiedot tallennettu'));
   }
 
   @override
@@ -159,13 +158,13 @@ class _TaxInfoScreenState extends State<TaxInfoScreen> {
       backgroundColor: AppTheme.background,
       appBar: AppBar(title: Text(tr(context, 'Tax information', 'Verotiedot'))),
       body: _loading
-          ? const SkeletonList(count: 2, lines: 5)
+          ? const MSkeletonList(count: 2, lines: 5)
           : _data == null
-              ? ListView(children: [ErrorState(message: _loadError, onRetry: () {
+              ? ListView(children: [MStateMessage.error(scrollable: false, top: 56, message: _loadError, onRetry: () {
                   setState(() => _loading = true);
                   _load();
                 })])
-              : Form(key: _form, child: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 40), children: _fields())),
+              : Form(key: _form, child: ListView(padding: const EdgeInsets.fromLTRB(MSpace.xl, MSpace.sm, MSpace.xl, MSpace.x4l), children: _fields())),
     );
   }
 
@@ -184,10 +183,10 @@ class _TaxInfoScreenState extends State<TaxInfoScreen> {
           style: const TextStyle(height: 1.4, color: AppTheme.textPrimary),
         ),
       ),
-      const SizedBox(height: 12),
+      const SizedBox(height: MSpace.md),
       Row(children: [
         Icon(complete ? Icons.check_circle_rounded : Icons.info_outline_rounded, color: complete ? AppTheme.success : AppTheme.warning, size: 20),
-        const SizedBox(width: 8),
+        const SizedBox(width: MSpace.sm),
         Expanded(
           child: Text(
             complete
@@ -197,15 +196,15 @@ class _TaxInfoScreenState extends State<TaxInfoScreen> {
           ),
         ),
       ]),
-      const SizedBox(height: 16),
+      const SizedBox(height: MSpace.lg),
       Text(
         _private ? tr(context, 'Private seller', 'Yksityinen myyjä') : tr(context, 'Business seller', 'Yritysmyyjä'),
-        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyL),
       ),
       const SizedBox(height: 2),
       Text(
         tr(context, 'From your store details. To change it, write to the Malvoya team in Help.', 'Kaupan tiedoista. Muuttaaksesi sitä kirjoita Malvoyan tiimille kohdassa Apua.'),
-        style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary),
+        style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary),
       ),
       const SizedBox(height: 14),
       TextFormField(
@@ -232,7 +231,7 @@ class _TaxInfoScreenState extends State<TaxInfoScreen> {
                 )
               : null,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: MSpace.md),
         TextFormField(
           controller: _vat,
           maxLength: 20,
@@ -244,7 +243,7 @@ class _TaxInfoScreenState extends State<TaxInfoScreen> {
         ),
       ],
       if (_private) ...[
-        const SizedBox(height: 4),
+        const SizedBox(height: MSpace.xs),
         Material(
           color: AppTheme.sand,
           borderRadius: BorderRadius.circular(AppTheme.radiusMd),
@@ -258,9 +257,9 @@ class _TaxInfoScreenState extends State<TaxInfoScreen> {
                 child: Row(children: [
                   Expanded(
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(tr(context, 'Date of birth', 'Syntymäaika'), style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary)),
+                      Text(tr(context, 'Date of birth', 'Syntymäaika'), style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
                       Text(_dateOfBirth == null ? tr(context, 'Choose', 'Valitse') : _fiDate(_dateOfBirth!),
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                          style: const TextStyle(fontSize: MTextSize.bodyL, fontWeight: FontWeight.w600)),
                     ]),
                   ),
                   const Icon(Icons.calendar_month_outlined, color: AppTheme.textSecondary),
@@ -269,10 +268,10 @@ class _TaxInfoScreenState extends State<TaxInfoScreen> {
             ),
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: MSpace.md),
         if (_tinMasked != null)
           Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.only(bottom: MSpace.sm),
             child: _readOnlyRow(tr(context, 'Saved tax ID', 'Tallennettu verotunniste'), _tinMasked!),
           ),
         TextFormField(
@@ -297,13 +296,13 @@ class _TaxInfoScreenState extends State<TaxInfoScreen> {
           Text(
             tr(context, 'Tax IDs cannot be saved right now because secure storage is not set up on the server. Please try again later.',
                 'Verotunnistetta ei voi juuri nyt tallentaa, koska palvelimen suojattu tallennus ei ole käytössä. Yritä myöhemmin uudelleen.'),
-            style: const TextStyle(fontSize: 12.5, color: AppTheme.accent),
+            style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.accent),
           ),
       ],
-      const SizedBox(height: 16),
+      const SizedBox(height: MSpace.lg),
       Text(_private ? tr(context, 'Home address', 'Kotiosoite') : tr(context, 'Registered address', 'Virallinen osoite'),
-          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-      const SizedBox(height: 8),
+          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyL)),
+      const SizedBox(height: MSpace.sm),
       TextFormField(
         controller: _address,
         maxLength: 200,
@@ -347,34 +346,29 @@ class _TaxInfoScreenState extends State<TaxInfoScreen> {
       ),
       if (_error != null)
         Padding(padding: const EdgeInsets.only(top: 14), child: Text(_error!, style: const TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w600))),
-      const SizedBox(height: 20),
+      const SizedBox(height: MSpace.xl),
       SizedBox(
         height: 54,
-        child: FilledButton(
-          onPressed: _saving ? null : _save,
-          child: _saving
-              ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : Text(_saved ? tr(context, 'Saved — save again', 'Tallennettu — tallenna uudelleen') : tr(context, 'Save', 'Tallenna')),
-        ),
+        child: MButton(label: _saved ? tr(context, 'Saved — save again', 'Tallennettu — tallenna uudelleen') : tr(context, 'Save', 'Tallenna'), loading: _saving, onPressed: _saving ? null : _save),
       ),
       const SizedBox(height: 10),
       Text(
         tr(context,
             'Malvoya uses these details only for the yearly DAC7 report and your monthly statements, and keeps them for 10 years after the reporting year, as the law requires — also if you delete your account.',
             'Malvoya käyttää näitä tietoja vain vuosittaiseen DAC7-ilmoitukseen ja kuukausiraportteihisi ja säilyttää ne lain edellyttämät 10 vuotta ilmoitusvuoden jälkeen — myös jos poistat tilisi.'),
-        style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary, height: 1.4),
+        style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary, height: 1.4),
       ),
     ];
   }
 
   Widget _readOnlyRow(String label, String value, {bool missing = false, Widget? action}) => Container(
-        padding: const EdgeInsets.fromLTRB(18, 10, 8, 10),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(AppTheme.radiusMd), border: Border.all(color: AppTheme.divider)),
+        padding: const EdgeInsets.fromLTRB(18, 10, MSpace.sm, 10),
+        decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(AppTheme.radiusMd), border: Border.all(color: AppTheme.divider)),
         child: Row(children: [
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(label, style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary)),
-              Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: missing ? AppTheme.accent : AppTheme.textPrimary)),
+              Text(label, style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
+              Text(value, style: TextStyle(fontSize: MTextSize.bodyL, fontWeight: FontWeight.w600, color: missing ? AppTheme.accent : AppTheme.textPrimary)),
             ]),
           ),
           if (action != null) action,

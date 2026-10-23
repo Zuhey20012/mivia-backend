@@ -1,15 +1,14 @@
-import '../core/strings.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
-import '../widgets/brand_mark.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
-import '../core/api_client.dart' show localizeServerMessage;
+
 import '../config/theme.dart';
 import '../l10n.dart';
-import '../locale_provider.dart';
 import 'register.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../realtime_notification_service.dart';
 import '../widgets/forgot_password_sheet.dart';
 
@@ -102,11 +101,9 @@ class _LoginScreenState extends State<LoginScreen> {
     _emailCtrl.text = outcome.email;
     _passCtrl.clear();
     setState(() { _error = null; _wrongPassword = false; });
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(outcome.signedIn
+    MSnack.show(context, outcome.signedIn
           ? tr(context, 'New password saved. You are signed in.', 'Uusi salasana tallennettu. Olet kirjautunut sisään.')
-          : tr(context, 'New password saved. Sign in with it now.', 'Uusi salasana tallennettu. Kirjaudu sillä nyt sisään.')),
-    ));
+          : tr(context, 'New password saved. Sign in with it now.', 'Uusi salasana tallennettu. Kirjaudu sillä nyt sisään.'));
   }
 
   Future<void> _handleGoogle() async {
@@ -170,12 +167,7 @@ class _LoginScreenState extends State<LoginScreen> {
       return p;
     }
 
-    showModalBottomSheet(
-      showDragHandle: false,
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
+    showMSheet(context, builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => Container(
           padding: EdgeInsets.only(
             bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
@@ -183,7 +175,7 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
           decoration: BoxDecoration(
             color: cardBg,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(MRadius.lg)),
             border: Border.all(color: cardBorder),
           ),
           child: SingleChildScrollView(
@@ -191,13 +183,8 @@ class _LoginScreenState extends State<LoginScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Center(
-                  child: Container(
-                    width: 40, height: 4,
-                    decoration: BoxDecoration(color: Colors.grey.shade400, borderRadius: BorderRadius.circular(2)),
-                  ),
-                ),
-                const SizedBox(height: 20),
+                const MSheetHandle(),
+                const SizedBox(height: MSpace.xl),
                 if (step == 1) ...[
                   Row(
                     children: [
@@ -211,22 +198,22 @@ class _LoginScreenState extends State<LoginScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(l10n.translate('signInWithPhone'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textPrimary)),
+                            Text(l10n.translate('signInWithPhone'), style: TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w800, color: textPrimary)),
                             Text(tr(context, 'We send a one-time code by text message or email', 'Lähetämme kertakäyttöisen koodin tekstiviestillä tai sähköpostiin'),
-                                style: TextStyle(fontSize: 12, color: textSecondary)),
+                                style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
                           ],
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 20),
-                  Text(tr(context, 'Phone number or email', 'Puhelinnumero tai sähköposti'), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: textPrimary)),
+                  const SizedBox(height: MSpace.xl),
+                  Text(tr(context, 'Phone number or email', 'Puhelinnumero tai sähköposti'), style: TextStyle(fontSize: MTextSize.label, fontWeight: FontWeight.w700, color: textPrimary)),
                   const SizedBox(height: 6),
                   TextField(
                     controller: phoneCtrl,
                     keyboardType: TextInputType.emailAddress,
                     autofocus: true,
-                    style: TextStyle(color: textPrimary, fontSize: 16, fontWeight: FontWeight.w600),
+                    style: TextStyle(color: textPrimary, fontSize: MTextSize.bodyL, fontWeight: FontWeight.w600),
                     decoration: InputDecoration(
                       hintText: tr(context, '+358… or name@example.com', '+358… tai nimi@esimerkki.fi'),
                       hintStyle: TextStyle(color: textSecondary.withValues(alpha: 0.6)),
@@ -237,24 +224,22 @@ class _LoginScreenState extends State<LoginScreen> {
                       enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide(color: cardBorder)),
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: MSpace.sm),
                   Text(tr(context, 'You will get a 6-digit code. Enter it on the next step.', 'Saat 6-numeroisen koodin. Kirjoita se seuraavassa vaiheessa.'),
-                      style: TextStyle(fontSize: 11, color: textSecondary)),
+                      style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
                   const SizedBox(height: 22),
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.primary,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        padding: const EdgeInsets.symmetric(vertical: MSpace.lg),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                       ),
                       onPressed: isProcessing ? null : () async {
                         final rawDestination = phoneCtrl.text.trim();
                         if (rawDestination.length < 5) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(tr(context, 'Enter your phone number or email address.', 'Kirjoita puhelinnumerosi tai sähköpostiosoitteesi.'))),
-                          );
+                          MSnack.show(context, tr(context, 'Enter your phone number or email address.', 'Kirjoita puhelinnumerosi tai sähköpostiosoitteesi.'));
                           return;
                         }
                         final destination = formatDestination(rawDestination);
@@ -314,7 +299,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                     SnackBar(
                                       content: Row(
                                         children: [
-                                          const Icon(Icons.sms_rounded, color: Color(0xFF248A52), size: 20),
+                                          const Icon(Icons.sms_rounded, color: MPalette.green, size: 20),
                                           const SizedBox(width: 10),
                                           Expanded(
                                             child: Text(tr(context, 'Code sent by text message to $destination. Enter it below.',
@@ -322,18 +307,13 @@ class _LoginScreenState extends State<LoginScreen> {
                                           ),
                                         ],
                                       ),
-                                      backgroundColor: const Color(0xFF1E293B),
+                                      backgroundColor: MPalette.night,
                                       behavior: SnackBarBehavior.floating,
                                       duration: const Duration(seconds: 5),
                                     ),
                                   );
                                 } else {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(res['error'] ?? tr(context, 'The code could not be sent. Please try again.', 'Koodia ei voitu lähettää. Yritä uudelleen.')),
-                                      backgroundColor: Colors.red.shade700,
-                                    ),
-                                  );
+                                  MSnack.error(context, res['error'] ?? tr(context, 'The code could not be sent. Please try again.', 'Koodia ei voitu lähettää. Yritä uudelleen.'));
                                 }
                               },
                               codeSent: (String verId, int? token) {
@@ -356,7 +336,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   SnackBar(
                                     content: Row(
                                       children: [
-                                        const Icon(Icons.sms_rounded, color: Color(0xFF248A52), size: 20),
+                                        const Icon(Icons.sms_rounded, color: MPalette.green, size: 20),
                                         const SizedBox(width: 10),
                                         Expanded(
                                           child: Text(tr(context, 'Code sent by text message to $destination. Enter it below.',
@@ -364,7 +344,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                         ),
                                       ],
                                     ),
-                                    backgroundColor: const Color(0xFF1E293B),
+                                    backgroundColor: MPalette.night,
                                     behavior: SnackBarBehavior.floating,
                                     duration: const Duration(seconds: 5),
                                   ),
@@ -394,13 +374,8 @@ class _LoginScreenState extends State<LoginScreen> {
                               });
                               setDialogState(() => step = 2);
                             } else {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(res['error'] ?? tr(context, 'The code could not be sent. Check the number and try again.',
-                                      'Koodia ei voitu lähettää. Tarkista numero ja yritä uudelleen.')),
-                                  backgroundColor: Colors.red.shade700,
-                                ),
-                              );
+                              MSnack.error(context, res['error'] ?? tr(context, 'The code could not be sent. Check the number and try again.',
+                                      'Koodia ei voitu lähettää. Tarkista numero ja yritä uudelleen.'));
                             }
                           }
                         } else {
@@ -424,31 +399,26 @@ class _LoginScreenState extends State<LoginScreen> {
                               SnackBar(
                                 content: Row(
                                   children: [
-                                    const Icon(Icons.mark_email_read_rounded, color: Color(0xFF248A52), size: 20),
+                                    const Icon(Icons.mark_email_read_rounded, color: MPalette.green, size: 20),
                                     const SizedBox(width: 10),
                                     Expanded(
                                       child: Text(tr(context, 'Code sent to $destination. Check your inbox.', 'Koodi lähetetty osoitteeseen $destination. Tarkista saapuneet viestit.')),
                                     ),
                                   ],
                                 ),
-                                backgroundColor: const Color(0xFF1E293B),
+                                backgroundColor: MPalette.night,
                                 behavior: SnackBarBehavior.floating,
                                 duration: const Duration(seconds: 5),
                               ),
                             );
                           } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(res['error'] ?? tr(context, 'The code could not be sent. Please try again.', 'Koodia ei voitu lähettää. Yritä uudelleen.')),
-                                backgroundColor: Colors.red.shade700,
-                              ),
-                            );
+                            MSnack.error(context, res['error'] ?? tr(context, 'The code could not be sent. Please try again.', 'Koodia ei voitu lähettää. Yritä uudelleen.'));
                           }
                         }
                       },
                       child: isProcessing
-                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                          : Text(l10n.translate('sendVerificationCode'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
+                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: AppTheme.onBrand, strokeWidth: 2))
+                          : Text(l10n.translate('sendVerificationCode'), style: const TextStyle(fontSize: MTextSize.bodyL, fontWeight: FontWeight.bold, color: AppTheme.onBrand)),
                     ),
                   ),
                 ] else ...[
@@ -456,32 +426,32 @@ class _LoginScreenState extends State<LoginScreen> {
                     children: [
                       Container(
                         width: 44, height: 44,
-                        decoration: BoxDecoration(color: const Color(0xFFDCFCE7), borderRadius: BorderRadius.circular(20)),
-                        child: const Icon(Icons.mark_chat_read_rounded, color: Color(0xFF248A52), size: 24),
+                        decoration: BoxDecoration(color: MPalette.mint, borderRadius: BorderRadius.circular(20)),
+                        child: const Icon(Icons.mark_chat_read_rounded, color: MPalette.green, size: 24),
                       ),
                       const SizedBox(width: 14),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(l10n.translate('verifyPhoneCode'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textPrimary)),
+                            Text(l10n.translate('verifyPhoneCode'), style: TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w800, color: textPrimary)),
                             Text(tr(context, 'Code sent to ${formatDestination(phoneCtrl.text.trim())}', 'Koodi lähetetty: ${formatDestination(phoneCtrl.text.trim())}'),
-                                style: TextStyle(fontSize: 12, color: textSecondary)),
+                                style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
                           ],
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 20),
-                  Text(l10n.translate('enterSmsCode'), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: textPrimary)),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: MSpace.xl),
+                  Text(l10n.translate('enterSmsCode'), style: TextStyle(fontSize: MTextSize.label, fontWeight: FontWeight.w700, color: textPrimary)),
+                  const SizedBox(height: MSpace.sm),
                   TextField(
                     controller: otpCtrl,
                     keyboardType: TextInputType.number,
                     maxLength: 6,
                     autofocus: true,
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: 8, color: textPrimary),
+                    style: TextStyle(fontSize: MTextSize.displayS, fontWeight: FontWeight.bold, letterSpacing: 8, color: textPrimary),
                     decoration: InputDecoration(
                       hintText: '------',
                       hintStyle: TextStyle(color: textSecondary.withValues(alpha: 0.5), letterSpacing: 8),
@@ -493,7 +463,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       focusedBorder: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(20)), borderSide: BorderSide(color: AppTheme.primary, width: 2)),
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: MSpace.md),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -501,7 +471,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         countdown > 0
                             ? tr(context, 'Resend in ${countdown}s', 'Uusi koodi $countdown s kuluttua')
                             : tr(context, 'Didn’t get it?', 'Eikö koodi tullut?'),
-                        style: TextStyle(fontSize: 12, color: textSecondary),
+                        style: TextStyle(fontSize: MTextSize.caption, color: textSecondary),
                       ),
                       if (countdown == 0)
                         TextButton(
@@ -523,9 +493,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 timeout: const Duration(seconds: 60),
                                 verificationCompleted: (_) {},
                                 verificationFailed: (e) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text(tr(context, 'The code could not be sent again. Please try again.', 'Koodia ei voitu lähettää uudelleen. Yritä uudelleen.'))),
-                                  );
+                                  MSnack.show(context, tr(context, 'The code could not be sent again. Please try again.', 'Koodia ei voitu lähettää uudelleen. Yritä uudelleen.'));
                                 },
                                 codeSent: (verId, token) {
                                   verificationId = verId;
@@ -533,7 +501,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
                                       content: Text(tr(context, 'A new code was sent to your phone.', 'Uusi koodi lähetettiin puhelimeesi.')),
-                                      backgroundColor: const Color(0xFF1E293B),
+                                      backgroundColor: MPalette.night,
                                     ),
                                   );
                                 },
@@ -547,31 +515,29 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
                                     content: Text(tr(context, 'A new code was sent.', 'Uusi koodi lähetettiin.')),
-                                    backgroundColor: const Color(0xFF1E293B),
+                                    backgroundColor: MPalette.night,
                                   ),
                                 );
                               }
                             }
                           },
-                          child: Text(tr(context, 'Send again', 'Lähetä uudelleen'), style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primary, fontSize: 13)),
+                          child: Text(tr(context, 'Send again', 'Lähetä uudelleen'), style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primary, fontSize: MTextSize.label)),
                         ),
                     ],
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: MSpace.xxl),
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.primary,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        padding: const EdgeInsets.symmetric(vertical: MSpace.lg),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                       ),
                       onPressed: isProcessing ? null : () async {
                         final entered = otpCtrl.text.trim();
                         if (entered.length != 6) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(tr(context, 'Enter the 6-digit code.', 'Kirjoita 6-numeroinen koodi.'))),
-                          );
+                          MSnack.show(context, tr(context, 'Enter the 6-digit code.', 'Kirjoita 6-numeroinen koodi.'));
                           return;
                         }
                         setDialogState(() => isProcessing = true);
@@ -607,32 +573,22 @@ class _LoginScreenState extends State<LoginScreen> {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text(tr(context, 'You’re signed in. Welcome!', 'Olet kirjautunut sisään. Tervetuloa!')),
-                                  backgroundColor: const Color(0xFF248A52),
+                                  backgroundColor: MPalette.green,
                                 ),
                               );
                             }
                           } on fb_auth.FirebaseAuthException catch (e) {
                             setDialogState(() => isProcessing = false);
                             if (ctx.mounted) {
-                              ScaffoldMessenger.of(ctx).showSnackBar(
-                                SnackBar(
-                                  content: Text(e.code == 'invalid-verification-code' || e.code == 'session-expired'
+                              MSnack.error(ctx, e.code == 'invalid-verification-code' || e.code == 'session-expired'
                                       ? tr(context, 'That code is wrong or has expired. Check it or ask for a new one.',
                                           'Koodi on väärä tai vanhentunut. Tarkista se tai pyydä uusi.')
-                                      : tr(context, 'The code could not be checked. Please try again.', 'Koodia ei voitu tarkistaa. Yritä uudelleen.')),
-                                  backgroundColor: Colors.red.shade700,
-                                ),
-                              );
+                                      : tr(context, 'The code could not be checked. Please try again.', 'Koodia ei voitu tarkistaa. Yritä uudelleen.'));
                             }
                           } catch (e) {
                             setDialogState(() => isProcessing = false);
                             if (ctx.mounted) {
-                              ScaffoldMessenger.of(ctx).showSnackBar(
-                                SnackBar(
-                                  content: Text(tr(context, 'Signing in did not work. Please try again.', 'Kirjautuminen ei onnistunut. Yritä uudelleen.')),
-                                  backgroundColor: Colors.red.shade700,
-                                ),
-                              );
+                              MSnack.error(ctx, tr(context, 'Signing in did not work. Please try again.', 'Kirjautuminen ei onnistunut. Yritä uudelleen.'));
                             }
                           }
                         } else {
@@ -659,28 +615,23 @@ class _LoginScreenState extends State<LoginScreen> {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text(tr(context, 'You’re signed in.', 'Olet kirjautunut sisään.')),
-                                  backgroundColor: const Color(0xFF248A52),
+                                  backgroundColor: MPalette.green,
                                 ),
                               );
                             }
                           } else {
                             if (ctx.mounted) {
-                              ScaffoldMessenger.of(ctx).showSnackBar(
-                                SnackBar(
-                                  content: Text(verifyRes['error'] ?? tr(context, 'That code is not right.', 'Koodi ei ole oikein.')),
-                                  backgroundColor: Colors.red.shade700,
-                                ),
-                              );
+                              MSnack.error(ctx, verifyRes['error'] ?? tr(context, 'That code is not right.', 'Koodi ei ole oikein.'));
                             }
                           }
                         }
                       },
                       child: isProcessing
-                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                          : Text(l10n.translate('verifyAndSignIn'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: AppTheme.onBrand, strokeWidth: 2))
+                          : Text(l10n.translate('verifyAndSignIn'), style: const TextStyle(fontSize: MTextSize.bodyL, fontWeight: FontWeight.bold, color: AppTheme.onBrand)),
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: MSpace.sm),
                   Center(
                     child: TextButton(
                       onPressed: () {
@@ -690,7 +641,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           verificationId = null;
                         });
                       },
-                      child: Text(l10n.translate('changePhone'), style: TextStyle(color: textSecondary, fontSize: 13)),
+                      child: Text(l10n.translate('changePhone'), style: TextStyle(color: textSecondary, fontSize: MTextSize.label)),
                     ),
                   ),
                 ],
@@ -698,8 +649,7 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
         ),
-      ),
-    );
+      ), transparent: true, isScrollControlled: true, useSafeArea: false);
   }
 
   void _showLanguageSelector(BuildContext context) {
@@ -714,7 +664,7 @@ class _LoginScreenState extends State<LoginScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(MRadius.lg)),
       ),
       builder: (ctx) {
         return Consumer<LocaleProvider>(
@@ -724,27 +674,22 @@ class _LoginScreenState extends State<LoginScreen> {
               constraints: BoxConstraints(
                 maxHeight: MediaQuery.of(context).size.height * 0.75,
               ),
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              padding: const EdgeInsets.fromLTRB(MSpace.xl, MSpace.lg, MSpace.xl, MSpace.xxl),
               decoration: BoxDecoration(
                 color: cardBg,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(MRadius.lg)),
                 border: Border.all(color: cardBorder),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Center(
-                    child: Container(
-                      width: 40, height: 4,
-                      decoration: BoxDecoration(color: Colors.grey.shade400, borderRadius: BorderRadius.circular(2)),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(l10n.translate('selectLanguagePrompt'), style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: textPrimary)),
-                  const SizedBox(height: 4),
-                  Text(l10n.translate('languagesSubtitle'), style: TextStyle(fontSize: 13, color: textSecondary)),
-                  const SizedBox(height: 12),
+                  const MSheetHandle(),
+                  const SizedBox(height: MSpace.lg),
+                  Text(l10n.translate('selectLanguagePrompt'), style: TextStyle(fontSize: MTextSize.displayS, fontWeight: FontWeight.bold, color: textPrimary)),
+                  const SizedBox(height: MSpace.xs),
+                  Text(l10n.translate('languagesSubtitle'), style: TextStyle(fontSize: MTextSize.label, color: textSecondary)),
+                  const SizedBox(height: MSpace.md),
                   Divider(height: 1, color: cardBorder),
                   Expanded(
                     child: ListView(
@@ -752,12 +697,12 @@ class _LoginScreenState extends State<LoginScreen> {
                       children: AppLocalizations.languages.entries.map((entry) {
                         final isSelected = provider.locale.languageCode == entry.key;
                         return ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: MSpace.sm, vertical: 2),
                           title: Text(
                             entry.value,
                             style: TextStyle(
                               fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                              fontSize: 16,
+                              fontSize: MTextSize.bodyL,
                               color: isSelected ? AppTheme.primary : textPrimary,
                             ),
                           ),
@@ -793,11 +738,11 @@ class _LoginScreenState extends State<LoginScreen> {
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
+          padding: const EdgeInsets.symmetric(horizontal: MSpace.xxl),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: 16),
+              const SizedBox(height: MSpace.lg),
 
               // Top row: back (when opened from inside the app) and the language switcher pill
               Row(
@@ -812,7 +757,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   GestureDetector(
                   onTap: () => _showLanguageSelector(context),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: MSpace.md, vertical: 6),
                     decoration: BoxDecoration(
                       color: cardBg,
                       borderRadius: BorderRadius.circular(20),
@@ -825,9 +770,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         const SizedBox(width: 6),
                         Text(
                           currentLangLabel.split(' ').first, // Shows flag
-                          style: const TextStyle(fontSize: 14),
+                          style: const TextStyle(fontSize: MTextSize.bodyM),
                         ),
-                        const SizedBox(width: 4),
+                        const SizedBox(width: MSpace.xs),
                         Icon(Icons.arrow_drop_down, size: 18, color: textSecondary),
                       ],
                     ),
@@ -836,17 +781,17 @@ class _LoginScreenState extends State<LoginScreen> {
                 ],
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: MSpace.xxl),
 
               // Logo + Branding (Centered, clean Nordic style)
               Center(
                 child: Column(
                   children: [
                     BrandTile(size: 76, background: AppTheme.primary),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: MSpace.lg),
                     Text('Malvoya', style: AppTheme.display(context, size: 34)),
-                    const SizedBox(height: 4),
-                    Text(l10n.translate('boutiques'), style: TextStyle(fontSize: 14, color: textSecondary, fontWeight: FontWeight.w500)),
+                    const SizedBox(height: MSpace.xs),
+                    Text(l10n.translate('boutiques'), style: TextStyle(fontSize: MTextSize.bodyM, color: textSecondary, fontWeight: FontWeight.w500)),
                   ],
                 ),
               ),
@@ -855,7 +800,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
               Text(l10n.translate('welcomeBack'), style: AppTheme.display(context, size: 28)),
               const SizedBox(height: 6),
-              Text(l10n.translate('signInToContinue'), style: TextStyle(fontSize: 14, color: textSecondary)),
+              Text(l10n.translate('signInToContinue'), style: TextStyle(fontSize: MTextSize.bodyM, color: textSecondary)),
               const SizedBox(height: 28),
 
               // Email field (autocorrect and suggestions off, no prefilled email)
@@ -895,7 +840,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: TextButton(
                   onPressed: _openForgotPassword,
                   style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-                  child: Text(tr(context, 'Forgot password?', 'Unohditko salasanan?'), style: const TextStyle(fontSize: 14)),
+                  child: Text(tr(context, 'Forgot password?', 'Unohditko salasanan?'), style: const TextStyle(fontSize: MTextSize.bodyM)),
                 ),
               ),
 
@@ -905,21 +850,21 @@ class _LoginScreenState extends State<LoginScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFF0F0),
+                    color: MPalette.redLight,
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: const Color(0xFFFFCDD2)),
+                    border: Border.all(color: MPalette.redLine),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.error_outline, color: Color(0xFFD93025), size: 18),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFD93025), fontSize: 13))),
+                      const Icon(Icons.error_outline, color: MPalette.red, size: 18),
+                      const SizedBox(width: MSpace.sm),
+                      Expanded(child: Text(_error!, style: const TextStyle(color: MPalette.red, fontSize: MTextSize.label))),
                     ],
                   ),
                 ),
                 if (_wrongPassword)
                   Padding(
-                    padding: const EdgeInsets.only(top: 4),
+                    padding: const EdgeInsets.only(top: MSpace.xs),
                     child: TextButton.icon(
                       onPressed: _openForgotPassword,
                       style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
@@ -929,34 +874,26 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
               ],
 
-              const SizedBox(height: 24),
+              const SizedBox(height: MSpace.xxl),
 
               // Login button
-              SizedBox(
-                width: double.infinity,
-                child: _loading
-                    ? const Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5)))
-                    : ElevatedButton(
-                        onPressed: _handleLogin,
-                        child: Text(l10n.translate('login')),
-                      ),
-              ),
+              MButton(label: l10n.translate('login'), expand: true, loading: _loading, onPressed: _handleLogin),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: MSpace.xxl),
 
               // Divider
               Row(
                 children: [
                   Expanded(child: Divider(color: cardBorder)),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(l10n.translate('or'), style: TextStyle(color: textSecondary, fontSize: 13, fontWeight: FontWeight.w500)),
+                    padding: const EdgeInsets.symmetric(horizontal: MSpace.lg),
+                    child: Text(l10n.translate('or'), style: TextStyle(color: textSecondary, fontSize: MTextSize.label, fontWeight: FontWeight.w500)),
                   ),
                   Expanded(child: Divider(color: cardBorder)),
                 ],
               ),
 
-              const SizedBox(height: 20),
+              const SizedBox(height: MSpace.xl),
 
               // Google Sign-In button
               OutlinedButton(
@@ -970,14 +907,15 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
+                    // Google's own brand blue (their sign-in button guideline), not a Malvoya colour
                     const Icon(Icons.g_mobiledata_rounded, size: 28, color: Color(0xFF4285F4)),
-                    const SizedBox(width: 8),
-                    Text(l10n.translate('continueWithGoogle'), style: TextStyle(fontWeight: FontWeight.w700, color: textPrimary, fontSize: 15)),
+                    const SizedBox(width: MSpace.sm),
+                    Text(l10n.translate('continueWithGoogle'), style: TextStyle(fontWeight: FontWeight.w700, color: textPrimary, fontSize: MTextSize.bodyL)),
                   ],
                 ),
               ),
 
-              const SizedBox(height: 12),
+              const SizedBox(height: MSpace.md),
 
               // Phone Sign-In button
               OutlinedButton(
@@ -992,13 +930,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     const Icon(Icons.phone_iphone_rounded, size: 20, color: AppTheme.primary),
-                    const SizedBox(width: 8),
-                    Text(l10n.translate('continueWithPhone'), style: TextStyle(fontWeight: FontWeight.w700, color: textPrimary, fontSize: 15)),
+                    const SizedBox(width: MSpace.sm),
+                    Text(l10n.translate('continueWithPhone'), style: TextStyle(fontWeight: FontWeight.w700, color: textPrimary, fontSize: MTextSize.bodyL)),
                   ],
                 ),
               ),
 
-              const SizedBox(height: 12),
+              const SizedBox(height: MSpace.md),
 
               // Malvoya Continue as Guest button (not when a guest opened sign-in from inside the app)
               if (!widget.returnAfterSignIn)
@@ -1019,16 +957,16 @@ class _LoginScreenState extends State<LoginScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     const Icon(Icons.explore_outlined, size: 20, color: AppTheme.ink),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: MSpace.sm),
                     Text(
                       l10n.translate('guestLogin'),
-                      style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.ink, fontSize: 15),
+                      style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.ink, fontSize: MTextSize.bodyL),
                     ),
                   ],
                 ),
               ),
 
-              const SizedBox(height: 32),
+              const SizedBox(height: MSpace.x3l),
 
               // Register link
               Center(
@@ -1039,7 +977,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Text.rich(
                     TextSpan(
                       text: '${l10n.translate('dontHaveAccount')} ',
-                      style: TextStyle(color: textSecondary, fontSize: 14),
+                      style: TextStyle(color: textSecondary, fontSize: MTextSize.bodyM),
                       children: [
                         TextSpan(
                           text: l10n.translate('createOne'),
@@ -1051,7 +989,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: MSpace.xxl),
             ],
           ),
         ),

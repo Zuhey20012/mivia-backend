@@ -17,8 +17,8 @@ export function sendOrderError(res: Response, e: any) {
   if (e instanceof ordersService.PickupCodeError) {
     return res.status(e.status).json({ ok: false, error: e.message, attemptsLeft: e.attemptsLeft, ...(e.lockedUntil ? { lockedUntil: e.lockedUntil } : {}) });
   }
-  if (e instanceof ordersService.OrderError) return res.status(e.status).json({ ok: false, error: e.message });
-  if (typeof e?.status === "number") return res.status(e.status).json({ ok: false, error: e.message });
+  if (e instanceof ordersService.OrderError) return res.status(e.status).json({ ok: false, error: e.message, ...(e.extra ?? {}) });
+  if (typeof e?.status === "number") return res.status(e.status).json({ ok: false, error: e.message, ...(e.extra ?? {}) });
   console.error(e);
   reportError(e, { tags: { area: "orders" } });
   if (typeof e?.type === "string" && e.type.startsWith("Stripe")) {

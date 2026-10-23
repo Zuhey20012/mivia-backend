@@ -1,20 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../cart.dart';
 import '../checkout.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
 import '../core/blocked_users.dart';
 import '../core/delivery_location.dart';
 import '../core/sign_in.dart';
 import '../core/store_hours.dart';
-import '../core/strings.dart';
 import '../widgets/product_tile.dart';
-import '../widgets/skeleton.dart';
 import '../widgets/ugc_actions.dart';
 import 'drops_feed.dart';
-import '../core/haptics.dart';
 import '../widgets/app_image.dart';
 
 /// A store: delivery time and fee to your address, who the seller is, their drops, what
@@ -68,7 +66,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
         _store['followerCount'] = res.data['followerCount'];
       }
     });
-    if (!res.ok) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.errorText(context)!)));
+    if (!res.ok) MSnack.show(context, res.errorText(context)!);
   }
 
   @override
@@ -160,18 +158,18 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                   pinned: true,
                   flexibleSpace: FlexibleSpaceBar(
                     title: Text(_store['name'] ?? '',
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, shadows: [Shadow(blurRadius: 8, color: Colors.black54)])),
+                        style: const TextStyle(color: AppTheme.onMedia, fontWeight: FontWeight.w800, shadows: [Shadow(blurRadius: 8, color: MPalette.scrim)])),
                     background: _store['bannerUrl'] != null
                         ? AppImage(_store['bannerUrl'])
                         : Container(
-                            color: AppTheme.isDarkMode(context) ? const Color(0xFF3A2F42) : AppTheme.primary,
-                            child: Center(child: Icon(Icons.storefront_outlined, size: 72, color: Colors.white.withValues(alpha: 0.25))),
+                            color: AppTheme.isDarkMode(context) ? MPalette.nightRaised : AppTheme.primary,
+                            child: Center(child: Icon(Icons.storefront_outlined, size: 72, color: AppTheme.onMedia.withValues(alpha: 0.25))),
                           ),
                   ),
                 ),
                 if (_error != null)
                   SliverFillRemaining(
-                    child: StateMessage.error(
+                    child: MStateMessage.error(
                       message: _error!,
                       top: 60,
                       onRetry: () {
@@ -189,18 +187,18 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                   if (_reviews.isNotEmpty) SliverToBoxAdapter(child: _reviewsBlock()),
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
+                      padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.xl, MSpace.lg, MSpace.md),
                       child: Text(
                         _productTotal != null && _productTotal! > 0
                             ? tr(context, 'All items ($_productTotal)', 'Kaikki tuotteet ($_productTotal)')
                             : tr(context, 'All items', 'Kaikki tuotteet'),
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textPrimary),
+                        style: TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w800, color: textPrimary),
                       ),
                     ),
                   ),
                   if (_loading)
                     SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
+                      padding: const EdgeInsets.fromLTRB(MSpace.lg, 0, MSpace.lg, 120),
                       sliver: SliverGrid(
                         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 2,
@@ -208,13 +206,13 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                           crossAxisSpacing: 14,
                           childAspectRatio: 0.58,
                         ),
-                        delegate: SliverChildBuilderDelegate((_, __) => const SkeletonProductTile(), childCount: 4),
+                        delegate: SliverChildBuilderDelegate((_, __) => const MSkeletonProductTile(), childCount: 4),
                       ),
                     )
                   else if (_products.isEmpty)
                     SliverToBoxAdapter(
                       child: Padding(
-                        padding: const EdgeInsets.all(40),
+                        padding: const EdgeInsets.all(MSpace.x4l),
                         child: Column(children: [
                           Icon(Icons.checkroom_outlined, size: 40, color: AppTheme.secondaryText(context)),
                           const SizedBox(height: 10),
@@ -225,7 +223,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                     )
                   else ...[
                     SliverPadding(
-                      padding: EdgeInsets.fromLTRB(16, 0, 16, _hasMoreProducts ? 16 : 120 + safeBottom),
+                      padding: EdgeInsets.fromLTRB(MSpace.lg, 0, MSpace.lg, _hasMoreProducts ? 16 : 120 + safeBottom),
                       sliver: SliverGrid(
                         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 2,
@@ -242,7 +240,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                     if (_hasMoreProducts)
                       SliverToBoxAdapter(
                         child: Padding(
-                          padding: EdgeInsets.fromLTRB(16, 8, 16, 120 + safeBottom),
+                          padding: EdgeInsets.fromLTRB(MSpace.lg, MSpace.sm, MSpace.lg, 120 + safeBottom),
                           child: Center(
                             child: _loadingMore
                                 ? const SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 2.5))
@@ -270,21 +268,21 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
     final isPrivate = _store['sellerType'] == 'PRIVATE';
     final closed = closedLabel(context, _store);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.lg, MSpace.lg, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (closed != null)
             Container(
               width: double.infinity,
-              margin: const EdgeInsets.only(bottom: 12),
+              margin: const EdgeInsets.only(bottom: MSpace.md),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 color: AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine),
                 borderRadius: BorderRadius.circular(AppTheme.radiusMd),
               ),
               child: Row(children: [
-                const Icon(Icons.schedule_rounded, color: Color(0xFF8A5A00)),
+                const Icon(Icons.schedule_rounded, color: MPalette.amberInk),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text('$closed. ${tr(context, 'You can look around and save favourites.', 'Voit katsella ja tallentaa suosikkeja.')}',
@@ -293,7 +291,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
               ]),
             ),
           Padding(
-            padding: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.only(bottom: MSpace.md),
             child: Row(children: [
               Expanded(
                 child: Text(
@@ -318,21 +316,21 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
           ),
           if ((_store['description'] ?? '').toString().isNotEmpty)
             Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Text(_store['description'], style: TextStyle(fontSize: 14.5, height: 1.45, color: AppTheme.primaryText(context))),
+              padding: const EdgeInsets.only(bottom: MSpace.md),
+              child: Text(_store['description'], style: TextStyle(fontSize: MTextSize.bodyM, height: 1.45, color: AppTheme.primaryText(context))),
             ),
           Wrap(
             spacing: 16,
             runSpacing: 8,
             children: [
               _meta(Icons.star_rounded, reviews > 0 ? '${_store['rating']} ($reviews)' : tr(context, 'No reviews yet', 'Ei vielä arvioita'),
-                  color: reviews > 0 ? const Color(0xFFE08A00) : muted),
+                  color: reviews > 0 ? MPalette.amber : muted),
               if (eta != null) _meta(Icons.schedule_rounded, eta),
               if (_store['deliveryFeeCents'] != null) _meta(Icons.delivery_dining_rounded, '${euro(context, _store['deliveryFeeCents'])} ${tr(context, 'delivery', 'toimitus')}'),
               if (_store['distanceKm'] != null) _meta(Icons.near_me_outlined, '${_store['distanceKm']} km'),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: MSpace.md),
           InkWell(
             onTap: _traderInfo,
             child: Row(
@@ -341,7 +339,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                 const SizedBox(width: 6),
                 Text(isPrivate ? tr(context, 'Private seller', 'Yksityinen myyjä') : tr(context, 'Business seller', 'Yritysmyyjä'),
                     style: TextStyle(color: muted, fontWeight: FontWeight.w600)),
-                const SizedBox(width: 4),
+                const SizedBox(width: MSpace.xs),
                 Text('· ${tr(context, 'Seller information', 'Myyjän tiedot')}', style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w600)),
               ],
             ),
@@ -355,28 +353,26 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: 17, color: color ?? AppTheme.secondaryText(context)),
-          const SizedBox(width: 4),
-          Text(text, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppTheme.primaryText(context))),
+          const SizedBox(width: MSpace.xs),
+          Text(text, style: TextStyle(fontWeight: FontWeight.w600, fontSize: MTextSize.label, color: AppTheme.primaryText(context))),
         ],
       );
 
   void _traderInfo() {
     Haptics.selection();
     final isPrivate = _store['sellerType'] == 'PRIVATE';
-    showModalBottomSheet(
-      context: context,
-      builder: (_) => Padding(
-        padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+    showMSheet(context, builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(MSpace.xxl, MSpace.xxl, MSpace.xxl, MSpace.x3l),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(tr(context, 'Seller information', 'Myyjän tiedot'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 12),
+            Text(tr(context, 'Seller information', 'Myyjän tiedot'), style: const TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w700)),
+            const SizedBox(height: MSpace.md),
             Text(_store['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
             if (!isPrivate && _store['businessId'] != null) Text('Y-tunnus ${_store['businessId']}'),
             if (!isPrivate && _store['address'] != null) Text(_store['address']),
-            const SizedBox(height: 12),
+            const SizedBox(height: MSpace.md),
             Text(
               isPrivate
                   ? tr(context, 'A private person selling their own items. Consumer rights such as the 14-day right of withdrawal do not apply.',
@@ -387,22 +383,21 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
             ),
           ],
         ),
-      ),
-    );
+      ), isScrollControlled: false, useSafeArea: false);
   }
 
   Widget _dropsStrip() => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 20, 16, 10),
-            child: Text(tr(context, 'Drops', 'Dropit'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppTheme.primaryText(context))),
+            padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.xl, MSpace.lg, 10),
+            child: Text(tr(context, 'Drops', 'Dropit'), style: TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w800, color: AppTheme.primaryText(context))),
           ),
           SizedBox(
             height: 190,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.symmetric(horizontal: MSpace.lg),
               itemCount: _drops.length,
               separatorBuilder: (_, __) => const SizedBox(width: 10),
               itemBuilder: (_, i) {
@@ -422,16 +417,16 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
-                          Container(color: Colors.black12),
+                          Container(color: MPalette.night.withValues(alpha: 0.12)),
                           if (poster != null) AppImage(poster),
-                          if (d['kind'] == 'VIDEO') const Center(child: Icon(Icons.play_arrow_rounded, color: Colors.white, size: 36)),
+                          if (d['kind'] == 'VIDEO') const Center(child: Icon(Icons.play_arrow_rounded, color: AppTheme.onMedia, size: 36)),
                           Positioned(
                             left: 6,
                             bottom: 6,
                             child: Row(children: [
-                              const Icon(Icons.favorite_rounded, color: Colors.white, size: 14),
+                              const Icon(Icons.favorite_rounded, color: AppTheme.onMedia, size: 14),
                               const SizedBox(width: 3),
-                              Text('${d['likeCount'] ?? 0}', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
+                              Text('${d['likeCount'] ?? 0}', style: const TextStyle(color: AppTheme.onMedia, fontSize: MTextSize.caption, fontWeight: FontWeight.w700)),
                             ]),
                           ),
                         ],
@@ -450,13 +445,11 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
     if (reason == null || !mounted) return;
     final res = await ApiClient(Provider.of<AuthService>(context, listen: false)).post('/reviews/${r['id']}/report', {'reason': reason});
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(res.ok
+    MSnack.show(context, res.ok
           ? tr(context, 'Thanks — we will review it.', 'Kiitos — tarkistamme sen.')
           : res.status == 404
               ? tr(context, 'Reporting reviews is not available yet.', 'Arvioista ilmoittaminen ei ole vielä käytössä.')
-              : res.errorText(context)!),
-    ));
+              : res.errorText(context)!);
   }
 
   Widget _reviewActions(Map<String, dynamic> r, Widget child) {
@@ -498,34 +491,34 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
     final muted = AppTheme.secondaryText(context);
     final shown = _reviews.where((r) => !BlockedUsers.instance.isBlocked(authorIdOf(r))).take(3);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+      padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.xl, MSpace.lg, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(children: [
-            Text(tr(context, 'Reviews', 'Arviot'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppTheme.primaryText(context))),
+            Text(tr(context, 'Reviews', 'Arviot'), style: TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w800, color: AppTheme.primaryText(context))),
             const Spacer(),
             Text('$_reviewTotal', style: TextStyle(color: muted)),
           ]),
-          const SizedBox(height: 4),
+          const SizedBox(height: MSpace.xs),
           Text(tr(context, 'Only customers whose order was delivered can review.', 'Vain asiakkaat, joiden tilaus on toimitettu, voivat arvioida.'),
-              style: TextStyle(fontSize: 12, color: muted)),
+              style: TextStyle(fontSize: MTextSize.caption, color: muted)),
           const SizedBox(height: 10),
           for (final r in shown)
             _reviewActions(r, Container(
               width: double.infinity,
               margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.fromLTRB(14, 14, 40, 14),
-              decoration: BoxDecoration(color: AppTheme.cardBackground(context), borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.cardBorder(context))),
+              padding: const EdgeInsets.fromLTRB(14, 14, MSpace.x4l, 14),
+              decoration: BoxDecoration(color: AppTheme.cardBackground(context), borderRadius: BorderRadius.circular(MRadius.md), border: Border.all(color: AppTheme.cardBorder(context))),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(children: [
-                    Text('★' * (asInt(r['rating']) ?? 0), style: const TextStyle(color: Color(0xFFE08A00))),
-                    const SizedBox(width: 8),
+                    Text('★' * (asInt(r['rating']) ?? 0), style: const TextStyle(color: MPalette.amber)),
+                    const SizedBox(width: MSpace.sm),
                     Text(r['author'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
                     const SizedBox(width: 6),
-                    Text(tr(context, '· Verified purchase', '· Vahvistettu ostos'), style: TextStyle(fontSize: 12, color: muted)),
+                    Text(tr(context, '· Verified purchase', '· Vahvistettu ostos'), style: TextStyle(fontSize: MTextSize.caption, color: muted)),
                   ]),
                   if ((r['comment'] ?? '').toString().isNotEmpty)
                     Padding(padding: const EdgeInsets.only(top: 6), child: Text(r['comment'], style: const TextStyle(height: 1.4))),
@@ -547,7 +540,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
             },
             child: Container(
               height: 62,
-              padding: const EdgeInsets.fromLTRB(8, 8, 18, 8),
+              padding: const EdgeInsets.fromLTRB(MSpace.sm, MSpace.sm, 18, MSpace.sm),
               decoration: BoxDecoration(
                 color: AppTheme.primary,
                 borderRadius: BorderRadius.circular(31),
@@ -560,14 +553,14 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                     height: 46,
                     alignment: Alignment.center,
                     decoration: const BoxDecoration(color: AppTheme.sunshine, shape: BoxShape.circle),
-                    child: Text('${cart.itemCount}', style: const TextStyle(color: AppTheme.ink, fontWeight: FontWeight.w800, fontSize: 17)),
+                    child: Text('${cart.itemCount}', style: const TextStyle(color: AppTheme.ink, fontWeight: FontWeight.w800, fontSize: MTextSize.title)),
                   ),
-                  const SizedBox(width: 12),
-                  Text(euro(context, (cart.total * 100).round()), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 17)),
+                  const SizedBox(width: MSpace.md),
+                  Text(euro(context, (cart.total * 100).round()), style: const TextStyle(color: AppTheme.onMedia, fontWeight: FontWeight.w900, fontSize: MTextSize.title)),
                   const Spacer(),
-                  Text(tr(context, 'View bag', 'Näytä kassi'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14)),
+                  Text(tr(context, 'View bag', 'Näytä kassi'), style: const TextStyle(color: AppTheme.onMedia, fontWeight: FontWeight.w800, fontSize: MTextSize.bodyM)),
                   const SizedBox(width: 6),
-                  const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 18),
+                  const Icon(Icons.arrow_forward_rounded, color: AppTheme.onMedia, size: 18),
                 ],
               ),
             ),

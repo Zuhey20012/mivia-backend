@@ -45,6 +45,7 @@ const baseProductSchema = z.object({
   // 2.12: a subcategory slug from GET /categories (null clears it)
   categorySlug:  z.string().trim().max(60).nullable().optional(),
   audience:      z.enum(["WOMEN", "MEN", "KIDS", "UNISEX"]).optional(),
+  ageGroup:      z.enum(["BABY", "TODDLER", "KIDS", "JUNIOR", "TEEN", "ADULT"]).nullable().optional(),
   attributes:    z.record(z.any()).optional(),
   hygieneSealed: z.boolean().optional(),
   contentAmount: z.number().positive().max(100000).nullable().optional(),
@@ -105,6 +106,9 @@ export const searchQuerySchema = z.object({
   // A category slug (descendants included) or, for older app builds, the legacy free-text category
   category:  z.string().trim().max(60).optional(),
   audience:  z.enum(["WOMEN", "MEN", "KIDS", "UNISEX", "women", "men", "kids", "unisex"]).optional(),
+  ageGroup:  z.enum(["BABY", "TODDLER", "KIDS", "JUNIOR", "TEEN", "ADULT"]).optional(),
+  // A Home collection (GET /collections): its saved filter
+  collection: z.string().trim().max(60).optional(),
   size:      z.string().trim().max(20).optional(),
   color:     z.string().trim().max(40).optional(),
   condition: z.enum(["NEW", "LIKE_NEW", "GOOD", "FAIR", "POOR"]).optional(),
@@ -117,7 +121,7 @@ export const searchQuerySchema = z.object({
   maxPrice:  z.coerce.number().int().min(0).optional(),
   // Attribute filters (comma-separated values = any of them); also as attr[key]=value
   colourFamily: list, shadeFamily: list, undertone: list, finish: list, skinType: list, hairType: list,
-  concentration: list, metal: list, fibre: list, brand: list, certificate: list, productType: list,
+  concentration: list, metal: list, fibre: list, brand: list, certificate: list, productType: list, fitCollection: list,
   attr:      z.record(z.string().max(400)).optional(),
   sort:      z.enum(["relevance", "newest", "price_asc", "price_desc", "rating"]).default("relevance"),
   page:      z.coerce.number().int().min(1).max(500).default(1),
@@ -125,4 +129,4 @@ export const searchQuerySchema = z.object({
 });
 
 /** The named attribute filters of the search (the rest come as attr[key]). */
-export const NAMED_FILTERS = ["colourFamily", "shadeFamily", "undertone", "finish", "skinType", "hairType", "concentration", "metal", "fibre", "brand", "productType"] as const;
+export const NAMED_FILTERS = ["colourFamily", "shadeFamily", "undertone", "finish", "skinType", "hairType", "concentration", "metal", "fibre", "brand", "productType", "fitCollection"] as const;

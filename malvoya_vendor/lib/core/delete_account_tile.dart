@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
-import 'strings.dart';
 
 /// Account setting: permanently delete the account on the server (GDPR Art. 17, required by Google Play).
 class DeleteAccountTile extends StatefulWidget {
@@ -14,7 +15,7 @@ class DeleteAccountTile extends StatefulWidget {
 }
 
 class _DeleteAccountTileState extends State<DeleteAccountTile> {
-  static const _red = Color(0xFFD93025);
+  static const _red = MPalette.red;
   bool _busy = false;
 
   Future<void> _confirm() async {
@@ -43,7 +44,7 @@ class _DeleteAccountTileState extends State<DeleteAccountTile> {
     if (!mounted) return;
     setState(() => _busy = false);
     if (error != null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error), behavior: SnackBarBehavior.floating));
+      MSnack.show(context, error);
     }
   }
 

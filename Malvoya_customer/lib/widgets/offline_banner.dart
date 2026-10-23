@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
 import '../core/network_status.dart';
-import '../core/strings.dart';
 
 /// A slim notice at the top of every screen while the phone is offline, and a short "back online"
 /// when the connection returns. It pushes the app down a little instead of covering it, and
@@ -85,17 +86,17 @@ class _OfflineBannerState extends State<OfflineBanner> {
         child: Material(
           color: color,
           child: Padding(
-            padding: EdgeInsets.fromLTRB(16, topInset + 6, 16, 8),
+            padding: EdgeInsets.fromLTRB(MSpace.lg, topInset + 6, MSpace.lg, MSpace.sm),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(_offline ? Icons.wifi_off_rounded : Icons.wifi_rounded, size: 16, color: ink),
-                const SizedBox(width: 8),
+                const SizedBox(width: MSpace.sm),
                 Flexible(
                   child: Text(
                     text,
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontFamily: AppTheme.bodyFont, fontSize: 12.5, fontWeight: FontWeight.w700, color: ink, height: 1.3),
+                    style: TextStyle(fontFamily: AppTheme.bodyFont, fontSize: MTextSize.caption, fontWeight: FontWeight.w700, color: ink, height: 1.3),
                   ),
                 ),
               ],

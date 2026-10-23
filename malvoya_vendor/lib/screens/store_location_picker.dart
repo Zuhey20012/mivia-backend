@@ -5,8 +5,9 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
-import '../core/strings.dart';
 
 /// Where couriers pick up: the owner moves the map under the pin (or taps a spot) until the pin is on
 /// the shop's door. It starts at the saved pin, else at the typed address (found with OpenStreetMap's
@@ -150,7 +151,7 @@ class _StoreLocationPickerState extends State<StoreLocationPicker> {
           ? const Center(child: CircularProgressIndicator())
           : Column(children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.xs, MSpace.lg, MSpace.sm),
                 child: TextField(
                   controller: _search,
                   textInputAction: TextInputAction.search,
@@ -195,7 +196,7 @@ class _StoreLocationPickerState extends State<StoreLocationPicker> {
                     top: 12,
                     child: Column(children: [
                       _mapButton(Icons.add_rounded, tr(context, 'Zoom in', 'Lähennä'), () => _zoom(1)),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: MSpace.sm),
                       _mapButton(Icons.remove_rounded, tr(context, 'Zoom out', 'Loitonna'), () => _zoom(-1)),
                     ]),
                   ),
@@ -204,8 +205,8 @@ class _StoreLocationPickerState extends State<StoreLocationPicker> {
                     bottom: 6,
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      color: Colors.white.withValues(alpha: 0.85),
-                      child: const Text('© OpenStreetMap contributors', style: TextStyle(fontSize: 11, color: AppTheme.textPrimary)),
+                      color: AppTheme.surface.withValues(alpha: 0.85),
+                      child: const Text('© OpenStreetMap contributors', style: TextStyle(fontSize: MTextSize.caption, color: AppTheme.textPrimary)),
                     ),
                   ),
                 ]),
@@ -214,12 +215,12 @@ class _StoreLocationPickerState extends State<StoreLocationPicker> {
       bottomNavigationBar: !_ready
           ? null
           : SafeArea(
-              minimum: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+              minimum: const EdgeInsets.fromLTRB(MSpace.lg, 10, MSpace.lg, MSpace.lg),
               child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 Text(
                   _note ?? tr(context, 'Drag the map or tap a spot so the pin is on your shop\'s door. Couriers come here.',
                       'Vedä karttaa tai napauta kohtaa niin, että neula on kauppasi ovella. Kuriirit tulevat tähän.'),
-                  style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary, height: 1.35),
+                  style: const TextStyle(fontSize: MTextSize.label, color: AppTheme.textSecondary, height: 1.35),
                 ),
                 const SizedBox(height: 10),
                 OutlinedButton.icon(
@@ -229,7 +230,7 @@ class _StoreLocationPickerState extends State<StoreLocationPicker> {
                       : const Icon(Icons.my_location_rounded),
                   label: Text(tr(context, 'Use my current location', 'Käytä nykyistä sijaintia')),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: MSpace.sm),
                 FilledButton.icon(
                   onPressed: () => Navigator.pop(context, _center),
                   icon: const Icon(Icons.check_rounded),
@@ -241,7 +242,7 @@ class _StoreLocationPickerState extends State<StoreLocationPicker> {
   }
 
   Widget _mapButton(IconData icon, String label, VoidCallback onTap) => Material(
-        color: Colors.white,
+        color: AppTheme.surface,
         shape: const CircleBorder(),
         elevation: 2,
         child: IconButton(tooltip: label, onPressed: onTap, icon: Icon(icon, color: AppTheme.textPrimary), constraints: const BoxConstraints(minWidth: 48, minHeight: 48)),

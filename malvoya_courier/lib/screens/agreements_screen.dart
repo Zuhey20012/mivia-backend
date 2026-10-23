@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/agreements.dart';
-import '../core/strings.dart';
 
 /// Account → Agreements: what the courier has accepted (Courier Agreement) or read (Privacy
 /// Policy), announced changes, and every acceptance with a copy of the exact text (API 2.11).
@@ -64,7 +65,7 @@ class _AgreementsScreenState extends State<AgreementsScreen> {
               onRefresh: _load,
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.sm, MSpace.lg, MSpace.x3l),
                 children: state == null || !state.ok ? _fallback(state) : _content(state),
               ),
             ),
@@ -75,7 +76,7 @@ class _AgreementsScreenState extends State<AgreementsScreen> {
   List<Widget> _fallback(AgreementState? state) => [
         if (state != null && !state.unsupported)
           Padding(
-            padding: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.only(bottom: MSpace.md),
             child: Text(state.error ?? '', style: const TextStyle(color: AppTheme.danger, fontWeight: FontWeight.w600)),
           ),
         _card([
@@ -84,7 +85,7 @@ class _AgreementsScreenState extends State<AgreementsScreen> {
           _readTile('privacy', Icons.shield_outlined),
         ]),
         if (state != null && !state.unsupported) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: MSpace.md),
           Center(child: OutlinedButton.icon(onPressed: _load, icon: const Icon(Icons.refresh_rounded), label: Text(tr(context, 'Try again', 'Yritä uudelleen')))),
         ],
       ];
@@ -108,7 +109,7 @@ class _AgreementsScreenState extends State<AgreementsScreen> {
         for (final d in state.required) _docCard(d),
         const SizedBox(height: 10),
         Text(tr(context, 'History', 'Historia'), style: AppTheme.display(size: 19)),
-        const SizedBox(height: 8),
+        const SizedBox(height: MSpace.sm),
         if (state.history.isEmpty)
           Text(tr(context, 'Nothing accepted yet.', 'Ei vielä hyväksyttyjä sopimuksia.'), style: const TextStyle(color: AppTheme.textSecondary))
         else
@@ -134,16 +135,16 @@ class _AgreementsScreenState extends State<AgreementsScreen> {
     }
     final pendingAt = d.pendingEffectiveAt;
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(AppTheme.radiusLg), border: Border.all(color: AppTheme.divider)),
+      margin: const EdgeInsets.only(bottom: MSpace.md),
+      padding: const EdgeInsets.fromLTRB(MSpace.lg, 14, MSpace.lg, 10),
+      decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(AppTheme.radiusLg), border: Border.all(color: AppTheme.divider)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Icon(privacy ? Icons.shield_outlined : Icons.gavel_rounded, color: AppTheme.primary),
           const SizedBox(width: 10),
           Expanded(child: Text(title, style: AppTheme.display(size: 18))),
         ]),
-        const SizedBox(height: 8),
+        const SizedBox(height: MSpace.sm),
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Icon(d.accepted ? Icons.check_circle_rounded : Icons.error_outline_rounded, size: 18, color: d.accepted ? AppTheme.success : (privacy ? AppTheme.textSecondary : AppTheme.warning)),
           const SizedBox(width: 6),
@@ -151,38 +152,38 @@ class _AgreementsScreenState extends State<AgreementsScreen> {
         ]),
         if (d.effectiveAt != null || d.currentVersion != null)
           Padding(
-            padding: const EdgeInsets.only(top: 4),
+            padding: const EdgeInsets.only(top: MSpace.xs),
             child: Text(
               [
                 if (d.currentVersion != null) '${tr(context, 'Version', 'Versio')} ${d.currentVersion}',
                 if (d.effectiveAt != null) tr(context, 'in force since ${dateText(context, d.effectiveAt!)}', 'voimassa ${dateText(context, d.effectiveAt!)} alkaen'),
               ].join(' · '),
-              style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+              style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary),
             ),
           ),
         if (d.pendingVersion != null)
           Container(
             width: double.infinity,
             margin: const EdgeInsets.only(top: 10),
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(MSpace.md),
             decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(
                 pendingAt == null ? tr(context, 'New version announced', 'Uusi versio ilmoitettu') : tr(context, 'New version from ${dateText(context, pendingAt)}', 'Uusi versio ${dateText(context, pendingAt)} alkaen'),
-                style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF8A5A00)),
+                style: const TextStyle(fontWeight: FontWeight.w800, color: MPalette.amberInk),
               ),
-              if (localizedText(context, d.summary) != null)
-                Padding(padding: const EdgeInsets.only(top: 4), child: Text(localizedText(context, d.summary)!, style: const TextStyle(height: 1.4))),
-              const SizedBox(height: 4),
+              if (localized(context, d.summary) != null)
+                Padding(padding: const EdgeInsets.only(top: MSpace.xs), child: Text(localized(context, d.summary)!, style: const TextStyle(height: 1.4))),
+              const SizedBox(height: MSpace.xs),
               Text(
                 d.pendingAccepted
                     ? tr(context, 'You have already accepted it.', 'Olet jo hyväksynyt sen.')
                     : tr(context, 'Nothing changes before that date. You can accept it now or later.', 'Ennen sitä mikään ei muutu. Voit hyväksyä sen nyt tai myöhemmin.'),
-                style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                style: const TextStyle(fontSize: MTextSize.label, color: AppTheme.textSecondary),
               ),
             ]),
           ),
-        const SizedBox(height: 4),
+        const SizedBox(height: MSpace.xs),
         Wrap(spacing: 4, children: [
           TextButton.icon(
             style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
@@ -212,15 +213,15 @@ class _AgreementsScreenState extends State<AgreementsScreen> {
     final doc = '${h['doc'] ?? ''}';
     final at = DateTime.tryParse('${h['acceptedAt'] ?? ''}');
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+      padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.md, MSpace.sm, MSpace.sm),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(Agreements.titleOf(context, doc, h['title'] is Map ? h['title'] as Map : null), style: const TextStyle(fontWeight: FontWeight.w700)),
         const SizedBox(height: 2),
         Text(
           [if (at != null) dateTimeText(context, at), _method(h['method'] as String?)].join(' · '),
-          style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+          style: const TextStyle(fontSize: MTextSize.label, color: AppTheme.textSecondary),
         ),
-        Text('${tr(context, 'Version', 'Versio')} ${h['version'] ?? ''}', style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+        Text('${tr(context, 'Version', 'Versio')} ${h['version'] ?? ''}', style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
         if (id != null)
           Align(
             alignment: Alignment.centerRight,
@@ -238,7 +239,7 @@ class _AgreementsScreenState extends State<AgreementsScreen> {
   }
 
   Widget _card(List<Widget> children) => Container(
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(AppTheme.radiusLg), border: Border.all(color: AppTheme.divider)),
+        decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(AppTheme.radiusLg), border: Border.all(color: AppTheme.divider)),
         clipBehavior: Clip.antiAlias,
         child: Column(children: children),
       );

@@ -7,22 +7,19 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
 import '../core/delivery_location.dart';
 import '../core/network_status.dart';
 import '../core/media_sound.dart';
 import '../core/report_reasons.dart';
-import '../core/strings.dart';
 import '../core/sign_in.dart';
 import '../widgets/add_to_bag_sheet.dart';
 import '../widgets/drop_comments_sheet.dart';
-import '../widgets/motion.dart';
-import '../widgets/price_tag.dart';
 import 'product_detail.dart';
 import 'store_detail.dart';
-import '../core/haptics.dart';
 import '../widgets/app_image.dart';
 
 /// Shoppable short videos from stores near you. Everything shown here comes from the API:
@@ -391,7 +388,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   // ── Actions ─────────────────────────────────────────────────────────────
 
   void _snack(String text) =>
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text), behavior: SnackBarBehavior.floating));
+      MSnack.show(context, text);
 
   Future<void> _toggleLike(Map<String, dynamic> drop, {bool onlyLike = false}) async {
     final auth = Provider.of<AuthService>(context, listen: false);
@@ -436,24 +433,21 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
 
   void _report(Map<String, dynamic> drop) {
     const reasons = reportReasons;
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) => SafeArea(
+    showMSheet(context, builder: (ctx) => SafeArea(
         child: ListView(
           shrinkWrap: true,
-          padding: const EdgeInsets.fromLTRB(8, 16, 8, 16),
+          padding: const EdgeInsets.fromLTRB(MSpace.sm, MSpace.lg, MSpace.sm, MSpace.lg),
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-              child: Text(tr(context, 'Report this drop', 'Ilmoita dropista'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+              padding: const EdgeInsets.fromLTRB(MSpace.lg, 0, MSpace.lg, MSpace.xs),
+              child: Text(tr(context, 'Report this drop', 'Ilmoita dropista'), style: const TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w700)),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              padding: const EdgeInsets.fromLTRB(MSpace.lg, 0, MSpace.lg, MSpace.sm),
               child: Text(
                 tr(context, 'A person on the Malvoya team reviews every report. The store is not told who reported.',
                     'Malvoyan tiimi tarkistaa jokaisen ilmoituksen. Kaupalle ei kerrota, kuka ilmoitti.'),
-                style: TextStyle(color: AppTheme.secondaryText(context), fontSize: 13),
+                style: TextStyle(color: AppTheme.secondaryText(context), fontSize: MTextSize.label),
               ),
             ),
             for (final e in reasons.entries)
@@ -470,32 +464,29 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
               ),
           ],
         ),
-      ),
-    );
+      ), isScrollControlled: true, useSafeArea: false);
   }
 
   void _explain(Map<String, dynamic>? drop) {
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+    showMSheet(context, builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(MSpace.xxl, MSpace.xxl, MSpace.xxl, MSpace.x3l),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(tr(context, 'Why am I seeing this?', 'Miksi näen tämän?'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            Text(tr(context, 'Why am I seeing this?', 'Miksi näen tämän?'), style: const TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w700)),
             if (drop?['reason'] != null) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: MSpace.sm),
               Text(drop!['reason'], style: const TextStyle(fontWeight: FontWeight.w600, color: AppTheme.primary)),
             ],
-            const SizedBox(height: 12),
+            const SizedBox(height: MSpace.md),
             Text(
               tr(context,
                   '"For you" ranks drops by how new they are, how people respond to them (likes, shares, full views), how close the store is to your delivery address and the store\'s rating. We do not build a profile of you. "Latest" shows the newest drops first, nothing else.',
                   '"Sinulle" järjestää dropit sen mukaan, kuinka uusia ne ovat, miten ihmiset reagoivat niihin (tykkäykset, jaot, loppuun katsotut), kuinka lähellä kauppa on toimitusosoitettasi ja kaupan arvosanan perusteella. Emme profiloi sinua. "Uusimmat" näyttää uusimmat dropit ensin.'),
               style: TextStyle(height: 1.45, color: AppTheme.secondaryText(context)),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: MSpace.lg),
             SizedBox(
               width: double.infinity,
               child: OutlinedButton(
@@ -508,8 +499,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
             ),
           ],
         ),
-      ),
-    );
+      ), isScrollControlled: false, useSafeArea: false);
   }
 
   // ── UI ──────────────────────────────────────────────────────────────────
@@ -519,11 +509,11 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     final body = AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: Container(
-        color: Colors.black,
+        color: MPalette.night,
         child: Stack(
           children: [
             if (_loading)
-              const Center(child: CircularProgressIndicator(color: Colors.white))
+              const Center(child: CircularProgressIndicator(color: AppTheme.onMedia))
             else if (_needsSignIn)
               _message(
                 Icons.storefront_rounded,
@@ -562,21 +552,21 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
         ),
       ),
     );
-    return widget.standalone ? Scaffold(backgroundColor: Colors.black, body: body) : body;
+    return widget.standalone ? Scaffold(backgroundColor: MPalette.night, body: body) : body;
   }
 
   Widget _message(IconData icon, String text, {required String action, required VoidCallback onTap}) => Center(
         child: Padding(
-          padding: const EdgeInsets.all(32),
+          padding: const EdgeInsets.all(MSpace.x3l),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: Colors.white54, size: 56),
-              const SizedBox(height: 16),
-              Text(text, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70, fontSize: 15, height: 1.4)),
-              const SizedBox(height: 16),
+              Icon(icon, color: AppTheme.onMedia.withValues(alpha: 0.54), size: 56),
+              const SizedBox(height: MSpace.lg),
+              Text(text, textAlign: TextAlign.center, style: TextStyle(color: AppTheme.onMedia.withValues(alpha: 0.7), fontSize: MTextSize.bodyL, height: 1.4)),
+              const SizedBox(height: MSpace.lg),
               OutlinedButton(
-                style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Colors.white38)),
+                style: OutlinedButton.styleFrom(foregroundColor: AppTheme.onMedia, side: BorderSide(color: MPalette.white.withValues(alpha: 0.38))),
                 onPressed: onTap,
                 child: Text(action),
               ),
@@ -600,14 +590,14 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
             padding: const EdgeInsets.symmetric(horizontal: 13),
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: selected ? Colors.white : Colors.transparent,
+              color: selected ? MPalette.white : Colors.transparent,
               borderRadius: BorderRadius.circular(18),
             ),
             child: Text(label,
                 style: TextStyle(
-                  color: selected ? AppTheme.ink : Colors.white,
+                  color: selected ? AppTheme.ink : AppTheme.onMedia,
                   fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                  fontSize: 14.5,
+                  fontSize: MTextSize.bodyM,
                 )),
           ),
         ),
@@ -619,16 +609,16 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
       return SafeArea(
         child: Row(
           children: [
-            const BackButton(color: Colors.white),
+            const BackButton(color: MPalette.white),
             Expanded(
               child: Text(widget.storeName ?? '',
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16, shadows: [Shadow(blurRadius: 8, color: Colors.black54)])),
+                  style: const TextStyle(color: AppTheme.onMedia, fontWeight: FontWeight.w700, fontSize: MTextSize.bodyL, shadows: [Shadow(blurRadius: 8, color: MPalette.scrim)])),
             ),
             IconButton(
               tooltip: _muted ? tr(context, 'Sound on', 'Ääni päälle') : tr(context, 'Mute', 'Mykistä'),
               constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-              icon: Icon(_muted ? Icons.volume_off_rounded : Icons.volume_up_rounded, color: Colors.white),
+              icon: Icon(_muted ? Icons.volume_off_rounded : Icons.volume_up_rounded, color: AppTheme.onMedia),
               onPressed: _toggleMute,
             ),
           ],
@@ -637,12 +627,12 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     }
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: MSpace.sm, vertical: MSpace.xs),
         child: Row(
           children: [
             IconButton(
               tooltip: tr(context, 'Why am I seeing this?', 'Miksi näen tämän?'),
-              icon: const Icon(Icons.info_outline_rounded, color: Colors.white),
+              icon: const Icon(Icons.info_outline_rounded, color: AppTheme.onMedia),
               onPressed: () => _explain(current),
             ),
             // Three feeds in one pill; shrinks to fit narrow phones and long translations
@@ -652,7 +642,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                   fit: BoxFit.scaleDown,
                   child: Container(
                     padding: const EdgeInsets.all(3),
-                    decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(21)),
+                    decoration: BoxDecoration(color: MPalette.night.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(21)),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -668,7 +658,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
             IconButton(
               tooltip: _muted ? tr(context, 'Sound on', 'Ääni päälle') : tr(context, 'Mute', 'Mykistä'),
               constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-              icon: Icon(_muted ? Icons.volume_off_rounded : Icons.volume_up_rounded, color: Colors.white),
+              icon: Icon(_muted ? Icons.volume_off_rounded : Icons.volume_up_rounded, color: AppTheme.onMedia),
               onPressed: _toggleMute,
             ),
           ],
@@ -721,12 +711,12 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 stops: [0, 0.18, 0.55, 1],
-                colors: [Color(0x66000000), Colors.transparent, Colors.transparent, Color(0xB3000000)],
+                colors: [MPalette.mediaScrimSoft, Colors.transparent, Colors.transparent, MPalette.mediaScrim],
               ),
             ),
           ),
           if (isCurrent && _paused && drop['kind'] == 'VIDEO')
-            const Center(child: Icon(Icons.play_arrow_rounded, size: 84, color: Colors.white70)),
+            Center(child: Icon(Icons.play_arrow_rounded, size: 84, color: AppTheme.onMedia.withValues(alpha: 0.7))),
           if (isCurrent && _burstAt != null)
             Positioned(
               left: _burstAt!.dx - 60,
@@ -749,7 +739,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                 controller,
                 allowScrubbing: true,
                 padding: EdgeInsets.zero,
-                colors: const VideoProgressColors(playedColor: AppTheme.sunshine, bufferedColor: Colors.white24, backgroundColor: Colors.white10),
+                colors: VideoProgressColors(playedColor: AppTheme.sunshine, bufferedColor: MPalette.white.withValues(alpha: 0.24), backgroundColor: MPalette.white.withValues(alpha: 0.1)),
               ),
             ),
         ],
@@ -760,7 +750,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   Widget _rail(Map<String, dynamic> drop) {
     final store = (drop['store'] as Map?)?.cast<String, dynamic>() ?? {};
     final liked = drop['likedByMe'] == true;
-    Widget action(IconData icon, String? label, VoidCallback onTap, {Color color = Colors.white, String? tooltip, Object? bumpOn}) => Padding(
+    Widget action(IconData icon, String? label, VoidCallback onTap, {Color color = MPalette.white, String? tooltip, Object? bumpOn}) => Padding(
           padding: const EdgeInsets.only(bottom: 18),
           child: Semantics(
             button: true,
@@ -774,11 +764,11 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                   SizedBox(
                     width: 48,
                     height: 44,
-                    child: Bump(trigger: bumpOn, child: Icon(icon, size: 34, color: color, shadows: const [Shadow(blurRadius: 10, color: Colors.black54)])),
+                    child: Bump(trigger: bumpOn, child: Icon(icon, size: 34, color: color, shadows: const [Shadow(blurRadius: 10, color: MPalette.scrim)])),
                   ),
                   if (label != null)
                     Text(label,
-                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700, shadows: [Shadow(blurRadius: 6, color: Colors.black54)])),
+                        style: const TextStyle(color: AppTheme.onMedia, fontSize: MTextSize.caption, fontWeight: FontWeight.w700, shadows: [Shadow(blurRadius: 6, color: MPalette.scrim)])),
                 ],
               ),
             ),
@@ -790,7 +780,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
         // The store's logo with a follow button overlapping its lower edge; the follow button has a
         // full 48 px tap area inside the stack (taps outside a Stack's bounds are not received)
         Padding(
-          padding: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.only(bottom: MSpace.sm),
           child: SizedBox(
             width: 56,
             height: 76,
@@ -801,7 +791,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                 onTap: () => _open(StoreDetailScreen(store: store)),
                 child: CircleAvatar(
                   radius: 24,
-                  backgroundColor: Colors.white,
+                  backgroundColor: MPalette.white,
                   child: CircleAvatar(
                     radius: 22,
                     backgroundColor: AppTheme.primaryLight,
@@ -828,12 +818,12 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                           width: 28,
                           height: 28,
                           decoration: BoxDecoration(
-                            color: store['followedByMe'] == true ? Colors.white : AppTheme.primary,
+                            color: store['followedByMe'] == true ? MPalette.white : AppTheme.primary,
                             shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
+                            border: Border.all(color: MPalette.white, width: 2),
                           ),
                           child: Icon(store['followedByMe'] == true ? Icons.check_rounded : Icons.add_rounded,
-                              size: 18, color: store['followedByMe'] == true ? AppTheme.primary : Colors.white),
+                              size: 18, color: store['followedByMe'] == true ? AppTheme.primary : AppTheme.onMedia),
                         ),
                       ),
                     ),
@@ -845,7 +835,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
           ),
         ),
         action(liked ? Icons.favorite_rounded : Icons.favorite_border_rounded, _compact(drop['likeCount']), () => _toggleLike(drop),
-            color: liked ? const Color(0xFFFF4D6D) : Colors.white,
+            color: liked ? MPalette.like : MPalette.white,
             tooltip: liked ? tr(context, 'Unlike', 'Poista tykkäys') : tr(context, 'Like', 'Tykkää'),
             bumpOn: liked),
         action(Icons.chat_bubble_outline_rounded, _compact(drop['commentCount']), () => _openComments(drop), tooltip: tr(context, 'Comments', 'Kommentit')),
@@ -865,13 +855,13 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                     decoration: BoxDecoration(
                       color: AppTheme.sunshine,
                       shape: BoxShape.circle,
-                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 10)],
+                      boxShadow: [BoxShadow(color: MPalette.night.withValues(alpha: 0.25), blurRadius: 10)],
                     ),
                     child: const Icon(Icons.shopping_bag_outlined, size: 25, color: AppTheme.ink),
                   ),
                   const SizedBox(height: 3),
                   Text(tr(context, 'Buy', 'Osta'),
-                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800, shadows: [Shadow(blurRadius: 6, color: Colors.black54)])),
+                      style: const TextStyle(color: AppTheme.onMedia, fontSize: MTextSize.caption, fontWeight: FontWeight.w800, shadows: [Shadow(blurRadius: 6, color: MPalette.scrim)])),
                 ],
               ),
             ),
@@ -895,7 +885,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     final product = (drop['product'] as Map?)?.cast<String, dynamic>() ?? {};
     final images = (product['images'] as List?)?.cast<String>() ?? const [];
     final eta = etaWindow(store);
-    const shadow = [Shadow(blurRadius: 8, color: Colors.black87)];
+    const shadow = [Shadow(blurRadius: 8, color: MPalette.ink)];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -905,10 +895,10 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
           GestureDetector(
             onTap: () => _explain(drop),
             child: Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(color: Colors.black38, borderRadius: BorderRadius.circular(14)),
-              child: Text(drop['reason'], style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+              margin: const EdgeInsets.only(bottom: MSpace.sm),
+              padding: const EdgeInsets.symmetric(horizontal: MSpace.sm, vertical: MSpace.xs),
+              decoration: BoxDecoration(color: MPalette.night.withValues(alpha: 0.38), borderRadius: BorderRadius.circular(14)),
+              child: Text(drop['reason'], style: const TextStyle(color: AppTheme.onMedia, fontSize: MTextSize.caption, fontWeight: FontWeight.w600)),
             ),
           ),
         Row(
@@ -916,15 +906,15 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
             Flexible(
               child: Text(store['name'] ?? '',
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16, shadows: shadow)),
+                  style: const TextStyle(color: AppTheme.onMedia, fontWeight: FontWeight.w800, fontSize: MTextSize.bodyL, shadows: shadow)),
             ),
             const SizedBox(width: 6),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(border: Border.all(color: Colors.white54), borderRadius: BorderRadius.circular(6)),
+              decoration: BoxDecoration(border: Border.all(color: MPalette.white.withValues(alpha: 0.54)), borderRadius: BorderRadius.circular(6)),
               child: Text(
                 store['sellerType'] == 'PRIVATE' ? tr(context, 'Private seller', 'Yksityinen') : tr(context, 'Business', 'Yritys'),
-                style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w600),
+                style: const TextStyle(color: AppTheme.onMedia, fontSize: MTextSize.caption, fontWeight: FontWeight.w600),
               ),
             ),
           ],
@@ -933,18 +923,18 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: Text(drop['caption'], maxLines: 3, overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.35, shadows: shadow)),
+                style: const TextStyle(color: AppTheme.onMedia, fontSize: MTextSize.bodyM, height: 1.35, shadows: shadow)),
           ),
         const SizedBox(height: 10),
         GestureDetector(
           onTap: () => _open(ProductDetailScreen(productId: asInt(product['id'])!)),
           child: Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.96), borderRadius: BorderRadius.circular(AppTheme.radiusMd + 2)),
+            padding: const EdgeInsets.all(MSpace.sm),
+            decoration: BoxDecoration(color: MPalette.white.withValues(alpha: 0.96), borderRadius: BorderRadius.circular(AppTheme.radiusMd + 2)),
             child: Row(
               children: [
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(MRadius.sm),
                   child: SizedBox(
                     width: 48,
                     height: 58,
@@ -960,14 +950,14 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(product['name'] ?? '', maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.ink)),
-                      PriceTag(pricing: product['pricing'] as Map<String, dynamic>?, size: 14, color: AppTheme.ink),
+                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyM, color: AppTheme.ink)),
+                      MPrice.fromPricing(product['pricing'] as Map<String, dynamic>?, size: MPriceSize.sm, color: AppTheme.ink),
                       Text(
                         [
                           if (eta != null) eta,
                           if (store['deliveryFeeCents'] != null) '${tr(context, 'delivery', 'toimitus')} ${euro(context, store['deliveryFeeCents'])}',
                         ].join(' · '),
-                        style: const TextStyle(fontSize: 11.5, color: AppTheme.inkSecondary),
+                        style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.inkSecondary),
                       ),
                     ],
                   ),
@@ -976,7 +966,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                   onPressed: product['inStock'] == false ? null : () => _addToBag(drop),
                   style: FilledButton.styleFrom(
                     backgroundColor: AppTheme.primary,
-                    foregroundColor: Colors.white,
+                    foregroundColor: AppTheme.onMedia,
                     padding: const EdgeInsets.symmetric(horizontal: 18),
                     minimumSize: const Size(0, 44),
                   ),
@@ -1028,10 +1018,10 @@ class _HeartBurstState extends State<_HeartBurst> with SingleTickerProviderState
             opacity: _fade,
             child: ScaleTransition(
               scale: _scale,
-              child: const SizedBox(
+              child: SizedBox(
                 width: 120,
                 height: 120,
-                child: Icon(Icons.favorite_rounded, size: 108, color: Color(0xFFFF4D6D), shadows: [Shadow(blurRadius: 18, color: Colors.black38)]),
+                child: Icon(Icons.favorite_rounded, size: 108, color: MPalette.like, shadows: [Shadow(blurRadius: 18, color: MPalette.night.withValues(alpha: 0.38))]),
               ),
             ),
           ),

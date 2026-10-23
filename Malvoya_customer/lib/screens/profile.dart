@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import 'chatbot.dart';
 import 'settings_screen.dart';
@@ -18,13 +20,10 @@ import '../core/agreements.dart';
 import '../widgets/agreement_sheet.dart';
 import '../widgets/forgot_password_sheet.dart';
 import '../core/sign_in.dart';
-import '../core/strings.dart';
-import '../locale_provider.dart';
 import '../l10n.dart';
 import '../config/theme.dart';
 import '../theme_provider.dart';
 import 'notification_center_drawer.dart';
-import '../core/haptics.dart';
 
 /// Profile: orders, favourites, addresses, language, appearance, privacy and help.
 
@@ -63,7 +62,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ? tr(context, 'Privacy Policy update on $date: review', 'Tietosuojaseloste päivittyy $date: tutustu')
             : tr(context, 'Terms update on $date: review', 'Käyttöehdot päivittyvät $date: tutustu');
         return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+          padding: const EdgeInsets.fromLTRB(MSpace.lg, 0, MSpace.lg, 14),
           child: Material(
             color: AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine),
             borderRadius: BorderRadius.circular(AppTheme.radiusMd),
@@ -76,14 +75,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(minHeight: 56),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: MSpace.lg, vertical: MSpace.md),
                   child: Row(
                     children: [
-                      Icon(Icons.event_note_rounded, color: AppTheme.isDarkMode(context) ? AppTheme.sunshine : const Color(0xFF8A5A00)),
-                      const SizedBox(width: 12),
+                      Icon(Icons.event_note_rounded, color: AppTheme.isDarkMode(context) ? AppTheme.sunshine : MPalette.amberInk),
+                      const SizedBox(width: MSpace.md),
                       Expanded(
                         child: Text(text,
-                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
+                            style: TextStyle(fontSize: MTextSize.bodyM, fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
                       ),
                       Icon(Icons.chevron_right_rounded, color: AppTheme.secondaryText(context)),
                     ],
@@ -136,26 +135,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
       backgroundColor: cardBg,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
       builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+        padding: const EdgeInsets.fromLTRB(MSpace.xl, MSpace.lg, MSpace.xl, 28),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Center(
-              child: Container(
-                width: 44,
-                height: 4,
-                decoration: BoxDecoration(color: Colors.grey.shade400, borderRadius: BorderRadius.circular(2)),
-              ),
-            ),
+            const SizedBox.shrink(),
             const SizedBox(height: 18),
-            Text(l10n.translate('displayAppearance'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textPrimary)),
-            const SizedBox(height: 4),
-            Text(l10n.translate('displayAppearanceSubtitle'), style: TextStyle(fontSize: 12, color: textSecondary)),
-            const SizedBox(height: 16),
+            Text(l10n.translate('displayAppearance'), style: TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w800, color: textPrimary)),
+            const SizedBox(height: MSpace.xs),
+            Text(l10n.translate('displayAppearanceSubtitle'), style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
+            const SizedBox(height: MSpace.lg),
             ListTile(
-              leading: const Icon(Icons.light_mode_rounded, color: Color(0xFFEAB308), size: 22),
-              title: Text(l10n.translate('themeCrispDaylight'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
+              leading: const Icon(Icons.light_mode_rounded, color: MPalette.amber, size: 22),
+              title: Text(l10n.translate('themeCrispDaylight'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyM, color: textPrimary)),
               trailing: themeProvider.mode == AppThemeMode.light ? const Icon(Icons.check_circle_rounded, color: AppTheme.primary) : null,
               onTap: () {
                 Haptics.selection();
@@ -165,8 +158,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             Divider(height: 1, indent: 56, color: dividerColor),
             ListTile(
-              leading: const Icon(Icons.dark_mode_rounded, color: Color(0xFF6D2E8C), size: 22),
-              title: Text(l10n.translate('themeOledMidnight'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
+              leading: const Icon(Icons.dark_mode_rounded, color: MPalette.malva, size: 22),
+              title: Text(l10n.translate('themeOledMidnight'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyM, color: textPrimary)),
               trailing: themeProvider.mode == AppThemeMode.dark ? const Icon(Icons.check_circle_rounded, color: AppTheme.primary) : null,
               onTap: () {
                 Haptics.selection();
@@ -176,8 +169,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             Divider(height: 1, indent: 56, color: dividerColor),
             ListTile(
-              leading: const Icon(Icons.wb_sunny_outlined, color: Color(0xFFB86E00), size: 22),
-              title: Text(l10n.translate('themeEyeComfort'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
+              leading: const Icon(Icons.wb_sunny_outlined, color: MPalette.amberInk, size: 22),
+              title: Text(l10n.translate('themeEyeComfort'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyM, color: textPrimary)),
               trailing: themeProvider.mode == AppThemeMode.eyeComfort ? const Icon(Icons.check_circle_rounded, color: AppTheme.primary) : null,
               onTap: () {
                 Haptics.selection();
@@ -209,18 +202,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
             final l10n = AppLocalizations.of(context);
             return Container(
               constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.78),
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              padding: const EdgeInsets.fromLTRB(MSpace.xl, MSpace.lg, MSpace.xl, MSpace.xxl),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(color: Colors.grey.shade400, borderRadius: BorderRadius.circular(2)),
-                    ),
-                  ),
+                  const SizedBox.shrink(),
                   const SizedBox(height: 18),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -230,12 +217,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         children: [
                           Text(
                             l10n.translate('language'),
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textPrimary),
+                            style: TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w800, color: textPrimary),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             l10n.translate('instantSwitching'),
-                            style: TextStyle(fontSize: 12, color: textSecondary),
+                            style: TextStyle(fontSize: MTextSize.caption, color: textSecondary),
                           ),
                         ],
                       ),
@@ -254,12 +241,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       children: AppLocalizations.languages.entries.map((entry) {
                         final isSelected = provider.locale.languageCode == entry.key;
                         return ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: MSpace.md, vertical: 3),
                           title: Text(
                             entry.value,
                             style: TextStyle(
                               fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
-                              fontSize: 15,
+                              fontSize: MTextSize.bodyL,
                               color: isSelected ? AppTheme.primary : textPrimary,
                             ),
                           ),
@@ -274,7 +261,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               SnackBar(
                                 content: Text(l10n.translate('languageSwitchedTo').replaceAll('{lang}', entry.value)),
                                 duration: const Duration(seconds: 2),
-                                backgroundColor: const Color(0xFF1E1B4B),
+                                backgroundColor: MPalette.night,
                               ),
                             );
                           },
@@ -308,9 +295,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: cardBg,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: Text(l10n.translate('logOutTitle'), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: textPrimary)),
-        content: Text(l10n.translate('logOutMsg'), style: const TextStyle(fontSize: 13)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(MRadius.lg)),
+        title: Text(l10n.translate('logOutTitle'), style: TextStyle(fontWeight: FontWeight.bold, fontSize: MTextSize.title, color: textPrimary)),
+        content: Text(l10n.translate('logOutMsg'), style: const TextStyle(fontSize: MTextSize.label)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -318,9 +305,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFD93025),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              backgroundColor: MPalette.red,
+              foregroundColor: AppTheme.onBrand,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(MRadius.sm)),
             ),
             onPressed: () {
               Navigator.pop(ctx);
@@ -357,7 +344,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             border: Border.all(color: borderColor),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.03),
+                color: MPalette.night.withValues(alpha: 0.03),
                 blurRadius: 8,
                 offset: const Offset(0, 3),
               ),
@@ -380,14 +367,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: textPrimary),
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.label, color: textPrimary),
               ),
               const SizedBox(height: 2),
               Text(
                 subtitle,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 11, color: textSecondary),
+                style: TextStyle(fontSize: MTextSize.caption, color: textSecondary),
               ),
             ],
           ),
@@ -406,16 +393,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final borderColor = AppTheme.cardBorder(context);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: MSpace.lg, vertical: MSpace.sm),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.only(left: 4, bottom: 6),
+            padding: const EdgeInsets.only(left: MSpace.xs, bottom: 6),
             child: Text(
               title.toUpperCase(),
               style: TextStyle(
-                fontSize: 11,
+                fontSize: MTextSize.caption,
                 fontWeight: FontWeight.w800,
                 color: textSecondary,
                 letterSpacing: 0.8,
@@ -449,24 +436,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final textSecondary = AppTheme.secondaryText(context);
 
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+      contentPadding: const EdgeInsets.symmetric(horizontal: MSpace.lg, vertical: 2),
       leading: Container(
         width: 34,
         height: 34,
         decoration: BoxDecoration(
           color: iconColor.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(MRadius.xs),
         ),
         child: Icon(icon, color: iconColor, size: 18),
       ),
       title: Text(
         title,
-        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary),
+        style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyM, color: textPrimary),
       ),
       subtitle: subtitle != null
-          ? Text(subtitle, style: TextStyle(fontSize: 11, color: textSecondary))
+          ? Text(subtitle, style: TextStyle(fontSize: MTextSize.caption, color: textSecondary))
           : null,
-      trailing: trailing ?? const Icon(Icons.chevron_right_rounded, color: Colors.grey, size: 20),
+      trailing: trailing ?? Icon(Icons.chevron_right_rounded, color: AppTheme.secondaryText(context), size: 20),
       onTap: onTap,
     );
   }
@@ -496,7 +483,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           appBar: AppBar(
             title: Text(
               l10n.translate('profile'),
-              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: textPrimary),
+              style: TextStyle(fontWeight: FontWeight.w900, fontSize: MTextSize.title, color: textPrimary),
             ),
             elevation: 0,
             backgroundColor: cardBg,
@@ -514,7 +501,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             children: [
               // Sleek Customer Profile Header with Authentic Verification Badge
               Container(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                padding: const EdgeInsets.fromLTRB(MSpace.xl, MSpace.lg, MSpace.xl, MSpace.xl),
                 color: cardBg,
                 child: Row(
                   children: [
@@ -523,7 +510,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       backgroundColor: AppTheme.primary,
                       child: Text(
                         userInitial,
-                        style: const TextStyle(fontSize: 26, color: Colors.white, fontWeight: FontWeight.w900),
+                        style: const TextStyle(fontSize: MTextSize.displayM, color: AppTheme.onBrand, fontWeight: FontWeight.w900),
                       ),
                     ),
                     const SizedBox(width: 14),
@@ -533,14 +520,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         children: [
                           Text(
                             userName,
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: textPrimary),
+                            style: TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w900, color: textPrimary),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
                           const SizedBox(height: 3),
                           Text(
                             userEmail.isNotEmpty ? userEmail : (auth.currentUser?.phone ?? ''),
-                            style: TextStyle(color: textSecondary, fontSize: 12),
+                            style: TextStyle(color: textSecondary, fontSize: MTextSize.caption),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -556,7 +543,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               // Guests: an account is needed to pay, follow orders and save favourites
               if (!auth.isAuthenticated)
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                  padding: const EdgeInsets.fromLTRB(MSpace.lg, 0, MSpace.lg, 14),
                   child: SignInCard(
                     title: tr(context, 'Sign in or create an account', 'Kirjaudu tai luo tili'),
                     message: tr(context, 'You need an account to pay, follow your orders and save favourites. Your bag stays as it is.',
@@ -569,13 +556,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
               // Quick-Access Action Grid (4 Refined Cards: Orders, Returns/Swap, Addresses, Language)
               // Google Pay completely removed per brand guidelines
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: MSpace.lg),
                 child: Row(
                   children: [
                     _buildQuickCard(
                       context: context,
                       icon: Icons.receipt_long_rounded,
-                      iconColor: const Color(0xFF6D2E8C),
+                      iconColor: MPalette.malva,
                       title: l10n.translate('orders'),
                       subtitle: l10n.translate('liveTracking'),
                       onTap: () => _nav(context, const OrdersScreen()),
@@ -584,7 +571,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     _buildQuickCard(
                       context: context,
                       icon: Icons.favorite_rounded,
-                      iconColor: const Color(0xFFC2412D),
+                      iconColor: MPalette.lingon,
                       title: tr(context, 'Favourites', 'Suosikit'),
                       subtitle: tr(context, 'Saved items', 'Tallennetut tuotteet'),
                       onTap: () => _nav(context, const FavoritesScreen()),
@@ -594,13 +581,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 10),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: MSpace.lg),
                 child: Row(
                   children: [
                     _buildQuickCard(
                       context: context,
                       icon: Icons.location_on_rounded,
-                      iconColor: const Color(0xFF6D2E8C),
+                      iconColor: MPalette.malva,
                       title: l10n.translate('deliveryAddresses'),
                       subtitle: l10n.translate('savedLocations'),
                       onTap: () => _nav(context, const AddressManagementScreen()),
@@ -609,7 +596,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     _buildQuickCard(
                       context: context,
                       icon: Icons.language_rounded,
-                      iconColor: const Color(0xFF55226E),
+                      iconColor: MPalette.malvaStrong,
                       title: l10n.translate('language'),
                       subtitle: currentLangName,
                       onTap: () => _showLanguageBottomSheet(context),
@@ -618,7 +605,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
 
-              const SizedBox(height: 16),
+              const SizedBox(height: MSpace.lg),
 
               if (_referral != null && auth.isAuthenticated)
                 _buildMenuGroup(
@@ -628,7 +615,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     _buildTile(
                       context: context,
                       icon: Icons.card_giftcard_rounded,
-                      iconColor: const Color(0xFFB86E00),
+                      iconColor: MPalette.amberInk,
                       title: tr(context, 'Invite a friend', 'Kutsu ystävä'),
                       subtitle: tr(context, 'Share your code: ${_referral!['code']}', 'Jaa koodisi: ${_referral!['code']}'),
                       onTap: () async {
@@ -665,7 +652,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _buildTile(
                     context: context,
                     icon: Icons.palette_outlined,
-                    iconColor: const Color(0xFF6D2E8C),
+                    iconColor: MPalette.malva,
                     title: l10n.translate('displayAppearance'),
                     subtitle: l10n.translate('displayAppearanceSubtitle'),
                     onTap: () => _showThemePicker(context, themeProvider),
@@ -674,7 +661,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _buildTile(
                     context: context,
                     icon: Icons.language_rounded,
-                    iconColor: const Color(0xFF55226E),
+                    iconColor: MPalette.malvaStrong,
                     title: l10n.translate('language'),
                     subtitle: currentLangName,
                     onTap: () => _showLanguageBottomSheet(context),
@@ -683,7 +670,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _buildTile(
                     context: context,
                     icon: Icons.notifications_none_rounded,
-                    iconColor: const Color(0xFF6D2E8C),
+                    iconColor: MPalette.malva,
                     title: l10n.translate('multiChannelAlerts'),
                     subtitle: l10n.translate('multiChannelAlertsSubtitle'),
                     onTap: () => NotificationCenterDrawer.show(context),
@@ -699,7 +686,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _buildTile(
                     context: context,
                     icon: Icons.account_balance_wallet_outlined,
-                    iconColor: const Color(0xFF6D2E8C),
+                    iconColor: MPalette.malva,
                     title: l10n.translate('paymentMethods'),
                     subtitle: l10n.translate('paymentMethodsSubtitle'),
                     onTap: () => _nav(context, const PaymentMethodsScreen()),
@@ -708,7 +695,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _buildTile(
                     context: context,
                     icon: Icons.assignment_return_outlined,
-                    iconColor: const Color(0xFF55226E),
+                    iconColor: MPalette.malvaStrong,
                     title: l10n.translate('refundsReturns'),
                     subtitle: l10n.translate('refundsReturnsSubtitle'),
                     onTap: () => _nav(context, const ReturnsScreen()),
@@ -724,7 +711,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _buildTile(
                     context: context,
                     icon: Icons.privacy_tip_outlined,
-                    iconColor: Colors.teal,
+                    iconColor: MPalette.green,
                     title: l10n.translate('dataRights'),
                     subtitle: l10n.translate('dataRightsSubtitle'),
                     onTap: () => _nav(context, const PrivacyGdprScreen()),
@@ -733,7 +720,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _buildTile(
                     context: context,
                     icon: Icons.gavel_rounded,
-                    iconColor: const Color(0xFFB86E00),
+                    iconColor: MPalette.amberInk,
                     title: l10n.translate('legalTerms'),
                     subtitle: l10n.translate('legalTermsSubtitle'),
                     onTap: () => _nav(context, const TermsLegalScreen()),
@@ -752,7 +739,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     _buildTile(
                       context: context,
                       icon: Icons.block_rounded,
-                      iconColor: const Color(0xFFD93025),
+                      iconColor: MPalette.red,
                       title: tr(context, 'Blocked users', 'Estetyt käyttäjät'),
                       subtitle: tr(context, 'People whose comments and reviews you have hidden', 'Henkilöt, joiden kommentit ja arviot olet piilottanut'),
                       onTap: () => _nav(context, const BlockedUsersScreen()),
@@ -778,7 +765,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _buildTile(
                     context: context,
                     icon: Icons.support_agent_rounded,
-                    iconColor: const Color(0xFF8E4FAE),
+                    iconColor: MPalette.malva,
                     title: l10n.translate('customerSupport'),
                     subtitle: l10n.translate('customerSupportSubtitle'),
                     onTap: () => _nav(context, const SupportHubScreen()),
@@ -786,28 +773,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ],
               ),
 
-              const SizedBox(height: 16),
+              const SizedBox(height: MSpace.lg),
 
               // Bottom Clean Account Actions (Log Out & GDPR Art. 17 Delete)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
+                padding: const EdgeInsets.symmetric(horizontal: MSpace.xl),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     TextButton.icon(
-                      icon: const Icon(Icons.logout_rounded, color: Color(0xFFD93025), size: 17),
+                      icon: const Icon(Icons.logout_rounded, color: MPalette.red, size: 17),
                       label: Text(
                         l10n.translate('logOut'),
-                        style: const TextStyle(color: Color(0xFFD93025), fontSize: 13, fontWeight: FontWeight.w700),
+                        style: const TextStyle(color: MPalette.red, fontSize: MTextSize.label, fontWeight: FontWeight.w700),
                       ),
                       onPressed: () => _confirmLogout(context, auth),
                     ),
                     Text('  •  ', style: TextStyle(color: textSecondary)),
                     TextButton.icon(
-                      icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFB3261E), size: 17),
+                      icon: const Icon(Icons.delete_outline_rounded, color: MPalette.redInk, size: 17),
                       label: Text(
                         l10n.translate('deleteAccountGdpr'),
-                        style: const TextStyle(color: Color(0xFFB3261E), fontSize: 12, fontWeight: FontWeight.w800),
+                        style: const TextStyle(color: MPalette.redInk, fontSize: MTextSize.caption, fontWeight: FontWeight.w800),
                       ),
                       onPressed: () => _openAccountDeletion(context),
                     ),

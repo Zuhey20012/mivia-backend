@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
-import '../core/strings.dart';
 
 /// The vehicle types the server accepts (`PATCH /courier/me {vehicleType}`, API 2.11).
 const kVehicleTypes = ['bicycle', 'ebike', 'moped', 'scooter', 'car', 'on_foot'];
@@ -29,11 +29,7 @@ String vehicleLabel(BuildContext context, String type) => switch (type) {
     };
 
 /// Picks how the courier gets around and saves it at once. Returns the saved type, or null.
-Future<String?> showVehiclePicker(BuildContext context, {String? current}) => showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => _VehicleSheet(current: current),
-    );
+Future<String?> showVehiclePicker(BuildContext context, {String? current}) => showMSheet<String>(context, builder: (_) => _VehicleSheet(current: current), isScrollControlled: true, useSafeArea: false);
 
 class _VehicleSheet extends StatefulWidget {
   final String? current;
@@ -70,7 +66,7 @@ class _VehicleSheetState extends State<_VehicleSheet> {
   Widget build(BuildContext context) {
     return SafeArea(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+        padding: const EdgeInsets.fromLTRB(MSpace.xl, 0, MSpace.xl, MSpace.lg),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(tr(context, 'How do you deliver?', 'Millä toimitat?'), style: AppTheme.display(size: 22)),
           const SizedBox(height: 6),
@@ -89,10 +85,10 @@ class _VehicleSheetState extends State<_VehicleSheet> {
           }),
           if (_error != null)
             Padding(
-              padding: const EdgeInsets.only(top: 12),
+              padding: const EdgeInsets.only(top: MSpace.md),
               child: Text(_error!, style: const TextStyle(color: AppTheme.danger, fontWeight: FontWeight.w600)),
             ),
-          const SizedBox(height: 8),
+          const SizedBox(height: MSpace.sm),
           Center(
             child: TextButton(
               style: TextButton.styleFrom(minimumSize: const Size(64, 48), foregroundColor: AppTheme.textSecondary),
@@ -119,12 +115,12 @@ class _VehicleSheetState extends State<_VehicleSheet> {
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 96),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: MSpace.sm, vertical: 14),
               child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                 _saving == type
                     ? const SizedBox(width: 32, height: 32, child: CircularProgressIndicator(strokeWidth: 2.5))
                     : Icon(vehicleIcon(type), size: 32, color: AppTheme.textPrimary),
-                const SizedBox(height: 8),
+                const SizedBox(height: MSpace.sm),
                 Text(vehicleLabel(context, type), textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w700)),
               ]),
             ),
@@ -138,11 +134,7 @@ class _VehicleSheetState extends State<_VehicleSheet> {
 /// Name and contact phone for the courier profile: the name through `PATCH /me/profile`, the
 /// phone through `PATCH /courier/me {phone}`. True when something was saved.
 Future<bool> showCourierProfileSheet(BuildContext context) async =>
-    await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => const _ProfileSheet(),
-    ) ==
+    await showMSheet<bool>(context, builder: (_) => const _ProfileSheet(), isScrollControlled: true, useSafeArea: false) ==
     true;
 
 class _ProfileSheet extends StatefulWidget {
@@ -247,7 +239,7 @@ class _ProfileSheetState extends State<_ProfileSheet> {
       child: Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+          padding: const EdgeInsets.fromLTRB(MSpace.xl, 0, MSpace.xl, MSpace.lg),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text(tr(context, 'Name and phone', 'Nimi ja puhelin'), style: AppTheme.display(size: 22)),
             const SizedBox(height: 6),
@@ -256,9 +248,9 @@ class _ProfileSheetState extends State<_ProfileSheet> {
                   'Malvoyan tiimi käyttää puhelinnumeroasi tavoittaakseen sinut hakemukseesi ja toimituksiin liittyen.'),
               style: const TextStyle(color: AppTheme.textSecondary, height: 1.4),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: MSpace.lg),
             if (_loading)
-              const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()))
+              const Padding(padding: EdgeInsets.all(MSpace.xxl), child: Center(child: CircularProgressIndicator()))
             else ...[
               TextField(
                 controller: _name,
@@ -268,7 +260,7 @@ class _ProfileSheetState extends State<_ProfileSheet> {
                 maxLength: 80,
                 decoration: InputDecoration(labelText: tr(context, 'Name', 'Nimi'), counterText: ''),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: MSpace.md),
               TextField(
                 controller: _phone,
                 keyboardType: TextInputType.phone,
@@ -284,14 +276,9 @@ class _ProfileSheetState extends State<_ProfileSheet> {
                 padding: const EdgeInsets.only(top: 10),
                 child: Text(_error!, style: const TextStyle(color: AppTheme.danger, fontWeight: FontWeight.w600)),
               ),
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: _loading || _saving ? null : _save,
-              child: _saving
-                  ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
-                  : Text(tr(context, 'Save', 'Tallenna')),
-            ),
-            const SizedBox(height: 4),
+            const SizedBox(height: MSpace.lg),
+            MButton(label: tr(context, 'Save', 'Tallenna'), loading: _saving, onPressed: _loading || _saving ? null : _save),
+            const SizedBox(height: MSpace.xs),
             Center(
               child: TextButton(
                 style: TextButton.styleFrom(minimumSize: const Size(64, 48), foregroundColor: AppTheme.textSecondary),

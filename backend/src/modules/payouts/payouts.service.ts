@@ -23,7 +23,8 @@ async function partyFor(actor: Actor): Promise<Party> {
   if (actor.role === "COURIER") {
     const courier = await prisma.courier.findUnique({ where: { userId: actor.id } });
     if (!courier) throw new ApiError("Courier profile not found", 404);
-    if (!courier.isApproved) throw new ApiError("You can set up payouts once your account is approved", 403);
+    // Stripe onboarding may be done before approval (it is a step of the onboarding checklist that leads to approval);
+    // money only ever flows for delivered jobs, and only approved couriers get jobs
     return { kind: "COURIER", id: courier.id, accountId: courier.stripeAccountId, email: user.email, individual: true, name: courier.name };
   }
   throw new ApiError("Payouts are for stores and couriers", 403);

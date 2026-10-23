@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../cart.dart';
 import '../config/theme.dart';
 import '../core/deep_links.dart';
-import '../core/strings.dart';
 import 'home.dart';
 import 'drops_feed.dart';
 import 'search.dart';
@@ -11,8 +12,6 @@ import 'orders.dart';
 import 'profile.dart';
 import '../checkout.dart';
 import '../l10n.dart';
-import '../widgets/motion.dart';
-import '../core/haptics.dart';
 
 /// Lets the main screen notice when a screen pushed over it (checkout, an order, a store) closes.
 final mainRouteObserver = RouteObserver<ModalRoute<void>>();
@@ -141,15 +140,15 @@ class _MainNavigationState extends State<MainNavigation> with RouteAware {
             ],
           ),
           bottomNavigationBar: SafeArea(
-            minimum: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+            minimum: const EdgeInsets.fromLTRB(14, 0, 14, MSpace.md),
             child: Container(
               height: 66,
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF2A2331) : AppTheme.night,
+                color: isDark ? MPalette.nightSurfaceVariant : AppTheme.night,
                 borderRadius: BorderRadius.circular(33),
                 boxShadow: [
-                  BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 24, offset: const Offset(0, 8)),
+                  BoxShadow(color: MPalette.night.withValues(alpha: 0.18), blurRadius: 24, offset: const Offset(0, 8)),
                 ],
               ),
               child: Row(
@@ -193,7 +192,7 @@ class _MainNavigationState extends State<MainNavigation> with RouteAware {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(selected ? activeIcon : icon, size: 23, color: selected ? AppTheme.ink : Colors.white.withValues(alpha: 0.72)),
+                Icon(selected ? activeIcon : icon, size: 23, color: selected ? AppTheme.ink : AppTheme.onBrand.withValues(alpha: 0.72)),
                 if (selected) ...[
                   const SizedBox(width: 6),
                   Flexible(
@@ -201,7 +200,7 @@ class _MainNavigationState extends State<MainNavigation> with RouteAware {
                       label,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: AppTheme.ink, fontSize: 13.5, fontWeight: FontWeight.w800),
+                      style: const TextStyle(color: AppTheme.ink, fontSize: MTextSize.label, fontWeight: FontWeight.w800),
                     ),
                   ),
                 ],
@@ -230,7 +229,7 @@ class _MainNavigationState extends State<MainNavigation> with RouteAware {
             },
             child: Container(
               height: 62,
-              padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+              padding: const EdgeInsets.fromLTRB(MSpace.sm, MSpace.sm, MSpace.sm, MSpace.sm),
               decoration: BoxDecoration(
                 color: AppTheme.primary,
                 borderRadius: BorderRadius.circular(31),
@@ -249,10 +248,10 @@ class _MainNavigationState extends State<MainNavigation> with RouteAware {
                       decoration: const BoxDecoration(color: AppTheme.sunshine, shape: BoxShape.circle),
                       alignment: Alignment.center,
                       child: Text('${cart.itemCount}',
-                          style: const TextStyle(color: AppTheme.ink, fontWeight: FontWeight.w800, fontSize: 17)),
+                          style: const TextStyle(color: AppTheme.ink, fontWeight: FontWeight.w800, fontSize: MTextSize.title)),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: MSpace.md),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -261,22 +260,22 @@ class _MainNavigationState extends State<MainNavigation> with RouteAware {
                         Text(l10n.translate('viewBag'),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                            style: TextStyle(color: AppTheme.onBrand.withValues(alpha: 0.7), fontSize: MTextSize.caption, fontWeight: FontWeight.w600)),
                         AnimatedEuro((cart.total * 100).round(),
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 17)),
+                            style: const TextStyle(color: AppTheme.onBrand, fontWeight: FontWeight.w800, fontSize: MTextSize.title)),
                       ],
                     ),
                   ),
                   Container(
                     height: 46,
                     padding: const EdgeInsets.symmetric(horizontal: 18),
-                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(23)),
+                    decoration: BoxDecoration(color: MPalette.white, borderRadius: BorderRadius.circular(23)),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(tr(ctx, 'Checkout', 'Kassalle'),
-                            style: const TextStyle(color: AppTheme.primaryDark, fontWeight: FontWeight.w800, fontSize: 14.5)),
-                        const SizedBox(width: 4),
+                            style: const TextStyle(color: AppTheme.primaryDark, fontWeight: FontWeight.w800, fontSize: MTextSize.bodyM)),
+                        const SizedBox(width: MSpace.xs),
                         const Icon(Icons.arrow_forward_rounded, color: AppTheme.primaryDark, size: 18),
                       ],
                     ),

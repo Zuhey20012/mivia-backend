@@ -1,14 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/agreements.dart';
-import '../core/api_client.dart';
-import '../core/haptics.dart';
-import '../core/legal_links.dart';
-import '../core/strings.dart';
-import '../widgets/loading_states.dart';
 
 /// Store → Agreements (API 2.11, `GET /me/agreements`): what the store has accepted, announced
 /// updates, and every acceptance with a copy of the exact text. Older servers answer 404; then the
@@ -37,15 +34,15 @@ class _AgreementsScreenState extends State<AgreementsScreen> {
   }
 
   Future<void> _load() async {
-    final res = await _api.get('/me/agreements');
+    final state = await AgreementsApi(_api).load();
     if (!mounted) return;
     setState(() {
       _loading = false;
-      _supported = res.status != 404;
-      _error = res.ok || res.status == 404 ? null : res.errorMessage;
-      if (res.ok) {
-        _required = ((res.data['required'] as List?) ?? const []).whereType<Map>().toList();
-        _history = ((res.data['history'] as List?) ?? const []).whereType<Map>().toList();
+      _supported = !state.unsupported;
+      _error = state.ok || state.unsupported ? null : state.error;
+      if (state.ok) {
+        _required = [for (final d in state.required) d.raw];
+        _history = state.history;
       }
     });
   }
@@ -66,7 +63,7 @@ class _AgreementsScreenState extends State<AgreementsScreen> {
   }
 
   Future<void> _openUrl(String? url) async {
-    Haptics.select();
+    Haptics.selection();
     final uri = Uri.tryParse(url ?? '');
     if (uri == null || uri.scheme != 'https') return;
     try {
@@ -76,13 +73,12 @@ class _AgreementsScreenState extends State<AgreementsScreen> {
 
   /// A fresh 10-minute link each time, opened in the browser (where the copy can be printed or saved).
   Future<void> _openCopy(Map h) async {
-    Haptics.select();
+    Haptics.selection();
     final id = h['id'];
     setState(() => _opening.add(id));
-    final res = await _api.get('/me/agreements/$id/copy/link');
+    final (uri, res) = await AgreementsApi(_api).copyLink(asInt(id) ?? 0);
     if (!mounted) return;
     setState(() => _opening.remove(id));
-    final uri = Uri.tryParse('${res.data['url'] ?? ''}');
     var opened = false;
     if (res.ok && uri != null && uri.scheme == 'https') {
       try {
@@ -90,9 +86,7 @@ class _AgreementsScreenState extends State<AgreementsScreen> {
       } catch (_) {}
     }
     if (!mounted || opened) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(res.ok ? tr(context, 'Could not open the browser. Please try again.', 'Selainta ei voitu avata. Yritä uudelleen.') : res.errorMessage),
-    ));
+    MSnack.show(context, res.ok ? tr(context, 'Could not open the browser. Please try again.', 'Selainta ei voitu avata. Yritä uudelleen.') : res.errorMessage);
   }
 
   @override
@@ -101,29 +95,29 @@ class _AgreementsScreenState extends State<AgreementsScreen> {
       backgroundColor: AppTheme.background,
       appBar: AppBar(title: Text(tr(context, 'Agreements', 'Sopimukset'))),
       body: _loading
-          ? const SkeletonList(count: 3)
+          ? const MSkeletonList(count: 3)
           : RefreshIndicator(
               onRefresh: _load,
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.sm, MSpace.lg, MSpace.x3l),
                 children: [
-                  if (_error != null) ErrorState(message: _error, onRetry: _retry, top: 24),
+                  if (_error != null) MStateMessage.error(scrollable: false, message: _error, onRetry: _retry, top: 24),
                   if (_error == null && !_supported) ..._olderServer(),
                   if (_error == null && _supported) ...[
                     for (final item in _required) _statusCard(item),
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(4, 12, 4, 8),
+                      padding: const EdgeInsets.fromLTRB(MSpace.xs, MSpace.md, MSpace.xs, MSpace.sm),
                       child: Text(tr(context, 'What you have accepted', 'Hyväksymäsi'), style: AppTheme.display(size: 18)),
                     ),
                     if (_history.isEmpty)
                       Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                        padding: const EdgeInsets.symmetric(horizontal: MSpace.xs, vertical: MSpace.sm),
                         child: Text(tr(context, 'Nothing recorded yet.', 'Ei vielä kirjauksia.'), style: const TextStyle(color: AppTheme.textSecondary)),
                       ),
                     if (_history.isNotEmpty)
                       Container(
-                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppTheme.divider)),
+                        decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppTheme.divider)),
                         child: Column(children: [
                           for (var i = 0; i < _history.length; i++) ...[
                             if (i > 0) const Divider(height: 1),
@@ -132,11 +126,11 @@ class _AgreementsScreenState extends State<AgreementsScreen> {
                         ]),
                       ),
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(4, 12, 4, 0),
+                      padding: const EdgeInsets.fromLTRB(MSpace.xs, MSpace.md, MSpace.xs, 0),
                       child: Text(
                         tr(context, 'A copy shows the exact text you accepted. It opens in your browser for 10 minutes, where you can print it or save it as a PDF.',
                             'Kopiossa on täsmälleen hyväksymäsi teksti. Se avautuu selaimeesi 10 minuutiksi, ja voit tulostaa sen tai tallentaa sen PDF-tiedostona.'),
-                        style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary, height: 1.4),
+                        style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary, height: 1.4),
                       ),
                     ),
                   ],
@@ -147,7 +141,7 @@ class _AgreementsScreenState extends State<AgreementsScreen> {
   }
 
   void _retry() {
-    Haptics.select();
+    Haptics.selection();
     setState(() {
       _loading = true;
       _error = null;
@@ -157,7 +151,7 @@ class _AgreementsScreenState extends State<AgreementsScreen> {
 
   List<Widget> _olderServer() => [
         Container(
-          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppTheme.divider)),
+          decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppTheme.divider)),
           child: Column(children: [
             ListTile(
               minTileHeight: 56,
@@ -183,12 +177,12 @@ class _AgreementsScreenState extends State<AgreementsScreen> {
     final title = agreementTitle(context, item['title'], doc);
     final blocking = item['blocking'] == true;
     final accepted = item['accepted'] == true;
-    final acceptedAt = parseDate(item['acceptedAt']);
-    final effectiveAt = parseDate(item['effectiveAt']);
+    final acceptedAt = parseApiDate(item['acceptedAt']);
+    final effectiveAt = parseApiDate(item['effectiveAt']);
     final hasPending = item['pendingVersion'] != null;
     final pendingAccepted = item['pendingAccepted'] == true;
-    final pendingAt = parseDate(item['pendingEffectiveAt']);
-    final terminateBefore = parseDate(item['canTerminateBefore']);
+    final pendingAt = parseApiDate(item['pendingEffectiveAt']);
+    final terminateBefore = parseApiDate(item['canTerminateBefore']);
     final summary = item['summary'] is Map ? '${(item['summary'] as Map)[isFinnish(context) ? 'fi' : 'en'] ?? ''}'.trim() : '';
     final privacy = doc == 'privacy';
 
@@ -206,73 +200,73 @@ class _AgreementsScreenState extends State<AgreementsScreen> {
             : (tr(context, 'Please read it', 'Lue se'), AppTheme.sand, AppTheme.textPrimary, Icons.info_outline_rounded);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(AppTheme.radiusLg - 2), border: Border.all(color: AppTheme.divider)),
+      margin: const EdgeInsets.only(bottom: MSpace.md),
+      padding: const EdgeInsets.fromLTRB(MSpace.lg, 14, MSpace.lg, MSpace.md),
+      decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(AppTheme.radiusLg - 2), border: Border.all(color: AppTheme.divider)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(title, style: AppTheme.display(size: 19)),
         if (effectiveAt != null)
           Padding(
             padding: const EdgeInsets.only(top: 2),
             child: Text(tr(context, 'Version in force since ${longDate(context, effectiveAt)}', 'Voimassa oleva versio ${longDate(context, effectiveAt)} alkaen'),
-                style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary)),
+                style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
           ),
-        const SizedBox(height: 8),
+        const SizedBox(height: MSpace.sm),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          decoration: BoxDecoration(color: statusBg, borderRadius: BorderRadius.circular(12)),
+          decoration: BoxDecoration(color: statusBg, borderRadius: BorderRadius.circular(MRadius.sm)),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Icon(statusIcon, size: 16, color: statusFg),
             const SizedBox(width: 6),
-            Flexible(child: Text(statusText, style: TextStyle(color: statusFg, fontWeight: FontWeight.w800, fontSize: 13))),
+            Flexible(child: Text(statusText, style: TextStyle(color: statusFg, fontWeight: FontWeight.w800, fontSize: MTextSize.label))),
           ]),
         ),
         if (!accepted && blocking)
           Padding(
-            padding: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.only(top: MSpace.sm),
             child: Text(
               tr(context, 'Until you accept, you can\'t accept new orders or publish products. Orders already accepted, returns and payouts carry on.',
                   'Ennen hyväksyntää et voi ottaa vastaan uusia tilauksia etkä julkaista tuotteita. Jo hyväksytyt tilaukset, palautukset ja tilitykset jatkuvat normaalisti.'),
-              style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary, height: 1.4),
+              style: const TextStyle(fontSize: MTextSize.label, color: AppTheme.textSecondary, height: 1.4),
             ),
           ),
         if (hasPending) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: MSpace.md),
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            padding: const EdgeInsets.fromLTRB(MSpace.md, 10, MSpace.md, 10),
             decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(14)),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(
                 pendingAt != null
                     ? tr(context, 'Update announced: takes effect on ${longDate(context, pendingAt)}', 'Muutos ilmoitettu: tulee voimaan ${longDate(context, pendingAt)}')
                     : tr(context, 'Update announced', 'Muutos ilmoitettu'),
-                style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF6A4500)),
+                style: const TextStyle(fontWeight: FontWeight.w800, color: MPalette.amberInk),
               ),
               if (summary.isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.only(top: 4),
+                  padding: const EdgeInsets.only(top: MSpace.xs),
                   child: Text(summary, style: const TextStyle(color: AppTheme.textPrimary, height: 1.4)),
                 ),
               if (terminateBefore != null && !pendingAccepted)
                 Padding(
-                  padding: const EdgeInsets.only(top: 4),
+                  padding: const EdgeInsets.only(top: MSpace.xs),
                   child: Text(
                     tr(context, 'If you don\'t agree, you can end your contract before ${longDate(context, terminateBefore)} (Seller Terms §7a).',
                         'Jos et hyväksy muutosta, voit irtisanoa sopimuksesi ennen ${longDate(context, terminateBefore)} (Myyjän ehdot §7a).'),
-                    style: const TextStyle(fontSize: 13, color: Color(0xFF6A4500), height: 1.4),
+                    style: const TextStyle(fontSize: MTextSize.label, color: MPalette.amberInk, height: 1.4),
                   ),
                 ),
               if (pendingAccepted)
                 Padding(
-                  padding: const EdgeInsets.only(top: 4),
+                  padding: const EdgeInsets.only(top: MSpace.xs),
                   child: Text(tr(context, 'You have already accepted this update.', 'Olet jo hyväksynyt tämän muutoksen.'),
-                      style: const TextStyle(fontSize: 13, color: AppTheme.primary, fontWeight: FontWeight.w700)),
+                      style: const TextStyle(fontSize: MTextSize.label, color: AppTheme.primary, fontWeight: FontWeight.w700)),
                 ),
             ]),
           ),
         ],
-        const SizedBox(height: 8),
+        const SizedBox(height: MSpace.sm),
         Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
           if (!accepted)
             FilledButton(
@@ -303,19 +297,19 @@ class _AgreementsScreenState extends State<AgreementsScreen> {
 
   Widget _historyRow(Map h) {
     final doc = '${h['doc']}';
-    final at = parseDate(h['acceptedAt']);
+    final at = parseApiDate(h['acceptedAt']);
     final method = _methods[h['method']];
     final how = method == null ? null : (isFinnish(context) ? method[1] : method[0]);
     final opening = _opening.contains(h['id']);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+      padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.md, MSpace.sm, MSpace.md),
       child: Row(children: [
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(agreementTitle(context, h['title'], doc), style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
             if (at != null)
-              Text([longDate(context, at), if (how != null) how].join(' · '), style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary)),
-            Text('${h['version'] ?? ''}', style: const TextStyle(fontSize: 11.5, color: AppTheme.textSecondary)),
+              Text([longDate(context, at), if (how != null) how].join(' · '), style: const TextStyle(fontSize: MTextSize.label, color: AppTheme.textSecondary)),
+            Text('${h['version'] ?? ''}', style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
           ]),
         ),
         TextButton(

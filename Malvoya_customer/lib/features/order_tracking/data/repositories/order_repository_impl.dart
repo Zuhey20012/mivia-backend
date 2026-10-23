@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import '../../../../core/app_language.dart';
+import 'package:malvoya_core/malvoya_core.dart';
 import '../../../../config/constants.dart';
 import '../../domain/entities/active_order_entity.dart';
 import '../../domain/repositories/order_repository.dart';
@@ -37,7 +37,7 @@ class OrderRepositoryImpl implements OrderRepository {
         headers: {
           if (accessToken != null) 'Authorization': 'Bearer $accessToken',
           'Content-Type': 'application/json',
-          ...AppLanguage.header,
+          ...AppLanguage.headers,
         },
       ).timeout(const Duration(seconds: 5));
 
@@ -77,7 +77,7 @@ class OrderRepositoryImpl implements OrderRepository {
         headers: {
           if (accessToken != null) 'Authorization': 'Bearer $accessToken',
           'Content-Type': 'application/json',
-          ...AppLanguage.header,
+          ...AppLanguage.headers,
         },
         body: jsonEncode({'reason': reason}),
       );

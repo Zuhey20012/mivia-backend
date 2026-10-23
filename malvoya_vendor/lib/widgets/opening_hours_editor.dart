@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
-import '../core/strings.dart';
 
 class OpeningDay {
   bool open;
@@ -107,9 +108,9 @@ class OpeningHoursEditor extends StatelessWidget {
         if (draft.useHours)
           for (var i = 0; i < 7; i++)
             Container(
-              margin: const EdgeInsets.only(top: 8),
-              padding: const EdgeInsets.fromLTRB(14, 6, 8, 6),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(AppTheme.radiusMd), border: Border.all(color: AppTheme.divider)),
+              margin: const EdgeInsets.only(top: MSpace.sm),
+              padding: const EdgeInsets.fromLTRB(14, 6, MSpace.sm, 6),
+              decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(AppTheme.radiusMd), border: Border.all(color: AppTheme.divider)),
               child: Row(
                 children: [
                   Expanded(
@@ -118,13 +119,13 @@ class OpeningHoursEditor extends StatelessWidget {
                       children: [
                         Text(names[i], style: const TextStyle(fontWeight: FontWeight.w700)),
                         Text(draft.days[i].open ? tr(context, 'Open', 'Auki') : tr(context, 'Closed', 'Suljettu'),
-                            style: TextStyle(fontSize: 12.5, color: draft.days[i].open ? AppTheme.primary : AppTheme.textSecondary)),
+                            style: TextStyle(fontSize: MTextSize.caption, color: draft.days[i].open ? AppTheme.primary : AppTheme.textSecondary)),
                       ],
                     ),
                   ),
                   if (draft.days[i].open) ...[
                     _timeButton(OpeningHoursDraft.fmt(draft.days[i].from), () => _pick(context, draft.days[i], true)),
-                    const Padding(padding: EdgeInsets.symmetric(horizontal: 4), child: Text('–')),
+                    const Padding(padding: EdgeInsets.symmetric(horizontal: MSpace.xs), child: Text('–')),
                     _timeButton(OpeningHoursDraft.fmt(draft.days[i].to), () => _pick(context, draft.days[i], false)),
                   ],
                   Switch(
@@ -143,15 +144,15 @@ class OpeningHoursEditor extends StatelessWidget {
 
   Widget _timeButton(String label, VoidCallback onTap) => Material(
         color: AppTheme.sand,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(MRadius.sm),
         child: InkWell(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(MRadius.sm),
           onTap: onTap,
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 48),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Center(widthFactor: 1, child: Text(label, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15))),
+              child: Center(widthFactor: 1, child: Text(label, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyL))),
             ),
           ),
         ),

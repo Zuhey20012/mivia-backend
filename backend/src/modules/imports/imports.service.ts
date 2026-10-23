@@ -6,6 +6,11 @@ import { ApiError } from "../../lib/errors";
 import { imageUrl, mediaConfigured, uploadRemoteImage } from "../../lib/cloudinary";
 import { createProductSchema } from "../products/products.schema";
 import { applyProductUpdate, assertOwnImages, createProductRecord } from "../products/products.service";
+import { productInclude } from "../products/pricing";
+import { FieldsError, ownerPublishCheck, prepareCatalogWrite } from "../catalog/productWrite";
+import { PublishStore } from "../catalog/publish";
+import { HOLD_REASONS, TOPS } from "../catalog/taxonomy";
+import { attrDef } from "../catalog/attributes";
 import { ImportIssue, ImportItem } from "./mapping";
 import { assertPublicHost, parseShopUrl } from "./safeFetch";
 import { assertEuroShop, fetchShopifyProducts, mapShopifyProduct } from "./shopify";
@@ -211,9 +216,10 @@ async function runJob(jobId: number, storeId: number, source: ImportSource, load
   await progress();
 
   const uploaded = new Map<string, string>(); // remote url → our URL, within this job
+  const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId }, select: { id: true, sellerType: true, safetyPledgeAt: true } });
   for (const item of items) {
     try {
-      const result = await importItem(jobId, storeId, source, item, uploaded, note, budget);
+      const result = await importItem(jobId, store, source, item, uploaded, note, budget);
       counts[result]++;
     } catch (e: any) {
       counts.skipped++;
@@ -246,10 +252,20 @@ async function rehost(storeId: number, remote: string, cache: Map<string, string
   return url;
 }
 
+/** "Material, Manufacturer, …": the missing fields of an imported draft, for the import report. */
+function missingText(fields: { field: string }[]) {
+  const names = [...new Set(fields.map((f) => {
+    const key = f.field.replace(/^attributes\./, "").split(".")[0];
+    return attrDef(key)?.label.en ?? ({ categorySlug: "category", manufacturerId: "manufacturer", responsiblePersonId: "responsible person", productModel: "model / type", warnings: "warnings (FI + SV)", safetyPledge: "safety pledge", contentAmount: "content (ml / g)", name: "name (generic green claim)", description: "description (generic green claim)" } as Record<string, string>)[key] ?? key;
+  }))];
+  return names.slice(0, 8).join(", ") + (names.length > 8 ? ", …" : "");
+}
+
 async function importItem(
-  jobId: number, storeId: number, source: ImportSource, item: ImportItem,
+  jobId: number, store: PublishStore & { id: number }, source: ImportSource, item: ImportItem,
   cache: Map<string, string>, note: (i: ImportIssue) => void, budget: UploadBudget,
 ): Promise<"created" | "updated"> {
+  const storeId = store.id;
   const existing = await prisma.product.findFirst({
     where: { storeId, externalSource: source, externalId: item.externalId },
     include: { variants: true },
@@ -265,10 +281,16 @@ async function importItem(
   });
   assertOwnImages(images, storeId); // never a remote URL on a product
 
+  const m = item.match;
   const parsed = createProductSchema.safeParse({
     name: item.name,
     description: item.description,
     category: item.category,
+    // Mapped with the spec's keyword rules; unmatched items stay drafts without a category (never "Other")
+    ...(m.slug && !m.hold ? { categorySlug: m.slug } : {}),
+    ...(m.audience ? { audience: m.audience } : {}),
+    ...(item.brand || m.vintage ? { attributes: { ...(item.brand ? { brand: item.brand } : {}), ...(m.vintage && m.slug ? { vintage: true } : {}) } } : {}),
+    ...(item.content ? { contentAmount: item.content.amount, contentUnit: item.content.unit } : {}),
     condition: item.condition,
     tags: item.tags,
     images,
@@ -286,7 +308,28 @@ async function importItem(
   const bookkeeping = { gtin: item.gtin ?? null, importJobId: jobId };
 
   if (!existing) {
-    await createProductRecord(storeId, { ...data, isAvailable: false }, { ...bookkeeping, importDraft: true, externalSource: source, externalId: item.externalId });
+    let prepared;
+    try {
+      prepared = await prepareCatalogWrite(store, null, { ...data, isAvailable: false }, { mapLegacy: false });
+    } catch (e) {
+      // Attribute values the shop's data got wrong: keep the draft without them rather than losing the product
+      if (!(e instanceof FieldsError)) throw e;
+      prepared = await prepareCatalogWrite(store, null, { ...data, attributes: undefined, isAvailable: false }, { mapLegacy: false });
+    }
+    if (m.hold) {
+      prepared.data.importHold = m.holdKey;
+      note({ item: item.label, message: `On hold: ${(HOLD_REASONS[m.holdKey!] ?? m.hold).en}`, level: "warning" });
+    } else if (!m.slug) {
+      note({ item: item.label, message: m.topOnly
+        ? `Looks like ${TOPS.get(m.topOnly)?.en ?? m.topOnly}: pick the exact category before publishing`
+        : "No category matched: pick one before publishing", level: "warning" });
+    } else if (m.slug.endsWith("-other")) {
+      note({ item: item.label, message: "Filed under Other clothing: check the category", level: "warning" });
+    }
+    for (const w of prepared.warnings) note({ item: item.label, message: w.message.en, level: "warning" });
+    const created = await createProductRecord(storeId, prepared.data, { ...bookkeeping, importDraft: true, externalSource: source, externalId: item.externalId });
+    const check = ownerPublishCheck(created, store);
+    if (!check.ready) note({ item: item.label, message: `Missing before publishing: ${missingText(check.missing)}`, level: "warning" });
     return "created";
   }
 
@@ -325,20 +368,34 @@ export async function getJob(ownerId: number, id: number) {
 
 /**
  * Makes the job's drafts visible: only imported products that were never published or hidden by the store
- * (importDraft), with at least one photo and a price. A product the store hid or deleted stays hidden.
+ * (importDraft), with at least one photo and a price, and (since 2.12.0) that meet their template's publishing rules.
+ * The others stay drafts and are listed in `incomplete` with what is missing. A product the store hid or deleted
+ * stays hidden.
  */
 export async function publishJob(ownerId: number, id: number) {
   const job = await jobForOwner(ownerId, id);
   if (job.status === "QUEUED" || job.status === "RUNNING") throw new ApiError("This import is still running", 409);
-  const res = await prisma.product.updateMany({
+  const store = await prisma.store.findUniqueOrThrow({ where: { id: job.storeId }, select: { sellerType: true, safetyPledgeAt: true } });
+  const drafts = await prisma.product.findMany({
     where: {
-      storeId: job.storeId, importJobId: job.id, importDraft: true, isAvailable: false, canBeSold: true,
+      storeId: job.storeId, importJobId: job.id, importDraft: true, isAvailable: false, canBeSold: true, lockedAt: null, deletedAt: null,
       salePriceCents: { not: null }, images: { isEmpty: false },
     },
-    data: { isAvailable: true, importDraft: false },
+    include: productInclude,
+    take: 2000,
   });
+  const ready: number[] = [];
+  const incomplete: { productId: number; name: string; missing: { field: string; code: string; message: { en: string; fi: string } }[] }[] = [];
+  for (const p of drafts) {
+    const check = ownerPublishCheck(p, store);
+    if (check.ready) ready.push(p.id);
+    else if (incomplete.length < 200) incomplete.push({ productId: p.id, name: p.name, missing: check.missing });
+  }
+  const res = ready.length
+    ? await prisma.product.updateMany({ where: { id: { in: ready }, importDraft: true, isAvailable: false }, data: { isAvailable: true, importDraft: false } })
+    : { count: 0 };
   await prisma.importJob.update({ where: { id: job.id }, data: { publishedAt: new Date() } });
-  return res.count;
+  return { published: res.count, incomplete };
 }
 
 /** Jobs that made no progress for 15 minutes (server restart, crash) are marked FAILED. */

@@ -3,9 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'package:malvoya_core/malvoya_core.dart';
 import '../config/constants.dart';
-import '../core/app_version.dart';
-import '../core/server_messages.dart';
 import 'socket_service.dart';
 
 /// Shares the courier's position while they are online, and only then.
@@ -47,8 +46,8 @@ class CourierTelemetryService extends ChangeNotifier {
             intervalDuration: const Duration(seconds: 5),
             // In the app language at the moment sharing starts
             foregroundNotificationConfig: ForegroundNotificationConfig(
-              notificationTitle: ServerMessages.pick('Malvoya Courier is online', 'Malvoya Courier on linjoilla'),
-              notificationText: ServerMessages.pick('Your location is shared while you are online. Go offline to stop.',
+              notificationTitle: AppLanguage.pick('Malvoya Courier is online', 'Malvoya Courier on linjoilla'),
+              notificationText: AppLanguage.pick('Your location is shared while you are online. Go offline to stop.',
                   'Sijaintisi jaetaan, kun olet linjoilla. Lopeta poistumalla linjoilta.'),
               notificationIcon: const AndroidResource(name: 'ic_stat_malvoya', defType: 'drawable'),
               enableWakeLock: true,
@@ -124,7 +123,7 @@ class CourierTelemetryService extends ChangeNotifier {
       final res = await http
           .post(
             Uri.parse('${AppConstants.apiBase}/courier/telemetry'),
-            headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $_token', 'Accept-Language': ServerMessages.languageCode, ...AppVersion.headers},
+            headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $_token', 'Accept-Language': AppLanguage.code, if (AppLanguage.appVersion != null) 'X-App-Version': AppLanguage.appVersion!},
             body: jsonEncode(body),
           )
           .timeout(const Duration(seconds: 6));

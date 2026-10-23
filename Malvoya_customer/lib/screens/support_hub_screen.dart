@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../core/strings.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
 import '../l10n.dart';
-import '../locale_provider.dart';
 import 'chatbot.dart';
 import '../auth_service.dart';
-import '../core/api_client.dart';
-import '../core/haptics.dart';
 
 /// Contact: messages are stored by the server (admin panel → Support) and answered by email.
 /// There is no phone line, live chat or SMS channel, so none is offered here.
@@ -42,7 +40,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
         _Topic(
           'orders',
           Icons.inventory_2_outlined,
-          const Color(0xFF6D2E8C),
+          MPalette.malva,
           tr(context, 'Orders and delivery', 'Tilaukset ja toimitus'),
           tr(context, 'Where your order is, a missing or wrong item', 'Missä tilauksesi on, puuttuva tai väärä tuote'),
           [
@@ -54,7 +52,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
         _Topic(
           'returns',
           Icons.assignment_return_outlined,
-          const Color(0xFFE08A00),
+          MPalette.amber,
           tr(context, 'Returns and refunds', 'Palautukset ja hyvitykset'),
           tr(context, '14-day withdrawal for purchases from business sellers, refund status',
               '14 päivän peruuttamisoikeus yritysmyyjiltä ostettaessa, hyvityksen tila'),
@@ -67,7 +65,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
         _Topic(
           'payments',
           Icons.credit_card_outlined,
-          const Color(0xFF248A52),
+          MPalette.green,
           tr(context, 'Payments', 'Maksut'),
           tr(context, 'Charges, declined payments and receipts', 'Veloitukset, hylätyt maksut ja kuitit'),
           [
@@ -79,7 +77,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
         _Topic(
           'account',
           Icons.manage_accounts_outlined,
-          const Color(0xFF3B82F6),
+          MPalette.moss,
           tr(context, 'Account and privacy', 'Tili ja tietosuoja'),
           tr(context, 'Signing in, your details and your data', 'Kirjautuminen, tietosi ja henkilötietosi'),
           [
@@ -91,7 +89,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
         _Topic(
           'partner',
           Icons.handshake_outlined,
-          const Color(0xFF6366F1),
+          MPalette.malva,
           tr(context, 'Selling or delivering', 'Myyminen tai toimittaminen'),
           tr(context, 'Opening a store or becoming a courier', 'Kaupan avaaminen tai lähetiksi ryhtyminen'),
           [
@@ -102,7 +100,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
         _Topic(
           'other',
           Icons.chat_bubble_outline_rounded,
-          const Color(0xFF8E4FAE),
+          MPalette.malva,
           tr(context, 'Something else', 'Jokin muu'),
           tr(context, 'Feedback, ideas or anything else', 'Palaute, ideat tai muu asia'),
           [
@@ -125,12 +123,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
     final cardBorder = AppTheme.cardBorder(context);
     bool sending = false;
 
-    showModalBottomSheet(
-      showDragHandle: false,
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
+    showMSheet(context, builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) => Container(
           decoration: BoxDecoration(
             color: cardBg,
@@ -143,31 +136,25 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Center(
-                  child: Container(
-                    width: 44,
-                    height: 5,
-                    decoration: BoxDecoration(color: Colors.grey.shade400, borderRadius: BorderRadius.circular(3)),
-                  ),
-                ),
+                const MSheetHandle(),
                 const SizedBox(height: 18),
                 Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(MSpace.md),
                       decoration: BoxDecoration(
                         color: topic.color.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(MRadius.md),
                       ),
                       child: Icon(topic.icon, color: topic.color, size: 26),
                     ),
                     const SizedBox(width: 14),
-                    Expanded(child: Text(topic.title, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: textPrimary))),
+                    Expanded(child: Text(topic.title, style: TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w800, color: textPrimary))),
                   ],
                 ),
-                const SizedBox(height: 20),
-                Text(l10n.translate('commonInquiries'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: textSecondary)),
-                const SizedBox(height: 8),
+                const SizedBox(height: MSpace.xl),
+                Text(l10n.translate('commonInquiries'), style: TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w700, color: textSecondary)),
+                const SizedBox(height: MSpace.sm),
                 Wrap(
                   spacing: 8,
                   runSpacing: 6,
@@ -175,62 +162,59 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
                     return GestureDetector(
                       onTap: () => messageCtrl.text = example,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: MSpace.md, vertical: 6),
                         decoration: BoxDecoration(
                           color: inputBg,
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(MRadius.sm),
                           border: Border.all(color: cardBorder),
                         ),
-                        child: Text(example, style: const TextStyle(fontSize: 11, color: AppTheme.primary, fontWeight: FontWeight.w600)),
+                        child: Text(example, style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.primary, fontWeight: FontWeight.w600)),
                       ),
                     );
                   }).toList(),
                 ),
                 const SizedBox(height: 18),
-                Text(l10n.translate('describeYourRequest'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textPrimary)),
+                Text(l10n.translate('describeYourRequest'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.label, color: textPrimary)),
                 const SizedBox(height: 6),
                 TextField(
                   controller: messageCtrl,
                   maxLines: 4,
-                  style: TextStyle(color: textPrimary, fontSize: 14),
+                  style: TextStyle(color: textPrimary, fontSize: MTextSize.bodyM),
                   decoration: InputDecoration(
                     hintText: l10n.translate('inquiryHint'),
                     hintStyle: TextStyle(color: textSecondary),
                     filled: true,
                     fillColor: inputBg,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.md), borderSide: BorderSide.none),
                   ),
                 ),
                 // Signed-in customers get the reply at their account email; guests tell us where
                 if (!auth.isAuthenticated) ...[
                   const SizedBox(height: 14),
-                  Text(l10n.translate('yourReplyEmail'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textPrimary)),
+                  Text(l10n.translate('yourReplyEmail'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.label, color: textPrimary)),
                   const SizedBox(height: 6),
                   TextField(
                     controller: emailCtrl,
                     keyboardType: TextInputType.emailAddress,
-                    style: TextStyle(color: textPrimary, fontSize: 14),
+                    style: TextStyle(color: textPrimary, fontSize: MTextSize.bodyM),
                     decoration: InputDecoration(
                       hintText: 'name@example.com',
                       hintStyle: TextStyle(color: textSecondary),
                       filled: true,
                       fillColor: inputBg,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.md), borderSide: BorderSide.none),
                     ),
                   ),
                 ],
-                const SizedBox(height: 20),
+                const SizedBox(height: MSpace.xl),
                 SizedBox(
                   width: double.infinity,
                   height: 52,
-                  child: FilledButton(
-                    onPressed: sending
+                  child: MButton(label: l10n.translate('submitSupportRequest'), loading: sending, onPressed: sending
                         ? null
                         : () async {
                             if (messageCtrl.text.trim().isEmpty) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text(l10n.translate('pleaseDescribeInquiry'))),
-                              );
+                              MSnack.show(context, l10n.translate('pleaseDescribeInquiry'));
                               return;
                             }
                             setSheet(() => sending = true);
@@ -243,25 +227,17 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
                             if (!mounted) return;
                             if (ctx.mounted) setSheet(() => sending = false);
                             if (res.ok && ctx.mounted) Navigator.pop(ctx);
-                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                              behavior: SnackBarBehavior.floating,
-                              content: Text(res.ok
+                            MSnack.show(context, res.ok
                                   ? tr(context, 'Sent (#${res.data['id']}). We will reply to ${res.data['replyTo']}.',
                                       'Lähetetty (#${res.data['id']}). Vastaamme osoitteeseen ${res.data['replyTo']}.')
-                                  : res.errorText(context)!),
-                            ));
-                          },
-                    child: sending
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : Text(l10n.translate('submitSupportRequest'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                  ),
+                                  : res.errorText(context)!);
+                          }),
                 ),
               ],
             ),
           ),
         ),
-      ),
-    );
+      ), transparent: true, isScrollControlled: true, useSafeArea: false);
   }
 
   @override
@@ -285,7 +261,7 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
           appBar: AppBar(
             title: Text(
               l10n.translate('customerSupport'),
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: textPrimary),
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.title, color: textPrimary),
             ),
             backgroundColor: cardBg,
             elevation: 0,
@@ -299,22 +275,22 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
             physics: const BouncingScrollPhysics(),
             children: [
               Container(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(MSpace.xl),
                 color: cardBg,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(l10n.translate('howCanWeAssist'), style: AppTheme.display(context, size: 22)),
-                    const SizedBox(height: 4),
-                    Text(l10n.translate('howCanWeAssistSub'), style: TextStyle(fontSize: 13, color: textSecondary)),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: MSpace.xs),
+                    Text(l10n.translate('howCanWeAssistSub'), style: TextStyle(fontSize: MTextSize.label, color: textSecondary)),
+                    const SizedBox(height: MSpace.lg),
                     TextField(
                       controller: _searchCtrl,
-                      style: TextStyle(color: textPrimary, fontSize: 14),
+                      style: TextStyle(color: textPrimary, fontSize: MTextSize.bodyM),
                       onChanged: (val) => setState(() => _searchQuery = val),
                       decoration: InputDecoration(
                         hintText: l10n.translate('searchTopicsHint'),
-                        hintStyle: TextStyle(fontSize: 13, color: textSecondary),
+                        hintStyle: TextStyle(fontSize: MTextSize.label, color: textSecondary),
                         prefixIcon: const Icon(Icons.search, color: AppTheme.primary),
                         suffixIcon: _searchQuery.isNotEmpty
                             ? IconButton(
@@ -328,18 +304,18 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
                             : null,
                         filled: true,
                         fillColor: inputBg,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.md), borderSide: BorderSide.none),
                       ),
                     ),
                   ],
                 ),
               ),
 
-              const SizedBox(height: 12),
+              const SizedBox(height: MSpace.md),
 
               // Help assistant (ready-made answers, not a person and not AI)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: MSpace.lg),
                 child: Material(
                   color: AppTheme.primary,
                   borderRadius: BorderRadius.circular(22),
@@ -351,8 +327,8 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
                       child: Row(
                         children: [
                           Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                            padding: const EdgeInsets.all(MSpace.md),
+                            decoration: const BoxDecoration(color: MPalette.white, shape: BoxShape.circle),
                             child: const Icon(Icons.help_outline_rounded, color: AppTheme.primary, size: 26),
                           ),
                           const SizedBox(width: 14),
@@ -361,16 +337,16 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(tr(context, 'Help assistant', 'Apuri'),
-                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
+                                    style: const TextStyle(color: AppTheme.onBrand, fontWeight: FontWeight.w800, fontSize: MTextSize.bodyL)),
                                 const SizedBox(height: 2),
                                 Text(
                                   tr(context, 'Ready-made answers about orders, returns and sizes', 'Valmiit vastaukset tilauksista, palautuksista ja koosta'),
-                                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                  style: TextStyle(color: AppTheme.onBrand.withValues(alpha: 0.7), fontSize: MTextSize.caption),
                                 ),
                               ],
                             ),
                           ),
-                          const Icon(Icons.chevron_right_rounded, color: Colors.white, size: 26),
+                          const Icon(Icons.chevron_right_rounded, color: AppTheme.onBrand, size: 26),
                         ],
                       ),
                     ),
@@ -378,42 +354,42 @@ class _SupportHubScreenState extends State<SupportHubScreen> {
                 ),
               ),
 
-              const SizedBox(height: 16),
+              const SizedBox(height: MSpace.lg),
 
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
+                padding: const EdgeInsets.symmetric(horizontal: MSpace.xl),
                 child: Text(
                   l10n.translate('allTopicsHeader'),
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: textSecondary, letterSpacing: 0.8),
+                  style: TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w800, color: textSecondary, letterSpacing: 0.8),
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: MSpace.sm),
 
               ...filteredTopics.map((topic) {
                 return Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  margin: const EdgeInsets.symmetric(horizontal: MSpace.lg, vertical: 6),
                   decoration: BoxDecoration(
                     color: cardBg,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(color: cardBorder),
                   ),
                   child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: MSpace.sm),
                     leading: Container(
                       width: 48,
                       height: 48,
                       decoration: BoxDecoration(
                         color: topic.color.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(MRadius.md),
                       ),
                       child: Icon(topic.icon, color: topic.color, size: 24),
                     ),
-                    title: Text(topic.title, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: textPrimary)),
+                    title: Text(topic.title, style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyL, color: textPrimary)),
                     subtitle: Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(topic.subtitle, style: TextStyle(fontSize: 12, color: textSecondary, height: 1.3)),
+                      padding: const EdgeInsets.only(top: MSpace.xs),
+                      child: Text(topic.subtitle, style: TextStyle(fontSize: MTextSize.caption, color: textSecondary, height: 1.3)),
                     ),
-                    trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
+                    trailing: Icon(Icons.chevron_right_rounded, color: AppTheme.secondaryText(context)),
                     onTap: () => _openMessageSheet(topic),
                   ),
                 );

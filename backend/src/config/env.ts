@@ -112,9 +112,10 @@ function deliveryFeeConfig() {
 export type DeliveryFeeConfig = ReturnType<typeof deliveryFeeConfig>;
 
 const SLOT_RE = /^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)$/;
-const DEFAULT_SLOTS = "17:00-19:00,19:00-21:00";
-
-/** "17:00-19:00,19:00-21:00" → [{ start: "17:00", end: "19:00" }, …], sorted; invalid or overlapping entries are dropped. */
+/**
+ * "17:00-19:00,19:00-21:00" → [{ start: "17:00", end: "19:00" }, …], sorted; invalid or overlapping entries are dropped.
+ * Since 2.12.0 there is no default: without DELIVERY_SLOTS scheduled delivery is off (no invented time windows).
+ */
 export function parseDeliverySlots(raw: string | undefined): { start: string; end: string }[] {
   const parse = (value: string) => {
     const slots = value.split(",").map((s) => s.trim()).filter((s) => SLOT_RE.test(s))
@@ -123,8 +124,7 @@ export function parseDeliverySlots(raw: string | undefined): { start: string; en
       .sort((a, b) => (a.start < b.start ? -1 : 1));
     return slots.filter((s, i) => i === 0 || s.start >= slots[i - 1].end);
   };
-  const slots = raw === undefined || raw.trim() === "" ? [] : parse(raw);
-  return slots.length ? slots : parse(DEFAULT_SLOTS);
+  return raw === undefined || raw.trim() === "" ? [] : parse(raw);
 }
 
 export const env = {
@@ -199,7 +199,7 @@ export const env = {
     readyHours:    hours("PICKUP_READY_HOURS", 24),
   },
 
-  // Scheduled delivery ("Tonight 17–19"): platform-wide slots in Finnish time, bookable today or tomorrow from
+  // Scheduled delivery (windows from DELIVERY_SLOTS only; none by default): platform-wide slots in Finnish time, bookable today or tomorrow from
   // 60 minutes ahead, only while the store is open at the slot start. Couriers are offered the job from
   // slot start − the store's prep time − 15 min. The discount comes off the delivery fee (never below 0) and
   // is paid by Malvoya: courier pay is the same as for a delivery right away.

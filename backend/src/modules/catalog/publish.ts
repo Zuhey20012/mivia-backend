@@ -32,12 +32,13 @@ export type PublishCandidate = {
   categorySlug: string | null;
   template: Template | null;
   audience: string;
+  ageGroup: string | null;
   condition: string;
   isSecondHand: boolean;
   attributes: Record<string, any>;
   contentAmount: number | null;
   contentUnit: string | null;
-  variants: { contentAmount: number | null; contentUnit: string | null; colourFamily: string | null }[];
+  variants: { contentAmount: number | null; contentUnit: string | null; colourFamily: string | null; size?: string | null }[];
   manufacturer: { countryCode: string } | null;
   responsiblePerson: { countryCode: string } | null;
   productModel: string | null;
@@ -137,6 +138,10 @@ export function publishCheck(p: PublishCandidate, store: PublishStore): PublishC
         "Lasten vaatteessa ei saa olla nyörejä hupussa tai kaulan alueella (alle 7 v, EN 14682).",
       ), "not_allowed");
     }
+    // Kids' sizes are in cm (height, EN 13402): 50–176; teens may use letter sizes
+    if (p.ageGroup !== "TEEN" && t === "APPAREL" && a.sizeSystem !== "kids_height" && a.sizeSystem !== "one_size") {
+      need("attributes.sizeSystem", l("Children's clothes use sizes in cm (height 50–176): choose the kids' height sizes.", "Lastenvaatteissa käytetään koko senttimetreinä (pituus 50–176): valitse lasten pituuskoot."));
+    }
     if (a.costumeIsToy === true) need("attributes.costumeIsToy", l("Fancy-dress costumes are toys and can't be sold on Malvoya yet.", "Naamiaisasut ovat leluja, eikä niitä voi vielä myydä Malvoyassa."), "not_allowed");
   }
   if (t === "FOOTWEAR" && !privateSecondHand) {
@@ -149,6 +154,13 @@ export function publishCheck(p: PublishCandidate, store: PublishStore): PublishC
   if (t === "EYEWEAR" && business) {
     if (typeof a.uvFilterCategory !== "number") need("attributes.uvFilterCategory", l("Add the UV filter category (0–4) from the label.", "Lisää UV-suojaluokka (0–4) merkinnöistä."));
     if (a.ceMarked !== true) need("attributes.ceMarked", l("Sunglasses must be CE marked.", "Aurinkolasien on oltava CE-merkityt."));
+  }
+  if (t === "HAIR_TOOL") {
+    // Electrical appliances: CE marking (Low Voltage / EMC / RoHS) and the safety instructions in Finnish and Swedish
+    if (a.ceMarked !== true) need("attributes.ceMarked", l("Electrical hair tools must be CE marked.", "Sähköisten hiustenmuotoilulaitteiden on oltava CE-merkittyjä."));
+    if (!business && !(has(p.warningsFi) && has(p.warningsSv))) {
+      need("warnings", l("Add the safety instructions in Finnish and Swedish from the manual.", "Lisää käyttöohjeen turvallisuusohjeet suomeksi ja ruotsiksi."));
+    }
   }
   if (t === "WATCH" && a.movement === "smart") {
     need("attributes.movement", l("Smart watches are radio equipment and can't be sold on Malvoya yet.", "Älykellot ovat radiolaitteita, eikä niitä voi vielä myydä Malvoyassa."), "not_allowed");
@@ -190,6 +202,7 @@ export function publishCheck(p: PublishCandidate, store: PublishStore): PublishC
   }
 
   // Recommended (never blocking)
+  if (a.countryOfManufacture && a.originDeclared !== true) warn("attributes.originDeclared", l("Confirm the country of manufacture to appear in \"Made in Finland\".", "Vahvista valmistusmaa, jotta tuote näkyy kokoelmassa \"Suomessa valmistettu\"."));
   if (t && !has(a.brand)) warn("attributes.brand", l("Add the brand, or \"No brand\".", "Lisää merkki tai \"Merkitön\"."));
   if (t && !isCosmetic(t) && t !== "BEAUTY_TOOL" && !a.colourFamily && !p.variants.some((v) => v.colourFamily)) {
     warn("attributes.colourFamily", l("Add the colour so shoppers can filter by it.", "Lisää väri, jotta ostajat voivat suodattaa sen mukaan."));

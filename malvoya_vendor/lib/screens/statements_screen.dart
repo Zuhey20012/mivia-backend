@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
-import '../core/strings.dart';
-import '../widgets/loading_states.dart';
 
 /// Monthly statement (GET /stores/my/statements?month=YYYY-MM): every order delivered or collected in
 /// the month, with sales, refunds, commission and payout. The printable version opens in the phone's
@@ -72,11 +71,9 @@ class _StatementsScreenState extends State<StatementsScreen> {
       } catch (_) {}
     }
     if (!mounted || opened) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(res.ok
+    MSnack.show(context, res.ok
           ? tr(context, 'Could not open the browser. Please try again.', 'Selainta ei voitu avata. Yritä uudelleen.')
-          : res.errorMessage),
-    ));
+          : res.errorMessage);
   }
 
   Future<void> _load() async {
@@ -119,10 +116,10 @@ class _StatementsScreenState extends State<StatementsScreen> {
         onRefresh: _load,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
+          padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.sm, MSpace.lg, MSpace.x4l),
           children: [
             Container(
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(AppTheme.radiusMd), border: Border.all(color: AppTheme.divider)),
+              decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(AppTheme.radiusMd), border: Border.all(color: AppTheme.divider)),
               child: Row(children: [
                 IconButton(
                   tooltip: tr(context, 'Previous month', 'Edellinen kuukausi'),
@@ -140,8 +137,8 @@ class _StatementsScreenState extends State<StatementsScreen> {
               ]),
             ),
             const SizedBox(height: 14),
-            if (_loading) ...[for (var i = 0; i < 2; i++) const SkeletonCard(lines: 4)],
-            if (!_loading && _error != null) ErrorState(message: _error, onRetry: _load, top: 24),
+            if (_loading) ...[for (var i = 0; i < 2; i++) const MSkeleton(child: MSkeletonCard(lines: 4))],
+            if (!_loading && _error != null) MStateMessage.error(scrollable: false, message: _error, onRetry: _load, top: 24),
             if (!_loading && _error == null && _data != null) ..._content(_data!),
           ],
         ),
@@ -156,8 +153,8 @@ class _StatementsScreenState extends State<StatementsScreen> {
     final pending = asInt(totals['payoutsPendingCents']) ?? 0;
     return [
       Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(AppTheme.radiusLg - 2), border: Border.all(color: AppTheme.divider)),
+        padding: const EdgeInsets.all(MSpace.lg),
+        decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(AppTheme.radiusLg - 2), border: Border.all(color: AppTheme.divider)),
         child: Column(children: [
           _line(tr(context, 'Sales', 'Myynti'), euro(context, totals['salesCents'])),
           _line(tr(context, 'Refunds (returned goods)', 'Hyvitykset (palautetut tuotteet)'), '−${euro(context, totals['refundsCents'])}'),
@@ -173,7 +170,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
         tr(context,
             'Orders delivered or collected in this month (Finnish time). Sales are at full item prices: Malvoya pays for promo-code discounts. Delivery fees and tips are not your sales. This is a summary for your records, not a VAT invoice.',
             'Tässä kuussa toimitetut tai noudetut tilaukset (Suomen aikaa). Myynti on tuotteiden täysi hinta: Malvoya maksaa tarjouskoodien alennukset. Toimitusmaksut ja tipit eivät ole myyntiäsi. Tämä on yhteenveto kirjanpitoasi varten, ei ALV-lasku.'),
-        style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary, height: 1.4),
+        style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary, height: 1.4),
       ),
       if (_printable == true) ...[
         const SizedBox(height: 14),
@@ -188,35 +185,35 @@ class _StatementsScreenState extends State<StatementsScreen> {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.only(top: 6, left: 4, right: 4),
+          padding: const EdgeInsets.only(top: 6, left: MSpace.xs, right: MSpace.xs),
           child: Text(
             tr(context, 'Opens in your browser, where you can print it or save it as a PDF. The link works for 10 minutes.',
                 'Avautuu selaimeen, jossa voit tulostaa sen tai tallentaa PDF:ksi. Linkki toimii 10 minuuttia.'),
-            style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary, height: 1.4),
+            style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary, height: 1.4),
           ),
         ),
       ],
-      const SizedBox(height: 16),
-      Text(tr(context, 'Orders', 'Tilaukset'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-      const SizedBox(height: 8),
+      const SizedBox(height: MSpace.lg),
+      Text(tr(context, 'Orders', 'Tilaukset'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyL)),
+      const SizedBox(height: MSpace.sm),
       if (orders.isEmpty)
         Padding(
-          padding: const EdgeInsets.symmetric(vertical: 24),
+          padding: const EdgeInsets.symmetric(vertical: MSpace.xxl),
           child: Text(tr(context, 'No orders were delivered in this month.', 'Tässä kuussa ei toimitettu tilauksia.'),
               textAlign: TextAlign.center, style: const TextStyle(color: AppTheme.textSecondary)),
         ),
       for (final o in orders) _orderRow(o),
       if (data['truncated'] == true)
         Padding(
-          padding: const EdgeInsets.only(top: 8),
+          padding: const EdgeInsets.only(top: MSpace.sm),
           child: Text(tr(context, 'Only the first 5000 orders are listed.', 'Vain 5000 ensimmäistä tilausta näytetään.'),
-              style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+              style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
         ),
     ];
   }
 
   Widget _line(String label, String value, {bool bold = false}) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(vertical: MSpace.xs),
         child: Row(children: [
           Expanded(child: Text(label, style: TextStyle(fontWeight: bold ? FontWeight.w800 : FontWeight.w500, color: bold ? AppTheme.textPrimary : AppTheme.textSecondary))),
           Text(value, style: TextStyle(fontWeight: bold ? FontWeight.w800 : FontWeight.w700, fontSize: bold ? 17 : 14)),
@@ -235,9 +232,9 @@ class _StatementsScreenState extends State<StatementsScreen> {
       _ => tr(context, 'Pending', 'Odottaa'),
     };
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.divider)),
+      margin: const EdgeInsets.only(bottom: MSpace.sm),
+      padding: const EdgeInsets.all(MSpace.md),
+      decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.divider)),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -250,12 +247,12 @@ class _StatementsScreenState extends State<StatementsScreen> {
                 if (refunds > 0) '${tr(context, 'refunds', 'hyvitykset')} −${euro(context, refunds)}',
                 '${tr(context, 'commission', 'provisio')} −${euro(context, o['commissionCents'])}',
               ].join(' · '),
-              style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary),
+              style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary),
             ),
-            Text(status, style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary)),
+            Text(status, style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
           ]),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: MSpace.sm),
         Text(euro(context, o['payoutCents']), style: const TextStyle(fontWeight: FontWeight.w800)),
       ]),
     );

@@ -35,7 +35,7 @@ const RULES: Rule[] = [
   { term: "kompostoituva", re: fiStem("kompostoitu"), block: true },
   // English (blocking)
   { term: "eco", re: /(?<![\p{L}\p{N}])eco(?:-|(?![\p{L}\p{N}]))/u, block: true },
-  { term: "eco-friendly", re: enWord("ecofriendly"), block: true },
+  { term: "eco-friendly", re: /(?<![\p{L}\p{N}])eco[- ]?friendly/u, block: true },
   { term: "ecological", re: enPrefix("ecologic"), block: true },
   { term: "environmentally friendly", re: /environment(?:ally)?[- ]?friendly/u, block: true },
   { term: "planet-friendly", re: /planet[- ]?friendly/u, block: true },

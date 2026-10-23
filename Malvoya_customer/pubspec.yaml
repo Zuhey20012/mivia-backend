@@ -11,6 +11,10 @@ dependencies:
   firebase_auth: ^5.7.0
   flutter:
     sdk: flutter
+  malvoya_core:
+    path: ../packages/malvoya_core
+  malvoya_ui:
+    path: ../packages/malvoya_ui
   flutter_localizations:
     sdk: flutter
   flutter_map: ^7.0.2
@@ -48,27 +52,6 @@ flutter:
   uses-material-design: true
   assets:
     - assets/
-    - assets/licenses/
-  fonts:
-    - family: HankenGrotesk
-      fonts:
-        - asset: assets/fonts/HankenGrotesk-400.ttf
-        - asset: assets/fonts/HankenGrotesk-500.ttf
-          weight: 500
-        - asset: assets/fonts/HankenGrotesk-600.ttf
-          weight: 600
-        - asset: assets/fonts/HankenGrotesk-700.ttf
-          weight: 700
-        - asset: assets/fonts/HankenGrotesk-800.ttf
-          weight: 800
-    - family: BricolageGrotesque
-      fonts:
-        - asset: assets/fonts/BricolageGrotesque-600.ttf
-          weight: 600
-        - asset: assets/fonts/BricolageGrotesque-700.ttf
-          weight: 700
-        - asset: assets/fonts/BricolageGrotesque-800.ttf
-          weight: 800
 
 flutter_launcher_icons:
   android: "launcher_icon"

@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
-import '../core/strings.dart';
-import '../widgets/loading_states.dart';
 
 /// Comments on one of the store's drops: answer as the store, or delete comments that do not belong there.
 Future<void> showStoreDropComments(BuildContext context, Map<String, dynamic> drop, {ValueChanged<int>? onCountChanged}) {
@@ -12,7 +11,7 @@ Future<void> showStoreDropComments(BuildContext context, Map<String, dynamic> dr
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
-    backgroundColor: Colors.white,
+    backgroundColor: AppTheme.surface,
     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
     builder: (_) => _StoreDropComments(drop: drop, onCountChanged: onCountChanged),
   );
@@ -85,7 +84,7 @@ class _StoreDropCommentsState extends State<_StoreDropComments> {
         _setCount(_count + 1);
       }
     });
-    if (!res.ok) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.errorMessage)));
+    if (!res.ok) MSnack.show(context, res.errorMessage);
   }
 
   Future<void> _delete(Map<String, dynamic> c) async {
@@ -108,7 +107,7 @@ class _StoreDropCommentsState extends State<_StoreDropComments> {
         _setCount(_count - 1);
       });
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.errorMessage)));
+      MSnack.show(context, res.errorMessage);
     }
   }
 
@@ -120,20 +119,19 @@ class _StoreDropCommentsState extends State<_StoreDropComments> {
         height: MediaQuery.of(context).size.height * 0.75,
         child: Column(children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.lg, MSpace.lg, MSpace.sm),
             child: Text(
               _count == 1 ? tr(context, '1 comment', '1 kommentti') : tr(context, '$_count comments', '$_count kommenttia'),
-              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: AppTheme.textPrimary),
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.bodyL, color: AppTheme.textPrimary),
             ),
           ),
           const Divider(height: 1),
           Expanded(
             child: _loading
-                ? const SkeletonList(count: 3, lines: 2)
+                ? const MSkeletonList(count: 3, lines: 2)
                 : _error != null
                     ? ListView(children: [
-                        ErrorState(
-                          message: _error,
+                        MStateMessage.error(scrollable: false, message: _error,
                           top: 24,
                           onRetry: () {
                             setState(() {
@@ -152,9 +150,9 @@ class _StoreDropCommentsState extends State<_StoreDropComments> {
                                 leading: CircleAvatar(
                                   backgroundColor: c['byStore'] == true ? AppTheme.primary : AppTheme.primaryLight,
                                   child: Icon(c['byStore'] == true ? Icons.storefront_rounded : Icons.person_outline_rounded,
-                                      color: c['byStore'] == true ? Colors.white : AppTheme.primary, size: 20),
+                                      color: c['byStore'] == true ? AppTheme.onPrimary : AppTheme.primary, size: 20),
                                 ),
-                                title: Text('${c['author'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                                title: Text('${c['author'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.label)),
                                 subtitle: Text('${c['body'] ?? ''}', style: const TextStyle(color: AppTheme.textPrimary)),
                                 trailing: c['canDelete'] == true
                                     ? IconButton(tooltip: tr(context, 'Delete', 'Poista'), icon: const Icon(Icons.delete_outline_rounded), onPressed: () => _delete(c))
@@ -168,7 +166,7 @@ class _StoreDropCommentsState extends State<_StoreDropComments> {
           SafeArea(
             top: false,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+              padding: const EdgeInsets.fromLTRB(MSpace.md, MSpace.sm, MSpace.sm, MSpace.sm),
               child: Row(children: [
                 Expanded(
                   child: TextField(

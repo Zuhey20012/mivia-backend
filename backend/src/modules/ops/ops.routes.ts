@@ -16,7 +16,7 @@ import { auth, requireRole } from "../../middleware/auth";
  *  GET /api/v1/admin/metrics  this instance's numbers, for admins or `Authorization: Bearer <METRICS_TOKEN>`
  */
 export const opsRoutes = Router();
-const VERSION = "2.11.0";
+const VERSION = "2.12.0";
 
 let draining = false;
 /** Called on SIGTERM: readiness turns 503 so a load balancer stops sending new requests here. */

@@ -3,9 +3,10 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
 import '../core/location_disclosure.dart';
-import '../core/strings.dart';
 
 /// Something on the phone that gets in the way of delivering while online.
 enum GoOnlineIssue { locationService, locationPermission, preciseLocation, notifications, battery }
@@ -30,11 +31,7 @@ class GoOnlineCheck {
     final issues = await problems();
     if (issues.isEmpty) return true;
     if (!context.mounted) return false;
-    final go = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => _GoOnlineSheet(initial: issues),
-    );
+    final go = await showMSheet<bool>(context, builder: (_) => _GoOnlineSheet(initial: issues), isScrollControlled: true, useSafeArea: false);
     return go == true;
   }
 
@@ -188,7 +185,7 @@ class _GoOnlineSheetState extends State<_GoOnlineSheet> with WidgetsBindingObser
     }
     return SafeArea(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+        padding: const EdgeInsets.fromLTRB(MSpace.xl, 0, MSpace.xl, MSpace.lg),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(tr(context, 'Before you go online', 'Ennen kuin menet linjoille'), style: AppTheme.display(size: 22)),
           const SizedBox(height: 6),
@@ -201,9 +198,9 @@ class _GoOnlineSheetState extends State<_GoOnlineSheet> with WidgetsBindingObser
                         'Voit mennä linjoille, mutta nämä voivat aiheuttaa ongelmia toimitusten aikana.'),
             style: const TextStyle(color: AppTheme.textSecondary, height: 1.4),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: MSpace.sm),
           for (final issue in _issues) _row(issue),
-          const SizedBox(height: 12),
+          const SizedBox(height: MSpace.md),
           SizedBox(
             width: double.infinity,
             child: FilledButton(
@@ -211,7 +208,7 @@ class _GoOnlineSheetState extends State<_GoOnlineSheet> with WidgetsBindingObser
               child: Text(goLabel, textAlign: TextAlign.center),
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: MSpace.xs),
           Center(
             child: TextButton(
               style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
@@ -227,13 +224,13 @@ class _GoOnlineSheetState extends State<_GoOnlineSheet> with WidgetsBindingObser
   Widget _row(GoOnlineIssue issue) {
     final (icon, title, body) = _copy(issue);
     final critical = GoOnlineCheck.isCritical(issue);
-    final color = critical ? const Color(0xFFD93025) : const Color(0xFF8A5A00);
+    final color = critical ? MPalette.red : MPalette.amberInk;
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(top: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: critical ? const Color(0xFFFDECEA) : AppTheme.sunshineLight,
+        color: critical ? MPalette.redLight : AppTheme.sunshineLight,
         borderRadius: BorderRadius.circular(AppTheme.radiusMd),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -244,11 +241,11 @@ class _GoOnlineSheetState extends State<_GoOnlineSheet> with WidgetsBindingObser
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(title, style: TextStyle(fontWeight: FontWeight.w800, color: color)),
               const SizedBox(height: 2),
-              Text(body, style: const TextStyle(fontSize: 13, height: 1.4, color: AppTheme.textPrimary)),
+              Text(body, style: const TextStyle(fontSize: MTextSize.label, height: 1.4, color: AppTheme.textPrimary)),
             ]),
           ),
         ]),
-        const SizedBox(height: 8),
+        const SizedBox(height: MSpace.sm),
         Align(
           alignment: Alignment.centerRight,
           child: OutlinedButton(

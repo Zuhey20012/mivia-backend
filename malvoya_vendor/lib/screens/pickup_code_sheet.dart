@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
-import '../core/strings.dart';
 
 /// "Customer is here": the store types the 6-digit pickup code the customer shows in their app.
 /// The store never sees the code; the server checks it. Returns the updated order on success
@@ -105,7 +105,7 @@ class _PickupCodeSheetState extends State<_PickupCodeSheet> {
             : AppTheme.divider;
     return Expanded(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
+        padding: const EdgeInsets.symmetric(horizontal: MSpace.xs),
         child: AspectRatio(
           aspectRatio: 0.82,
           child: AnimatedContainer(
@@ -137,7 +137,7 @@ class _PickupCodeSheetState extends State<_PickupCodeSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(tr(context, 'Enter the pickup code', 'Syötä noutokoodi'), style: AppTheme.display(size: 22)),
-            const SizedBox(height: 4),
+            const SizedBox(height: MSpace.xs),
             Text(
               '${tr(context, 'Order', 'Tilaus')} #${widget.order['id']} · ${count == 1 ? tr(context, '1 item', '1 tuote') : tr(context, '$count items', '$count tuotetta')}',
               style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.textSecondary),
@@ -146,7 +146,7 @@ class _PickupCodeSheetState extends State<_PickupCodeSheet> {
             Text(
               tr(context, 'Ask the customer for the 6-digit code in their Malvoya app. Hand over the items only after the code is accepted.',
                   'Pyydä asiakkaalta 6-numeroinen koodi hänen Malvoya-sovelluksestaan. Luovuta tuotteet vasta, kun koodi on hyväksytty.'),
-              style: const TextStyle(fontSize: 13.5, color: AppTheme.textSecondary, height: 1.4),
+              style: const TextStyle(fontSize: MTextSize.label, color: AppTheme.textSecondary, height: 1.4),
             ),
             const SizedBox(height: 18),
             Stack(children: [
@@ -191,14 +191,14 @@ class _PickupCodeSheetState extends State<_PickupCodeSheet> {
                   : Container(
                       width: double.infinity,
                       margin: const EdgeInsets.only(top: 14),
-                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                      decoration: BoxDecoration(color: _locked ? AppTheme.sunshineLight : const Color(0xFFFDECEA), borderRadius: BorderRadius.circular(14)),
+                      padding: const EdgeInsets.fromLTRB(MSpace.md, 10, MSpace.md, 10),
+                      decoration: BoxDecoration(color: _locked ? AppTheme.sunshineLight : MPalette.redLight, borderRadius: BorderRadius.circular(14)),
                       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Icon(_locked ? Icons.lock_clock_rounded : Icons.error_outline_rounded, size: 18, color: _locked ? const Color(0xFF6A4500) : const Color(0xFFD93025)),
-                        const SizedBox(width: 8),
+                        Icon(_locked ? Icons.lock_clock_rounded : Icons.error_outline_rounded, size: 18, color: _locked ? MPalette.amberInk : MPalette.red),
+                        const SizedBox(width: MSpace.sm),
                         Expanded(
                           child: Text(_error!,
-                              style: TextStyle(fontSize: 13.5, height: 1.35, fontWeight: FontWeight.w600, color: _locked ? const Color(0xFF6A4500) : const Color(0xFFD93025))),
+                              style: TextStyle(fontSize: MTextSize.label, height: 1.35, fontWeight: FontWeight.w600, color: _locked ? MPalette.amberInk : MPalette.red)),
                         ),
                       ]),
                     ),
@@ -206,13 +206,7 @@ class _PickupCodeSheetState extends State<_PickupCodeSheet> {
             const SizedBox(height: 18),
             SizedBox(
               width: double.infinity,
-              child: FilledButton(
-                style: FilledButton.styleFrom(minimumSize: const Size(64, 56)),
-                onPressed: complete && !_checking && !_locked ? _submit : null,
-                child: _checking
-                    ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
-                    : Text(_locked ? tr(context, 'Locked for now', 'Lukittu toistaiseksi') : tr(context, 'Confirm handover', 'Vahvista luovutus')),
-              ),
+              child: MButton(label: _locked ? tr(context, 'Locked for now', 'Lukittu toistaiseksi') : tr(context, 'Confirm handover', 'Vahvista luovutus'), loading: _checking, onPressed: complete && !_checking && !_locked ? _submit : null),
             ),
           ],
         ),

@@ -3,17 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
 import '../core/delivery_location.dart';
-import '../core/strings.dart';
 import '../l10n.dart';
 import '../widgets/product_tile.dart';
-import '../widgets/skeleton.dart';
 import 'store_detail.dart';
-import '../core/haptics.dart';
 import '../widgets/app_image.dart';
-import '../widgets/empty_art.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 
 /// Search across every store: items with size, price, condition and second-hand filters,
 /// or stores by name.
@@ -265,7 +262,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: MSpace.lg),
                 child: SegmentedButton<bool>(
                   segments: [
                     ButtonSegment(value: false, label: Text(tr(context, 'Items', 'Tuotteet'))),
@@ -286,9 +283,9 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
         ),
       ),
       body: _loading
-          ? (_storesTab ? const SkeletonCardList(thumbHeight: 44) : const SkeletonProductGrid())
+          ? (_storesTab ? const MSkeletonList(thumbnail: true, thumbHeight: 44) : const MSkeletonProductGrid())
           : _error != null
-              ? RefreshIndicator(onRefresh: _search, child: StateMessage.error(message: _error!, onRetry: _search))
+              ? RefreshIndicator(onRefresh: _search, child: MStateMessage.error(message: _error!, onRetry: _search))
               : _storesTab
                   ? _storeList()
                   : _itemGrid(),
@@ -298,7 +295,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
   Widget _filters() {
     // Active filters can be removed with their × (the chip itself still opens the choice)
     Widget chip(String label, bool active, VoidCallback onTap, {VoidCallback? onRemove}) => Padding(
-          padding: const EdgeInsets.only(right: 8),
+          padding: const EdgeInsets.only(right: MSpace.sm),
           child: FilterChip(
             label: Text(label),
             selected: active,
@@ -326,7 +323,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
     };
     return ListView(
       scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+      padding: const EdgeInsets.fromLTRB(MSpace.lg, 6, MSpace.lg, 6),
       children: [
         if (_category != null)
           chip(AppLocalizations.of(context).translateCategory(_category!), true, () => _clear(() => _category = null), onRemove: () => _category = null),
@@ -372,9 +369,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
   }
 
   Future<void> _pick(List<String> values, Map<String, String> labels, String? current, void Function(String?) apply, {bool allowClear = true}) async {
-    final picked = await showModalBottomSheet<String>(
-      context: context,
-      builder: (ctx) => SafeArea(
+    final picked = await showMSheet<String>(context, builder: (ctx) => SafeArea(
         child: ListView(
           shrinkWrap: true,
           children: [
@@ -391,8 +386,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
               ListTile(title: Text(tr(context, 'Clear', 'Tyhjennä')), onTap: () => Navigator.pop(ctx, '')),
           ],
         ),
-      ),
-    );
+      ), isScrollControlled: false, useSafeArea: false);
     if (picked == null) return;
     setState(() => apply(picked.isEmpty ? null : picked));
     _search();
@@ -401,27 +395,23 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
   Future<void> _pickPrice() async {
     final min = TextEditingController(text: _minPrice != null ? '${_minPrice! ~/ 100}' : '');
     final max = TextEditingController(text: _maxPrice != null ? '${_maxPrice! ~/ 100}' : '');
-    final ok = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) => Padding(
+    final ok = await showMSheet<bool>(context, builder: (ctx) => Padding(
         padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + MediaQuery.of(ctx).viewInsets.bottom),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(tr(context, 'Price (€)', 'Hinta (€)'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 16),
+            Text(tr(context, 'Price (€)', 'Hinta (€)'), style: const TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w700)),
+            const SizedBox(height: MSpace.lg),
             Row(children: [
               Expanded(child: TextField(controller: min, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: tr(context, 'From', 'Alkaen')))),
-              const SizedBox(width: 12),
+              const SizedBox(width: MSpace.md),
               Expanded(child: TextField(controller: max, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: tr(context, 'To', 'Enintään')))),
             ]),
-            const SizedBox(height: 16),
+            const SizedBox(height: MSpace.lg),
             SizedBox(width: double.infinity, height: 48, child: FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(tr(context, 'Show results', 'Näytä tulokset')))),
           ],
         ),
-      ),
-    );
+      ), isScrollControlled: true, useSafeArea: false);
     if (ok != true) return;
     final a = int.tryParse(min.text.trim());
     final b = int.tryParse(max.text.trim());
@@ -447,7 +437,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
             SliverToBoxAdapter(child: _noResults())
           else
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 140),
+              padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.md, MSpace.lg, 140),
               sliver: SliverGrid(
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisSpacing: 18, crossAxisSpacing: 14, childAspectRatio: 0.56),
                 delegate: SliverChildBuilderDelegate(
@@ -462,10 +452,10 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
   }
 
   Widget _sectionLabel(String text, {Widget? trailing}) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 8, 4),
+        padding: const EdgeInsets.fromLTRB(MSpace.lg, 14, MSpace.sm, MSpace.xs),
         child: Row(children: [
           Expanded(
-            child: Text(text, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 0.3, color: AppTheme.secondaryText(context))),
+            child: Text(text, style: TextStyle(fontSize: MTextSize.label, fontWeight: FontWeight.w700, letterSpacing: 0.3, color: AppTheme.secondaryText(context))),
           ),
           if (trailing != null) trailing,
         ]),
@@ -483,7 +473,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
             trailing: TextButton(onPressed: _clearRecent, child: Text(tr(context, 'Clear', 'Tyhjennä'))),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: MSpace.lg),
             child: Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -503,11 +493,11 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
           height: 48,
           child: ListView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: MSpace.lg),
             children: [
               for (final c in _quickCategories)
                 Padding(
-                  padding: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.only(right: MSpace.sm),
                   child: ActionChip(label: Text(l10n.translateCategory(c)), onPressed: () => _useCategory(c)),
                 ),
             ],
@@ -523,10 +513,10 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
     final muted = AppTheme.secondaryText(context);
     final suggestions = _recent.where((r) => r.toLowerCase() != _query.text.trim().toLowerCase()).take(4).toList();
     return Padding(
-      padding: const EdgeInsets.fromLTRB(28, 40, 28, 140),
+      padding: const EdgeInsets.fromLTRB(28, MSpace.x4l, 28, 140),
       child: Column(
         children: [
-          const EmptyArt(EmptyArtKind.search),
+          const MEmptyArt(MArtKind.search),
           const SizedBox(height: 14),
           Text(
             _query.text.trim().isEmpty ? tr(context, 'Nothing here yet', 'Täällä ei ole vielä mitään') : tr(context, 'No matches', 'Ei osumia'),
@@ -538,16 +528,16 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
                 ? tr(context, 'Try fewer filters or another word.', 'Kokeile vähemmän suodattimia tai toista sanaa.')
                 : tr(context, 'Try another word, or look around a category.', 'Kokeile toista sanaa tai katso jotain kategoriaa.'),
             textAlign: TextAlign.center,
-            style: TextStyle(color: muted, fontSize: 15, height: 1.4),
+            style: TextStyle(color: muted, fontSize: MTextSize.bodyL, height: 1.4),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: MSpace.lg),
           if (_hasFilters)
             FilledButton.tonalIcon(
               onPressed: _clearFilters,
               icon: const Icon(Icons.filter_alt_off_rounded, size: 20),
               label: Text(tr(context, 'Clear filters', 'Poista suodattimet')),
             ),
-          const SizedBox(height: 12),
+          const SizedBox(height: MSpace.md),
           Wrap(
             alignment: WrapAlignment.center,
             spacing: 8,
@@ -569,13 +559,13 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
     if (_stores.isEmpty) {
       return RefreshIndicator(
         onRefresh: _search,
-        child: StateMessage(icon: Icons.storefront_outlined, message: tr(context, 'No stores found. Try another name.', 'Kauppoja ei löytynyt. Kokeile toista nimeä.')),
+        child: MStateMessage(icon: Icons.storefront_outlined, message: tr(context, 'No stores found. Try another name.', 'Kauppoja ei löytynyt. Kokeile toista nimeä.')),
       );
     }
     return RefreshIndicator(
       onRefresh: _search,
       child: ListView.separated(
-      padding: const EdgeInsets.fromLTRB(8, 8, 8, 140),
+      padding: const EdgeInsets.fromLTRB(MSpace.sm, MSpace.sm, MSpace.sm, 140),
       itemCount: _stores.length,
       separatorBuilder: (_, __) => Divider(height: 1, color: AppTheme.cardBorder(context)),
       itemBuilder: (_, i) {

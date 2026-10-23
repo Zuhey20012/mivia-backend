@@ -1,12 +1,10 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
-import '../core/strings.dart';
-import '../widgets/skeleton.dart';
-import '../core/haptics.dart';
 
 /// Returns. Purchases from business sellers have the 14-day right of withdrawal (Kuluttajansuojalaki
 /// 6 luku); purchases from private sellers do not, but a request can still be sent to the seller.
@@ -207,15 +205,11 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
     var submitting = false;
     String? sheetError;
 
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (ctx) => StatefulBuilder(
+    await showMSheet(context, builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) {
           if (orders.isEmpty || selected == null) {
             return Padding(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
+              padding: const EdgeInsets.fromLTRB(MSpace.xxl, MSpace.sm, MSpace.xxl, MSpace.x3l),
               child: Text(
                 loadError ??
                     (preselected != null
@@ -224,7 +218,7 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                             context,
                             'You have no delivered orders from the last 14 days with items left to return. Return requests can be sent within 14 days of delivery.',
                             'Sinulla ei ole viimeisen 14 päivän aikana toimitettuja tilauksia, joista voisi vielä palauttaa tuotteita. Palautuspyynnön voi lähettää 14 päivän kuluessa toimituksesta.')),
-                style: const TextStyle(fontSize: 15, height: 1.4),
+                style: const TextStyle(fontSize: MTextSize.bodyL, height: 1.4),
               ),
             );
           }
@@ -257,7 +251,7 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                 SizedBox(
                   width: 34,
                   child: Text('$q/$max',
-                      textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: AppTheme.primaryText(context))),
+                      textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.label, color: AppTheme.primaryText(context))),
                 ),
                 btn(Icons.add_rounded, tr(context, 'More', 'Lisää'), q < max ? q + 1 : null),
               ]),
@@ -265,7 +259,7 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
           }
 
           Widget line(String label, String value, {bool bold = false}) => Padding(
-                padding: const EdgeInsets.only(top: 4),
+                padding: const EdgeInsets.only(top: MSpace.xs),
                 child: Row(children: [
                   Expanded(
                       child: Text(label,
@@ -285,10 +279,10 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                 constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.85),
                 child: ListView(
                   shrinkWrap: true,
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                  padding: const EdgeInsets.fromLTRB(MSpace.xl, 0, MSpace.xl, MSpace.xxl),
                   children: [
                     Text(tr(context, 'Start a return', 'Aloita palautus'), style: AppTheme.display(context, size: 20)),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: MSpace.lg),
                     if (orders.length > 1) ...[
                       DropdownButtonFormField<int>(
                         initialValue: asInt(order['id']),
@@ -306,10 +300,10 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                           picked = Map.of(_remaining(selected!));
                         }),
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: MSpace.lg),
                     ] else
                       Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.only(bottom: MSpace.md),
                         child: Text('${tr(context, 'Order', 'Tilaus')} #${order['id']} · ${order['store']?['name'] ?? ''}',
                             style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
                       ),
@@ -335,18 +329,18 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
-                              Text('${euro(context, i['unitCents'])} ${tr(context, 'each', '/ kpl')}', style: TextStyle(fontSize: 12.5, color: muted)),
+                              Text('${euro(context, i['unitCents'])} ${tr(context, 'each', '/ kpl')}', style: TextStyle(fontSize: MTextSize.caption, color: muted)),
                             ]),
                           ),
-                          const SizedBox(width: 8),
+                          const SizedBox(width: MSpace.sm),
                           if (perItem)
                             stepper(i['_key'] as int, remaining[i['_key']] ?? 0)
                           else
                             Text('${remaining[i['_key']] ?? i['quantity']}×', style: const TextStyle(fontWeight: FontWeight.w800)),
                         ]),
                       ),
-                    if (!perItem) Text(tr(context, 'The whole order is returned.', 'Koko tilaus palautetaan.'), style: TextStyle(fontSize: 12.5, color: muted)),
-                    const SizedBox(height: 8),
+                    if (!perItem) Text(tr(context, 'The whole order is returned.', 'Koko tilaus palautetaan.'), style: TextStyle(fontSize: MTextSize.caption, color: muted)),
+                    const SizedBox(height: MSpace.sm),
                     Container(
                       padding: const EdgeInsets.all(14),
                       decoration:
@@ -358,7 +352,7 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                         if (est.fees > 0) line(tr(context, 'Delivery and fees', 'Toimitus ja maksut'), euro(context, est.fees)),
                         const Divider(height: 18),
                         line(tr(context, 'Expected refund', 'Odotettu hyvitys'), euro(context, est.total), bold: true),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: MSpace.sm),
                         Text(
                           [
                             if (!everything && (asInt(order['deliveryFeeCents']) ?? 0) > 0)
@@ -371,18 +365,18 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                             tr(context, 'The store confirms the final amount when the items are back.',
                                 'Kauppa vahvistaa lopullisen summan, kun tuotteet ovat palanneet.'),
                           ].join(' '),
-                          style: TextStyle(fontSize: 12, height: 1.4, color: AppTheme.primaryText(context)),
+                          style: TextStyle(fontSize: MTextSize.caption, height: 1.4, color: AppTheme.primaryText(context)),
                         ),
                       ]),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: MSpace.lg),
                     DropdownButtonFormField<String>(
                       initialValue: reason,
                       decoration: InputDecoration(labelText: tr(context, 'Reason', 'Syy')),
                       items: _reasons(context).entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
                       onChanged: (v) => setSheet(() => reason = v ?? reason),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: MSpace.md),
                     TextField(
                       controller: noteCtrl,
                       maxLength: 500,
@@ -394,18 +388,20 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                           context,
                           'From a business seller: no reason is needed. The refund goes to your original payment method within 14 days, but it may wait until the item is back with the seller. From a private seller: there is no legal right of withdrawal, so the seller decides.',
                           'Yritysmyyjältä: syytä ei tarvitse kertoa. Hyvitys tehdään alkuperäiselle maksutavalle 14 päivän kuluessa, mutta se voi odottaa, kunnes tuote on palannut myyjälle. Yksityismyyjältä: lakisääteistä peruuttamisoikeutta ei ole, joten myyjä päättää.'),
-                      style: TextStyle(fontSize: 12, height: 1.4, color: muted),
+                      style: TextStyle(fontSize: MTextSize.caption, height: 1.4, color: muted),
                     ),
                     if (sheetError != null) ...[
                       const SizedBox(height: 10),
-                      Text(sheetError!, style: const TextStyle(color: Color(0xFFD93025), fontWeight: FontWeight.w600)),
+                      Text(sheetError!, style: const TextStyle(color: MPalette.red, fontWeight: FontWeight.w600)),
                     ],
-                    const SizedBox(height: 16),
+                    const SizedBox(height: MSpace.lg),
                     SizedBox(
                       width: double.infinity,
                       height: 54,
-                      child: FilledButton(
-                        onPressed: submitting || pickedQty == 0
+                      child: MButton(label: everything
+                                ? tr(context, 'Return everything', 'Palauta kaikki')
+                                : tr(context, 'Return $pickedQty ${pickedQty == 1 ? 'item' : 'items'}',
+                                    'Palauta $pickedQty ${pickedQty == 1 ? 'tuote' : 'tuotetta'}'), loading: submitting, onPressed: submitting || pickedQty == 0
                             ? null
                             : () async {
                                 Haptics.medium();
@@ -428,24 +424,14 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                                 if (res.ok) {
                                   if (ctx.mounted) Navigator.pop(ctx);
                                   _load();
-                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                                    behavior: SnackBarBehavior.floating,
-                                    content: Text(tr(context, 'Return request sent to the store.', 'Palautuspyyntö lähetetty kaupalle.')),
-                                  ));
+                                  MSnack.show(context, tr(context, 'Return request sent to the store.', 'Palautuspyyntö lähetetty kaupalle.'));
                                 } else {
                                   setSheet(() {
                                     submitting = false;
                                     sheetError = res.errorText(context) ?? tr(context, 'Could not create the return.', 'Palautusta ei voitu luoda.');
                                   });
                                 }
-                              },
-                        child: submitting
-                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                            : Text(everything
-                                ? tr(context, 'Return everything', 'Palauta kaikki')
-                                : tr(context, 'Return $pickedQty ${pickedQty == 1 ? 'item' : 'items'}',
-                                    'Palauta $pickedQty ${pickedQty == 1 ? 'tuote' : 'tuotetta'}')),
-                      ),
+                              }),
                     ),
                   ],
                 ),
@@ -453,8 +439,7 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
             ),
           );
         },
-      ),
-    );
+      ), isScrollControlled: true, useSafeArea: false);
     noteCtrl.dispose();
   }
 
@@ -470,7 +455,7 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _startReturn(),
         backgroundColor: AppTheme.primary,
-        foregroundColor: Colors.white,
+        foregroundColor: AppTheme.onBrand,
         icon: const Icon(Icons.undo_rounded),
         label: Text(tr(context, 'Start a return', 'Aloita palautus')),
       ),
@@ -478,10 +463,10 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
         onRefresh: _load,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+          padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.lg, MSpace.lg, 96),
           children: [
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(MSpace.lg),
               decoration: BoxDecoration(
                   color: cardColor, borderRadius: BorderRadius.circular(AppTheme.radiusMd), border: Border.all(color: AppTheme.cardBorder(context))),
               child: Text(
@@ -493,18 +478,18 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                     'Ostitko yritysmyyjältä? Voit perua oston 14 päivän kuluessa tuotteen vastaanottamisesta syytä kertomatta (kuluttajansuojalaki, 6 luku). Viallisesta tuotteesta myyjä vastaa lisäksi virhevastuun perusteella. Voit palauttaa koko tilauksen tai vain osan tuotteista.\n\n'
                         'Ostitko yksityismyyjältä? Lakisääteinen peruuttamisoikeus ei koske ostoa, mutta voit silti lähettää palautuspyynnön ja myyjä päättää. Jokaisella kauppasivulla kerrotaan, millainen myyjä on kyseessä.\n\n'
                         'Ellei myyjä ole toisin sopinut, maksat tuotteen palautuskulut.'),
-                style: TextStyle(fontSize: 14, height: 1.4, color: secondary),
+                style: TextStyle(fontSize: MTextSize.bodyM, height: 1.4, color: secondary),
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: MSpace.lg),
             if (_loading)
-              const SizedBox(height: 360, child: SkeletonCardList(count: 3, thumbHeight: 40, padding: EdgeInsets.zero))
+              const SizedBox(height: 360, child: MSkeletonList(thumbnail: true, count: 3, thumbHeight: 40, padding: EdgeInsets.zero))
             else if (_error != null)
-              SizedBox(height: 380, child: StateMessage.error(message: _error!, onRetry: _load, top: 40))
+              SizedBox(height: 380, child: MStateMessage.error(message: _error!, onRetry: _load, top: 40))
             else if (_returns.isEmpty)
               SizedBox(
                 height: 320,
-                child: StateMessage(icon: Icons.inventory_2_outlined, message: tr(context, 'No returns yet', 'Ei palautuksia'), top: 40),
+                child: MStateMessage(icon: Icons.inventory_2_outlined, message: tr(context, 'No returns yet', 'Ei palautuksia'), top: 40),
               )
             else
               ..._returns.map((r) => _returnCard(r, cardColor, secondary)),
@@ -553,22 +538,22 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
           Text(
             tr(context, 'The store approved your return. Bring or send the items back to $storeEn. The store refunds you once it has received them.',
                 'Kauppa hyväksyi palautuksesi. Tuo tai lähetä tuotteet takaisin $storeFi. Kauppa maksaa hyvityksen, kun se on vastaanottanut tuotteet.'),
-            style: TextStyle(fontSize: 13, height: 1.4, color: AppTheme.primaryText(context)),
+            style: TextStyle(fontSize: MTextSize.label, height: 1.4, color: AppTheme.primaryText(context)),
           ),
           if (address.isNotEmpty) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: MSpace.sm),
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Icon(Icons.storefront_rounded, size: 16, color: AppTheme.primaryText(context)),
               const SizedBox(width: 6),
-              Expanded(child: SelectableText(address, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.primaryText(context)))),
+              Expanded(child: SelectableText(address, style: TextStyle(fontSize: MTextSize.label, fontWeight: FontWeight.w600, color: AppTheme.primaryText(context)))),
             ]),
           ],
           if (phone.isNotEmpty) ...[
-            const SizedBox(height: 4),
+            const SizedBox(height: MSpace.xs),
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Icon(Icons.phone_outlined, size: 16, color: AppTheme.primaryText(context)),
               const SizedBox(width: 6),
-              Expanded(child: SelectableText(phone, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.primaryText(context)))),
+              Expanded(child: SelectableText(phone, style: TextStyle(fontSize: MTextSize.label, fontWeight: FontWeight.w600, color: AppTheme.primaryText(context)))),
             ]),
           ],
           if (address.isEmpty && phone.isEmpty) ...[
@@ -576,7 +561,7 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
             Text(
               tr(context, 'The store’s address is not shown here. Ask Malvoya support (Profile → Help) how to send it back.',
                   'Kaupan osoite ei näy tässä. Kysy Malvoyan tuelta (Profiili → Apua), miten palautat tuotteet.'),
-              style: TextStyle(fontSize: 12.5, height: 1.35, color: AppTheme.primaryText(context)),
+              style: TextStyle(fontSize: MTextSize.caption, height: 1.35, color: AppTheme.primaryText(context)),
             ),
           ],
         ],
@@ -592,11 +577,11 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
     final badge = status == 'REFUNDED'
         ? AppTheme.success
         : status == 'REJECTED'
-            ? const Color(0xFFD93025)
+            ? MPalette.red
             : AppTheme.primary;
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: MSpace.md),
+      padding: const EdgeInsets.all(MSpace.lg),
       decoration:
           BoxDecoration(color: cardColor, borderRadius: BorderRadius.circular(AppTheme.radiusMd), border: Border.all(color: AppTheme.cardBorder(context))),
       child: Column(
@@ -607,35 +592,35 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
               Expanded(
                 child: Text(
                   '${tr(context, 'Order', 'Tilaus')} #${r['orderId'] ?? '-'} · ${_storeName(r)}',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppTheme.primaryText(context)),
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyL, color: AppTheme.primaryText(context)),
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: MSpace.xs),
                 decoration: BoxDecoration(color: badge.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(20)),
-                child: Text(_statusLabels(context)[status] ?? status, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: badge)),
+                child: Text(_statusLabels(context)[status] ?? status, style: TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w700, color: badge)),
               ),
             ],
           ),
           const SizedBox(height: 6),
-          Text(_reasons(context)[r['reason']] ?? '${r['reason'] ?? ''}', style: TextStyle(color: secondary, fontSize: 13)),
+          Text(_reasons(context)[r['reason']] ?? '${r['reason'] ?? ''}', style: TextStyle(color: secondary, fontSize: MTextSize.label)),
           // Newer servers keep the store's words in storeNote and the customer's own in conditionNote;
           // on older ones conditionNote may hold either, so it is shown as a plain note.
           if ('${r['conditionNote'] ?? ''}'.trim().isNotEmpty)
             Padding(
-              padding: const EdgeInsets.only(top: 4),
+              padding: const EdgeInsets.only(top: MSpace.xs),
               child: Text(
                   '${r.containsKey('storeNote') ? tr(context, 'Your note', 'Oma huomautuksesi') : tr(context, 'Note', 'Huomautus')}: ${'${r['conditionNote']}'.trim()}',
-                  style: TextStyle(fontSize: 13, color: AppTheme.primaryText(context), height: 1.35)),
+                  style: TextStyle(fontSize: MTextSize.label, color: AppTheme.primaryText(context), height: 1.35)),
             ),
           if ('${r['storeNote'] ?? ''}'.trim().isNotEmpty)
             Container(
               width: double.infinity,
-              margin: const EdgeInsets.only(top: 8),
-              padding: const EdgeInsets.all(12),
+              margin: const EdgeInsets.only(top: MSpace.sm),
+              padding: const EdgeInsets.all(MSpace.md),
               decoration: BoxDecoration(
                 color: status == 'REJECTED'
-                    ? AppTheme.pastel(context, AppTheme.peach, const Color(0xFFD93025))
+                    ? AppTheme.pastel(context, AppTheme.peach, MPalette.red)
                     : AppTheme.pastel(context, AppTheme.lilac, AppTheme.primary),
                 borderRadius: BorderRadius.circular(AppTheme.radiusSm),
               ),
@@ -646,39 +631,39 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                     status == 'REJECTED'
                         ? tr(context, 'Why the store declined', 'Miksi kauppa hylkäsi')
                         : tr(context, 'From the store', 'Kaupalta'),
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppTheme.primaryText(context)),
+                    style: TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w800, color: AppTheme.primaryText(context)),
                   ),
                   const SizedBox(height: 2),
-                  Text('${r['storeNote']}'.trim(), style: TextStyle(fontSize: 13, height: 1.35, color: AppTheme.primaryText(context))),
+                  Text('${r['storeNote']}'.trim(), style: TextStyle(fontSize: MTextSize.label, height: 1.35, color: AppTheme.primaryText(context))),
                 ],
               ),
             ),
           if (lines.isNotEmpty) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: MSpace.sm),
             for (final l in lines)
               Padding(
                 padding: const EdgeInsets.only(bottom: 2),
                 child: Row(children: [
                   Expanded(
                     child: Text('${asInt(l['quantity']) ?? 1}×  ${l['name'] ?? ''}',
-                        style: TextStyle(fontSize: 13, color: AppTheme.primaryText(context)), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        style: TextStyle(fontSize: MTextSize.label, color: AppTheme.primaryText(context)), maxLines: 1, overflow: TextOverflow.ellipsis),
                   ),
                   if (l['unitCents'] != null)
-                    Text(euro(context, (asInt(l['unitCents']) ?? 0) * (asInt(l['quantity']) ?? 1)), style: TextStyle(fontSize: 13, color: secondary)),
+                    Text(euro(context, (asInt(l['unitCents']) ?? 0) * (asInt(l['quantity']) ?? 1)), style: TextStyle(fontSize: MTextSize.label, color: secondary)),
                 ]),
               ),
           ],
           if (refunded != null && status == 'REFUNDED') ...[
             const SizedBox(height: 6),
             Text('${tr(context, 'Refunded', 'Hyvitetty')} ${euro(context, refunded)}',
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppTheme.success)),
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.label, color: AppTheme.success)),
           ] else if (expected != null && status != 'REJECTED') ...[
             const SizedBox(height: 6),
             Text('${tr(context, 'Expected refund', 'Odotettu hyvitys')} ${euro(context, expected)}',
-                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppTheme.primaryText(context))),
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: MTextSize.label, color: AppTheme.primaryText(context))),
           ],
           if (status == 'APPROVED') ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: MSpace.md),
             _nextSteps(r),
           ],
         ],

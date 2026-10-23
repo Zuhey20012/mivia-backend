@@ -1,4 +1,4 @@
-// End-to-end test for API v2.11 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
+// End-to-end test for API v2.12 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
 const { execSync, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -127,6 +127,24 @@ async function register(name, role, extra = {}) {
   return r.body;
 }
 
+// 2.12: what a store needs before it can publish: the product safety pledge and a manufacturer record (GPSR Art. 19)
+async function sellerReady(token, country = "FI") {
+  await call("POST", "/stores/my/safety-pledge", { accept: true }, token);
+  const m = await call("POST", "/stores/my/operators", { name: `Testi Valmistaja ${country}`, addressLine: "Teollisuuskatu 1", postalCode: "00510", city: "Helsinki", countryCode: country, email: "info@valmistaja.example.fi" }, token);
+  return m.body.operator?.id;
+}
+const wool100 = [{ component: "main", fibres: [{ fibre: "wool", percent: 100 }] }];
+/** The required information of a clothing product (fibre composition + the GPSR block), for a business seller. */
+const clothing = (mfr, slug = "clothing-tops", extra = {}) => ({
+  categorySlug: slug, audience: "UNISEX", attributes: { brand: "Testi", fibreComposition: wool100 },
+  manufacturerId: mfr, productModel: "T-100", noWarnings: true, ...extra,
+});
+/** EAN-13 with its check digit, from 12 digits. */
+function ean13(d12) {
+  const sum = d12.split("").reduce((t, c, i) => t + Number(c) * (i % 2 === 0 ? 1 : 3), 0);
+  return d12 + ((10 - (sum % 10)) % 10);
+}
+
 (async () => {
   console.log("\n— Auth");
   const regA = await call("POST", "/auth/register", { name: "Aino Korhonen", email: `aino${uniq}@example.fi`, password: "correct-horse-1", acceptTerms: true });
@@ -248,6 +266,7 @@ async function register(name, role, extra = {}) {
   const store = await call("POST", "/stores", { name: `Vera Vintage ${uniq}`, category: "THRIFT", sellerType: "BUSINESS", businessId: "2345678-0", latitude: 60.17, longitude: 24.94, address: "Mannerheimintie 1, Helsinki", prepMinutes: 8 }, vendor.accessToken);
   check("vendor creates a business store with Y-tunnus", store.status === 201 && store.body.store.sellerType === "BUSINESS", store);
   const storeId = store.body.store.id;
+  const veraMfr = await sellerReady(vendor.accessToken);
   check("business seller must give a valid Y-tunnus", (await call("POST", "/stores", { name: "No ID", category: "APPAREL", sellerType: "BUSINESS" }, (await register("Nina", "VENDOR")).accessToken)).status === 400);
   const privSeller = await call("POST", "/stores", { name: `Pekka's closet ${uniq}`, category: "THRIFT", sellerType: "PRIVATE" }, (await register("Pekka", "VENDOR")).accessToken);
   check("private seller needs no Y-tunnus", privSeller.status === 201 && privSeller.body.store.sellerType === "PRIVATE", privSeller.body);
@@ -255,7 +274,7 @@ async function register(name, role, extra = {}) {
   check("unverified store hidden from public list", (await call("GET", `/stores?search=Vera Vintage ${uniq}`)).body.stores.length === 0);
   const foreignImg = await call("POST", "/products", { name: "Stolen pic", category: "Coat", salePriceCents: 5000, images: ["https://res.cloudinary.com/demo/coat.jpg"] }, vendor.accessToken);
   check("product photos must be the store's own uploads", foreignImg.status === 400, foreignImg.body);
-  const prod = await call("POST", "/products", { name: "Wool coat", category: "Coat", salePriceCents: 5000, stockQuantity: 2, images: [ownImage(storeId, "coat")] }, vendor.accessToken);
+  const prod = await call("POST", "/products", { name: "Wool coat", category: "Coat", salePriceCents: 5000, stockQuantity: 2, images: [ownImage(storeId, "coat")], ...clothing(veraMfr, "clothing-jackets-coats") }, vendor.accessToken);
   check("vendor creates product with own photo", prod.status === 201 && prod.body.product.images.length === 1, prod.body);
   const productId = prod.body.product.id;
 
@@ -274,7 +293,9 @@ async function register(name, role, extra = {}) {
   const c1 = await register("Kalle", "COURIER");
   const c2 = await register("Linnea", "COURIER");
   check("unapproved courier cannot see jobs", (await call("GET", "/orders/available", null, c1.accessToken)).status === 403);
-  check("unapproved courier cannot set up payouts", (await call("POST", "/payouts/onboarding", null, c1.accessToken)).status === 403);
+  // Payout onboarding is a step towards approval, so it is open before approval; jobs (and so money) only come after
+  const earlyPayout = await call("POST", "/payouts/onboarding", null, c1.accessToken);
+  check("an unapproved courier can already set up payouts (Stripe onboarding), but still gets no jobs", earlyPayout.status === 200 && /^https?:\/\//.test(earlyPayout.body.url || "") && (await call("GET", "/orders/available", null, c1.accessToken)).status === 403, earlyPayout.body);
   const couriers = (await call("GET", "/admin/couriers", null, adminToken)).body.couriers;
   for (const c of couriers.filter((x) => [c1.user.id, c2.user.id].includes(x.user?.id))) await call("PATCH", `/admin/couriers/${c.id}/approve`, null, adminToken);
   await call("POST", "/courier/status", { isOnline: true, latitude: 60.171, longitude: 24.941 }, c1.accessToken);
@@ -403,7 +424,7 @@ async function register(name, role, extra = {}) {
   await call("PATCH", `/admin/reviews/${review.body.review.id}`, { isHidden: false }, adminToken);
 
   console.log("\n— Honest pricing (Omnibus 30-day rule)");
-  const p2 = (await call("POST", "/products", { name: "Silk scarf", category: "Accessories", salePriceCents: 6000, images: [ownImage(storeId, "scarf")] }, vendor.accessToken)).body.product;
+  const p2 = (await call("POST", "/products", { name: "Silk scarf", category: "Accessories", salePriceCents: 6000, images: [ownImage(storeId, "scarf")], ...clothing(veraMfr, "accessories-scarves") }, vendor.accessToken)).body.product;
   check("new product shows no discount", p2.pricing.previousPriceCents === null && p2.pricing.discountPct === null, p2.pricing);
   await call("PATCH", `/products/${p2.id}`, { salePriceCents: 4800 }, vendor.accessToken);
   check("reduction with < 30 days of history shows no 'was' price", (await call("GET", `/products/${p2.id}`)).body.product.pricing.previousPriceCents === null);
@@ -416,7 +437,7 @@ async function register(name, role, extra = {}) {
   check("public product has no exact stock count", !("stockQuantity" in (await call("GET", `/products/${p2.id}`)).body.product));
 
   console.log("\n— Sizes and colours");
-  const p3res = await call("POST", "/products", { name: "Linen shirt", category: "Shirt", salePriceCents: 3900, images: [ownImage(storeId, "shirt")],
+  const p3res = await call("POST", "/products", { name: "Linen shirt", category: "Shirt", salePriceCents: 3900, images: [ownImage(storeId, "shirt")], ...clothing(veraMfr, "clothing-shirts-blouses"),
     variants: [{ size: "S", color: "White", stock: 2 }, { size: "M", color: "White", stock: 0 }, { size: "L", color: "Sage", stock: 1, priceAdjustCents: 200 }] }, vendor.accessToken);
   const p3 = p3res.body.product;
   check("product with options; stock is the sum of options", p3res.status === 201 && sql(`select "stockQuantity" from "Product" where id=${p3.id}`) === "3", p3res.body);
@@ -446,6 +467,7 @@ async function register(name, role, extra = {}) {
   check("video slot is signed, scoped to the store and asks for streaming versions", vslot.publicId?.startsWith(`malvoya/drops/s${storeId}/`) && /sp_auto/.test(vslot.params?.eager || "") && vslot.params?.signature?.length === 40, vslot);
   const otherVendor = await register("Otto", "VENDOR");
   await call("POST", "/stores", { name: `Otto Outlet ${uniq}`, category: "APPAREL", sellerType: "BUSINESS", businessId: "1234567-1", latitude: 60.2, longitude: 24.9 }, otherVendor.accessToken);
+  const ottoMfr = await sellerReady(otherVendor.accessToken);
   const stolen = await call("POST", "/media/confirm", { kind: "drop_video", publicId: vslot.publicId, version: 5, signature: uploadSig(vslot.publicId, 5) }, otherVendor.accessToken);
   check("another store cannot claim someone else's upload", stolen.status === 403, stolen.body);
   const confirmed = await call("POST", "/media/confirm", { kind: "drop_video", publicId: vslot.publicId, version: 5, signature: uploadSig(vslot.publicId, 5) }, vendor.accessToken);
@@ -543,7 +565,7 @@ async function register(name, role, extra = {}) {
   check("store profile lists its drops", (await call("GET", `/stores/${storeId}/drops`)).body.drops.length >= 5);
   const oSlot = (await call("POST", "/media/sign", { kind: "drop_image" }, otherVendor.accessToken)).body;
   await seedResource(oSlot.publicId, { width: 1080, height: 1350 });
-  const oProd = (await call("POST", "/products", { name: "Denim", category: "Jeans", salePriceCents: 7000 }, otherVendor.accessToken)).body.product;
+  const oProd = (await call("POST", "/products", { name: "Denim", category: "Jeans", salePriceCents: 7000, ...clothing(ottoMfr, "clothing-trousers-jeans") }, otherVendor.accessToken)).body.product;
   const oDrop = (await call("POST", "/drops", { productId: oProd.id, kind: "IMAGE", rightsConfirmed: true, upload: { publicId: oSlot.publicId, version: 1, signature: uploadSig(oSlot.publicId, 1) } }, otherVendor.accessToken)).body.drop;
   check("unverified store's drops stay out of the feed", !!oDrop && !(await call("GET", "/drops/feed?limit=20&mode=latest")).body.drops.some((d) => d.id === oDrop.id));
   check("another store cannot delete my drop", (await call("DELETE", `/drops/${d1}`, null, otherVendor.accessToken)).status === 404);
@@ -643,7 +665,8 @@ async function register(name, role, extra = {}) {
   check("privacy policy is published as a web page", legal.status === 200 && legalHtml.includes("<h1>") && legalHtml.includes("<table>") && !/<script/i.test(legalHtml));
   check("all four legal documents are published", (await Promise.all(["terms", "sellers", "couriers"].map((d) => fetch(`${BASE}/legal/${d}`)))).every((r) => r.status === 200));
   check("unknown legal document is 404", (await fetch(`${BASE}/legal/../../etc/passwd`)).status === 404 && (await fetch(`${BASE}/legal/secrets`)).status === 404);
-  check("search filters by eco-friendly flag", (await call("GET", "/products/search?eco=true")).status === 200);
+  const ecoOn = await call("GET", "/products/search?eco=true&limit=50");
+  check("the removed eco filter is ignored (same results as without it)", ecoOn.status === 200 && ecoOn.body.total === (await call("GET", "/products/search?limit=50")).body.total, ecoOn.body.total);
 
   console.log("\n— Store hours, pause switch and the order watchdog");
   sql(`update "Product" set "stockQuantity"=10, "isAvailable"=true where id=${productId}`);
@@ -793,7 +816,7 @@ async function register(name, role, extra = {}) {
   }));
 
   const sysDefault = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.11.0", sysDefault.pricing);
+  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.12.0", sysDefault.pricing);
   const stockBeforeQuote = stockOf(productId);
   const ordersBeforeQuote = sql(`select count(*) from "Order" where "userId"=${otherCust.user.id}`);
   const q0 = await quote(quoteBody, otherCust.accessToken);
@@ -876,7 +899,7 @@ async function register(name, role, extra = {}) {
   check("admin ends a campaign; paid orders keep their discount", ended.status === 200 && /expired/.test((await quote({ ...quoteBody, promoCode: `PERUSER-${uniq}` }, otherCust.accessToken)).body.quote?.promoError || "") && sql(`select "discountCents" from "Order" where id=${oTw.id}`) === "200");
   check("changing an unknown code is 404", (await call("PATCH", "/admin/promo-codes/999999", { active: false }, adminToken)).status === 404);
 
-  const socks = (await call("POST", "/products", { name: "Wool socks", category: "Socks", salePriceCents: 100, stockQuantity: 20, images: [ownImage(storeId, "socks")] }, vendor.accessToken)).body.product;
+  const socks = (await call("POST", "/products", { name: "Wool socks", category: "Socks", salePriceCents: 100, stockQuantity: 20, images: [ownImage(storeId, "socks")], ...clothing(veraMfr, "clothing-underwear-nightwear") }, vendor.accessToken)).body.product;
   await mkPromo({ code: `BIG-${uniq}`, description: "1000 € off", kind: "AMOUNT", value: 100000 });
   const qBig = (await quote({ ...quoteBody, tipCents: 0, items: [{ productId: socks.id, quantity: 1 }], promoCode: `BIG-${uniq}` }, otherCust.accessToken)).body.quote;
   check("a discount never exceeds the item subtotal", qBig?.discountCents === 100 && qBig.totalCents === qBig.deliveryFeeCents && qBig.totalCents >= 50, qBig);
@@ -1125,17 +1148,23 @@ async function register(name, role, extra = {}) {
   const dress = own.find((p) => p.externalId === "1001");
   const boots = own.find((p) => p.externalId === "1002");
   check("imported products are hidden drafts linked to the job", own.length === 3 && own.every((p) => p.isAvailable === false && p.importJobId === sj.body.job.id && p.externalSource === "SHOPIFY"), own.map((p) => [p.name, p.isAvailable]));
-  check("Shopify mapping: name, plain-text description, category, price, size/colour options with price differences, GTIN", dress?.name === "Linen Dress" && dress.description === "Soft linen & cotton" && dress.category === "Clothing" && dress.salePriceCents === 4990 && dress.variants.length === 2 && dress.variants[0].size === "S" && dress.variants[0].color === "Musta" && dress.variants[1].priceAdjustCents === 300 && dress.variants[0].stock === 3 && dress.stockQuantity === 3 && dress.gtin === "6412345678901", dress);
-  check("a vintage tag and no stock levels: Good condition, stock 1, category from the title", boots?.condition === "GOOD" && boots.isSecondHand === true && boots.stockQuantity === 1 && boots.category === "Shoes" && boots.variants.length === 0, boots);
+  check("Shopify mapping: name, plain-text description, category, price, size/colour options with price differences, GTIN", dress?.name === "Linen Dress" && dress.description === "Soft linen & cotton" && dress.category === "Dresses" && dress.categorySlug === "clothing-dresses" && dress.salePriceCents === 4990 && dress.variants.length === 2 && dress.variants[0].size === "S" && dress.variants[0].color === "Musta" && dress.variants[1].priceAdjustCents === 300 && dress.variants[0].stock === 3 && dress.stockQuantity === 3 && dress.gtin === "6412345678901", dress);
+  check("a vintage tag and no stock levels: Good condition, stock 1, category from the title", boots?.condition === "GOOD" && boots.isSecondHand === true && boots.stockQuantity === 1 && boots.category === "Boots & ankle boots" && boots.categorySlug === "shoes-boots" && boots.variants.length === 0, boots);
   check("photos are copied into the store's own Cloudinary folder; products never hold remote URLs", own.every((p) => p.images.every((u) => u.startsWith(`https://res.cloudinary.com/testcloud/image/upload/c_limit,w_1200,q_auto,f_auto/malvoya/products/s${impStore.id}/imp-`))) && dress?.images.length === 2 && !JSON.stringify(own).includes("shopify.test"), own.map((p) => p.images));
   const uploads1 = await (await fetch("http://localhost:12222/__uploads")).json();
   check("the copies are signed server-side uploads of the shop's photo URLs", uploads1.some((u) => u.file === "https://cdn.shopify.test/files/dress1.jpg?v=1") && uploads1.some((u) => u.file === "https://cdn.shopify.test/files/dress2.jpg") && uploads1.every((u) => u.public_id.startsWith(`malvoya/products/s${impStore.id}/imp-`)), uploads1);
   check("imported prices start the 30-day price history", sql(`select count(*) from "PriceChange" where "productId"=${dress?.id}`) === "1");
   check("a draft cannot be opened by anyone but its store", (await call("GET", `/products/${dress?.id}`)).status === 404 && (await call("GET", `/products/${dress?.id}`, null, otherCust.accessToken)).status === 404 && (await call("GET", `/products/${dress?.id}`, null, importer.accessToken)).status === 200);
   check("drafts are not public", (await call("GET", `/stores/${impStore.id}/products`)).body.products.length === 0 && !(await call("GET", `/products/search?q=${encodeURIComponent("Linen Dress")}`)).body.products.some((p) => p.id === dress?.id));
+  // 2.12: drafts that miss required information stay drafts and are listed with what is missing
+  const pub0 = await call("POST", `/products/import/${sj.body.job.id}/publish`, null, importer.accessToken);
+  const dressMissing = pub0.body.incomplete?.find((x) => x.productId === dress?.id)?.missing.map((m) => m.field) ?? [];
+  check("publishing an import refuses drafts that miss required information, and says what is missing", pub0.status === 200 && pub0.body.published === 0 && dressMissing.includes("safetyPledge") && dressMissing.includes("attributes.fibreComposition") && pub0.body.incomplete.length === 2, pub0.body);
+  await call("POST", "/stores/my/safety-pledge", { accept: true }, importer.accessToken);
+  await call("PATCH", `/products/${dress?.id}`, { attributes: { fibreComposition: [{ component: "main", fibres: [{ fibre: "flax", percent: 55 }, { fibre: "cotton", percent: 45 }] }] } }, importer.accessToken);
   const pub1 = await call("POST", `/products/import/${sj.body.job.id}/publish`, null, importer.accessToken);
   const publicNow = (await call("GET", `/stores/${impStore.id}/products`)).body.products.map((p) => p.id).sort();
-  check("publishing shows the drafts with a photo and a price, not the one without a photo", pub1.status === 200 && pub1.body.published === 2 && publicNow.join() === [dress?.id, boots?.id].sort().join(), [pub1.body, publicNow]);
+  check("once complete (pledge; a private seller's second-hand boots need no labels) the drafts with a photo and a price publish, not the one without a photo", pub1.status === 200 && pub1.body.published === 2 && publicNow.join() === [dress?.id, boots?.id].sort().join(), [pub1.body, publicNow]);
   shopPrice = "44.90";
   shopStock = 5;
   const sj2 = await shopImport({ shopUrl: "http://localhost:12223", rightsConfirmed: true });
@@ -1185,13 +1214,14 @@ async function register(name, role, extra = {}) {
   const sweater = own.find((p) => p.externalId === "id:SW-1");
   const scarf = own.find((p) => p.name === "Silk scarf");
   const cap = own.find((p) => p.externalId === "id:CAP-1");
-  check("CSV mapping: options with price differences, quoted text, comma decimals, category mapping", sweater?.salePriceCents === 5990 && sweater.variants.length === 2 && sweater.variants[1].priceAdjustCents === 300 && sweater.stockQuantity === 3 && sweater.description === 'Warm "merino" wool' && sweater.category === "Clothing" && sweater.images.length === 2 && sweater.isAvailable === false, sweater);
-  check("CSV: dot decimals, condition and GTIN; an http photo is skipped", scarf?.salePriceCents === 1950 && scarf.condition === "LIKE_NEW" && scarf.gtin === "40123455" && scarf.category === "Accessories" && cap?.images.length === 0 && cap.category === "Accessories", [scarf, cap]);
+  check("CSV mapping: options with price differences, quoted text, comma decimals, category mapping", sweater?.salePriceCents === 5990 && sweater.variants.length === 2 && sweater.variants[1].priceAdjustCents === 300 && sweater.stockQuantity === 3 && sweater.description === 'Warm "merino" wool' && sweater.category === "Knitwear & hoodies" && sweater.categorySlug === "clothing-knitwear" && sweater.images.length === 2 && sweater.isAvailable === false, sweater);
+  check("CSV: dot decimals, condition and GTIN; an http photo is skipped", scarf?.salePriceCents === 1950 && scarf.condition === "LIKE_NEW" && scarf.gtin === "40123455" && scarf.categorySlug === "accessories-scarves" && cap?.images.length === 0 && cap.categorySlug === "accessories-hats-beanies", [scarf, cap]);
   const cj2 = await csvImport({ csv: csvText, rightsConfirmed: true });
   const cjob2 = await waitJob(cj2.body.job?.id);
   // 3 Shopify + 3 CSV products, less the boots the store deleted (since 2.10 deleted products leave the owner's list too)
   check("re-importing the same CSV updates, never duplicates", cjob2?.created === 0 && cjob2.updated === 3 && (await ownList()).length === 5, cjob2);
-  check("publishing the CSV import shows only the products with a photo", (await call("POST", `/products/import/${cj2.body.job?.id}/publish`, null, importer.accessToken)).body.published === 2);
+  const cpub = (await call("POST", `/products/import/${cj2.body.job?.id}/publish`, null, importer.accessToken)).body;
+  check("publishing the CSV import: textile drafts without a composition stay drafts (only those with a photo are listed)", cpub.published === 0 && cpub.incomplete?.length === 2 && cpub.incomplete.every((x) => x.missing.some((m) => m.field === "attributes.fibreComposition")), cpub);
   const cj3 = await csvImport({ csv: "name,price\nShirt,12,90\nCap,15\n", rightsConfirmed: true });
   const cjob3 = await waitJob(cj3.body.job?.id);
   check("a row with more cells than the header (unquoted 12,90) is reported with how to fix it", cjob3?.status === "DONE" && cjob3.created === 1 && cjob3.errors.some((e) => e.item === "row 2" && /quotes/.test(e.message)), cjob3);
@@ -1243,12 +1273,13 @@ async function register(name, role, extra = {}) {
   const wOwn = (await call("GET", `/stores/${wStore.id}/products?limit=50`, null, wilma.accessToken)).body.products;
   const cardigan = wOwn?.find((x) => x.externalId === "201");
   const belt = wOwn?.find((x) => x.externalId === "202");
-  check("WooCommerce mapping: variations become size/colour options with price differences and stock, GTIN, plain-text description", cardigan?.name === "Merino Cardigan" && cardigan.externalSource === "WOOCOMMERCE" && cardigan.salePriceCents === 7900 && cardigan.description === "Soft merino wool" && cardigan.category === "Clothing" && cardigan.variants.length === 2 && cardigan.variants[0].size === "S" && cardigan.variants[0].color === "Grey" && cardigan.variants[0].stock === 2 && cardigan.variants[1].size === "M" && cardigan.variants[1].stock === 0 && cardigan.variants[1].priceAdjustCents === 600 && cardigan.gtin === "6412345678901" && cardigan.images.length === 2 && cardigan.isAvailable === false, cardigan);
-  check("WooCommerce mapping: a simple vintage product, stock not tracked → 1 with a warning, photos re-hosted", belt?.salePriceCents === 3500 && belt.condition === "GOOD" && belt.stockQuantity === 1 && belt.category === "Accessories" && belt.images.every((u) => u.includes(`/malvoya/products/s${wStore.id}/imp-`)) && wjob.errors.some((e) => e.item === "Leather Belt" && /stock/.test(e.message)), belt);
+  check("WooCommerce mapping: variations become size/colour options with price differences and stock, GTIN, plain-text description", cardigan?.name === "Merino Cardigan" && cardigan.externalSource === "WOOCOMMERCE" && cardigan.salePriceCents === 7900 && cardigan.description === "Soft merino wool" && cardigan.categorySlug === "clothing-knitwear" && cardigan.variants.length === 2 && cardigan.variants[0].size === "S" && cardigan.variants[0].color === "Grey" && cardigan.variants[0].stock === 2 && cardigan.variants[1].size === "M" && cardigan.variants[1].stock === 0 && cardigan.variants[1].priceAdjustCents === 600 && cardigan.gtin === "6412345678901" && cardigan.images.length === 2 && cardigan.isAvailable === false, cardigan);
+  check("WooCommerce mapping: a simple vintage product, stock not tracked → 1 with a warning, photos re-hosted", belt?.salePriceCents === 3500 && belt.condition === "GOOD" && belt.stockQuantity === 1 && belt.categorySlug === "accessories-belts" && belt.images.every((u) => u.includes(`/malvoya/products/s${wStore.id}/imp-`)) && wjob.errors.some((e) => e.item === "Leather Belt" && /stock/.test(e.message)), belt);
   const keyLeak = wooSeen.some((r) => r.url.includes("ck_") || r.url.includes("cs_")) || wooSeen.some((r) => r.method !== "GET");
   check("the keys go only in the Authorization header of GET requests to the shop, never in a URL", wooSeen.length > 0 && !keyLeak && wooSeen.every((r) => r.url.startsWith("/wp-json/wc/v3/")), wooSeen.slice(0, 5));
   check("the keys are not stored anywhere", sql(`select count(*) from "ImportJob" where "errors"::text ~ '(ck|cs)_' or coalesce("sourceRef",'') ~ '(ck|cs)_'`) === "0" && !JSON.stringify(wj.body).includes(CS));
-  check("publishing the WooCommerce import shows the products with a photo", (await call("POST", `/products/import/${wj.body.job.id}/publish`, null, wilma.accessToken)).body.published === 2);
+  const wpub = (await call("POST", `/products/import/${wj.body.job.id}/publish`, null, wilma.accessToken)).body;
+  check("publishing the WooCommerce import: a business seller's drafts need the manufacturer, model and warnings first", wpub.published === 0 && wpub.incomplete?.length === 2 && wpub.incomplete.every((x) => x.missing.some((m) => m.field === "manufacturerId") && x.missing.some((m) => m.field === "productModel")), wpub);
   const wj2 = await wooImport(wooBody);
   const wjob2 = await waitJob(wj2.body.job?.id, wilma.accessToken);
   check("re-importing from WooCommerce updates instead of duplicating", wjob2?.status === "DONE" && wjob2.created === 0 && wjob2.updated === 2, wjob2);
@@ -1420,8 +1451,11 @@ async function register(name, role, extra = {}) {
   check("a promo code cannot take a customer's invite code", (await mkPromo({ code: myCode, description: "shadow", kind: "AMOUNT", value: 100 })).status === 409);
 
   // This instance also runs as production without SMTP: password reset by email is unavailable there
-  const refUp = await startFeeApi({ NODE_ENV: "production", REFERRAL_DISCOUNT_CENTS: "500", REFERRAL_REWARD_CENTS: "300", ANDROID_APP_SHA256: `${"ab:".repeat(31)}cd, ${"12:".repeat(31)}EF, not-a-fingerprint` });
+  // DELIVERY_SLOTS empty (the default since 2.12): scheduled delivery is off, no invented time windows
+  const refUp = await startFeeApi({ NODE_ENV: "production", REFERRAL_DISCOUNT_CENTS: "500", REFERRAL_REWARD_CENTS: "300", ANDROID_APP_SHA256: `${"ab:".repeat(31)}cd, ${"12:".repeat(31)}EF, not-a-fingerprint`, DELIVERY_SLOTS: "" });
   check("API starts with invites switched on", refUp);
+  const noSlotQ = await quote({ storeId, deliveryLat: 60.18, deliveryLng: 24.95, items: [{ productId, quantity: 1 }] }, otherCust.accessToken, FEE_API);
+  check("without DELIVERY_SLOTS no delivery windows are offered and none can be booked (2.12 default)", noSlotQ.status === 200 && Array.isArray(noSlotQ.body.quote?.slots) && noSlotQ.body.quote.slots.length === 0 && (await quote({ storeId, deliveryLat: 60.18, deliveryLng: 24.95, items: [{ productId, quantity: 1 }], deliverySlot: { date: hel(new Date(Date.now() + 86_400_000)).date, start: "17:00", end: "19:00" } }, otherCust.accessToken, FEE_API)).status === 400, noSlotQ.body.quote?.slots);
   const noMail = await callAt(FEE_API, "POST", "/auth/password/forgot", { email: `reija${uniq}@example.fi` });
   check("without email sending, forgot password says so (503) for any address", noMail.status === 503 && noMail.body.error === "Password reset by email is not available yet. Contact support." && (await callAt(FEE_API, "POST", "/auth/password/forgot", { email: `nobody2-${uniq}@example.fi` })).status === 503, noMail.body);
   const refOn = (await callAt(FEE_API, "GET", "/me/referral", null, otherCust.accessToken)).body;
@@ -1467,7 +1501,7 @@ async function register(name, role, extra = {}) {
   check("without ANDROID_APP_SHA256 assetlinks.json is an empty list", noLinks.status === 200 && JSON.stringify(await noLinks.json()) === "[]");
 
   console.log("\n— Store share page");
-  const evilProd = await call("POST", "/products", { name: "Tee <script>alert(1)</script>", category: "Shirt", salePriceCents: 2500, images: [ownImage(storeId, "tee")] }, vendor.accessToken);
+  const evilProd = await call("POST", "/products", { name: "Tee <script>alert(1)</script>", category: "Shirt", salePriceCents: 2500, images: [ownImage(storeId, "tee")], ...clothing(veraMfr) }, vendor.accessToken);
   const sPageRes = await fetch(`${BASE}/s/${storeId}`);
   const sHtml = await sPageRes.text();
   check("store share page: name, products with prices, open-in-app and Play links, everything escaped", evilProd.status === 201 && sPageRes.status === 200 && sHtml.includes(`Vera Vintage ${uniq}`) && sHtml.includes("Tee &lt;script&gt;alert(1)&lt;/script&gt;") && !/<script/i.test(sHtml) && sHtml.includes("25,00 €") && sHtml.includes("intent://") && sHtml.includes("package=com.malvoya.customer") && sHtml.includes("play.google.com/store/apps/details?id=com.malvoya.customer"), sHtml.slice(0, 400));
@@ -1537,10 +1571,10 @@ async function register(name, role, extra = {}) {
   check("a deduction can be explained in the store note (old apps: the condition note)", rnRef.status === 200 && rnRef.body.return?.refundCents === 4300 - 500 && rnRef.body.return.storeNote === "A stain on the sleeve", rnRef.body);
 
   console.log("\n— Deleting products and the store's own catalogue (2.10)");
-  const hardP = (await call("POST", "/products", { name: `Delete me ${uniq}`, category: "Shirt", salePriceCents: 1500, images: [ownImage(storeId, "del")] }, vendor.accessToken)).body.product;
+  const hardP = (await call("POST", "/products", { name: `Delete me ${uniq}`, category: "Shirt", salePriceCents: 1500, images: [ownImage(storeId, "del")], ...clothing(veraMfr) }, vendor.accessToken)).body.product;
   const hardDel = await call("DELETE", `/products/${hardP.id}`, null, vendor.accessToken);
   check("a product nobody ordered is deleted for good", hardDel.status === 200 && hardDel.body.deleted === "hard" && sql(`select count(*) from "Product" where id=${hardP.id}`) === "0", hardDel.body);
-  const softP = (await call("POST", "/products", { name: `Keep me ${uniq}`, category: "Shirt", salePriceCents: 1500, stockQuantity: 0, images: [ownImage(storeId, "keep")] }, vendor.accessToken)).body.product;
+  const softP = (await call("POST", "/products", { name: `Keep me ${uniq}`, category: "Shirt", salePriceCents: 1500, stockQuantity: 0, images: [ownImage(storeId, "keep")], ...clothing(veraMfr) }, vendor.accessToken)).body.product;
   const mySold = await call("GET", "/stores/my/products?filter=soldout&limit=100", null, vendor.accessToken);
   check("the store's catalogue filters sold-out products", mySold.status === 200 && mySold.body.products.some((p) => p.id === softP.id) && mySold.body.products.every((p) => p.stockQuantity <= 0), mySold.body.products?.map((p) => p.stockQuantity));
   sql(`insert into "OrderItem" ("orderId","productId","quantity","unitCents") values (${rnOrder},${softP.id},1,1500)`);
@@ -1801,9 +1835,11 @@ async function register(name, role, extra = {}) {
 
   // Onboarding checklists
   let ob = (await call("GET", "/stores/my/onboarding", null, pekka.accessToken)).body;
-  check("store onboarding lists the steps in order with titles and actions", ob.ok && ob.steps.map((s) => s.key).join(",") === "details,map_pin,hours,payouts,first_product,tax_info,agreement,business_check" && ob.steps.every((s) => s.title?.en && s.title?.fi && s.action) && ob.readyForApproval === false && ob.percent === 50, ob);
+  check("store onboarding lists the steps in order with titles and actions", ob.ok && ob.steps.map((s) => s.key).join(",") === "details,map_pin,hours,payouts,first_product,tax_info,agreement,safety_pledge,business_check" && ob.steps.every((s) => s.title?.en && s.title?.fi && s.action) && ob.readyForApproval === false && ob.percent === 44, ob);
   await call("PATCH", `/stores/${pekkaStore.id}`, { openingHours: { mon: [["09:00", "18:00"]], tue: [["09:00", "18:00"]] } }, pekka.accessToken);
-  await call("POST", "/products", { name: "Testi paita", category: "Shirt", salePriceCents: 2500, stockQuantity: 1, images: [ownImage(pekkaStore.id, "paita")] }, pekka.accessToken);
+  // A draft counts as the first product (publishing needs the category data, 2.12)
+  await call("POST", "/products", { name: "Testi paita", category: "Shirt", salePriceCents: 2500, stockQuantity: 1, images: [ownImage(pekkaStore.id, "paita")], isAvailable: false }, pekka.accessToken);
+  await call("POST", "/stores/my/safety-pledge", { accept: true }, pekka.accessToken);
   await call("PUT", "/stores/my/tax-info", { legalName: "Testi Kauppa Oy", addressLine: "Testikatu 1", postalCode: "00100", city: "Helsinki", country: "fi" }, pekka.accessToken);
   ob = (await call("GET", "/stores/my/onboarding", null, pekka.accessToken)).body;
   check("steps turn done as the store completes them (payouts still missing)", ob.steps.filter((s) => !s.done).map((s) => s.key).join(",") === "payouts" && ob.readyForApproval === false && sql(`select "readyForApprovalAt" is null from "Store" where id=${pekkaStore.id}`) === "t", ob.steps);
@@ -1829,7 +1865,7 @@ async function register(name, role, extra = {}) {
   cob = (await call("GET", "/courier/me/onboarding", null, onni.accessToken)).body;
   check("courier ready for approval when everything but approval is done", cob.readyForApproval === true && cob.approved === false && cob.percent === 83 && sql(`select "readyForApprovalAt" is not null from "Courier" where "userId"=${onni.user.id}`) === "t", cob);
   const sys211 = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("System lists them as ready for approval", sys211.version === "2.11.0" && sys211.attention.some((a) => a.includes(`(#${pekkaStore.id}) is ready for approval`)) && sys211.attention.some((a) => a.includes("Courier \"Onni\"") && a.includes("ready for approval")) && sys211.readyForApproval?.stores?.some((s) => s.id === pekkaStore.id), sys211.attention);
+  check("System lists them as ready for approval", sys211.version === "2.12.0" && sys211.attention.some((a) => a.includes(`(#${pekkaStore.id}) is ready for approval`)) && sys211.attention.some((a) => a.includes("Courier \"Onni\"") && a.includes("ready for approval")) && sys211.readyForApproval?.stores?.some((s) => s.id === pekkaStore.id), sys211.attention);
   check("admin courier list shows vehicle, disclosure and readiness", (await call("GET", "/admin/couriers", null, adminToken)).body.couriers?.find((c) => c.user?.id === onni.user.id)?.vehicleType === "ebike");
 
   // Publishing changes (second instance reading a copy of the legal texts, same database)
@@ -1899,6 +1935,348 @@ async function register(name, role, extra = {}) {
   fs.rmSync(legalTmp, { recursive: true, force: true });
   }
 
+  console.log("\n— Category taxonomy, product data and EU compliance (2.12)");
+  {
+    // A business beauty & fashion store in Helsinki with its pledge, an EU manufacturer, a non-EU manufacturer and an EU responsible person
+    const bea = await register("Bea", "VENDOR");
+    const beaStore = (await call("POST", "/stores", { name: `Bea Beauty ${uniq}`, category: "COSMETICS", sellerType: "BUSINESS", businessId: "4567890-7", latitude: 60.169, longitude: 24.938, address: "Esplanadi 2, Helsinki" }, bea.accessToken)).body.store;
+    await call("PATCH", `/admin/vendors/${beaStore.id}/approve`, null, adminToken);
+    const bt = bea.accessToken;
+    const img = (n) => ownImage(beaStore.id, n);
+    const mk = (body, tok = bt, raw) => call("POST", "/products", { salePriceCents: 2900, stockQuantity: 5, images: [img(`p${Math.random().toString(36).slice(2, 8)}`)], ...body }, tok, raw);
+
+    // Safety pledge (GPSR Art. 22(10)(b))
+    const pl0 = await call("GET", "/stores/my/safety-pledge", null, bt);
+    check("the safety pledge has a text in English and Finnish and a version, not yet given", pl0.status === 200 && pl0.body.pledge.accepted === false && /^safety-pledge@[0-9a-f]{12}$/.test(pl0.body.pledge.currentVersion) && pl0.body.pledge.text.fi.includes("EU"), pl0.body);
+    const noPledge = await mk({ name: "Ennen sitoumusta", ...clothing(null) });
+    check("publishing before the pledge is refused (422) with the pledge as a field", noPledge.status === 422 && noPledge.body.code === "PUBLISH_REQUIREMENTS" && noPledge.body.fields.some((f) => f.field === "safetyPledge"), noPledge.body);
+    check("the pledge needs accept: true", (await call("POST", "/stores/my/safety-pledge", {}, bt)).status === 400);
+    const pl1 = await call("POST", "/stores/my/safety-pledge", { accept: true }, bt);
+    const pl2 = await call("POST", "/stores/my/safety-pledge", { accept: true }, bt);
+    check("the pledge is recorded once with its time and version (idempotent)", pl1.status === 201 && pl1.body.pledge.accepted && pl2.status === 200 && pl2.body.alreadyAccepted === true && pl2.body.pledge.acceptedAt === pl1.body.pledge.acceptedAt && sql(`select "safetyPledgeVersion" from "Store" where id=${beaStore.id}`) === pl1.body.pledge.currentVersion);
+    check("/stores/my shows the pledge", (await call("GET", "/stores/my", null, bt)).body.store?.safetyPledge?.accepted === true);
+
+    // Manufacturer / responsible person records
+    check("a manufacturer record needs an email or a web address (GPSR: electronic address)", (await call("POST", "/stores/my/operators", { name: "No Contact Oy", addressLine: "Katu 1", postalCode: "00100", city: "Helsinki", countryCode: "FI" }, bt)).status === 400);
+    const mFi = (await call("POST", "/stores/my/operators", { name: "Testi Kosmetiikka Oy", addressLine: "Teollisuuskatu 3", postalCode: "00510", city: "Helsinki", countryCode: "fi", email: "info@kosmetiikka.example.fi" }, bt)).body.operator;
+    const mCn = (await call("POST", "/stores/my/operators", { name: "Test Factory Ltd", addressLine: "1 Factory Road", postalCode: "518000", city: "Shenzhen", countryCode: "CN", url: "https://factory.example.com" }, bt)).body.operator;
+    const rpSe = (await call("POST", "/stores/my/operators", { name: "Test Import AB", addressLine: "Gatan 1", postalCode: "11122", city: "Stockholm", countryCode: "SE", email: "rp@import.example.se" }, bt)).body.operator;
+    check("records are the store's own, with the country and whether it is in the EU", mFi?.address?.countryCode === "FI" && mFi.inEu === true && mCn?.inEu === false && rpSe?.inEu === true && (await call("GET", "/stores/my/operators", null, bt)).body.operators.length === 3);
+    check("another store cannot use these records", (await mk({ name: "Borrowed maker", images: [], ...clothing(mFi.id) }, vendor.accessToken)).body.fields?.some((f) => f.field === "manufacturerId" && f.code === "unknown"));
+
+    // Taxonomy: templates, the tree and its counts
+    const tpl = (await call("GET", "/categories/templates")).body.templates;
+    const apparelTpl = tpl?.find((x) => x.template === "APPAREL");
+    check("templates describe the editor's fields with levels, allowed values and the Annex I fibre names", apparelTpl?.fields.some((f) => f.key === "fibreComposition" && f.level === "law" && f.fibres?.some((x) => x.value === "cotton" && x.label.fi === "puuvilla")) && tpl.some((x) => x.template === "FRAGRANCE" && x.cosmetic && x.optionFields.includes("contentAmount")) && tpl.some((x) => x.template === "HAIR_TOOL"), apparelTpl?.fields?.slice(0, 2));
+    const schemes = (await call("GET", "/categories/certificate-schemes")).body.schemes;
+    check("certificate schemes come from a fixed list with FI/EN names", schemes?.some((x) => x.key === "nordic_swan" && x.name.fi === "Joutsenmerkki") && schemes.some((x) => x.key === "eu_ecolabel") && schemes.length >= 15);
+    const allTree = (await call("GET", "/categories?includeEmpty=1")).body;
+    const tops = allTree.categories?.map((c) => c.slug) ?? [];
+    check("the tree has 11 top levels in Home order, incl. Sport & outdoor and Second-hand (store editor: includeEmpty=1)", tops.join() === "clothing,shoes,bags,accessories,jewellery,makeup,skincare,haircare,fragrance,sport-outdoor,second-hand", tops);
+    const lips = allTree.categories?.find((c) => c.slug === "makeup")?.children.find((c) => c.slug === "makeup-lips");
+    check("nodes carry FI/EN names, icon, tile colour and template", lips?.name?.fi === "Huulet" && lips.name.en === "Lips" && lips.icon === "brush" && lips.tileColor === "peach" && lips.template === "COSMETIC_MAKEUP" && allTree.categories.find((c) => c.slug === "second-hand")?.children.every((c) => c.collection === true), lips);
+    check("the owner's additions are in the tree", ["clothing-outdoor-rainwear", "clothing-workwear", "clothing-festive-traditional", "clothing-nightwear-loungewear"].every((s) => allTree.categories.find((c) => c.slug === "clothing").children.some((x) => x.slug === s)) && allTree.categories.find((c) => c.slug === "shoes").children.some((x) => x.slug === "shoes-first-shoes") && allTree.categories.find((c) => c.slug === "skincare").children.some((x) => x.slug === "skincare-mens-grooming") && allTree.categories.find((c) => c.slug === "haircare").children.some((x) => x.slug === "haircare-hair-tools" && x.template === "HAIR_TOOL"));
+
+    // Per-template validation (422 with field-level bilingual messages); drafts may be incomplete
+    const draft = await mk({ name: "Luonnos ilman kategoriaa", isAvailable: false });
+    check("a draft may be incomplete: saved, with the completeness meter", draft.status === 201 && draft.body.product.publishCheck?.ready === false && draft.body.product.publishCheck.missing.some((f) => f.field === "categorySlug"), draft.body);
+    const noCat = await mk({ name: "Ilman kategoriaa" });
+    check("a visible product needs a category (422 PUBLISH_REQUIREMENTS, messages in EN and FI)", noCat.status === 422 && noCat.body.fields.some((f) => f.field === "categorySlug" && f.message.en && f.message.fi), noCat.body);
+    const fiErr = await mk({ name: "Ilman kategoriaa" }, bt, { headers: { "Accept-Language": "fi-FI" } });
+    check("the summary follows the app's language", /^Tuotetta ei voi vielä julkaista/.test(fiErr.body.error || ""), fiErr.body.error);
+    const comp95 = await mk({ name: "Paita 95", ...clothing(mFi.id, "clothing-tops", { attributes: { fibreComposition: [{ component: "main", fibres: [{ fibre: "cotton", percent: 90 }, { fibre: "elastane", percent: 5 }] }] } }) });
+    check("textiles: the composition must total 100 % (Reg. 1007/2011)", comp95.status === 422 && comp95.body.fields.some((f) => f.code === "composition_total" && f.message.en.includes("95") && f.message.fi.includes("95 %")), comp95.body);
+    check("textiles: only Annex I fibre names (bamboo is not one)", (await mk({ name: "Bambupaita", ...clothing(mFi.id, "clothing-tops", { attributes: { fibreComposition: [{ component: "main", fibres: [{ fibre: "bamboo", percent: 100 }] }] } }) })).body.code === "INVALID_PRODUCT_DATA");
+    const noComp = await mk({ name: "Paita ilman materiaalia", ...clothing(mFi.id, "clothing-tops", { attributes: { brand: "Testi" } }) });
+    check("textiles: no composition, no publishing", noComp.status === 422 && noComp.body.fields.some((f) => f.field === "attributes.fibreComposition"));
+    const shoe = await mk({ name: "Nahkanilkkurit", ...clothing(mFi.id, "shoes-boots", { attributes: { brand: "Testi", materialUpper: ["leather"] } }) });
+    check("footwear: upper, lining and sole materials (Directive 94/11/EC)", shoe.status === 422 && ["attributes.materialLiningSock", "attributes.materialOuterSole"].every((k) => shoe.body.fields.some((f) => f.field === k)) && !shoe.body.fields.some((f) => f.field === "attributes.materialUpper"), shoe.body.fields);
+    const unknownAttr = await mk({ name: "Väärä tieto", ...clothing(mFi.id, "clothing-tops", { attributes: { fibreComposition: wool100, shadeFamily: "nude" } }) });
+    check("an attribute of another template is refused (422 INVALID_PRODUCT_DATA, even for drafts)", unknownAttr.status === 422 && unknownAttr.body.code === "INVALID_PRODUCT_DATA" && unknownAttr.body.fields.some((f) => f.field === "attributes.shadeFamily" && f.code === "not_for_category"), unknownAttr.body);
+    check("a hygiene seal is not allowed on clothing (always returnable)", (await mk({ name: "Uimapuku sinetillä", isAvailable: false, ...clothing(mFi.id, "clothing-swimwear", { hygieneSealed: true }) })).body.fields?.some((f) => f.field === "hygieneSealed" && f.code === "not_allowed"));
+    const noMaker = await mk({ name: "Ilman valmistajaa", ...clothing(null) });
+    check("business sellers: manufacturer name and address are required (GPSR Art. 19)", noMaker.status === 422 && noMaker.body.fields.some((f) => f.field === "manufacturerId" && /manufacturer/.test(f.message.en) && /valmistajan/.test(f.message.fi)));
+    const cnMaker = await mk({ name: "Kiinasta", ...clothing(mCn.id) });
+    check("a manufacturer outside the EU needs the EU responsible person", cnMaker.status === 422 && cnMaker.body.fields.some((f) => f.field === "responsiblePersonId"));
+    const fiOnly = await mk({ name: "Varoitus suomeksi", ...clothing(mFi.id, "clothing-tops", { noWarnings: false, warnings: { fi: "Pidä poissa tulesta." } }) });
+    check("warnings are needed in Finnish and Swedish", fiOnly.status === 422 && fiOnly.body.fields.some((f) => f.field === "warnings" && /Swedish/.test(f.message.en) && /ruotsiksi/.test(f.message.fi)), fiOnly.body.fields);
+    const withRp = await mk({ name: "Kiinasta vastuuhenkilöllä", ...clothing(mCn.id, "clothing-tops", { responsiblePersonId: rpSe.id, noWarnings: false, warnings: { fi: "Pidä poissa tulesta.", sv: "Håll borta från eld." } }) });
+    check("a complete product publishes; the safety block shows manufacturer, EU responsible person, model and warnings FI + SV", withRp.status === 201 && withRp.body.product.isAvailable === true && withRp.body.product.safety?.manufacturer?.name === "Test Factory Ltd" && withRp.body.product.safety.responsiblePerson?.address?.countryCode === "SE" && withRp.body.product.safety.productModel === "T-100" && withRp.body.product.safety.warnings?.sv === "Håll borta från eld." && withRp.body.product.materials?.fi === "100 % villa" && withRp.body.product.publishCheck?.ready === true, withRp.body);
+    const kids = await mk({ name: "Lasten huppari", ...clothing(mFi.id, "clothing-knitwear", { audience: "KIDS", ageGroup: "KIDS", attributes: { brand: "Testi", fibreComposition: wool100, sizeSystem: "kids_height", cordsDrawstrings: "present_hood_neck" } }) });
+    check("children's clothes: no cords in the hood or neck area (EN 14682)", kids.status === 422 && kids.body.fields.some((f) => f.field === "attributes.cordsDrawstrings" && f.code === "not_allowed"));
+    check("children's sizes are heights in cm (50–176)", (await mk({ name: "Lasten paita M", ...clothing(mFi.id, "clothing-tops", { audience: "KIDS", attributes: { brand: "Testi", fibreComposition: wool100, sizeSystem: "kids_height", cordsDrawstrings: "none" }, variants: [{ size: "M", stock: 1 }] }) })).body.fields?.some((f) => f.field === "variants.0.size"));
+    check("an age group must fit the audience (baby is for Kids)", (await mk({ name: "Vauvan body", isAvailable: false, ...clothing(mFi.id, "clothing-tops", { audience: "WOMEN", ageGroup: "BABY" }) })).body.fields?.some((f) => f.field === "ageGroup"));
+    const kidsOk = await mk({ name: "Lasten neule", ...clothing(mFi.id, "clothing-knitwear", { audience: "KIDS", ageGroup: "TODDLER", attributes: { brand: "Testi", fibreComposition: wool100, sizeSystem: "kids_height", cordsDrawstrings: "none" }, variants: [{ size: "98", stock: 1 }, { size: "110 cm", stock: 1 }] }) });
+    check("a complete children's product publishes with its age group", kidsOk.status === 201 && kidsOk.body.product.ageGroup === "TODDLER" && kidsOk.body.product.audience === "KIDS", kidsOk.body);
+
+    // Cosmetics: label facts, responsible person, business only, hygiene seal on by default
+    const cosm = (slug, extra = {}) => ({
+      categorySlug: slug, manufacturerId: mFi.id, responsiblePersonId: mFi.id, productModel: "C-1",
+      attributes: { brand: "Testi", durabilityType: "pao", paoMonths: 12, function: { fi: "Tuoksu", sv: "Doft" }, precautions: { fi: "Vain ulkoiseen käyttöön.", sv: "Endast för utvärtes bruk." }, ingredientsInci: "Alcohol Denat., Parfum, Aqua, Linalool", sealedUnused: true, ...(extra.attributes ?? {}) },
+      ...Object.fromEntries(Object.entries(extra).filter(([k]) => k !== "attributes")),
+    });
+    const bare = await mk({ name: "Hajuvesi ilman tietoja", categorySlug: "fragrance-parfum-edp", manufacturerId: mFi.id, productModel: "X" });
+    const bareFields = bare.body.fields?.map((f) => f.field) ?? [];
+    check("cosmetics: content, shelf life, function and precautions FI + SV, INCI, sealed & unused and the responsible person are required", bare.status === 422 && ["contentAmount", "attributes.durabilityType", "attributes.function", "attributes.precautions", "attributes.ingredientsInci", "attributes.sealedUnused", "responsiblePersonId"].every((k) => bareFields.includes(k)), bareFields);
+    check("cosmetics: testers and professional-use products are not for sale", (await mk({ name: "Testeri", ...cosm("fragrance-parfum-edp", { contentAmount: 50, contentUnit: "ml", attributes: { isTesterOrSample: true } }) })).body.fields?.some((f) => f.field === "attributes.isTesterOrSample"));
+    check("cosmetics: an expired best-before date blocks publishing", (await mk({ name: "Vanha voide", ...cosm("skincare-moisturisers", { contentAmount: 50, contentUnit: "ml", attributes: { durabilityType: "best_before", paoMonths: null, bestBefore: "2020-01" } }) })).body.fields?.some((f) => f.field === "attributes.bestBefore" && f.code === "expired"));
+    const paula2 = await register("Paavo", "VENDOR");
+    await call("POST", "/stores", { name: `Paavon kirppis ${uniq}`, category: "THRIFT", sellerType: "PRIVATE", latitude: 60.17, longitude: 24.94 }, paula2.accessToken);
+    await call("POST", "/stores/my/safety-pledge", { accept: true }, paula2.accessToken);
+    const privCosm = await mk({ name: "Avaamaton huulipuna", images: [], categorySlug: "makeup-lips", contentAmount: 3.5, contentUnit: "g", attributes: { brand: "Testi", durabilityType: "pao", paoMonths: 12, function: { fi: "Huulipuna", sv: "Läppstift" }, noPrecautions: true, ingredientsInci: "Ricinus Communis Seed Oil, Cera Alba", sealedUnused: true } }, paula2.accessToken);
+    check("private sellers cannot publish cosmetics, skincare, haircare or fragrance", privCosm.status === 422 && privCosm.body.fields.some((f) => f.code === "business_only"), privCosm.body.fields);
+    const edp = await mk({
+      name: "Testi Eau de Parfum", salePriceCents: 8900, stockQuantity: undefined,
+      ...cosm("fragrance-parfum-edp", { audience: "UNISEX", attributes: { concentration: "eau_de_parfum", olfactoryFamily: ["floral"] } }),
+      variants: [{ contentAmount: 30, contentUnit: "ml", priceAdjustCents: -3000, stock: 3 }, { contentAmount: 50, contentUnit: "ml", stock: 2 }, { contentAmount: 100, contentUnit: "ml", priceAdjustCents: 4000, stock: 1 }],
+    });
+    const ev = edp.body.product?.variants ?? [];
+    check("a complete fragrance publishes; the hygiene seal is on by default and disclosed", edp.status === 201 && edp.body.product.hygieneSealed === true && /seal/.test(edp.body.product.hygieneSealNotice?.en || "") && /sinet/.test(edp.body.product.hygieneSealNotice?.fi || ""), edp.body);
+    check("unit price per litre per option: 50 ml at 89,00 € → 1 780,00 €/l; 100 ml at 129,00 € → 1 290,00 €/l", ev[1]?.unitPrice?.cents === 178000 && ev[1].unitPrice.per === "l" && ev[2]?.unitPrice?.cents === 129000, ev.map((v) => v.unitPrice));
+    check("no unit price under 50 ml (decree 553/2013 §10) and none at product level without a product content", ev[0]?.unitPrice === null && ev[0].priceCents === 5900 && edp.body.product.unitPrice === null);
+    await call("PATCH", `/products/${edp.body.product?.id}`, { salePriceCents: 7900 }, bt);
+    check("the unit price follows a reduced price (sale prices too)", (await call("GET", `/products/${edp.body.product?.id}`)).body.product.variants[1].unitPrice?.cents === 158000);
+    const cream = await mk({ name: "Vartalovoide 200 g", salePriceCents: 1990, contentAmount: 200, contentUnit: "g", ...cosm("skincare-body", { attributes: { skinType: ["dry"] } }) });
+    check("per kilogram for grams: 200 g at 19,90 € → 99,50 €/kg", cream.status === 201 && cream.body.product.unitPrice?.cents === 9950 && cream.body.product.unitPrice.per === "kg", cream.body.product?.unitPrice ?? cream.body);
+    const edge50 = await mk({ name: "Käsivoide 50 ml", salePriceCents: 990, contentAmount: 50, contentUnit: "ml", ...cosm("skincare-hands-feet", { attributes: { skinType: ["dry"] } }) });
+    const edge49 = await mk({ name: "Käsivoide 49,9 ml", salePriceCents: 990, contentAmount: 49.9, contentUnit: "ml", ...cosm("skincare-hands-feet") });
+    check("exactly 50 ml shows a unit price; 49,9 ml does not", edge50.body.product?.unitPrice?.cents === 198000 && edge49.status === 201 && edge49.body.product.unitPrice === null, [edge50.body.product?.unitPrice, edge49.body.product?.unitPrice]);
+    const lip = await mk({ name: "Velvet Lip 02", salePriceCents: 2400, ...cosm("makeup-lips", { attributes: { productType: "lipstick", finish: "matte" } }), variants: [{ shadeName: "02 Rose", shadeHex: "#C2185B", shadeFamily: "pink", undertone: "cool", finish: "matte", contentAmount: 3.5, contentUnit: "g", stock: 4 }] });
+    check("shades are options with name, hex, family, undertone and finish; tiny packs have no unit price", lip.status === 201 && lip.body.product.variants[0].shadeHex === "#C2185B" && lip.body.product.variants[0].shadeFamily === "pink" && lip.body.product.variants[0].unitPrice === null, lip.body);
+    check("a shade hex must be #RRGGBB", (await mk({ name: "Bad shade", ...cosm("makeup-lips"), variants: [{ shadeName: "x", shadeHex: "red", contentAmount: 3, contentUnit: "g" }] })).status === 400);
+
+    // Jewellery, generic green claims
+    const ring = await mk({ name: "Hopeasormus", ...clothing(mFi.id, "jewellery-rings", { attributes: { brand: "Testi", metal: "silver_925", nickelBasis: "nickel_free_material" } }) });
+    check("jewellery publishes with its nickel safety basis", ring.status === 201, ring.body);
+    check("new jewellery without a nickel basis is refused (REACH Annex XVII)", (await mk({ name: "Teräskorvakorut", ...clothing(mFi.id, "jewellery-earrings", { attributes: { brand: "Testi", metal: "stainless_steel_316l", nickelBasis: "not_known", leadCadmiumBasis: "supplier_declaration" } }) })).body.fields?.some((f) => f.field === "attributes.nickelBasis"));
+    const greenDraft = await mk({ name: "Ekologinen villapaita", description: "Sustainable and eco-friendly", isAvailable: false, tags: ["eco-friendly", "villa"], ...clothing(mFi.id, "clothing-knitwear") });
+    check("claims checker: generic green words give warnings on a draft; green tags are not stored", greenDraft.status === 201 && greenDraft.body.warnings.some((w) => w.field === "name" && w.code === "generic_green_claim") && greenDraft.body.warnings.some((w) => w.field === "description") && greenDraft.body.product.tags.join() === "villa", greenDraft.body);
+    const greenPub = await call("PATCH", `/products/${greenDraft.body.product?.id}`, { isAvailable: true }, bt);
+    check("…and block publishing (422)", greenPub.status === 422 && greenPub.body.fields.some((f) => f.field === "name" && f.code === "generic_green_claim" && /ympäristöväittämä/.test(f.message.fi)), greenPub.body);
+    check("colour words are only checked, never blocked (a green dress)", (await mk({ name: "Green linen dress", ...clothing(mFi.id, "clothing-dresses") })).status === 201);
+
+    // Eco claim removed from the API and the database
+    const ecoP = await mk({ name: "Ilman ekolippua", isEcoFriendly: true, ...clothing(mFi.id) });
+    check("isEcoFriendly is gone from products and stores (accepted from old apps, ignored)", ecoP.status === 201 && !("isEcoFriendly" in ecoP.body.product) && !("isEcoFriendly" in (await call("GET", `/stores/${beaStore.id}`)).body.store) && sql(`select count(*) from information_schema.columns where column_name='isEcoFriendly'`) === "0");
+    const ecoStore = await call("POST", "/stores", { name: `Eco Shop ${uniq}`, category: "ECO_FRIENDLY", sellerType: "PRIVATE" }, (await register("Eetu", "VENDOR")).accessToken);
+    check("ECO_FRIENDLY is no longer a store category (old apps get OTHER)", ecoStore.status === 201 && ecoStore.body.store.category === "OTHER" && sql(`select count(*) from pg_enum e join pg_type t on t.oid = e.enumtypid where t.typname='StoreCategory' and e.enumlabel='ECO_FRIENDLY'`) === "0", ecoStore.body);
+
+    // Attributes for filters: a dress (black, cotton), another women's product, a men's one
+    const dress = await mk({ name: "Musta mekko", ...clothing(mFi.id, "clothing-dresses", { audience: "WOMEN", attributes: { brand: "Testi", fibreComposition: [{ component: "main", fibres: [{ fibre: "cotton", percent: 100 }] }], colourFamily: "black", season: ["winter"], countryOfManufacture: "FI", originDeclared: true } }) });
+    const jacket = await mk({ name: "Miesten talvitakki", ...clothing(mFi.id, "clothing-jackets-coats", { audience: "MEN", attributes: { brand: "Toinen", fibreComposition: wool100, colourFamily: "navy", season: ["winter"], countryOfManufacture: "FI", originDeclared: true, fitCollection: ["tall"] } }) });
+    check("attribute facets are written for search", dress.status === 201 && jacket.status === 201 && sql(`select string_agg(key || '=' || value, ',' order by key, value) from "ProductFacet" where "productId"=${dress.body.product?.id}`).includes("colourFamily=black") && sql(`select count(*) from "ProductFacet" where "productId"=${dress.body.product?.id} and key='fibre' and value='cotton'`) === "1");
+
+    // The tree with live counts within reach
+    const near = (await call("GET", "/categories?lat=60.17&lng=24.94")).body;
+    const nearClothing = near.categories?.find((c) => c.slug === "clothing");
+    check("GET /categories: live counts of buyable products within reach, empty nodes hidden", near.ok && near.reach?.located === true && nearClothing?.count >= 5 && nearClothing.children.every((c) => c.count > 0) && !nearClothing.children.some((c) => c.slug === "clothing-workwear") && near.categories.every((c) => c.count > 0), near);
+    const far = (await call("GET", "/categories?lat=68.5&lng=27.0")).body;
+    check("far from every store the tree is empty (no empty tiles); includeEmpty=1 keeps them for the editor", far.categories?.length === 0 && (await call("GET", "/categories?lat=68.5&lng=27.0&includeEmpty=1")).body.categories.length === 11);
+    const menTree = (await call("GET", "/categories?lat=60.17&lng=24.94&audience=MEN")).body;
+    const womenTree = (await call("GET", "/categories?lat=60.17&lng=24.94&audience=women")).body;
+    const dressesCount = (t) => t.categories?.find((c) => c.slug === "clothing")?.children.find((c) => c.slug === "clothing-dresses")?.count ?? 0;
+    check("audience: Women sees the women's dress, Men does not; unisex products count for both", dressesCount(womenTree) >= 1 && menTree.categories.find((c) => c.slug === "clothing")?.children.some((c) => c.slug === "clothing-jackets-coats") && dressesCount(menTree) < dressesCount(womenTree) && menTree.categories.find((c) => c.slug === "clothing").count < nearClothing.count, [dressesCount(womenTree), dressesCount(menTree)]);
+    const kidsTree = (await call("GET", "/categories?includeEmpty=1&audience=KIDS")).body;
+    check("Kids views never show beauty or fragrance", !kidsTree.categories.some((c) => ["makeup", "skincare", "haircare", "fragrance"].includes(c.slug)) && kidsTree.categories.some((c) => c.slug === "clothing"));
+    const babyTree = (await call("GET", "/categories?audience=KIDS&ageGroup=TODDLER")).body;
+    check("the Kids age row filters by age group", babyTree.ageGroup === "TODDLER" && babyTree.categories.find((c) => c.slug === "clothing")?.count >= 1);
+    const det = (await call("GET", "/categories/clothing-dresses?lat=60.17&lng=24.94")).body;
+    const fk = (key) => det.facets?.find((f) => f.key === key);
+    check("GET /categories/:slug: node, breadcrumbs and facets with counts", det.ok && det.category?.slug === "clothing-dresses" && det.breadcrumbs?.map((b) => b.slug).join() === "clothing,clothing-dresses" && fk("colourFamily")?.values.some((v) => v.value === "black" && v.count >= 1 && v.label.fi === "Musta") && fk("fibre")?.values.some((v) => v.value === "cotton") && fk("audience")?.values.some((v) => v.value === "WOMEN") && fk("condition") && det.facets.every((f) => f.label?.en && f.label?.fi), det);
+    const topDet = (await call("GET", "/categories/clothing")).body;
+    check("a top level lists its children and the union of their filters", topDet.children?.length >= 3 && topDet.breadcrumbs?.length === 1 && topDet.facets?.some((f) => f.key === "season"), topDet.children?.map((c) => c.slug));
+    check("an unknown category is 404", (await call("GET", "/categories/nope-nope")).status === 404);
+    const makeupDet = (await call("GET", "/categories/makeup")).body;
+    check("makeup facets: shade family and undertone from the options", makeupDet.facets?.some((f) => f.key === "shadeFamily" && f.values.some((v) => v.value === "pink")) && makeupDet.facets.some((f) => f.key === "undertone"), makeupDet.facets?.map((f) => f.key));
+
+    // Search by category, audience and attributes
+    const s = async (qs) => (await call("GET", `/products/search?limit=50&${qs}`)).body;
+    const ids = (r) => (r.products ?? []).map((p) => p.id);
+    const sTop = await s("category=clothing");
+    check("search by a top-level slug includes its subcategories", ids(sTop).includes(dress.body.product.id) && ids(sTop).includes(jacket.body.product.id) && !ids(sTop).includes(edp.body.product.id));
+    const sSub = await s("category=clothing-dresses");
+    check("search by a subcategory slug", ids(sSub).includes(dress.body.product.id) && !ids(sSub).includes(jacket.body.product.id));
+    check("the legacy free-text category still works for older apps", ids(await s("category=Dresses")).includes(dress.body.product.id));
+    check("audience filter (Men = men + unisex)", !ids(await s("category=clothing&audience=MEN")).includes(dress.body.product.id) && ids(await s("category=clothing&audience=MEN")).includes(jacket.body.product.id) && ids(await s("category=clothing&audience=MEN")).includes(withRp.body.product.id));
+    check("attribute filters: colour family, fibre (attr[...]), several values", ids(await s("category=clothing&colourFamily=black")).join() === String(dress.body.product.id) && ids(await s("attr[fibre]=cotton")).includes(dress.body.product.id) && ids(await s("category=clothing&colourFamily=black,navy")).length === 2);
+    check("beauty filters: shade family, undertone, skin type, concentration", ids(await s("category=makeup-lips&shadeFamily=pink&undertone=cool")).includes(lip.body.product.id) && ids(await s("category=skincare&skinType=dry")).includes(cream.body.product.id) && ids(await s("category=fragrance&concentration=eau_de_parfum")).includes(edp.body.product.id));
+    check("jewellery metal and fit-collection filters", ids(await s("category=jewellery&metal=silver_925")).includes(ring.body.product.id) && ids(await s("fitCollection=tall")).includes(jacket.body.product.id));
+    check("age group filter", ids(await s("audience=KIDS&ageGroup=TODDLER")).includes(kidsOk.body.product.id) && !ids(await s("ageGroup=TODDLER")).includes(dress.body.product.id));
+    const wrongF = await call("GET", "/products/search?category=clothing-dresses&shadeFamily=nude");
+    check("a filter that the category's template does not have is refused (400)", wrongF.status === 400 && wrongF.body.code === "FILTER_NOT_AVAILABLE" && (await call("GET", "/products/search?attr[colour]=x")).body.code === "UNKNOWN_FILTER", wrongF.body);
+    const huuli = await s("q=huulipuna");
+    check("search names the matching categories (huulipuna → Makeup › Lips) and finds the products filed there", huuli.categories?.[0]?.slug === "makeup-lips" && huuli.categories[0].path.map((x) => x.slug).join() === "makeup,makeup-lips" && huuli.categories[0].name.fi === "Huulet" && ids(huuli).includes(lip.body.product.id), huuli.categories);
+    check("English queries name categories too (lipstick)", (await s("q=lipstick")).categories?.[0]?.slug === "makeup-lips");
+
+    // Certificates: submitted by the store, verified by an admin; only verified, unexpired ones show
+    const certBody = { scheme: "nordic_swan", licenceNumber: "1234 5678", holderName: "Testi Tekstiili Oy", scope: "whole_product", validUntil: "2030-12-31", evidenceUrl: `https://res.cloudinary.com/testcloud/image/upload/v1/malvoya/certificates/s${beaStore.id}/swan.pdf` };
+    check("the certificate file must be the store's own upload", (await call("POST", "/stores/my/certificates", { ...certBody, evidenceUrl: "https://example.com/fake.pdf" }, bt)).status === 400);
+    check("an expired certificate cannot be submitted; schemes come from the fixed list", (await call("POST", "/stores/my/certificates", { ...certBody, validUntil: "2020-01-01" }, bt)).status === 400 && (await call("POST", "/stores/my/certificates", { ...certBody, scheme: "green_planet" }, bt)).status === 400);
+    const cert = (await call("POST", "/stores/my/certificates", certBody, bt)).body.certificate;
+    check("the store submits a certificate: pending until verified", cert?.status === "PENDING" && cert.live === false);
+    const bunny = (await call("POST", "/stores/my/certificates", { ...certBody, scheme: "leaping_bunny", licenceNumber: "LB-1" }, bt)).body.certificate;
+    check("a scheme must fit the product (Leaping Bunny is for cosmetics)", (await call("PATCH", `/products/${dress.body.product.id}`, { certificateIds: [bunny.id] }, bt)).body.fields?.some((f) => f.field === "certificateIds" && f.code === "not_for_category"));
+    await call("PATCH", `/products/${dress.body.product.id}`, { certificateIds: [cert.id] }, bt);
+    check("a pending certificate is not shown to shoppers or used in filters", (await call("GET", `/products/${dress.body.product.id}`)).body.product.certificates.length === 0 && !ids(await s("certificate=nordic_swan")).includes(dress.body.product.id));
+    check("the certificate queue is admin-only", (await call("GET", "/admin/certificates", null, bt)).status === 403);
+    const queue = (await call("GET", "/admin/certificates?status=PENDING", null, adminToken)).body.certificates;
+    check("admins see pending certificates with the store and evidence", queue?.some((c) => c.id === cert.id && c.store.id === beaStore.id && c.evidenceUrl === certBody.evidenceUrl && c.productCount === 1));
+    check("rejecting needs a reason", (await call("POST", `/admin/certificates/${bunny.id}/review`, { decision: "reject" }, adminToken)).status === 400);
+    const verified = await call("POST", `/admin/certificates/${cert.id}/review`, { decision: "verify" }, adminToken);
+    const pubCert = (await call("GET", `/products/${dress.body.product.id}`)).body.product.certificates;
+    check("once verified, the chip names the scheme and licence on the page itself; the decision is audited", verified.status === 200 && pubCert.length === 1 && pubCert[0].label.fi === "Joutsenmerkki · lisenssi 1234 5678" && pubCert[0].holderName === "Testi Tekstiili Oy" && !("evidenceUrl" in pubCert[0]) && sql(`select count(*) from "AdminAuditLog" where action='certificate.verify' and "entityId"=${cert.id}`) === "1", pubCert);
+    check("…and it is a filter with counts", ids(await s("certificate=nordic_swan")).includes(dress.body.product.id) && (await call("GET", "/categories/clothing-dresses")).body.facets.find((f) => f.key === "certificate")?.values.some((v) => v.value === "nordic_swan" && v.label.fi === "Joutsenmerkki"));
+    sql(`update "Certificate" set "validUntil" = current_date - 1 where id=${cert.id}`);
+    check("an expired certificate disappears from payloads and filters", (await call("GET", `/products/${dress.body.product.id}`)).body.product.certificates.length === 0 && !ids(await s("certificate=nordic_swan")).includes(dress.body.product.id));
+    sql(`update "Certificate" set "validUntil" = '2030-12-31' where id=${cert.id}`);
+
+    // Report this product (signed in or not, rate-limited) → admin queue
+    const target = withRp.body.product.id;
+    check("a report needs a valid reason; 'other' needs details", (await call("POST", `/products/${target}/report`, { reason: "ugly" })).status === 400 && (await call("POST", `/products/${target}/report`, { reason: "other" })).status === 400);
+    const rep1 = await call("POST", `/products/${target}/report`, { reason: "unsafe", details: "The zip puller came off and is a choking hazard", email: "reporter@example.fi" });
+    check("anyone can report a product, also signed out; a due date of three working days", rep1.status === 201 && rep1.body.report.status === "OPEN" && new Date(rep1.body.report.dueBy) > new Date(), rep1.body);
+    const hanna = await register("Hanna");
+    const repA = await call("POST", `/products/${target}/report`, { reason: "counterfeit", details: "Fake logo" }, hanna.accessToken);
+    const repB = await call("POST", `/products/${target}/report`, { reason: "counterfeit", details: "Fake logo" }, hanna.accessToken);
+    check("a signed-in user's second open report is the same report", repA.status === 201 && repB.status === 200 && repB.body.alreadyReported === true && repB.body.report.id === repA.body.report.id);
+    const fixedIp = { headers: { "X-Forwarded-For": `10.250.${uniq % 200}.7` } };
+    const rl = [];
+    for (let i = 0; i < 6; i++) rl.push((await call("POST", `/products/${target}/report`, { reason: "misleading" }, null, fixedIp)).status);
+    check("reports are rate-limited (5 an hour per address or account)", rl.slice(0, 5).every((x) => x === 201) && rl[5] === 429, rl);
+    const rq = (await call("GET", "/admin/product-reports", null, adminToken)).body.reports;
+    const rq1 = rq?.find((r) => r.id === rep1.body.report.id);
+    check("admins see the report queue with due dates, the reporter and the claims check", rq1?.reason === "unsafe" && rq1.reporter.email === "reporter@example.fi" && rq1.reporter.signedIn === false && rq1.dueBy && Array.isArray(rq1.product.claims) && (await call("GET", "/admin/product-reports", null, bt)).status === 403, rq1);
+    check("a decision needs a note", (await call("POST", `/admin/product-reports/${rep1.body.report.id}/resolve`, { action: "remove_listing" }, adminToken)).status === 400);
+    const removed = await call("POST", `/admin/product-reports/${rep1.body.report.id}/resolve`, { action: "remove_listing", note: "Choking hazard confirmed from the photos" }, adminToken);
+    check("removing the listing locks it, closes the other notices about it and is audited", removed.status === 200 && sql(`select "isAvailable" || '|' || "lockedReason" from "Product" where id=${target}`) === "false|ADMIN" && sql(`select count(*) from "ProductReport" where "productId"=${target} and status='OPEN'`) === "0" && sql(`select count(*) from "AdminAuditLog" where action='product_report.remove_listing' and "entityId"=${rep1.body.report.id}`) === "1");
+    const relock = await call("PATCH", `/products/${target}`, { isAvailable: true }, bt);
+    check("the store cannot show a locked listing again (409 PRODUCT_LOCKED)", relock.status === 409 && relock.body.code === "PRODUCT_LOCKED", relock.body);
+    check("a decided report cannot be decided again", (await call("POST", `/admin/product-reports/${rep1.body.report.id}/resolve`, { action: "dismiss", note: "again please" }, adminToken)).status === 409);
+    check("the reporter's own reports are in their data export", (await call("GET", "/auth/me/data", null, hanna.accessToken)).body.data?.productReports?.some((r) => r.reason === "counterfeit"));
+    const adminView = (await call("GET", `/admin/products/${greenDraft.body.product.id}`, null, adminToken)).body.product;
+    check("admins see a product's claims-checker warnings and its publishing check", adminView?.claims?.some((c) => c.term === "ekologinen" && c.blocking) && adminView.publishCheck?.ready === false && adminView.store?.id === beaStore.id, adminView?.claims);
+
+    // Recalls: identical listings lock, every buyer is told directly, public page
+    const gtin = ean13(`64${String(uniq).slice(-10)}`);
+    const recalled = await mk({ name: "Testi Hiuspinni", gtin, ...clothing(mFi.id, "accessories-hair", { attributes: { brand: "Testi", mainMaterial: ["metal"] }, productModel: "RC-1" }) });
+    const twin = await call("POST", "/products", { name: "Hiuspinni (sama)", gtin, salePriceCents: 900, images: [ownImage(storeId, "twin")], ...clothing(veraMfr, "accessories-hair", { attributes: { brand: "Joku" }, productModel: "X-9" }) }, vendor.accessToken);
+    const sameModel = await mk({ name: "Hiuspinni, punainen", ...clothing(mFi.id, "accessories-hair", { attributes: { brand: "testi" }, productModel: "rc-1" }) });
+    check("a GTIN must have a valid check digit", (await mk({ name: "Bad EAN", gtin: "6412345678900", ...clothing(mFi.id) })).status === 400 && recalled.status === 201 && twin.status === 201 && sameModel.status === 201, [recalled.body, twin.body]);
+    const kaisa = await register("Kaisa");
+    await call("PATCH", "/me", { locale: "fi" }, kaisa.accessToken);
+    const buy = (user, productId, tag) => {
+      const oid = Number(sql(`insert into "Order" ("userId","storeId","status","subtotalCents","deliveryFeeCents","courierFeeCents","commissionCents","sellerPayoutCents","totalCents","stripePaymentIntentId","paymentStatus","paidAt","deliveredAt","deliveryAddress","updatedAt") values (${user.user.id},${beaStore.id},'DELIVERED',2900,300,300,290,2610,3200,'pi_rc_${tag}_${uniq}','SUCCEEDED',now() - interval '3 days',now() - interval '2 days','Testikatu 1, Helsinki',now()) returning id`).split("\n")[0]);
+      sql(`insert into "OrderItem" ("orderId","productId","quantity","unitCents") values (${oid},${productId},1,2900)`);
+      return oid;
+    };
+    buy(hanna, recalled.body.product.id, "h");
+    buy(kaisa, sameModel.body.product.id, "k");
+    const recallBody = { productIds: [recalled.body.product.id], reasonFi: "Hiuspinnin metalliosa voi irrota ja aiheuttaa tukehtumisvaaran pienille lapsille.", reasonEn: "The metal part of the hair clip can come off and is a choking hazard for small children.", remedyFi: "Palauta tuote myymälään, saat rahat takaisin.", remedyEn: "Return the product to the shop for a full refund.", remedies: ["refund", "replacement"], contact: "Malvoya tuki, malvoya-api-eu.onrender.com/support" };
+    const soft = await call("POST", "/admin/recalls", { ...recallBody, reasonEn: "As a precautionary measure, the clip may in rare cases come loose." }, adminToken);
+    check("a recall notice may not play the hazard down (no 'precautionary', 'in rare cases')", soft.status === 422 && soft.body.code === "INVALID_RECALL" && soft.body.fields.some((f) => f.field === "reasonEn"), soft.body);
+    check("recalls are admin-only", (await call("POST", "/admin/recalls", recallBody, bt)).status === 403);
+    const rc = await call("POST", "/admin/recalls", recallBody, adminToken);
+    const rcId = rc.body.recall?.id;
+    check("a recall locks the product and every identical listing (same GTIN, or same brand + model) in any shop", rc.status === 201 && rc.body.locked === 3 && rc.body.identical === 2 && [recalled, twin, sameModel].every((p) => sql(`select "isAvailable" || '|' || "lockedReason" from "Product" where id=${p.body.product.id}`) === "false|RECALL") && rc.body.recall.products.some((p) => p.matchedBy === "gtin") && rc.body.recall.products.some((p) => p.matchedBy === "brand_model"), rc.body);
+    let notes = "";
+    for (let i = 0; i < 40 && !/hanna-email-t/.test(notes + "") ; i++) {
+      notes = sql(`select string_agg(u.name || '-' || n.channel || '-' || left(n.delivered::text,1) || '-' || n.locale, ',' order by u.name, n.channel) from "RecallNotification" n join "User" u on u.id = n."userId" where n."recallId"=${rcId}`).toLowerCase();
+      if (/hanna-email-t/.test(notes) && /kaisa-email-t/.test(notes)) break;
+      await sleep(250);
+    }
+    check("every buyer of the recalled listings is notified directly by push and email, in their language", /hanna-email-t-en/.test(notes) && /kaisa-email-t-fi/.test(notes) && /hanna-push/.test(notes) && /kaisa-push/.test(notes), notes);
+    check("the recall records when buyers were told, and the creation is audited", sql(`select ("buyersNotifiedAt" is not null) || '|' || "notifiedUsers" from "Recall" where id=${rcId}`) === "true|2" && sql(`select count(*) from "AdminAuditLog" where action='recall.create' and "entityId"=${rcId}`) === "1");
+    const pubRc = (await call("GET", "/recalls")).body.recalls?.find((r) => r.id === rcId);
+    check("GET /recalls lists it with the hazard, remedies, contact and products", pubRc?.headline?.fi === "Tuotteen turvallisuuteen liittyvä takaisinveto" && pubRc.hazard.en === recallBody.reasonEn && pubRc.remedies.join() === "refund,replacement" && pubRc.products.length === 3, pubRc);
+    const pageFi = await (await fetch(`${BASE}/recalls/${rcId}?lang=fi`)).text();
+    const pageEn = await fetch(`${BASE}/recalls/${rcId}?lang=en`);
+    const pageEnText = await pageEn.text();
+    check("the public notice uses the legal format: headline, product, identification, hazard, 'stop using it now', remedies, contact", pageFi.includes("Tuotteen turvallisuuteen liittyvä takaisinveto") && pageFi.includes("Lopeta tuotteen käyttö heti") && pageFi.includes(gtin) && pageEnText.includes("Product safety recall") && pageEnText.includes("Stop using this product now") && pageEnText.includes("Refund") && !/<script/i.test(pageEnText) && /img-src https:\/\/res\.cloudinary\.com/.test(pageEn.headers.get("content-security-policy") || ""));
+    check("the public /recalls page lists it", (await (await fetch(`${BASE}/recalls?lang=en`)).text()).includes(`/recalls/${rcId}`));
+    const rcProd = (await call("GET", `/products/${recalled.body.product.id}`)).body.product;
+    check("buyers who open the product see the recall banner; it cannot be bought or found", rcProd?.recall?.id === rcId && rcProd.inStock === false && !ids(await s(`q=${encodeURIComponent("Testi Hiuspinni")}`)).includes(recalled.body.product.id), rcProd?.recall);
+    check("the store cannot show a recalled listing again", (await call("PATCH", `/products/${twin.body.product.id}`, { isAvailable: true }, vendor.accessToken)).body.code === "PRODUCT_LOCKED");
+    const relist = await mk({ name: "Uusi hiuspinni", gtin, ...clothing(mFi.id, "accessories-hair", { attributes: { brand: "Muu" }, productModel: "N-1" }) });
+    check("a recalled GTIN cannot be listed again", relist.status === 422 && relist.body.fields.some((f) => f.code === "recalled"), relist.body.fields);
+    check("customers see recalls of what they bought in the app", (await call("GET", "/me/recalls", null, kaisa.accessToken)).body.recalls?.some((r) => r.id === rcId) && (await call("GET", "/me/recalls", null, (await register("Iida")).accessToken)).body.recalls.length === 0);
+    const closeRc = await call("PATCH", `/admin/recalls/${rcId}`, { status: "CLOSED" }, adminToken);
+    check("an admin closes the recall (audited); the listings stay locked", closeRc.status === 200 && closeRc.body.recall.status === "CLOSED" && sql(`select count(*) from "AdminAuditLog" where action='recall.status' and "entityId"=${rcId}`) === "1" && sql(`select "lockedReason" from "Product" where id=${twin.body.product.id}`) === "RECALL" && (await call("GET", "/admin/recalls", null, adminToken)).body.recalls.some((r) => r.id === rcId && r.notifiedUsers === 2));
+
+    // Hygiene seal: snapshot on the order, return needs the seal state
+    const hygOrder = await call("POST", "/orders", { storeId: beaStore.id, fulfilment: "PICKUP", items: [{ productId: cream.body.product.id, quantity: 2 }] }, hanna.accessToken);
+    const hoid = hygOrder.body.order?.id;
+    check("the hygiene seal is snapshotted onto the order line at purchase", hygOrder.status === 201 && sql(`select "hygieneSealed" from "OrderItem" where "orderId"=${hoid}`) === "t", hygOrder.body);
+    sql(`update "Order" set status='DELIVERED', "paymentStatus"='SUCCEEDED', "paidAt"=now(), "deliveredAt"=now() where id=${hoid}`);
+    const hItem = Number(sql(`select id from "OrderItem" where "orderId"=${hoid}`));
+    const noSeal = await call("POST", "/returns", { orderId: hoid, reason: "CHANGED_MIND", items: [{ orderItemId: hItem, quantity: 1 }] }, hanna.accessToken);
+    check("returning a sealed item under the right of withdrawal asks whether the seal is unbroken", noSeal.status === 400 && noSeal.body.code === "SEAL_STATUS_REQUIRED" && noSeal.body.question?.fi === "Onko hygieniasinetti ehjä?", noSeal.body);
+    const opened = await call("POST", "/returns", { orderId: hoid, reason: "CHANGED_MIND", sealIntact: false, items: [{ orderItemId: hItem, quantity: 1 }] }, hanna.accessToken);
+    check("an opened seal is refused with a clear reason in both languages that cites the disclosure", opened.status === 422 && opened.body.code === "HYGIENE_SEAL_OPENED" && /order confirmation/.test(opened.body.reason?.en || "") && /tilausvahvistuksessa/.test(opened.body.reason?.fi || "") && /6 luku 16 §/.test(opened.body.reason.fi), opened.body);
+    const intact = await call("POST", "/returns", { orderId: hoid, reason: "CHANGED_MIND", sealIntact: true, items: [{ orderItemId: hItem, quantity: 1 }] }, hanna.accessToken);
+    check("with the seal unbroken the return goes ahead (and the answer is kept)", intact.status === 201 && sql(`select "sealIntact" from "Return" where id=${intact.body.return?.id}`) === "t", intact.body);
+    const faulty = await call("POST", "/returns", { orderId: hoid, reason: "DAMAGED_ON_ARRIVAL", items: [{ orderItemId: hItem, quantity: 1 }] }, hanna.accessToken);
+    check("a faulty sealed item is always returnable (no seal question)", faulty.status === 201, faulty.body);
+
+    // Import mapping (FI/EN keywords, Finnish compounds by their last word, audience, second-hand, held goods)
+    Object.assign(process.env, testEnv);
+    const matcher = require(path.join(__dirname, "..", "..", "dist", "modules", "catalog", "matcher.js"));
+    const m = (...h) => matcher.matchTaxonomy(h);
+    check("matcher: Finnish compounds by their last word, with the audience", m("Naisten iltamekko").slug === "clothing-dresses" && m("Naisten iltamekko").audience === "WOMEN" && m("talvitakki").slug === "clothing-jackets-coats" && m("Lasten kumisaappaat").slug === "shoes-rubber-boots" && m("Lasten kumisaappaat").audience === "KIDS");
+    check("matcher: ASCII-typed Finnish, English plurals, longest keyword wins", m("Talvikengat").slug === "shoes-winter-rubber-boots" && m("Talvikengät").slug === "shoes-winter-rubber-boots" && m("Shower gel for men").slug === "skincare-body" && m("Shower gel for men").audience === "MEN" && m("earrings").slug === "jewellery-earrings" && m("Huulipuna 02").slug === "makeup-lips");
+    check("matcher: vintage and used words set second-hand; only a top level → no guess (or clothing-other)", m("Vintage farkut").slug === "clothing-trousers-jeans" && m("Vintage farkut").secondHand && m("Vintage farkut").vintage && m("Kengät").slug === null && m("Kengät").topOnly === "shoes" && m("Vaatteet").slug === "clothing-other");
+    check("matcher: out-of-scope goods are held; nothing matched stays without a category", m("Tuoksukynttilä kuusi").holdKey === "home_decor" && m("Kollageeni ravintolisä").holdKey === "food_supplement" && m("Gizmo 3000").slug === null && m("Hiustenkuivaaja 2000 W").slug === "haircare-hair-tools");
+    const csv212 = [
+      "name;description;category_slug;category;price;stock;image_urls;condition;external_id;brand;audience;content_ml",
+      "Testi Eau de Parfum;Floral;fragrance-parfum-edp;;59,00;3;https://img.example.com/edp.jpg;new;EDP-1;Testi;unisex;30",
+      "Testi Eau de Parfum;Floral;fragrance-parfum-edp;;89,00;2;;new;EDP-1;Testi;unisex;50",
+      "Tuoksukynttilä Kuusi;;;Sisustus;25;1;https://img.example.com/candle.jpg;new;CANDLE-1;;;",
+      "Gizmo 3000;;;;10;1;https://img.example.com/gizmo.jpg;new;GIZ-1;;;",
+      "Naisten talvitakki;;;Naiset > Takit;149;1;https://img.example.com/coat.jpg;new;COAT-1;;;",
+    ].join("\n");
+    const cj212 = await call("POST", "/products/import/csv", { csv: csv212, rightsConfirmed: true }, wilma.accessToken);
+    let j212 = null;
+    for (let i = 0; i < 120 && !(j212 && (j212.status === "DONE" || j212.status === "FAILED")); i++) { await sleep(250); j212 = (await call("GET", `/products/import/${cj212.body.job?.id}`, null, wilma.accessToken)).body?.job; }
+    const wl = (await call("GET", `/stores/my/products?limit=100`, null, wilma.accessToken)).body.products;
+    const iEdp = wl.find((p) => p.externalId === "id:EDP-1");
+    const iCandle = wl.find((p) => p.externalId === "id:CANDLE-1");
+    const iGizmo = wl.find((p) => p.externalId === "id:GIZ-1");
+    const iCoat = wl.find((p) => p.externalId === "id:COAT-1");
+    check("CSV import maps category_slug, brand, audience and content per option (unit price)", j212?.status === "DONE" && iEdp?.categorySlug === "fragrance-parfum-edp" && iEdp.attributes.brand === "Testi" && iEdp.variants.map((v) => v.contentAmount).join() === "30,50" && iEdp.variants[1].unitPrice?.cents === 178000 && iEdp.category === "Parfum & eau de parfum" && iEdp.hygieneSealed === true, iEdp);
+    check("CSV import: paths and Finnish words map with the audience (Naiset > Takit)", iCoat?.categorySlug === "clothing-jackets-coats" && iCoat.audience === "WOMEN");
+    check("CSV import: out-of-scope goods are held, unmatched items stay drafts without a category, both reported", iCandle?.importHold === "home_decor" && iCandle.categorySlug === null && iGizmo?.categorySlug === null && j212.errors.some((e) => /On hold/.test(e.message)) && j212.errors.some((e) => /No category matched/.test(e.message)) && j212.errors.some((e) => /Missing before publishing/.test(e.message)), j212?.errors);
+    const p212 = (await call("POST", `/products/import/${cj212.body.job?.id}/publish`, null, wilma.accessToken)).body;
+    check("an import publishes nothing incomplete: a held item says why", p212.published === 0 && p212.incomplete.find((x) => x.productId === iCandle?.id)?.missing.some((f) => f.code === "held"), p212);
+
+    // Collections (saved filters, in season, ≥ CATALOG_COLLECTION_MIN_ITEMS nearby; 2 in this test)
+    const cols = (qs = "") => call("GET", `/collections?lat=60.17&lng=24.94${qs}`);
+    const c1r = (await cols("&month=1")).body;
+    const slugs1 = c1r.collections?.map((c) => c.slug) ?? [];
+    check("GET /collections: in-season collections with enough items nearby (winter in January, Made in Finland with the seller's declaration)", c1r.ok && c1r.minItems === 2 && slugs1.includes("winter-essentials") && slugs1.includes("made-in-finland") && c1r.collections.every((c) => c.count >= 2 && c.name.fi && c.name.en), c1r.collections);
+    check("out of season collections are not shown (winter in July)", !((await cols("&month=7")).body.collections ?? []).some((c) => c.slug === "winter-essentials"));
+    const c1k = (await cols("&month=1&audience=KIDS")).body.collections?.map((c) => c.slug) ?? [];
+    check("beauty collections exist for everyone but never in Kids views", slugs1.includes("concern-dry-skin") && !c1k.includes("concern-dry-skin"), [slugs1, c1k]);
+    check("collections below the minimum are hidden (one tall item)", !slugs1.includes("fit-tall"));
+    const mif = await s("collection=made-in-finland");
+    check("search by collection uses its saved filter", ids(mif).includes(dress.body.product.id) && ids(mif).includes(jacket.body.product.id) && !ids(mif).includes(edp.body.product.id) && (await call("GET", "/products/search?collection=nope")).status === 400);
+    const brands = (await call("GET", "/collections/brands?lat=60.17&lng=24.94")).body.brands;
+    check("the A–Z brand index comes from product data", brands?.some((b) => b.value === "testi" && b.name === "Testi" && b.letter === "T" && b.count >= 3), brands);
+
+    // Admin: categories (rename, reorder, hide, counts), the under-18 flag
+    const acs = (await call("GET", "/admin/categories", null, adminToken)).body;
+    const workwear = acs.categories?.find((c) => c.slug === "clothing-workwear");
+    const dressesRow = acs.categories?.find((c) => c.slug === "clothing-dresses");
+    check("admin Categories lists every node with product counts", acs.ok && dressesRow?.visibleProducts >= 2 && acs.categories.length >= 90 && typeof acs.uncategorised?.products === "number", dressesRow);
+    const ren = await call("PATCH", `/admin/categories/${workwear.id}`, { nameFi: "Työ- ja suojavaatteet", sort: 5, active: false }, adminToken);
+    check("admins rename, reorder and hide a category (audited); hidden ones leave the tree", ren.status === 200 && ren.body.category.nameFi === "Työ- ja suojavaatteet" && !(await call("GET", "/categories?includeEmpty=1")).body.categories.find((c) => c.slug === "clothing").children.some((c) => c.slug === "clothing-workwear") && sql(`select count(*) from "AdminAuditLog" where action='category.edit' and "entityId"=${workwear.id}`) === "1");
+    check("a hidden category cannot be chosen in the editor", (await mk({ name: "Työhousut", ...clothing(mFi.id, "clothing-workwear") })).body.fields?.some((f) => f.field === "categorySlug"));
+    await call("PATCH", `/admin/categories/${workwear.id}`, { active: true }, adminToken);
+    const minor = await call("PATCH", `/admin/users/${kaisa.user.id}/minor`, { isMinor: true }, adminToken);
+    check("an admin can flag a user as under 18 (no profiling-based recommendations; audited); the feed still works", minor.status === 200 && sql(`select "isMinor" from "User" where id=${kaisa.user.id}`) === "t" && (await call("GET", "/drops/feed", null, kaisa.accessToken)).status === 200);
+    await call("POST", `/products/${dress.body.product.id}/report`, { reason: "misleading", details: "The colour is not as shown" }, kaisa.accessToken);
+    const sys212 = (await call("GET", "/admin/system", null, adminToken)).body;
+    check("System lists open product reports and pending certificates", sys212.attention?.some((a) => /certificate\(s\) waiting/.test(a)) && sys212.attention.some((a) => /product report\(s\)/.test(a)), sys212.attention);
+  }
+
   console.log("\n— Background jobs and input hardening");
   const leaseSql = `INSERT INTO "JobLease" ("name","lockedUntil") VALUES ('t${uniq}', now() + interval '1 minute') ON CONFLICT ("name") DO UPDATE SET "lockedUntil" = now() + interval '1 minute' WHERE "JobLease"."lockedUntil" < now() RETURNING "name"`;
   const firstLine = (q) => sql(q).split(/\r?\n/)[0];
@@ -1909,7 +2287,7 @@ async function register(name, role, extra = {}) {
   check("huge search input rejected", (await call("GET", `/products/search?q=${"a".repeat(200)}`)).status === 400);
   const cors = await fetch(`${API}/stores`, { headers: { Origin: "https://evil.example" } });
   check("CORS does not allow unknown origins", !cors.headers.get("access-control-allow-origin"));
-  check("health reports v2.11.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.11.0");
+  check("health reports v2.12.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.12.0");
 
   [vendorSock, custSock, otherSock, c1Sock, c2Sock].forEach((s) => s.close());
   console.log(`\n${pass} passed, ${fail} failed`);

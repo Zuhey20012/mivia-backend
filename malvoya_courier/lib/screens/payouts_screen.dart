@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
-import '../core/strings.dart';
 
 /// Payouts through Stripe. Stripe collects identity and bank details on its own pages, so
 /// none of it passes through this app.
@@ -64,7 +64,7 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
     if (!mounted) return;
     setState(() => _opening = false);
     if (!res.ok) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.error!)));
+      MSnack.show(context, res.error!);
       return;
     }
     await launchUrl(Uri.parse(res.data['url']), mode: LaunchMode.externalApplication);
@@ -82,12 +82,12 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
           : RefreshIndicator(
               onRefresh: _load,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(MSpace.lg),
                 children: [
-                  if (_error != null) Padding(padding: const EdgeInsets.only(bottom: 12), child: Text(_error!, style: const TextStyle(color: AppTheme.accent))),
+                  if (_error != null) Padding(padding: const EdgeInsets.only(bottom: MSpace.md), child: Text(_error!, style: const TextStyle(color: AppTheme.accent))),
                   Container(
                     padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppTheme.divider)),
+                    decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppTheme.divider)),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -101,22 +101,22 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
                                   : hasAccount
                                       ? tr(context, 'Finish your payout setup', 'Viimeistele tilitysten käyttöönotto')
                                       : tr(context, 'Set up payouts to get paid', 'Ota tilitykset käyttöön saadaksesi rahat'),
-                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyL),
                             ),
                           ),
                         ]),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: MSpace.sm),
                         Text(
                           tr(context,
                               'The pay for each delivery is sent to your Stripe account right after the handover, and Stripe moves it to your bank on your payout schedule. Stripe checks your identity and bank account on its own pages (EU anti-money-laundering rules). As an independent entrepreneur you handle your own taxes and insurance, through your Y-tunnus or a light-entrepreneur service.',
                               'Jokaisen toimituksen palkkio lähetetään Stripe-tilillesi heti luovutuksen jälkeen, ja Stripe siirtää sen pankkitilillesi maksuaikataulusi mukaan. Stripe tarkistaa henkilöllisyytesi ja pankkitilisi omilla sivuillaan (EU:n rahanpesulainsäädäntö). Itsenäisenä yrittäjänä hoidat itse verosi ja vakuutuksesi Y-tunnuksella tai laskutuspalvelun kautta.'),
-                          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4),
+                          style: const TextStyle(color: AppTheme.textSecondary, fontSize: MTextSize.label, height: 1.4),
                         ),
                         if (!enabled && (asInt(_status?['requirementsDue']) ?? 0) > 0)
                           Padding(
                             padding: const EdgeInsets.only(top: 6),
                             child: Text(tr(context, 'Stripe still needs ${_status!['requirementsDue']} detail(s) from you.', 'Stripe tarvitsee vielä ${_status!['requirementsDue']} tietoa.'),
-                                style: const TextStyle(color: AppTheme.accent, fontSize: 13)),
+                                style: const TextStyle(color: AppTheme.accent, fontSize: MTextSize.label)),
                           ),
                         const SizedBox(height: 14),
                         SizedBox(
@@ -132,14 +132,14 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
                     ),
                   ),
                   if (_summary != null) ...[
-                    const SizedBox(height: 16),
+                    const SizedBox(height: MSpace.lg),
                     Row(children: [
                       _stat(tr(context, 'Paid out', 'Maksettu'), _summary!['paidCents']),
                       const SizedBox(width: 10),
                       _stat(tr(context, 'Coming', 'Tulossa'), (asInt(_summary!['scheduledCents']) ?? 0) + (asInt(_summary!['waitingForAccountCents']) ?? 0)),
                     ]),
                   ],
-                  const SizedBox(height: 16),
+                  const SizedBox(height: MSpace.lg),
                   for (final p in _payouts) _row(p),
                 ],
               ),
@@ -150,10 +150,10 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
   Widget _stat(String label, dynamic cents) => Expanded(
         child: Container(
           padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.divider)),
+          decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(MRadius.md), border: Border.all(color: AppTheme.divider)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(label, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12.5)),
-            Text(euro(context, cents), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 20)),
+            Text(label, style: const TextStyle(color: AppTheme.textSecondary, fontSize: MTextSize.caption)),
+            Text(euro(context, cents), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.displayS)),
           ]),
         ),
       );
@@ -168,7 +168,7 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
       _ => tr(context, 'Failed — we will retry', 'Epäonnistui — yritämme uudelleen'),
     };
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+      contentPadding: const EdgeInsets.symmetric(horizontal: MSpace.xs),
       title: Text('${tr(context, 'Order', 'Tilaus')} #${p['orderId']}'),
       subtitle: Text(label),
       trailing: Text(euro(context, p['amountCents']), style: const TextStyle(fontWeight: FontWeight.w700)),

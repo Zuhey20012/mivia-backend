@@ -11,6 +11,9 @@ CREATE TYPE "CertificateStatus" AS ENUM ('PENDING', 'VERIFIED', 'REJECTED');
 -- CreateEnum
 CREATE TYPE "RecallStatus" AS ENUM ('ACTIVE', 'CLOSED');
 
+-- CreateEnum
+CREATE TYPE "AgeGroup" AS ENUM ('BABY', 'TODDLER', 'KIDS', 'JUNIOR', 'TEEN', 'ADULT');
+
 -- AlterEnum (stores that called themselves ECO_FRIENDLY become OTHER and are asked to choose)
 UPDATE "Store" SET "category" = 'OTHER' WHERE "category" = 'ECO_FRIENDLY';
 BEGIN;
@@ -256,6 +259,15 @@ CREATE INDEX "Product_responsiblePersonId_idx" ON "Product"("responsiblePersonId
 
 -- CreateIndex
 CREATE INDEX "Product_gtin_idx" ON "Product"("gtin");
+
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN     "isMinor" BOOLEAN NOT NULL DEFAULT false;
+
+-- AlterTable
+ALTER TABLE "Product" ADD COLUMN     "ageGroup" "AgeGroup";
+
+-- CreateIndex
+CREATE INDEX "Product_audience_ageGroup_idx" ON "Product"("audience", "ageGroup");
 
 -- AddForeignKey
 ALTER TABLE "Product" ADD CONSTRAINT "Product_categoryId_fkey" FOREIGN KEY ("categoryId") REFERENCES "Category"("id") ON DELETE SET NULL ON UPDATE CASCADE;

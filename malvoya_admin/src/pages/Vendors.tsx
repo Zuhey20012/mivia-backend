@@ -18,7 +18,7 @@ interface Vendor {
 
 const categoryColors: Record<string, string> = {
   APPAREL: 'badge-blue', COSMETICS: 'badge-yellow',
-  THRIFT: 'badge-gray', ECO_FRIENDLY: 'badge-green',
+  THRIFT: 'badge-gray',
   ACCESSORIES: 'badge-blue', HOME_DECOR: 'badge-purple',
   HANDMADE: 'badge-orange', OTHER: 'badge-gray',
 };

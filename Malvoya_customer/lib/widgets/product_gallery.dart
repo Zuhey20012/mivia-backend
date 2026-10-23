@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
-import '../core/strings.dart';
 import 'app_image.dart';
 import 'product_video_player.dart';
-import '../core/haptics.dart';
 
 /// One slide of a product gallery: a photo URL or a video map from the API.
 class GalleryItem {
@@ -118,7 +118,7 @@ class _ProductGalleryState extends State<ProductGallery> {
                     margin: const EdgeInsets.symmetric(horizontal: 3),
                     width: i == _page ? 18 : 6,
                     height: 6,
-                    decoration: BoxDecoration(color: Colors.white.withValues(alpha: i == _page ? 1 : 0.6), borderRadius: BorderRadius.circular(3)),
+                    decoration: BoxDecoration(color: MPalette.white.withValues(alpha: i == _page ? 1 : 0.6), borderRadius: BorderRadius.circular(3)),
                   ),
                 ),
               ),
@@ -133,11 +133,11 @@ Widget _chip(BuildContext context, IconData icon, String label, VoidCallback onT
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-        decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(14)),
+        decoration: BoxDecoration(color: AppTheme.scrim, borderRadius: BorderRadius.circular(14)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, color: Colors.white, size: 16),
+          Icon(icon, color: AppTheme.onMedia, size: 16),
           const SizedBox(width: 6),
-          Text(label, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+          Text(label, style: const TextStyle(color: AppTheme.onMedia, fontSize: MTextSize.caption, fontWeight: FontWeight.w600)),
         ]),
       ),
     );
@@ -185,7 +185,7 @@ class _FullscreenGalleryState extends State<FullscreenGallery> {
         if (!didPop) Navigator.of(context).pop(_page);
       },
       child: Scaffold(
-        backgroundColor: Colors.black,
+        backgroundColor: MPalette.night,
         body: Stack(
           children: [
             PageView.builder(
@@ -209,7 +209,7 @@ class _FullscreenGalleryState extends State<FullscreenGallery> {
                       item.image!,
                       fit: BoxFit.contain,
                       requestWidth: 2000,
-                      placeholder: const Center(child: CircularProgressIndicator(color: Colors.white54, strokeWidth: 2)),
+                      placeholder: Center(child: CircularProgressIndicator(color: AppTheme.onMedia.withValues(alpha: 0.54), strokeWidth: 2)),
                     ),
                   ),
                 );
@@ -217,17 +217,17 @@ class _FullscreenGalleryState extends State<FullscreenGallery> {
             ),
             SafeArea(
               child: Padding(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(MSpace.sm),
                 child: Row(children: [
                   IconButton(
                     tooltip: tr(context, 'Close', 'Sulje'),
                     onPressed: () => Navigator.of(context).pop(_page),
-                    icon: const CircleAvatar(backgroundColor: Colors.black54, child: Icon(Icons.close_rounded, color: Colors.white)),
+                    icon: const CircleAvatar(backgroundColor: AppTheme.scrim, child: Icon(Icons.close_rounded, color: AppTheme.onMedia)),
                   ),
                   const Spacer(),
                   if (widget.items.length > 1)
-                    Text('${_page + 1} / ${widget.items.length}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                  const SizedBox(width: 12),
+                    Text('${_page + 1} / ${widget.items.length}', style: const TextStyle(color: AppTheme.onMedia, fontWeight: FontWeight.w600)),
+                  const SizedBox(width: MSpace.md),
                 ]),
               ),
             ),

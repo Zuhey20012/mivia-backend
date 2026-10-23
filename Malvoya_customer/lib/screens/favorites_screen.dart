@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
-import '../core/api_client.dart';
 import '../core/sign_in.dart';
-import '../core/strings.dart';
 import '../widgets/product_tile.dart';
-import '../widgets/skeleton.dart';
 import 'main_navigation.dart';
 
 /// Items you saved with the heart button.
@@ -48,11 +47,11 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(tr(context, 'Favourites', 'Suosikit'))),
       body: !signedIn
-          ? StateMessage(
+          ? MStateMessage(
               icon: Icons.favorite_border_rounded,
               message: tr(context, 'Sign in to save favourites.', 'Kirjaudu sisään tallentaaksesi suosikkeja.'),
               actionLabel: tr(context, 'Sign in / Create account', 'Kirjaudu / Luo tili'),
-              onRetry: () async {
+              onAction: () async {
                 if (await openSignIn(context) && mounted) {
                   setState(() => _loading = true);
                   _load();
@@ -60,27 +59,27 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
               },
             )
           : _loading
-              ? const SkeletonProductGrid(padding: EdgeInsets.fromLTRB(16, 16, 16, 40))
+              ? const MSkeletonProductGrid(padding: EdgeInsets.fromLTRB(MSpace.lg, MSpace.lg, MSpace.lg, MSpace.x4l))
               : RefreshIndicator(
                   onRefresh: _load,
                   child: _error != null && _items.isEmpty
-                      ? StateMessage.error(
+                      ? MStateMessage.error(
                           message: _error!,
                           onRetry: () {
                             setState(() => _loading = true);
                             _load();
                           })
                       : _items.isEmpty
-                      ? StateMessage(
+                      ? MStateMessage(
                           icon: Icons.favorite_border_rounded,
                           title: tr(context, 'No favourites yet', 'Ei vielä suosikkeja'),
                           message: tr(context, 'Tap the heart on any item to save it here.', 'Tallenna tuotteita tänne sydämellä.'),
                           actionLabel: tr(context, 'Discover items', 'Löydä tuotteita'),
                           actionIcon: Icons.search_rounded,
-                          onRetry: () => openMainTab(context, MainTab.search),
+                          onAction: () => openMainTab(context, MainTab.search),
                         )
                       : GridView.builder(
-                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 40),
+                          padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.lg, MSpace.lg, MSpace.x4l),
                           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisSpacing: 18, crossAxisSpacing: 14, childAspectRatio: 0.56),
                           itemCount: _items.length,
                           itemBuilder: (_, i) => ProductTile(product: _items[i]),

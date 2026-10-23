@@ -3,26 +3,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import 'auth_service.dart';
 import 'cart.dart';
 import 'config/constants.dart';
 import 'config/theme.dart';
-import 'core/api_client.dart';
 import 'core/delivery_location.dart';
 import 'core/pending_promo.dart';
 import 'core/sign_in.dart';
 import 'core/store_hours.dart';
-import 'core/strings.dart';
 import 'local_notification_service.dart';
 import 'models.dart';
 import 'realtime_notification_service.dart';
 import 'screens/location_selector_modal.dart';
 import 'screens/order_detail.dart';
-import 'core/haptics.dart';
 import 'widgets/app_image.dart';
 import 'screens/main_navigation.dart';
-import 'widgets/skeleton.dart';
-import 'widgets/motion.dart';
 
 /// Checkout: delivery or "collect from the shop", address, items, an optional courier tip, a promo
 /// code and the exact price the server will charge. Payment details are only ever entered in
@@ -319,13 +316,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
   // ── Address & payment ───────────────────────────────────────────────────
 
   Future<void> _pickAddress() async {
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: false,
-      backgroundColor: Colors.transparent,
-      builder: (_) => LocationSelectorModal(currentLocation: _addressCtrl.text),
-    );
+    await showMSheet(context, builder: (_) => LocationSelectorModal(currentLocation: _addressCtrl.text), transparent: true, isScrollControlled: true, useSafeArea: false);
     await DeliveryLocation.instance.load();
     final addr = DeliveryLocation.instance.address;
     if (!mounted) return;
@@ -519,12 +510,12 @@ class _CheckoutPageState extends State<CheckoutPage> {
               children: [
                 Expanded(
                   child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                    padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.sm, MSpace.lg, MSpace.xxl),
                     children: [
                       if (closed != null) ...[
                         _notice(Icons.schedule_rounded,
                             '${cart.storeName ?? tr(context, 'The store', 'Kauppa')}: $closed. ${tr(context, 'You can pay when it opens.', 'Voit maksaa, kun se aukeaa.')}'),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: MSpace.md),
                       ],
                       if (_pickupSupported && !_legacy) ...[
                         _fulfilmentSwitch(),
@@ -545,7 +536,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                                 prefixIcon: const Icon(Icons.location_on_outlined),
                               ),
                             ),
-                            const SizedBox(height: 8),
+                            const SizedBox(height: MSpace.sm),
                             Row(children: [
                               Icon(_pinned ? Icons.check_circle_rounded : Icons.info_outline_rounded,
                                   size: 18, color: _pinned ? AppTheme.success : AppTheme.secondaryText(context)),
@@ -556,7 +547,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                                       ? tr(context, 'Pinned on the map: exact fee and live tracking', 'Merkitty kartalle: tarkka hinta ja live-seuranta')
                                       : tr(context, 'Pin it on the map for the exact fee and live tracking',
                                           'Merkitse kartalle tarkkaa hintaa ja live-seurantaa varten'),
-                                  style: TextStyle(fontSize: 12.5, color: AppTheme.secondaryText(context)),
+                                  style: TextStyle(fontSize: MTextSize.caption, color: AppTheme.secondaryText(context)),
                                 ),
                               ),
                               TextButton(onPressed: _pickAddress, child: Text(tr(context, 'Map', 'Kartta'))),
@@ -575,10 +566,10 @@ class _CheckoutPageState extends State<CheckoutPage> {
                                 counterText: '',
                               ),
                             ),
-                            const SizedBox(height: 4),
+                            const SizedBox(height: MSpace.xs),
                             Text(
                               tr(context, 'Optional. Your courier sees this with the order.', 'Valinnainen. Kuriiri näkee tämän tilauksen yhteydessä.'),
-                              style: TextStyle(fontSize: 12, color: AppTheme.secondaryText(context)),
+                              style: TextStyle(fontSize: MTextSize.caption, color: AppTheme.secondaryText(context)),
                             ),
                           ],
                         ),
@@ -597,7 +588,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                           tr(context, 'Tip your courier', 'Tippi kuriirille'),
                           [
                             Text(tr(context, 'Optional. The whole tip goes to the courier.', 'Vapaaehtoinen. Koko tippi menee kuriirille.'),
-                                style: TextStyle(fontSize: 13, color: AppTheme.secondaryText(context))),
+                                style: TextStyle(fontSize: MTextSize.label, color: AppTheme.secondaryText(context))),
                             const SizedBox(height: 10),
                             Wrap(
                               spacing: 8,
@@ -612,11 +603,11 @@ class _CheckoutPageState extends State<CheckoutPage> {
                         _section(tr(context, 'Promo code', 'Alennuskoodi'), [
                           _promoRow(loading),
                           if (_promoFromInvite) ...[
-                            const SizedBox(height: 8),
+                            const SizedBox(height: MSpace.sm),
                             Text(
                               tr(context, 'Filled in from a friend’s invite link. Invite codes work on a new customer’s first order.',
                                   'Täytetty ystävän kutsulinkistä. Kutsukoodi toimii uuden asiakkaan ensimmäiseen tilaukseen.'),
-                              style: TextStyle(fontSize: 12, color: AppTheme.secondaryText(context)),
+                              style: TextStyle(fontSize: MTextSize.caption, color: AppTheme.secondaryText(context)),
                             ),
                           ],
                         ]),
@@ -636,7 +627,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
     if (error != null) {
       return [
         _notice(Icons.error_outline_rounded, error, error: true),
-        const SizedBox(height: 8),
+        const SizedBox(height: MSpace.sm),
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
@@ -661,7 +652,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
 
     final rows = <Widget>[
       _summaryRow(tr(context, 'Items', 'Tuotteet'), money('subtotalCents')),
-      const SizedBox(height: 8),
+      const SizedBox(height: MSpace.sm),
       if (_pickup)
         _summaryRow(tr(context, 'Collect from the shop', 'Nouto kaupasta'),
             cents('deliveryFeeCents') == 0 ? tr(context, 'Free', 'Maksuton') : money('deliveryFeeCents'))
@@ -673,23 +664,23 @@ class _CheckoutPageState extends State<CheckoutPage> {
           money('deliveryFeeCents'),
         ),
       if (cents('serviceFeeCents') > 0) ...[
-        const SizedBox(height: 8),
+        const SizedBox(height: MSpace.sm),
         _summaryRow(tr(context, 'Service fee', 'Palvelumaksu'), money('serviceFeeCents')),
       ],
       if (smallFee > 0) ...[
-        const SizedBox(height: 8),
+        const SizedBox(height: MSpace.sm),
         _summaryRow(tr(context, 'Small-order fee', 'Pientilauslisä'), money('smallOrderFeeCents')),
         if (missing > 0)
           Padding(
             padding: const EdgeInsets.only(top: 3),
             child: Text(
               tr(context, 'Add ${euro(context, missing)} more to avoid it.', 'Lisää ostoksia vielä ${euro(context, missing)}, niin lisää ei peritä.'),
-              style: TextStyle(fontSize: 12, color: AppTheme.secondaryText(context)),
+              style: TextStyle(fontSize: MTextSize.caption, color: AppTheme.secondaryText(context)),
             ),
           ),
       ],
       if (discount > 0) ...[
-        const SizedBox(height: 8),
+        const SizedBox(height: MSpace.sm),
         _summaryRow(
           promoCode == null ? tr(context, 'Discount', 'Alennus') : '${tr(context, 'Discount', 'Alennus')} ($promoCode)',
           '−${euro(context, discount)}',
@@ -697,7 +688,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
         ),
       ],
       if (cents('tipCents') > 0) ...[
-        const SizedBox(height: 8),
+        const SizedBox(height: MSpace.sm),
         _summaryRow(tr(context, 'Courier tip', 'Tippi kuriirille'), money('tipCents')),
       ],
       const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Divider()),
@@ -709,14 +700,14 @@ class _CheckoutPageState extends State<CheckoutPage> {
                 'Lopullisen hinnan laskee Malvoya, ja se näytetään vielä maksuikkunassa ennen maksua.')
             : tr(context, 'This is the exact amount you will pay. The payment sheet shows the same amount.',
                 'Tämä on tarkka summa, jonka maksat. Maksuikkuna näyttää saman summan.'),
-        style: TextStyle(fontSize: 12, color: AppTheme.secondaryText(context)),
+        style: TextStyle(fontSize: MTextSize.caption, color: AppTheme.secondaryText(context)),
       ),
     ];
     // While a new price is on its way the previous one stays visible, dimmed
     return [
       AnimatedOpacity(
         opacity: loading && q != null ? 0.45 : 1,
-        duration: const Duration(milliseconds: 150),
+        duration: MMotion.fast,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows),
       ),
     ];
@@ -758,21 +749,21 @@ class _CheckoutPageState extends State<CheckoutPage> {
             width: 44,
             height: 44,
             decoration: BoxDecoration(color: AppTheme.pastel(context, AppTheme.lilac, AppTheme.primary), shape: BoxShape.circle),
-            child: Icon(Icons.storefront_rounded, color: AppTheme.isDarkMode(context) ? const Color(0xFFC9A3DD) : AppTheme.primary),
+            child: Icon(Icons.storefront_rounded, color: AppTheme.isDarkMode(context) ? MPalette.malvaOnDark : AppTheme.primary),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: MSpace.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(name, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: AppTheme.primaryText(context))),
+                Text(name, style: TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.bodyL, color: AppTheme.primaryText(context))),
                 const SizedBox(height: 2),
                 Text(
                   address ??
                       (loading
                           ? tr(context, 'Loading the address…', 'Ladataan osoitetta…')
                           : tr(context, 'The shop’s address is shown on your order.', 'Kaupan osoite näkyy tilauksessasi.')),
-                  style: TextStyle(fontSize: 13, color: muted, height: 1.35),
+                  style: TextStyle(fontSize: MTextSize.label, color: muted, height: 1.35),
                 ),
               ],
             ),
@@ -833,10 +824,10 @@ class _CheckoutPageState extends State<CheckoutPage> {
     } else {
       message = tr(context, 'This code can’t be used right now.', 'Koodia ei voi käyttää juuri nyt.');
     }
-    const errorColor = Color(0xFFD93025);
+    const errorColor = MPalette.red;
     final code = (promo is Map && promo['code'] != null ? promo['code'] : _promoCode).toString();
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 10, 4, 10),
+      padding: const EdgeInsets.fromLTRB(14, 10, MSpace.xs, 10),
       decoration: BoxDecoration(
         color: valid ? AppTheme.pastel(context, AppTheme.mint, AppTheme.moss) : AppTheme.inputBackground(context),
         borderRadius: BorderRadius.circular(AppTheme.radiusMd),
@@ -853,7 +844,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
               children: [
                 Text(code, style: TextStyle(fontWeight: FontWeight.w800, color: AppTheme.primaryText(context), letterSpacing: 0.4)),
                 const SizedBox(height: 2),
-                Text(message, style: TextStyle(fontSize: 12.5, color: valid || loading ? muted : errorColor, fontWeight: FontWeight.w600, height: 1.3)),
+                Text(message, style: TextStyle(fontSize: MTextSize.caption, color: valid || loading ? muted : errorColor, fontWeight: FontWeight.w600, height: 1.3)),
               ],
             ),
           ),
@@ -880,7 +871,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 160),
               constraints: const BoxConstraints(minHeight: 52),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: MSpace.lg, vertical: MSpace.sm),
               decoration: BoxDecoration(
                 color: selected ? AppTheme.sunshine : AppTheme.cardBackground(context),
                 borderRadius: BorderRadius.circular(26),
@@ -894,7 +885,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                   if (feeCents != null)
                     Text(
                       '${tr(context, 'Delivery', 'Toimitus')} ${euro(context, feeCents)}',
-                      style: TextStyle(fontSize: 12, color: selected ? AppTheme.ink : muted),
+                      style: TextStyle(fontSize: MTextSize.caption, color: selected ? AppTheme.ink : muted),
                     ),
                 ],
               ),
@@ -926,7 +917,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
         Text(
           tr(context, 'The shop gets it ready for this time and a courier brings it within the window.',
               'Kauppa valmistelee tilauksen tähän aikaan, ja kuriiri tuo sen valitun aikaikkunan sisällä.'),
-          style: TextStyle(fontSize: 12.5, color: muted, height: 1.35),
+          style: TextStyle(fontSize: MTextSize.caption, color: muted, height: 1.35),
         ),
       ],
     ]);
@@ -948,7 +939,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
       decoration: BoxDecoration(
         color: AppTheme.cardBackground(context),
         borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 20, offset: const Offset(0, -4))],
+        boxShadow: [BoxShadow(color: MPalette.night.withValues(alpha: 0.06), blurRadius: 20, offset: const Offset(0, -4))],
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -964,18 +955,13 @@ class _CheckoutPageState extends State<CheckoutPage> {
           SizedBox(
             width: double.infinity,
             height: 56,
-            child: FilledButton(
-              onPressed: _paying
+            child: MButton(label: label, loading: _paying, onPressed: _paying
                   ? null
                   : guest
                       ? _signInToPay
-                      : (!enabled || totalCents == null ? null : () => _placeOrder(cart, totalCents)),
-              child: _paying
-                  ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
-                  : Text(label, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
-            ),
+                      : (!enabled || totalCents == null ? null : () => _placeOrder(cart, totalCents))),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: MSpace.sm),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -986,7 +972,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                   tr(context, 'You pay in Stripe’s secure payment sheet. Malvoya never sees your card details.',
                       'Maksat Stripen suojatussa maksuikkunassa. Malvoya ei näe korttitietojasi.'),
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 11.5, color: AppTheme.secondaryText(context)),
+                  style: TextStyle(fontSize: MTextSize.caption, color: AppTheme.secondaryText(context)),
                 ),
               ),
             ],
@@ -1012,7 +998,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
           height: 48,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: MSpace.lg),
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: selected ? AppTheme.sunshine : AppTheme.cardBackground(context),
@@ -1027,7 +1013,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
 
   Widget _itemRow(CartService cart, CartItem item) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: MSpace.md),
       child: Row(
         children: [
           Container(
@@ -1042,7 +1028,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                 ? AppImage(item.imageUrl!, error: const Icon(Icons.checkroom_outlined, color: AppTheme.clayInk))
                 : const Icon(Icons.checkroom_outlined, color: AppTheme.clayInk),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: MSpace.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1051,7 +1037,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                     maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
                 Text(
                   [if (item.variantLabel != null) item.variantLabel, euro(context, (item.price * 100).round())].join(' · '),
-                  style: TextStyle(color: AppTheme.secondaryText(context), fontSize: 12.5),
+                  style: TextStyle(color: AppTheme.secondaryText(context), fontSize: MTextSize.caption),
                 ),
               ],
             ),
@@ -1066,29 +1052,29 @@ class _CheckoutPageState extends State<CheckoutPage> {
     );
   }
 
-  Widget _emptyCart() => StateMessage(
+  Widget _emptyCart() => MStateMessage(
         icon: Icons.shopping_bag_outlined,
         title: tr(context, 'Your bag is empty', 'Ostoskassisi on tyhjä'),
         message: tr(context, 'Find something you love from stores near you.', 'Löydä jotain ihanaa läheisistä kaupoista.'),
         actionLabel: tr(context, 'Browse shops', 'Selaa kauppoja'),
         actionIcon: Icons.storefront_rounded,
-        onRetry: () => openMainTab(context, MainTab.home),
+        onAction: () => openMainTab(context, MainTab.home),
       );
 
   Widget _notice(IconData icon, String text, {bool error = false}) => Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: error ? const Color(0xFFFEF2F2) : AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine),
+          color: error ? MPalette.redLight : AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine),
           borderRadius: BorderRadius.circular(AppTheme.radiusMd),
         ),
         child: Row(children: [
-          Icon(icon, color: error ? const Color(0xFFD93025) : const Color(0xFF8A5A00), size: 20),
+          Icon(icon, color: error ? MPalette.red : MPalette.amberInk, size: 20),
           const SizedBox(width: 10),
           Expanded(
             child: Text(text,
                 style: TextStyle(
-                  color: error ? const Color(0xFFB91C1C) : AppTheme.primaryText(context),
-                  fontSize: 13.5,
+                  color: error ? MPalette.redInk : AppTheme.primaryText(context),
+                  fontSize: MTextSize.label,
                   fontWeight: FontWeight.w600,
                   height: 1.35,
                 )),
@@ -1107,7 +1093,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(title, style: AppTheme.display(context, size: 18)),
-            const SizedBox(height: 12),
+            const SizedBox(height: MSpace.md),
             ...children,
           ],
         ),
@@ -1125,7 +1111,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                   fontSize: bold ? 16 : 14,
                 )),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: MSpace.md),
           if (cents != null)
             AnimatedEuro(cents,
                 style: TextStyle(

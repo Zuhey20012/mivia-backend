@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/agreements.dart';
-import '../core/api_client.dart';
 import '../core/location_disclosure.dart';
-import '../core/strings.dart';
 import '../screens/payouts_screen.dart';
 import 'courier_profile_sheets.dart';
 
@@ -143,7 +143,7 @@ class OnboardingChecklistState extends State<OnboardingChecklist> {
   Widget build(BuildContext context) {
     if (widget.suppressed) return const SizedBox.shrink();
     if (_loading) {
-      return widget.compact ? const SizedBox.shrink() : const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()));
+      return widget.compact ? const SizedBox.shrink() : const Padding(padding: EdgeInsets.all(MSpace.xxl), child: Center(child: CircularProgressIndicator()));
     }
     if (_data == null) {
       // An older server, or the first load failed: the screen's own text, or nothing on the dashboard
@@ -151,9 +151,9 @@ class OnboardingChecklistState extends State<OnboardingChecklist> {
       return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         if (!_unsupported && _error != null)
           Padding(
-            padding: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.only(bottom: MSpace.md),
             child: Row(children: [
-              Expanded(child: Text(_error!, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13))),
+              Expanded(child: Text(_error!, style: const TextStyle(color: AppTheme.textSecondary, fontSize: MTextSize.label))),
               TextButton(style: TextButton.styleFrom(minimumSize: const Size(48, 48)), onPressed: reload, child: Text(tr(context, 'Try again', 'Yritä uudelleen'))),
             ]),
           ),
@@ -177,12 +177,12 @@ class OnboardingChecklistState extends State<OnboardingChecklist> {
           ),
           const SizedBox(height: 2),
           Text(tr(context, '$done of ${steps.length} done', '$done/${steps.length} tehty'),
-              style: const TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.w600, fontSize: 13)),
+              style: const TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.w600, fontSize: MTextSize.label)),
         ]),
       ),
       Text('$percent %', style: AppTheme.display(size: widget.compact ? 18 : 22, color: AppTheme.primary)),
       if (widget.compact) ...[
-        const SizedBox(width: 4),
+        const SizedBox(width: MSpace.xs),
         Icon(_expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded),
       ],
     ]);
@@ -192,21 +192,21 @@ class OnboardingChecklistState extends State<OnboardingChecklist> {
           ? InkWell(
               borderRadius: BorderRadius.circular(AppTheme.radiusMd),
               onTap: () => setState(() => _expanded = !_expanded),
-              child: ConstrainedBox(constraints: const BoxConstraints(minHeight: 48), child: Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: header)),
+              child: ConstrainedBox(constraints: const BoxConstraints(minHeight: 48), child: Padding(padding: const EdgeInsets.symmetric(vertical: MSpace.xs), child: header)),
             )
           : header,
       const SizedBox(height: 10),
       Semantics(
         label: tr(context, '$percent percent done', '$percent prosenttia tehty'),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(MRadius.xs),
           child: LinearProgressIndicator(value: percent / 100, minHeight: 8, backgroundColor: AppTheme.sand, color: AppTheme.success),
         ),
       ),
       if (ready) ...[
-        const SizedBox(height: 12),
+        const SizedBox(height: MSpace.md),
         Container(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(MSpace.md),
           decoration: BoxDecoration(color: AppTheme.lilac, borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
           child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Icon(Icons.how_to_reg_outlined, color: AppTheme.malva),
@@ -229,9 +229,9 @@ class OnboardingChecklistState extends State<OnboardingChecklist> {
     ]);
 
     return Container(
-      margin: widget.compact ? const EdgeInsets.fromLTRB(16, 8, 16, 0) : EdgeInsets.zero,
-      padding: EdgeInsets.fromLTRB(16, widget.compact ? 6 : 16, 12, widget.compact ? 10 : 8),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(AppTheme.radiusLg), border: Border.all(color: AppTheme.divider)),
+      margin: widget.compact ? const EdgeInsets.fromLTRB(MSpace.lg, MSpace.sm, MSpace.lg, 0) : EdgeInsets.zero,
+      padding: EdgeInsets.fromLTRB(MSpace.lg, widget.compact ? 6 : MSpace.lg, MSpace.md, widget.compact ? 10 : MSpace.sm),
+      decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(AppTheme.radiusLg), border: Border.all(color: AppTheme.divider)),
       child: body,
     );
   }
@@ -239,7 +239,7 @@ class OnboardingChecklistState extends State<OnboardingChecklist> {
   Widget _row(Map<String, dynamic> step) {
     final done = step['done'] == true;
     final (icon, hint) = _stepCopy(step);
-    final title = localizedText(context, step['title']) ?? '${step['key'] ?? ''}';
+    final title = localized(context, step['title']) ?? '${step['key'] ?? ''}';
     final tappable = _actionable(step);
     final busy = _busy == '${step['key']}';
     return Semantics(
@@ -252,30 +252,30 @@ class OnboardingChecklistState extends State<OnboardingChecklist> {
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 56),
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: const EdgeInsets.symmetric(vertical: MSpace.sm),
             child: Row(children: [
               Container(
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(color: done ? AppTheme.success : AppTheme.primaryLight, shape: BoxShape.circle),
-                child: Icon(done ? Icons.check_rounded : icon, size: 20, color: done ? Colors.white : AppTheme.primary),
+                child: Icon(done ? Icons.check_rounded : icon, size: 20, color: done ? AppTheme.onPrimary : AppTheme.primary),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: MSpace.md),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(title,
                       style: TextStyle(
                           fontWeight: FontWeight.w700,
-                          fontSize: 15,
+                          fontSize: MTextSize.bodyL,
                           color: done ? AppTheme.textSecondary : AppTheme.textPrimary)),
                   if (hint != null)
-                    Text(hint, style: const TextStyle(fontSize: 13, height: 1.3, color: AppTheme.textSecondary)),
+                    Text(hint, style: const TextStyle(fontSize: MTextSize.label, height: 1.3, color: AppTheme.textSecondary)),
                 ]),
               ),
               if (busy)
-                const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))
+                const Padding(padding: EdgeInsets.all(MSpace.md), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))
               else if (tappable)
-                const Padding(padding: EdgeInsets.all(8), child: Icon(Icons.chevron_right_rounded, color: AppTheme.textSecondary)),
+                const Padding(padding: EdgeInsets.all(MSpace.sm), child: Icon(Icons.chevron_right_rounded, color: AppTheme.textSecondary)),
             ]),
           ),
         ),

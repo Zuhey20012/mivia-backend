@@ -147,12 +147,15 @@ export async function logoutUser(refreshToken: string) {
 // ─── GDPR: access (Art. 15/20) and erasure (Art. 17) ────────────────────────
 
 export async function exportUserData(userId: number) {
-  const [user, supportRequests, chatMessages] = await Promise.all([exportUser(userId), prisma.supportRequest.findMany({
+  const [user, supportRequests, chatMessages, productReports] = await Promise.all([exportUser(userId), prisma.supportRequest.findMany({
     where: { userId }, select: { id: true, topic: true, message: true, status: true, createdAt: true },
   }), prisma.orderMessage.findMany({
     where: { senderId: userId }, select: { orderId: true, text: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 5000,
+  }), prisma.productReport.findMany({
+    // "Report this product" notices the user sent (2.12)
+    where: { reporterId: userId }, select: { productId: true, reason: true, details: true, status: true, createdAt: true }, take: 1000,
   })]);
-  return user && { ...user, supportRequests, chatMessages };
+  return user && { ...user, supportRequests, chatMessages, productReports };
 }
 
 function exportUser(userId: number) {
@@ -244,6 +247,8 @@ export async function deleteUserAccount(userId: number) {
     await tx.orderMessage.deleteMany({ where: { senderId: userId } });
     await tx.userBlock.deleteMany({ where: { OR: [{ blockerId: userId }, { blockedId: userId }] } });
     await tx.reviewReport.deleteMany({ where: { reporterId: userId } });
+    // Product reports stay (product-safety notices must be processed) but no longer point at the person
+    await tx.productReport.updateMany({ where: { reporterId: userId }, data: { reporterId: null, reporterEmail: null } });
     await tx.review.updateMany({ where: { userId }, data: { comment: null } });
     if (store) {
       await tx.drop.updateMany({ where: { storeId: store.id, status: { in: ["READY", "PROCESSING"] } }, data: { status: "REMOVED", removedReason: "Store account deleted" } });

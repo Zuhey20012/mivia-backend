@@ -7,7 +7,7 @@
 
 export const TEMPLATES = [
   "APPAREL", "APPAREL_ACCESSORY", "FOOTWEAR", "BAG", "ACCESSORY", "EYEWEAR", "WATCH", "JEWELLERY",
-  "COSMETIC_MAKEUP", "COSMETIC_SKIN", "COSMETIC_HAIR", "COSMETIC_NAIL", "FRAGRANCE", "BEAUTY_TOOL",
+  "COSMETIC_MAKEUP", "COSMETIC_SKIN", "COSMETIC_HAIR", "COSMETIC_NAIL", "FRAGRANCE", "BEAUTY_TOOL", "HAIR_TOOL",
 ] as const;
 export type Template = (typeof TEMPLATES)[number];
 
@@ -15,7 +15,7 @@ export type Template = (typeof TEMPLATES)[number];
 export const COSMETIC_TEMPLATES: Template[] = ["COSMETIC_MAKEUP", "COSMETIC_SKIN", "COSMETIC_HAIR", "COSMETIC_NAIL", "FRAGRANCE"];
 export const isCosmetic = (t: string | null | undefined) => !!t && (COSMETIC_TEMPLATES as string[]).includes(t);
 
-/** Beauty products default to Unisex; apparel, shoes, accessories and jewellery need an audience chosen. */
+/** Beauty products default to Unisex and are never promoted in Kids sections (owner rule, category-sections-v2 §2). */
 export const BEAUTY_TOPS = ["makeup", "skincare", "haircare", "fragrance"];
 
 export type Sub = {
@@ -48,19 +48,25 @@ export const TAXONOMY: Top[] = [
       { slug: "clothing-knitwear", fi: "Neuleet ja hupparit", en: "Knitwear & hoodies", icon: "checkroom", tile: "clay", template: "APPAREL",
         kwFi: ["neule", "neuleet", "villapaita", "neuletakki", "huppari", "college", "collegepaita", "svetari"], kwEn: ["sweater", "jumper", "knit", "knitwear", "cardigan", "hoodie", "sweatshirt", "pullover"] },
       { slug: "clothing-jackets-coats", fi: "Takit", en: "Jackets & coats", icon: "dry_cleaning", tile: "clay", template: "APPAREL",
-        kwFi: ["takki", "takit", "toppatakki", "untuvatakki", "parka", "kuoritakki", "liivi"], kwEn: ["jacket", "coat", "parka", "puffer", "down jacket", "gilet", "vest", "windbreaker", "raincoat"] },
+        kwFi: ["takki", "takit", "toppatakki", "untuvatakki", "parka", "liivi"], kwEn: ["jacket", "coat", "parka", "puffer", "down jacket", "gilet", "vest", "windbreaker"] },
       { slug: "clothing-trousers-jeans", fi: "Housut ja farkut", en: "Trousers & jeans", icon: "checkroom", tile: "sand", template: "APPAREL",
         kwFi: ["housut", "farkut", "legginsit", "chinot", "verkkarit", "collegehousut"], kwEn: ["trousers", "pants", "jeans", "denim", "leggings", "chinos", "joggers"] },
       { slug: "clothing-skirts-shorts", fi: "Hameet ja shortsit", en: "Skirts & shorts", icon: "checkroom", tile: "peach", template: "APPAREL",
         kwFi: ["hame", "hameet", "shortsit", "sortsit"], kwEn: ["skirt", "shorts"] },
       { slug: "clothing-suits-blazers", fi: "Puvut ja bleiserit", en: "Suits & blazers", icon: "dry_cleaning", tile: "sand", template: "APPAREL",
         kwFi: ["puku", "bleiseri", "pikkutakki", "smokki"], kwEn: ["suit", "blazer", "tuxedo"] },
-      { slug: "clothing-sportswear", fi: "Urheiluvaatteet", en: "Sportswear", icon: "directions_run", tile: "mint", template: "APPAREL",
-        kwFi: ["urheiluvaate", "urheiluvaatteet", "treenivaate", "urheilurintaliivit"], kwEn: ["sportswear", "activewear", "gym wear", "sports bra"] },
-      { slug: "clothing-underwear-nightwear", fi: "Alusvaatteet, sukat ja yöasut", en: "Underwear, socks & nightwear", icon: "nightlight", tile: "peach", template: "APPAREL",
-        kwFi: ["alusvaate", "alusvaatteet", "alushousut", "rintaliivit", "rintaliivi", "bokserit", "sukat", "sukkahousut", "yöpaita", "pyjama", "aamutakki"], kwEn: ["underwear", "briefs", "boxers", "bra", "lingerie", "socks", "tights", "pyjamas", "nightwear", "robe", "loungewear"] },
-      { slug: "clothing-swimwear", fi: "Uima-asut", en: "Swimwear", icon: "pool", tile: "mint", template: "APPAREL",
-        kwFi: ["uimapuku", "bikinit", "uimahousut", "uima-asu"], kwEn: ["swimsuit", "swimwear", "bikini", "swim shorts", "trunks"] },
+      { slug: "clothing-underwear-nightwear", fi: "Alusvaatteet ja sukat", en: "Underwear & socks", icon: "checkroom", tile: "peach", template: "APPAREL",
+        kwFi: ["alusvaate", "alusvaatteet", "alushousut", "rintaliivit", "rintaliivi", "bokserit", "sukat", "sukkahousut"], kwEn: ["underwear", "briefs", "boxers", "bra", "lingerie", "socks", "tights"] },
+      { slug: "clothing-nightwear-loungewear", fi: "Yöasut ja oleiluvaatteet", en: "Nightwear & loungewear", icon: "nightlight", tile: "lilac", template: "APPAREL",
+        kwFi: ["yöpaita", "yöasu", "pyjama", "aamutakki", "oleiluasu"], kwEn: ["pyjamas", "pajamas", "nightwear", "nightdress", "robe", "loungewear"] },
+      { slug: "clothing-swimwear", fi: "Uima-asut ja rantavaatteet", en: "Swimwear & beachwear", icon: "pool", tile: "mint", template: "APPAREL",
+        kwFi: ["uimapuku", "bikinit", "uimahousut", "uima-asu", "rantamekko", "kaftaani"], kwEn: ["swimsuit", "swimwear", "bikini", "swim shorts", "trunks", "beachwear", "kaftan"] },
+      { slug: "clothing-outdoor-rainwear", fi: "Ulkoilu- ja sadevaatteet", en: "Outdoor & rainwear", icon: "umbrella", tile: "sand", template: "APPAREL",
+        kwFi: ["sadetakki", "sadeasu", "sadehousut", "sadevaatteet", "kuoritakki", "kuorihousut", "ulkoiluhousut", "välikausitakki"], kwEn: ["raincoat", "rain jacket", "rainwear", "shell jacket", "outdoor jacket"] },
+      { slug: "clothing-workwear", fi: "Työvaatteet", en: "Workwear", icon: "work", tile: "clay", template: "APPAREL",
+        kwFi: ["työvaate", "työvaatteet", "työhousut", "työtakki", "kokkitakki"], kwEn: ["workwear", "work trousers", "work jacket", "chef jacket"] },
+      { slug: "clothing-festive-traditional", fi: "Juhlavaatteet ja kansallispuvut", en: "Traditional & festive wear", icon: "celebration", tile: "peach", template: "APPAREL",
+        kwFi: ["juhlavaate", "juhlavaatteet", "kansallispuku", "iltapuku", "juhlamekko"], kwEn: ["festive wear", "national costume", "evening gown", "ball gown"] },
       { slug: "clothing-other", fi: "Muut vaatteet", en: "Other clothing", icon: "checkroom", tile: "sand", template: "APPAREL" },
     ],
   },
@@ -72,16 +78,18 @@ export const TAXONOMY: Top[] = [
         kwFi: ["tennarit", "tennari", "lenkkarit", "sneakerit"], kwEn: ["sneakers", "trainers", "sneaker"] },
       { slug: "shoes-boots", fi: "Saappaat ja nilkkurit", en: "Boots & ankle boots", icon: "snowshoeing", tile: "clay", template: "FOOTWEAR",
         kwFi: ["saappaat", "nilkkurit", "maiharit", "chelsea"], kwEn: ["boots", "ankle boots", "chelsea boots"] },
-      { slug: "shoes-winter-rubber-boots", fi: "Talvi- ja kumisaappaat", en: "Winter & rubber boots", icon: "ac_unit", tile: "sand", template: "FOOTWEAR",
-        kwFi: ["talvikengät", "talvisaappaat", "kumisaappaat", "toppakengät"], kwEn: ["winter boots", "snow boots", "rain boots", "rubber boots", "wellies"] },
+      { slug: "shoes-winter-rubber-boots", fi: "Talvikengät", en: "Winter boots", icon: "ac_unit", tile: "sand", template: "FOOTWEAR",
+        kwFi: ["talvikengät", "talvikenkä", "talvisaappaat", "toppakengät"], kwEn: ["winter boots", "snow boots", "winter shoes"] },
+      { slug: "shoes-rubber-boots", fi: "Kumisaappaat", en: "Rubber boots", icon: "water_drop", tile: "mint", template: "FOOTWEAR",
+        kwFi: ["kumisaappaat", "kumisaapas", "sadesaappaat"], kwEn: ["rain boots", "rubber boots", "wellies", "wellingtons"] },
+      { slug: "shoes-first-shoes", fi: "Ensikengät", en: "Kids' first shoes", icon: "child_care", tile: "peach", template: "FOOTWEAR",
+        kwFi: ["ensikengät", "vauvankengät", "nahkatossut"], kwEn: ["first shoes", "baby shoes", "pram shoes"] },
       { slug: "shoes-heels", fi: "Korkokengät", en: "Heels", icon: "snowshoeing", tile: "lilac", template: "FOOTWEAR",
         kwFi: ["korkokengät", "avokkaat", "piikkikorot"], kwEn: ["heels", "pumps", "stilettos"] },
       { slug: "shoes-flats-loafers", fi: "Ballerinat ja loaferit", en: "Flats & loafers", icon: "snowshoeing", tile: "peach", template: "FOOTWEAR",
         kwFi: ["ballerinat", "loaferit", "mokkasiinit"], kwEn: ["flats", "ballet flats", "loafers", "moccasins", "brogues"] },
       { slug: "shoes-sandals", fi: "Sandaalit ja varvastossut", en: "Sandals & slides", icon: "beach_access", tile: "sunshineLight", template: "FOOTWEAR",
         kwFi: ["sandaalit", "varvastossut", "sandaletit", "puukengät"], kwEn: ["sandals", "slides", "flip-flops", "clogs", "mules"] },
-      { slug: "shoes-sports-outdoor", fi: "Urheilu- ja ulkoilukengät", en: "Sports & outdoor shoes", icon: "hiking", tile: "mint", template: "FOOTWEAR",
-        kwFi: ["juoksukengät", "ulkoilukengät", "vaelluskengät", "urheilukengät"], kwEn: ["running shoes", "hiking shoes", "trail shoes", "sports shoes"] },
       { slug: "shoes-slippers", fi: "Tohvelit ja sisäkengät", en: "Slippers & indoor shoes", icon: "weekend", tile: "sand", template: "FOOTWEAR",
         kwFi: ["tohvelit", "sisäkengät", "aamutossut"], kwEn: ["slippers", "house shoes"] },
     ],
@@ -195,6 +203,8 @@ export const TAXONOMY: Top[] = [
         kwFi: ["vartalovoide", "suihkusaippua", "suihkugeeli", "deodorantti", "vartaloöljy"], kwEn: ["body lotion", "body cream", "shower gel", "body wash", "deodorant", "body oil"] },
       { slug: "skincare-hands-feet", fi: "Käsien ja jalkojen hoito", en: "Hand & foot care", icon: "back_hand", tile: "sand", template: "COSMETIC_SKIN",
         kwFi: ["käsivoide", "jalkavoide"], kwEn: ["hand cream", "foot cream"] },
+      { slug: "skincare-mens-grooming", fi: "Miesten hoito", en: "Men's grooming", icon: "face_6", tile: "clay", template: "COSMETIC_SKIN",
+        kwFi: ["partaöljy", "partavaha", "partabalsami", "parranajovaahto", "parranajogeeli", "partasaippua"], kwEn: ["beard oil", "beard balm", "shaving foam", "shaving gel", "shaving cream", "aftershave balm"] },
     ],
   },
   {
@@ -217,6 +227,10 @@ export const TAXONOMY: Top[] = [
         kwFi: ["hiuspohja", "hiuspohjan"], kwEn: ["scalp", "scalp serum"] },
       { slug: "haircare-brushes-tools", fi: "Harjat ja välineet", en: "Brushes & tools", icon: "brush", tile: "sand", template: "BEAUTY_TOOL",
         kwFi: ["hiusharja", "kampa"], kwEn: ["hairbrush", "hair brush", "comb"], productTypes: ["brush", "comb"] },
+      // Electrical (owner decision 22 Oct 2026): CE marking and the electrical safety information are required to publish
+      { slug: "haircare-hair-tools", fi: "Hiustenmuotoilulaitteet", en: "Hair tools", icon: "electrical_services", tile: "lilac", template: "HAIR_TOOL",
+        kwFi: ["hiustenkuivaaja", "suoristusrauta", "kiharrin", "kihartimet", "muotoiluharja", "lämpöharja"], kwEn: ["hair dryer", "hairdryer", "straightener", "flat iron", "curling iron", "curling wand", "hot brush"],
+        productTypes: ["hair_dryer", "straightener", "curler", "hot_brush"] },
     ],
   },
   {
@@ -235,6 +249,22 @@ export const TAXONOMY: Top[] = [
         kwFi: ["tuoksulahjapakkaus"], kwEn: ["fragrance gift set", "perfume gift set"] },
       { slug: "fragrance-travel", fi: "Matkakoot", en: "Travel sizes", icon: "luggage", tile: "sunshineLight", template: "FRAGRANCE",
         kwFi: ["matkakoko", "minikoko"], kwEn: ["travel size", "travel spray"] },
+    ],
+  },
+  {
+    slug: "sport-outdoor", fi: "Urheilu ja ulkoilu", en: "Sport & outdoor", icon: "directions_run", tile: "mint",
+    kwFi: ["urheilu", "ulkoilu"], kwEn: ["sport", "sports", "outdoor"],
+    children: [
+      { slug: "sport-activewear", fi: "Treenivaatteet", en: "Activewear", icon: "fitness_center", tile: "mint", template: "APPAREL",
+        kwFi: ["urheiluvaate", "urheiluvaatteet", "treenivaate", "treenivaatteet", "treenitrikoot", "urheilurintaliivit", "treenitoppi"], kwEn: ["sportswear", "activewear", "gym wear", "sports bra", "training tights", "workout"] },
+      { slug: "sport-running", fi: "Juoksu", en: "Running", icon: "directions_run", tile: "sunshineLight", template: "APPAREL",
+        kwFi: ["juoksutrikoot", "juoksupaita", "juoksutakki", "juoksushortsit"], kwEn: ["running tights", "running shirt", "running jacket", "running shorts"] },
+      { slug: "sport-hiking", fi: "Retkeily ja vaellus", en: "Hiking", icon: "hiking", tile: "sand", template: "APPAREL",
+        kwFi: ["vaellushousut", "retkeilyhousut", "vaellustakki", "fleece", "fleecetakki"], kwEn: ["hiking trousers", "hiking pants", "hiking jacket", "fleece"] },
+      { slug: "sport-ski-winter", fi: "Laskettelu ja talviurheilu", en: "Ski & winter sports", icon: "downhill_skiing", tile: "lilac", template: "APPAREL",
+        kwFi: ["laskettelutakki", "laskettelupuku", "laskettelu", "hiihtoasu", "hiihtohousut", "kerrastot", "kerrasto"], kwEn: ["ski jacket", "ski pants", "ski suit", "snowboard jacket", "base layer", "thermal underwear"] },
+      { slug: "sport-shoes", fi: "Urheilu- ja ulkoilukengät", en: "Sports & outdoor shoes", icon: "hiking", tile: "clay", template: "FOOTWEAR",
+        kwFi: ["juoksukengät", "ulkoilukengät", "vaelluskengät", "urheilukengät", "salikengät", "maastojuoksukengät"], kwEn: ["running shoes", "hiking shoes", "hiking boots", "trail shoes", "sports shoes", "training shoes"] },
     ],
   },
   {
@@ -292,8 +322,6 @@ export const HOLD_WORDS: { key: string; words: string[]; reason: { en: string; f
     reason: { en: "Medicines and medical devices are not sold on Malvoya.", fi: "Lääkkeitä ja lääkinnällisiä laitteita ei myydä Malvoyassa." } },
   { key: "biocide", words: ["käsidesi", "hand sanitiser", "hand sanitizer", "desinfiointiaine", "disinfectant"],
     reason: { en: "Biocides such as hand sanitiser are not sold on Malvoya.", fi: "Biosidejä, kuten käsidesiä, ei myydä Malvoyassa." } },
-  { key: "electrical", words: ["hiustenkuivaaja", "hair dryer", "hairdryer", "suoristusrauta", "straightener", "kiharrin", "curling iron", "sähkö"],
-    reason: { en: "Electrical beauty tools are not sold on Malvoya yet.", fi: "Sähköisiä kauneuslaitteita ei vielä myydä Malvoyassa." } },
   { key: "chemical", words: ["kynsiliima", "nail glue", "tatuointiväri", "tattoo ink"],
     reason: { en: "Classified chemicals such as nail glue and tattoo ink are not sold on Malvoya.", fi: "Luokiteltuja kemikaaleja, kuten kynsiliimaa ja tatuointivärejä, ei myydä Malvoyassa." } },
 ];

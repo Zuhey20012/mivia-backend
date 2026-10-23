@@ -1,7 +1,8 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
-import '../core/strings.dart';
 
 /// A short "thank you" right after paying: a sunny check pops in with a ring of confetti dots,
 /// then everything fades away by itself (about 1.8 s; a tap closes it sooner). With "reduce
@@ -85,15 +86,15 @@ class _PaidMomentState extends State<PaidMoment> with SingleTickerProviderStateM
                         ),
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: MSpace.sm),
                     Text(tr(context, 'Thanks for your order', 'Kiitos tilauksestasi'), style: AppTheme.display(context, size: 26)),
                     const SizedBox(height: 6),
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 32),
+                      padding: const EdgeInsets.symmetric(horizontal: MSpace.x3l),
                       child: Text(
                         tr(context, 'You can follow every step here.', 'Voit seurata jokaista vaihetta täällä.'),
                         textAlign: TextAlign.center,
-                        style: TextStyle(color: AppTheme.secondaryText(context), fontSize: 15),
+                        style: TextStyle(color: AppTheme.secondaryText(context), fontSize: MTextSize.bodyL),
                       ),
                     ),
                   ],
@@ -111,7 +112,7 @@ class _ConfettiPainter extends CustomPainter {
   final double t;
   _ConfettiPainter(this.t);
 
-  static const _colors = [AppTheme.primary, AppTheme.sunshine, AppTheme.lingon, AppTheme.success, AppTheme.accent];
+  static const _colors = [AppTheme.primary, AppTheme.sunshine, AppTheme.lingon, AppTheme.success, AppTheme.primaryOnDark];
 
   @override
   void paint(Canvas canvas, Size size) {

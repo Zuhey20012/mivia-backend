@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
-import '../core/haptics.dart';
-import '../core/strings.dart';
-import '../widgets/empty_art.dart';
-import '../widgets/motion.dart';
 
 /// Whether this phone has seen the short intro. Loaded once at start-up (a local flag).
 class Onboarding {
@@ -65,7 +63,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   Widget build(BuildContext context) {
     final slides = [
       (
-        EmptyArtKind.store,
+        MArtKind.store,
         AppTheme.lilac,
         AppTheme.primary,
         tr(context, 'Fashion from shops near you', 'Muotia läheisistä kaupoista'),
@@ -73,7 +71,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             'Vaatteita, kenkiä ja löytöjä kotikaupunkisi putiikeista ja kirpputorimyyjiltä.'),
       ),
       (
-        EmptyArtKind.drops,
+        MArtKind.drops,
         AppTheme.sunshineLight,
         AppTheme.sunshine,
         tr(context, 'See it move in Drops', 'Katso liikkeessä Dropeissa'),
@@ -81,7 +79,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             'Lyhyitä videoita suoraan kaupoilta. Pidätkö näkemästäsi? Lisää tuote kassiin suoraan videolta.'),
       ),
       (
-        EmptyArtKind.delivery,
+        MArtKind.delivery,
         AppTheme.mint,
         AppTheme.moss,
         tr(context, 'Delivered today, or collect it', 'Kotiin tänään tai nouda itse'),
@@ -97,7 +95,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             Align(
               alignment: Alignment.centerRight,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+                padding: const EdgeInsets.fromLTRB(MSpace.sm, MSpace.xs, MSpace.sm, 0),
                 child: AnimatedOpacity(
                   opacity: last ? 0 : 1,
                   duration: const Duration(milliseconds: 200),
@@ -131,15 +129,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                                 color: AppTheme.pastel(context, tile, hue),
                                 borderRadius: BorderRadius.circular(AppTheme.radiusLg + 8),
                               ),
-                              child: Center(child: EmptyArt(art, width: 220)),
+                              child: Center(child: MEmptyArt(art, width: 220)),
                             ),
-                            const SizedBox(height: 32),
+                            const SizedBox(height: MSpace.x3l),
                             Text(title, textAlign: TextAlign.center, style: AppTheme.display(context, size: 28)),
-                            const SizedBox(height: 12),
+                            const SizedBox(height: MSpace.md),
                             Text(
                               body,
                               textAlign: TextAlign.center,
-                              style: TextStyle(fontSize: 16, height: 1.45, color: AppTheme.secondaryText(context)),
+                              style: TextStyle(fontSize: MTextSize.bodyL, height: 1.45, color: AppTheme.secondaryText(context)),
                             ),
                           ],
                         ),
@@ -150,7 +148,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 12, 24, 20),
+              padding: const EdgeInsets.fromLTRB(MSpace.xxl, MSpace.md, MSpace.xxl, MSpace.xl),
               child: Column(
                 children: [
                   Semantics(
@@ -161,7 +159,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         slides.length,
                         (i) => AnimatedContainer(
                           duration: const Duration(milliseconds: 220),
-                          margin: const EdgeInsets.symmetric(horizontal: 4),
+                          margin: const EdgeInsets.symmetric(horizontal: MSpace.xs),
                           width: i == _page ? 22 : 8,
                           height: 8,
                           decoration: BoxDecoration(
@@ -172,7 +170,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: MSpace.xl),
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton(

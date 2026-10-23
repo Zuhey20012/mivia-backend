@@ -3,20 +3,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/agreements.dart';
-import '../core/api_client.dart';
 import '../core/connectivity.dart';
-import '../core/haptics.dart';
 import '../core/images.dart';
 import '../core/strings.dart';
-import '../core/google_link_tile.dart';
 import '../core/delete_account_tile.dart';
 import '../services/socket_service.dart';
 import '../core/push_service.dart';
 import '../widgets/language_sheet.dart';
-import '../widgets/loading_states.dart';
+import '../widgets/error_banner.dart';
 import '../widgets/setup_checklist.dart';
 import 'agreements_screen.dart';
 import 'chatbot.dart';
@@ -263,7 +262,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     final messenger = ScaffoldMessenger.of(context)..hideCurrentMaterialBanner();
     messenger.showMaterialBanner(MaterialBanner(
       backgroundColor: AppTheme.sunshineLight,
-      leading: const Icon(Icons.assignment_return_outlined, color: Color(0xFF6A4500)),
+      leading: const Icon(Icons.assignment_return_outlined, color: MPalette.amberInk),
       content: Text(
         orderId != null
             ? tr(context, 'New return request for order #$orderId', 'Uusi palautuspyyntö tilaukselle #$orderId')
@@ -297,7 +296,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
         constraints: const BoxConstraints(minWidth: 20),
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(10)),
-        child: Text('$n', textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, color: AppTheme.textPrimary, fontWeight: FontWeight.w800)),
+        child: Text('$n', textAlign: TextAlign.center, style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textPrimary, fontWeight: FontWeight.w800)),
       );
 
   // ── Notifications off: the store would miss new orders ─────────────────
@@ -325,22 +324,22 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           if (allowed != false) return const SizedBox.shrink();
           return Container(
             margin: const EdgeInsets.only(bottom: 14),
-            padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-            decoration: BoxDecoration(color: const Color(0xFFD93025), borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
+            padding: const EdgeInsets.fromLTRB(14, MSpace.md, MSpace.md, MSpace.md),
+            decoration: BoxDecoration(color: MPalette.red, borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
             child: Row(children: [
-              const Icon(Icons.notifications_off_rounded, color: Colors.white),
+              const Icon(Icons.notifications_off_rounded, color: AppTheme.onPrimary),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(tr(context, 'Notifications are off — you will miss orders.', 'Ilmoitukset ovat pois päältä — menetät tilauksia.'),
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, height: 1.3)),
+                    style: const TextStyle(color: AppTheme.onPrimary, fontWeight: FontWeight.w800, height: 1.3)),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: MSpace.sm),
               FilledButton(
                 style: FilledButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: const Color(0xFFD93025),
+                  backgroundColor: AppTheme.surface,
+                  foregroundColor: MPalette.red,
                   minimumSize: const Size(64, 48),
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  padding: const EdgeInsets.symmetric(horizontal: MSpace.lg),
                 ),
                 onPressed: _enablingPush ? null : _turnOnNotifications,
                 child: Text(tr(context, 'Turn on', 'Ota käyttöön')),
@@ -367,7 +366,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
         borderRadius: BorderRadius.circular(AppTheme.radiusMd),
         onTap: _openTaxInfo,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+          padding: const EdgeInsets.fromLTRB(14, MSpace.md, 10, MSpace.md),
           child: Row(children: [
             const Icon(Icons.receipt_long_outlined, color: AppTheme.malva),
             const SizedBox(width: 10),
@@ -376,7 +375,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                 Text(tr(context, 'Add your tax information', 'Lisää verotietosi'), style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.textPrimary)),
                 const SizedBox(height: 2),
                 Text(tr(context, 'EU law (DAC7) requires it from every seller. It takes about two minutes.', 'EU-laki (DAC7) edellyttää sitä jokaiselta myyjältä. Se vie noin kaksi minuuttia.'),
-                    style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary, height: 1.35)),
+                    style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary, height: 1.35)),
               ]),
             ),
             const Icon(Icons.chevron_right_rounded, color: AppTheme.textSecondary),
@@ -398,7 +397,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     if (!mounted) return;
     setState(() => _switching = false);
     if (!res.ok) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.error ?? tr(context, 'Could not change it', 'Muutos epäonnistui'))));
+      MSnack.show(context, res.error ?? tr(context, 'Could not change it', 'Muutos epäonnistui'));
       return;
     }
     await _load();
@@ -446,7 +445,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
         _store!['prepMinutes'] = before;
         _normalPrep = normalBefore;
       });
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.error ?? tr(context, 'Could not change it', 'Muutos epäonnistui'))));
+      MSnack.show(context, res.error ?? tr(context, 'Could not change it', 'Muutos epäonnistui'));
       return;
     }
     setState(() => _savingPrep = false);
@@ -484,7 +483,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           ),
           if (_savingPrep) SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: fg)),
         ]),
-        const SizedBox(height: 8),
+        const SizedBox(height: MSpace.sm),
         Wrap(spacing: 8, runSpacing: 8, children: [
           FilledButton.tonal(
             style: pill,
@@ -502,7 +501,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: Text(tr(context, 'Customers see longer delivery times while you are busy.', 'Asiakkaat näkevät pidemmät toimitusajat kiireen aikana.'),
-                style: TextStyle(fontSize: 12.5, color: fg.withValues(alpha: 0.85))),
+                style: TextStyle(fontSize: MTextSize.caption, color: fg.withValues(alpha: 0.85))),
           ),
       ]),
     );
@@ -525,12 +524,12 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
         ? (tr(context, 'Paused', 'Tauolla'), tr(context, 'Customers cannot order right now', 'Asiakkaat eivät voi tilata nyt'), AppTheme.sand, AppTheme.textPrimary)
         : !openNow
             ? (tr(context, 'Closed now', 'Suljettu nyt') + _opensText(_store?['opensAt'] as Map?),
-                tr(context, 'Outside your opening hours', 'Aukioloaikojen ulkopuolella'), AppTheme.sunshineLight, const Color(0xFF6A4500))
+                tr(context, 'Outside your opening hours', 'Aukioloaikojen ulkopuolella'), AppTheme.sunshineLight, MPalette.amberInk)
             : (tr(context, 'Open — taking orders', 'Auki — otetaan tilauksia'),
                 tr(context, 'Answer new orders within 10 minutes', 'Vastaa uusiin tilauksiin 10 minuutissa'), AppTheme.primaryLight, AppTheme.primary);
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.fromLTRB(16, 12, 10, 12),
+      padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.md, 10, MSpace.md),
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(AppTheme.radiusLg - 2)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
@@ -538,11 +537,11 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(title, style: AppTheme.display(size: 18, color: fg)),
               const SizedBox(height: 2),
-              Text(subtitle, style: TextStyle(fontSize: 13, color: fg.withValues(alpha: 0.85))),
+              Text(subtitle, style: TextStyle(fontSize: MTextSize.label, color: fg.withValues(alpha: 0.85))),
             ]),
           ),
           _switching
-              ? const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5)))
+              ? const Padding(padding: EdgeInsets.all(MSpace.md), child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5)))
               : Semantics(
                   label: tr(context, 'Take new orders', 'Ota vastaan tilauksia'),
                   child: Switch(value: accepting, onChanged: _setAccepting),
@@ -615,7 +614,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       );
       if (ok != true) return false;
     }
-    Haptics.tap();
+    Haptics.medium();
     final api = _api;
     Future<ApiResult> send() => api.patch('/orders/${order['id']}/status', {'status': status});
     // Accepting needs the Seller Terms in force: on 428 the agreement sheet opens over the incoming-order
@@ -625,7 +624,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     if (res.notice != null) _loadAgreements();
     if (!res.ok) {
       Haptics.warning();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text([if (res.notice != null) res.notice!, res.errorMessage].join(' '))));
+      MSnack.show(context, [if (res.notice != null) res.notice!, res.errorMessage].join(' '));
     } else if (status == 'CONFIRMED') {
       final accepted = tr(context, 'Order #${order['id']} accepted.', 'Tilaus #${order['id']} hyväksytty.');
       ScaffoldMessenger.of(context)
@@ -636,7 +635,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     return res.ok;
   }
 
-  static const _red = Color(0xFFD93025);
+  static const _red = MPalette.red;
 
   // ── "Can't fulfil": cancel an accepted order with a full refund ─────────
   // The API lets the store cancel CONFIRMED and PROCESSING orders (not once the courier has it);
@@ -657,26 +656,23 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       'OUT_OF_STOCK': tr(context, 'Out of stock', 'Tuote on loppu'),
       'OTHER': tr(context, 'Other', 'Muu syy'),
     };
-    final reason = await showModalBottomSheet<String>(
-      context: context,
-      builder: (ctx) => SafeArea(
+    final reason = await showMSheet<String>(context, builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 0, 24, 4),
+            padding: const EdgeInsets.fromLTRB(MSpace.xxl, 0, MSpace.xxl, MSpace.xs),
             child: Text(tr(ctx, 'Why can\'t you fulfil order #${o['id']}?', 'Miksi et voi toimittaa tilausta #${o['id']}?'), style: AppTheme.display(size: 19)),
           ),
           for (final e in reasons.entries)
             ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+              contentPadding: const EdgeInsets.symmetric(horizontal: MSpace.xxl),
               minTileHeight: 56,
               title: Text(e.value, style: const TextStyle(fontWeight: FontWeight.w600)),
               trailing: const Icon(Icons.chevron_right_rounded),
               onTap: () => Navigator.pop(ctx, e.key),
             ),
-          const SizedBox(height: 8),
+          const SizedBox(height: MSpace.sm),
         ]),
-      ),
-    );
+      ), isScrollControlled: false, useSafeArea: false);
     if (reason == null || !mounted) return;
     final ok = await showDialog<bool>(
       context: context,
@@ -689,7 +685,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(ctx, 'Keep the order', 'Pidä tilaus'))),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: _red, foregroundColor: Colors.white, minimumSize: const Size(64, 48)),
+            style: FilledButton.styleFrom(backgroundColor: _red, foregroundColor: AppTheme.onPrimary, minimumSize: const Size(64, 48)),
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(tr(ctx, 'Cancel and refund', 'Peru ja palauta rahat')),
           ),
@@ -702,11 +698,9 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     // store does not know, so it is written in Finnish and English (servers before 2.10 ignore it)
     final res = await _api.patch('/orders/${o['id']}/status', {'status': 'CANCELLED', 'reason': _customerReasons[reason] ?? _customerReasons['OTHER']!});
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(res.ok
+    MSnack.show(context, res.ok
           ? tr(context, 'Order #${o['id']} cancelled. The customer gets a full refund.', 'Tilaus #${o['id']} peruttu. Asiakas saa täyden hyvityksen.')
-          : res.errorMessage),
-    ));
+          : res.errorMessage);
     _loadOrders();
   }
 
@@ -767,15 +761,15 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             label: '$label: $value',
             excludeSemantics: true,
             child: Container(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              padding: const EdgeInsets.fromLTRB(MSpace.md, 10, MSpace.md, MSpace.md),
               decoration: BoxDecoration(
-                color: highlight ? AppTheme.sunshine : Colors.white,
-                borderRadius: BorderRadius.circular(16),
+                color: highlight ? AppTheme.sunshine : AppTheme.surface,
+                borderRadius: BorderRadius.circular(MRadius.md),
                 border: highlight ? null : Border.all(color: AppTheme.divider),
               ),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(label, maxLines: 2, style: const TextStyle(fontSize: 12, color: AppTheme.textPrimary, fontWeight: FontWeight.w600, height: 1.2)),
-                const SizedBox(height: 4),
+                Text(label, maxLines: 2, style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textPrimary, fontWeight: FontWeight.w600, height: 1.2)),
+                const SizedBox(height: MSpace.xs),
                 FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(value, style: AppTheme.display(size: 22))),
               ]),
             ),
@@ -786,9 +780,9 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       child: IntrinsicHeight(
         child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           tile(tr(context, 'Orders today', 'Tilauksia tänään'), '${today.length}'),
-          const SizedBox(width: 8),
+          const SizedBox(width: MSpace.sm),
           tile(tr(context, 'Sales today', 'Myynti tänään'), euro(context, sales)),
-          const SizedBox(width: 8),
+          const SizedBox(width: MSpace.sm),
           tile(tr(context, 'Waiting for you', 'Odottaa sinua'), '$needYou', highlight: needYou > 0),
         ]),
       ),
@@ -804,7 +798,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       ];
 
   Future<void> _quickEdit(Map<String, dynamic> p) async {
-    Haptics.select();
+    Haptics.selection();
     final result = await showProductQuickEdit(context, product: p, api: _api);
     if (!mounted || result == null) return;
     switch (result) {
@@ -837,7 +831,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     final pageIndex = _pageItems.indexWhere((x) => x['id'] == id);
     final storeCopy = storeIndex >= 0 ? storeList![storeIndex] : null;
     final pageCopy = pageIndex >= 0 ? _pageItems[pageIndex] : null;
-    Haptics.tap();
+    Haptics.medium();
     setState(() {
       if (storeIndex >= 0) storeList!.removeAt(storeIndex);
       if (pageIndex >= 0) {
@@ -863,7 +857,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
         .showSnackBar(SnackBar(content: Text(removed), duration: const Duration(seconds: 5), action: SnackBarAction(label: undo, onPressed: () {})))
         .closed;
     if (reason == SnackBarClosedReason.action) {
-      Haptics.select();
+      Haptics.selection();
       restore();
       return;
     }
@@ -904,14 +898,14 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
               Text(_store?['name'] ?? 'Malvoya Store', style: AppTheme.display(size: 18), overflow: TextOverflow.ellipsis),
               const SizedBox(height: 3),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: MSpace.sm, vertical: 2),
                 decoration: BoxDecoration(
                   color: _store?['isVerified'] == true ? AppTheme.primaryLight : AppTheme.sunshineLight,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
                   _store?['isVerified'] == true ? tr(context, 'Approved — visible to shoppers', 'Hyväksytty — näkyy asiakkaille') : tr(context, 'In review — not visible yet', 'Tarkistuksessa — ei vielä näkyvissä'),
-                  style: TextStyle(fontSize: 11.5, color: _store?['isVerified'] == true ? AppTheme.primary : const Color(0xFF8A5A00), fontWeight: FontWeight.w700),
+                  style: TextStyle(fontSize: MTextSize.caption, color: _store?['isVerified'] == true ? AppTheme.primary : MPalette.amberInk, fontWeight: FontWeight.w700),
                 ),
               ),
             ]),
@@ -929,7 +923,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
               Text(tr(context, 'Orders', 'Tilaukset')),
               if (newOrders > 0) ...[
                 const SizedBox(width: 6),
-                CircleAvatar(radius: 10, backgroundColor: AppTheme.sunshine, child: Text('$newOrders', style: const TextStyle(fontSize: 11, color: AppTheme.textPrimary, fontWeight: FontWeight.w800))),
+                CircleAvatar(radius: 10, backgroundColor: AppTheme.sunshine, child: Text('$newOrders', style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textPrimary, fontWeight: FontWeight.w800))),
               ],
             ])),
             Tab(text: tr(context, 'Products', 'Tuotteet')),
@@ -951,7 +945,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             FloatingActionButton.extended(
               heroTag: 'import-products',
               onPressed: _importProducts,
-              backgroundColor: Colors.white,
+              backgroundColor: AppTheme.surface,
               foregroundColor: AppTheme.primary,
               elevation: 2,
               icon: const Icon(Icons.upload_file_rounded),
@@ -969,11 +963,11 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
         _ => null,
       },
       body: _loading
-          ? const SkeletonList(button: true)
+          ? const MSkeletonList(button: true)
           : _error != null
               ? RefreshIndicator(
                   onRefresh: _load,
-                  child: ListView(physics: const AlwaysScrollableScrollPhysics(), children: [ErrorState(message: _error, onRetry: _retryLoad)]),
+                  child: ListView(physics: const AlwaysScrollableScrollPhysics(), children: [MStateMessage.error(scrollable: false, top: 56, message: _error, onRetry: _retryLoad)]),
                 )
               : TabBarView(controller: _tabs, children: [_ordersTab(), _productsTab(), DropsManager(key: _dropsKey), _storeTab()]),
     );
@@ -1004,7 +998,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       onRefresh: () => Future.wait([_loadOrders(), _loadReturns(), PushService.instance.refreshPermission()]),
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(MSpace.lg),
         children: [
           _notificationsOffBar(),
           if (_store != null && _onboarding != null)
@@ -1018,12 +1012,11 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           // The checklist already lists the tax step while it is shown
           if (!_checklistShown) _taxInfoBanner(),
           // First load: placeholders, or what went wrong. Later failures keep the list and show a strip.
-          if (!_ordersLoaded && _ordersError != null) ErrorState(message: _ordersError, onRetry: _retryOrders, top: 24),
-          if (!_ordersLoaded && _ordersError == null) ...[for (var i = 0; i < 3; i++) SkeletonCard(lines: 4, button: i == 0)],
+          if (!_ordersLoaded && _ordersError != null) MStateMessage.error(scrollable: false, message: _ordersError, onRetry: _retryOrders, top: 24),
+          if (!_ordersLoaded && _ordersError == null) ...[for (var i = 0; i < 3; i++) MSkeleton(child: MSkeletonCard(lines: 4, button: i == 0))],
           if (_ordersLoaded && _ordersError != null) ErrorBanner(message: _ordersError!, onRetry: _retryOrders),
           if (_ordersLoaded && _orders.isEmpty)
-            EmptyState(
-              icon: Icons.receipt_long_outlined,
+            MStateMessage(scrollable: false, icon: Icons.receipt_long_outlined,
               top: 48,
               message: _store?['isVerified'] == true
                   ? tr(context, 'No orders yet. New orders appear here as soon as they are paid, with a sound and a notification. Malvoya is just starting, so the first orders may take a while.',
@@ -1031,7 +1024,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                   : tr(context, 'Your store is in review. Add products and drops meanwhile — they go live when you are approved.', 'Kauppasi on tarkistuksessa. Lisää sillä välin tuotteita ja julkaisuja — ne julkaistaan hyväksynnän jälkeen.'),
             ),
           for (final o in active) _orderCard(o),
-          if (done.isNotEmpty) Padding(padding: const EdgeInsets.fromLTRB(4, 16, 4, 8), child: Text(tr(context, 'Earlier', 'Aiemmat'), style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.textSecondary))),
+          if (done.isNotEmpty) Padding(padding: const EdgeInsets.fromLTRB(MSpace.xs, MSpace.lg, MSpace.xs, MSpace.sm), child: Text(tr(context, 'Earlier', 'Aiemmat'), style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.textSecondary))),
           for (final o in done) _orderCard(o, earlier: true),
         ],
       ),
@@ -1055,7 +1048,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 56),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+              padding: const EdgeInsets.fromLTRB(14, MSpace.md, 10, MSpace.md),
               child: Row(children: [
                 const Icon(Icons.gavel_rounded, color: AppTheme.textPrimary),
                 const SizedBox(width: 10),
@@ -1065,7 +1058,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                         style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.textPrimary)),
                     const SizedBox(height: 2),
                     Text(tr(context, 'You need them to accept new orders and publish products.', 'Tarvitset ne, jotta voit hyväksyä uusia tilauksia ja julkaista tuotteita.'),
-                        style: const TextStyle(fontSize: 12.5, color: AppTheme.textPrimary, height: 1.35)),
+                        style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textPrimary, height: 1.35)),
                   ]),
                 ),
                 const Icon(Icons.chevron_right_rounded, color: AppTheme.textPrimary),
@@ -1084,14 +1077,14 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     final waited = since == null ? 0 : DateTime.now().difference(since).inMinutes.clamp(0, 999);
     final left = 10 - waited;
     final urgent = left <= 3;
-    final fg = urgent ? const Color(0xFFD93025) : const Color(0xFF6A4500);
+    final fg = urgent ? MPalette.red : MPalette.amberInk;
     return Container(
       margin: const EdgeInsets.only(top: 10),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      decoration: BoxDecoration(color: urgent ? const Color(0xFFFDECEA) : AppTheme.sunshineLight, borderRadius: BorderRadius.circular(14)),
+      padding: const EdgeInsets.fromLTRB(MSpace.md, 10, MSpace.md, 10),
+      decoration: BoxDecoration(color: urgent ? MPalette.redLight : AppTheme.sunshineLight, borderRadius: BorderRadius.circular(14)),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Icon(Icons.hourglass_bottom_rounded, size: 18, color: fg),
-        const SizedBox(width: 8),
+        const SizedBox(width: MSpace.sm),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(
@@ -1104,7 +1097,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                       'Vastaamattomat tilaukset hyvitetään automaattisesti 10 minuutin jälkeen ($left min jäljellä).')
                   : tr(context, 'Unanswered orders are refunded automatically after 10 minutes. Answer now.',
                       'Vastaamattomat tilaukset hyvitetään automaattisesti 10 minuutin jälkeen. Vastaa nyt.'),
-              style: TextStyle(fontSize: 12.5, color: fg, height: 1.35),
+              style: TextStyle(fontSize: MTextSize.caption, color: fg, height: 1.35),
             ),
           ]),
         ),
@@ -1119,27 +1112,27 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       if ((variant?['color'] ?? '').toString().isNotEmpty) '${tr(context, 'Colour', 'Väri')} ${variant!['color']}',
     ];
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: MSpace.sm),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Container(
           constraints: const BoxConstraints(minWidth: 34),
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-          decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(8)),
+          decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(MRadius.xs)),
           child: Text('${i['quantity']}×', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.primary)),
         ),
         const SizedBox(width: 10),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('${i['product']?['name'] ?? ''}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            Text('${i['product']?['name'] ?? ''}', style: const TextStyle(fontSize: MTextSize.bodyL, fontWeight: FontWeight.w600)),
             if (options.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(top: 4),
+                padding: const EdgeInsets.only(top: MSpace.xs),
                 child: Wrap(spacing: 6, runSpacing: 4, children: [
                   for (final opt in options)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(color: AppTheme.sand, borderRadius: BorderRadius.circular(8)),
-                      child: Text(opt, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+                      padding: const EdgeInsets.symmetric(horizontal: MSpace.sm, vertical: 2),
+                      decoration: BoxDecoration(color: AppTheme.sand, borderRadius: BorderRadius.circular(MRadius.xs)),
+                      child: Text(opt, style: const TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
                     ),
                 ]),
               ),
@@ -1168,12 +1161,12 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
   }
 
   Widget _pickupBadge() => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(12)),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: MSpace.xs),
+        decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(MRadius.sm)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.storefront_rounded, size: 15, color: Colors.white),
+          const Icon(Icons.storefront_rounded, size: 15, color: AppTheme.onPrimary),
           const SizedBox(width: 5),
-          Text(tr(context, 'Collect in shop', 'Nouto kaupasta'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12.5)),
+          Text(tr(context, 'Collect in shop', 'Nouto kaupasta'), style: const TextStyle(color: AppTheme.onPrimary, fontWeight: FontWeight.w800, fontSize: MTextSize.caption)),
         ]),
       );
 
@@ -1181,15 +1174,15 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
   Widget _pickupWaiting(Map<String, dynamic> o) {
     final readyAt = DateTime.tryParse('${o['readyAt'] ?? ''}')?.toLocal();
     final deadline = readyAt?.add(const Duration(hours: 72));
-    const fg = Color(0xFF6A4500);
+    const fg = MPalette.amberInk;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Container(
-        margin: const EdgeInsets.only(top: 12),
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        margin: const EdgeInsets.only(top: MSpace.md),
+        padding: const EdgeInsets.fromLTRB(MSpace.md, 10, MSpace.md, 10),
         decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(14)),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Icon(Icons.schedule_rounded, size: 18, color: fg),
-          const SizedBox(width: 8),
+          const SizedBox(width: MSpace.sm),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(
@@ -1205,17 +1198,17 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                         'Jos tilausta ei noudeta ${_when(deadline)} mennessä (72 h valmiiksi merkitsemisestä), se hyvitetään automaattisesti.')
                     : tr(context, 'Orders not collected within 72 h of being marked ready are refunded automatically.',
                         'Tilaukset, joita ei noudeta 72 tunnin kuluessa valmiiksi merkitsemisestä, hyvitetään automaattisesti.'),
-                style: const TextStyle(fontSize: 12.5, color: fg, height: 1.35),
+                style: const TextStyle(fontSize: MTextSize.caption, color: fg, height: 1.35),
               ),
             ]),
           ),
         ]),
       ),
-      const SizedBox(height: 12),
+      const SizedBox(height: MSpace.md),
       SizedBox(
         width: double.infinity,
         child: FilledButton.icon(
-          style: FilledButton.styleFrom(minimumSize: const Size(64, 60), textStyle: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+          style: FilledButton.styleFrom(minimumSize: const Size(64, 60), textStyle: const TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w800)),
           onPressed: () => _collect(o),
           icon: const Icon(Icons.how_to_reg_rounded),
           label: Text(tr(context, 'Customer is here', 'Asiakas on paikalla')),
@@ -1242,7 +1235,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
   /// The courier checked in at the shop (POST /orders/:id/arrived-at-store) and waits for this order.
   Widget _courierAtCounter(Map<String, dynamic> o, DateTime since) => Container(
         margin: const EdgeInsets.only(top: 10),
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        padding: const EdgeInsets.fromLTRB(MSpace.md, 10, MSpace.md, 10),
         decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(14)),
         child: Row(children: [
           const Icon(Icons.directions_bike_rounded, color: AppTheme.textPrimary),
@@ -1253,7 +1246,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
               style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.textPrimary),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: MSpace.sm),
           // The number the courier asks for
           Text('#${o['id']}', style: AppTheme.display(size: 26)),
         ]),
@@ -1291,7 +1284,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       final reason = _problemReason(o);
       return _problemBox(
         icon: Icons.report_problem_rounded,
-        bg: const Color(0xFFFDECEA),
+        bg: MPalette.redLight,
         fg: _red,
         title: tr(context, "The courier can't reach the customer", 'Kuriiri ei tavoita asiakasta'),
         body: [
@@ -1326,18 +1319,18 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
 
   Widget _problemBox({required IconData icon, required Color bg, required Color fg, required String title, String? body}) => Container(
         margin: const EdgeInsets.only(top: 10),
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        padding: const EdgeInsets.fromLTRB(MSpace.md, 10, MSpace.md, 10),
         decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(14)),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Icon(icon, size: 20, color: fg),
-          const SizedBox(width: 8),
+          const SizedBox(width: MSpace.sm),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(title, style: TextStyle(fontWeight: FontWeight.w800, color: fg)),
               if (body != null && body.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 2),
-                  child: Text(body, style: TextStyle(fontSize: 12.5, color: fg, height: 1.35)),
+                  child: Text(body, style: TextStyle(fontSize: MTextSize.caption, color: fg, height: 1.35)),
                 ),
             ]),
           ),
@@ -1371,10 +1364,10 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       _ => (tr(context, 'Cancelled / refunded', 'Peruttu / hyvitetty'), AppTheme.sand, AppTheme.textSecondary),
     };
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: MSpace.md),
+      padding: const EdgeInsets.all(MSpace.lg),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppTheme.surface,
         borderRadius: BorderRadius.circular(AppTheme.radiusLg - 2),
         border: Border.all(color: status == 'PENDING' ? AppTheme.primary : AppTheme.divider, width: status == 'PENDING' ? 2 : 1),
       ),
@@ -1415,13 +1408,13 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                 ],
               ),
           ]),
-          const SizedBox(height: 8),
+          const SizedBox(height: MSpace.sm),
           Wrap(spacing: 6, runSpacing: 6, children: [
             if (pickup) _pickupBadge(),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
-              child: Text(label, style: TextStyle(color: fg, fontWeight: FontWeight.w800, fontSize: 12.5)),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: MSpace.xs),
+              decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(MRadius.sm)),
+              child: Text(label, style: TextStyle(color: fg, fontWeight: FontWeight.w800, fontSize: MTextSize.caption)),
             ),
           ]),
           if (_isWaiting(o)) _waitingNote(o),
@@ -1436,7 +1429,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                 const Icon(Icons.volunteer_activism_outlined, size: 16, color: AppTheme.textSecondary),
                 const SizedBox(width: 6),
                 Text('${tr(context, 'Tip for the courier', 'Tippi kuriirille')} ${euro(context, o['tipCents'])}',
-                    style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
+                    style: const TextStyle(fontSize: MTextSize.label, color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
               ]),
             ),
           if (o['courier'] != null && courierArrived == null && ['CONFIRMED', 'PROCESSING'].contains(status))
@@ -1446,7 +1439,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                   style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w600)),
             ),
           if (status == 'PENDING') ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: MSpace.md),
             Row(children: [
               Expanded(
                 child: OutlinedButton(
@@ -1460,11 +1453,11 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             ]),
           ],
           if (status == 'CONFIRMED' && !pickup) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: MSpace.md),
             SizedBox(width: double.infinity, child: FilledButton(onPressed: () => _setStatus(o, 'PROCESSING'), child: Text(tr(context, 'Packed — ready for courier', 'Pakattu — valmis kuriirille')))),
           ],
           if (status == 'CONFIRMED' && pickup) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: MSpace.md),
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
@@ -1474,11 +1467,11 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
               ),
             ),
             Padding(
-              padding: const EdgeInsets.only(top: 8),
+              padding: const EdgeInsets.only(top: MSpace.sm),
               child: Text(
                 tr(context, 'The customer gets a message to come and collect it. Orders not collected within 72 h of being marked ready are refunded automatically.',
                     'Asiakas saa viestin, että tilauksen voi noutaa. Tilaukset, joita ei noudeta 72 tunnin kuluessa valmiiksi merkitsemisestä, hyvitetään automaattisesti.'),
-                style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary, height: 1.35),
+                style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary, height: 1.35),
               ),
             ),
           ],
@@ -1718,8 +1711,8 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       ]),
       if (countText != null)
         Padding(
-          padding: const EdgeInsets.only(top: 6, left: 4),
-          child: Text(countText, style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary)),
+          padding: const EdgeInsets.only(top: 6, left: MSpace.xs),
+          child: Text(countText, style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
         ),
       const SizedBox(height: 6),
     ]);
@@ -1730,23 +1723,22 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
         onRefresh: _load,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+          padding: const EdgeInsets.fromLTRB(MSpace.lg, 0, MSpace.lg, 100),
           children: [
-            EmptyState(
-              icon: Icons.checkroom_rounded,
+            MStateMessage(scrollable: false, icon: Icons.checkroom_rounded,
               top: 40,
               message: tr(context, 'Add your first product with photos, price and sizes.', 'Lisää ensimmäinen tuotteesi kuvineen, hintoineen ja kokoineen.'),
-              actions: [
+              action: Column(mainAxisSize: MainAxisSize.min, children: [
                 FilledButton.icon(onPressed: () => _editProduct(), icon: const Icon(Icons.add_rounded), label: Text(tr(context, 'Add product', 'Lisää tuote'))),
                 const SizedBox(height: 28),
                 Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(MSpace.lg),
                   decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
                   child: Column(children: [
                     Text(
                       tr(context, 'Have a Shopify shop or a spreadsheet? Import everything at once.', 'Onko sinulla Shopify-kauppa tai taulukko? Tuo kaikki kerralla.'),
                       textAlign: TextAlign.center,
-                      style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF6A4500), height: 1.35),
+                      style: const TextStyle(fontWeight: FontWeight.w700, color: MPalette.amberInk, height: 1.35),
                     ),
                     const SizedBox(height: 10),
                     OutlinedButton.icon(
@@ -1756,7 +1748,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                     ),
                   ]),
                 ),
-              ],
+              ]),
             ),
           ],
         ),
@@ -1781,7 +1773,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       onRefresh: _load,
       child: ListView.separated(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+        padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.lg, MSpace.lg, 100),
         itemCount: count,
         separatorBuilder: (_, __) => const SizedBox(height: 10),
         itemBuilder: (_, index) {
@@ -1798,13 +1790,13 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           }
           if (noMatch) {
             return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 32),
+              padding: const EdgeInsets.symmetric(vertical: MSpace.x3l),
               child: Text(tr(context, 'No products match.', 'Ei osuvia tuotteita.'), textAlign: TextAlign.center, style: const TextStyle(color: AppTheme.textSecondary)),
             );
           }
           if (_pageError != null) return ErrorBanner(message: _pageError!, onRetry: _retryProductPage);
           return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 20),
+            padding: EdgeInsets.symmetric(vertical: MSpace.xl),
             child: Center(child: SizedBox(width: 26, height: 26, child: CircularProgressIndicator(strokeWidth: 2.5))),
           );
         },
@@ -1824,10 +1816,10 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       // Tap: price, stock and visibility in a sheet. Long press: the full editor.
       onTap: () => _quickEdit(p),
       onLongPress: () => _editProduct(p),
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(MRadius.md),
       child: Container(
         padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.divider)),
+        decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(MRadius.md), border: Border.all(color: AppTheme.divider)),
         child: Row(children: [
           Opacity(
             opacity: available ? 1 : 0.45,
@@ -1842,16 +1834,16 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
               ),
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: MSpace.md),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               if (draft)
                 Container(
-                  margin: const EdgeInsets.only(bottom: 4),
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(8)),
+                  margin: const EdgeInsets.only(bottom: MSpace.xs),
+                  padding: const EdgeInsets.symmetric(horizontal: MSpace.sm, vertical: 2),
+                  decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(MRadius.xs)),
                   child: Text(tr(context, 'Draft — not published yet', 'Luonnos — ei vielä julkaistu'),
-                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: Color(0xFF6A4500))),
+                      style: const TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w800, color: MPalette.amberInk)),
                 ),
               Text(p['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w700)),
               Text(noPrice ? tr(context, 'No price yet', 'Ei vielä hintaa') : euro(context, p['salePriceCents']),
@@ -1862,7 +1854,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                   if (variants.isNotEmpty) '${variants.length} ${tr(context, 'options', 'vaihtoehtoa')}',
                   if (images.isEmpty) tr(context, 'No photo', 'Ei kuvaa'),
                 ].join(' · '),
-                style: TextStyle(fontSize: 12.5, color: stock == 0 || images.isEmpty ? AppTheme.accent : AppTheme.textSecondary),
+                style: TextStyle(fontSize: MTextSize.caption, color: stock == 0 || images.isEmpty ? AppTheme.accent : AppTheme.textSecondary),
               ),
             ]),
           ),
@@ -1879,7 +1871,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
                   : draft
                       ? tr(context, 'Hidden', 'Piilossa')
                       : tr(context, 'Sold out', 'Loppu'),
-              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: available ? AppTheme.primary : draft ? const Color(0xFF6A4500) : AppTheme.accent),
+              style: TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w700, color: available ? AppTheme.primary : draft ? MPalette.amberInk : AppTheme.accent),
             ),
           ]),
         ]),
@@ -1909,7 +1901,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       onRefresh: _load,
       child: ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(MSpace.lg),
       children: [
         Row(children: [
           _stat(tr(context, 'Sales, 7 days', 'Myynti, 7 pv'), euro(context, weekSales)),
@@ -1918,9 +1910,9 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           const SizedBox(width: 10),
           _stat(tr(context, 'Rating', 'Arvio'), reviews > 0 ? '★ ${_store?['rating']}' : '—'),
         ]),
-        const SizedBox(height: 16),
+        const SizedBox(height: MSpace.lg),
         Container(
-          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppTheme.divider)),
+          decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppTheme.divider)),
           child: Column(children: [
             tile(Icons.account_balance_outlined, tr(context, 'Payouts', 'Tilitykset'),
                 tr(context, 'Through Stripe · commission ${commissionText(_store?['commissionRate'] as num?)}', 'Stripen kautta · provisio ${commissionText(_store?['commissionRate'] as num?)}'),
@@ -1965,7 +1957,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             tile(Icons.language_rounded, tr(context, 'Language', 'Kieli'),
                 tr(context, 'English — also for your notifications and emails', 'Suomi — myös ilmoituksissa ja sähköposteissa'), () => showLanguageSheet(context)),
             const Divider(height: 1),
-            const GoogleLinkTile(leading: CircleAvatar(backgroundColor: AppTheme.primaryLight, child: Icon(Icons.link_rounded, color: AppTheme.primary))),
+            GoogleLinkTile(account: Provider.of<AuthService>(context, listen: false), leading: const CircleAvatar(backgroundColor: AppTheme.primaryLight, child: Icon(Icons.link_rounded, color: AppTheme.primary))),
             const Divider(height: 1),
             tile(Icons.help_outline_rounded, tr(context, 'Help', 'Apua'), tr(context, 'Answers for sellers', 'Vastauksia myyjille'),
                 () => Navigator.push(context, MaterialPageRoute(builder: (_) => ChatbotScreen(commissionRate: _store?['commissionRate'] as num?)))),
@@ -1981,10 +1973,10 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             tile(Icons.code_rounded, tr(context, 'Open-source licences', 'Avoimen lähdekoodin lisenssit'), tr(context, 'Software this app is built with', 'Ohjelmistot, joilla sovellus on tehty'),
                 () => showLicensePage(context: context, applicationName: 'Malvoya Store', applicationLegalese: '© Malvoya')),
             const Divider(height: 1),
-            const DeleteAccountTile(leading: CircleAvatar(backgroundColor: Color(0xFFFDECEA), child: Icon(Icons.delete_forever_rounded, color: Color(0xFFD93025)))),
+            const DeleteAccountTile(leading: CircleAvatar(backgroundColor: MPalette.redLight, child: Icon(Icons.delete_forever_rounded, color: MPalette.red))),
           ]),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: MSpace.lg),
         OutlinedButton.icon(
           onPressed: () => Provider.of<AuthService>(context, listen: false).logout(),
           icon: const Icon(Icons.logout_rounded),
@@ -1997,7 +1989,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
 
   String _agreementsSubtitle() {
     if (_termsNeeded) return tr(context, 'Seller Terms need your acceptance', 'Myyjän ehdot odottavat hyväksyntääsi');
-    final change = parseDate(_pendingUpdate?['pendingEffectiveAt']);
+    final change = parseApiDate(_pendingUpdate?['pendingEffectiveAt']);
     if (change != null) {
       return tr(context, 'Seller Terms change on ${longDate(context, change)}: have a look', 'Myyjän ehdot muuttuvat ${longDate(context, change)}: tutustu muutokseen');
     }
@@ -2007,11 +1999,11 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
   Widget _stat(String label, String value) => Expanded(
         child: Container(
           padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.divider)),
+          decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(MRadius.md), border: Border.all(color: AppTheme.divider)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(label, style: const TextStyle(fontSize: 11.5, color: AppTheme.textSecondary)),
-            const SizedBox(height: 4),
-            Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+            Text(label, style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
+            const SizedBox(height: MSpace.xs),
+            Text(value, style: const TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w800)),
           ]),
         ),
       );

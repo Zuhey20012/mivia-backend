@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/legal_links.dart';
-import '../core/strings.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -64,18 +64,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
+          padding: const EdgeInsets.symmetric(horizontal: MSpace.xxl),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: 20),
+              const SizedBox(height: MSpace.xl),
               Text(tr(context, 'Apply to deliver', 'Hae lähetiksi'), style: AppTheme.display(size: 28)),
               const SizedBox(height: 6),
               Text(
                 tr(context,
                     'Deliver local orders when it suits you, as an independent entrepreneur. You need to be 18 or older, have the right to work in Finland and a Y-tunnus (or a light-entrepreneur service). A person at Malvoya reviews every application.',
                     'Toimita paikallisia tilauksia silloin kun sinulle sopii, itsenäisenä yrittäjänä. Sinun pitää olla vähintään 18-vuotias ja sinulla pitää olla oikeus tehdä työtä Suomessa sekä Y-tunnus (tai laskutuspalvelu). Jokaisen hakemuksen käsittelee ihminen.'),
-                style: const TextStyle(fontSize: 15, color: AppTheme.textSecondary, height: 1.5),
+                style: const TextStyle(fontSize: MTextSize.bodyL, color: AppTheme.textSecondary, height: 1.5),
               ),
               const SizedBox(height: 36),
 
@@ -117,24 +117,24 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
 
               if (_error != null) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: MSpace.md),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFF0F0),
+                    color: MPalette.redLight,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.error_outline, color: Color(0xFFD93025), size: 18),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFD93025), fontSize: 13))),
+                      const Icon(Icons.error_outline, color: MPalette.red, size: 18),
+                      const SizedBox(width: MSpace.sm),
+                      Expanded(child: Text(_error!, style: const TextStyle(color: MPalette.red, fontSize: MTextSize.label))),
                     ],
                   ),
                 ),
               ],
 
-              const SizedBox(height: 20),
+              const SizedBox(height: MSpace.xl),
               // Required: the application records that the courier accepted the agreement
               CheckboxListTile(
                 value: _agreed,
@@ -144,7 +144,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 activeColor: AppTheme.primary,
                 title: Text(
                   tr(context, 'I have read and accept the Courier Agreement', 'Olen lukenut ja hyväksyn lähettisopimuksen'),
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
+                  style: const TextStyle(fontSize: MTextSize.bodyL, fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
                 ),
               ),
               Align(
@@ -155,17 +155,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   label: Text(tr(context, 'Read the courier agreement', 'Lue lähettisopimus')),
                 ),
               ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: _loading
-                    ? const Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5)))
-                    : ElevatedButton(
-                        onPressed: _agreed ? _handleRegister : null,
-                        child: Text(tr(context, 'Send application', 'Lähetä hakemus')),
-                      ),
-              ),
-              const SizedBox(height: 32),
+              const SizedBox(height: MSpace.xl),
+              MButton(label: tr(context, 'Send application', 'Lähetä hakemus'), expand: true, loading: _loading, onPressed: _agreed ? _handleRegister : null),
+              const SizedBox(height: MSpace.x3l),
             ],
           ),
         ),

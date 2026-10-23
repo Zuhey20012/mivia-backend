@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:malvoya_core/malvoya_core.dart';
 import '../auth_service.dart';
-import 'api_client.dart';
 
 /// A person this customer blocked: their comments and reviews are hidden from this account.
 class BlockedUser {

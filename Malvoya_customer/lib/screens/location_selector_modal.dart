@@ -1,11 +1,11 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
 import '../core/delivery_location.dart';
-import '../core/strings.dart';
 import 'map_address_picker.dart';
-import '../core/haptics.dart';
 
 class LocationSelectorModal extends StatefulWidget {
   final String currentLocation;
@@ -88,12 +88,12 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
     final messenger = ScaffoldMessenger.of(context);
     final text = tr(context, 'Delivery address: ${res.fullAddress}', 'Toimitusosoite: ${res.fullAddress}');
     Navigator.pop(context);
-    messenger.showSnackBar(SnackBar(content: Text(text), backgroundColor: const Color(0xFF248A52), behavior: SnackBarBehavior.floating));
+    messenger.showSnackBar(SnackBar(content: Text(text), backgroundColor: MPalette.green, behavior: SnackBarBehavior.floating));
   }
 
   Future<void> _saveNewManualAddress() async {
     if (_streetCtrl.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr(context, 'Please enter the street.', 'Kirjoita katuosoite.'))));
+      MSnack.show(context, tr(context, 'Please enter the street.', 'Kirjoita katuosoite.'));
       return;
     }
     Haptics.medium();
@@ -120,7 +120,7 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(tr(context, 'Delivery address: $addressText', 'Toimitusosoite: $addressText')),
-          backgroundColor: const Color(0xFF248A52),
+          backgroundColor: MPalette.green,
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -146,40 +146,34 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const SizedBox(height: 12),
-          Center(
-            child: Container(
-              width: 44,
-              height: 5,
-              decoration: BoxDecoration(color: Colors.grey.shade400, borderRadius: BorderRadius.circular(3)),
-            ),
-          ),
-          const SizedBox(height: 16),
+          const SizedBox(height: MSpace.md),
+          const MSheetHandle(),
+          const SizedBox(height: MSpace.lg),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            padding: const EdgeInsets.symmetric(horizontal: MSpace.xl),
             child: Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.all(8),
+                  padding: const EdgeInsets.all(MSpace.sm),
                   decoration: BoxDecoration(
                     color: AppTheme.primary.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(MRadius.sm),
                   ),
                   child: const Icon(Icons.location_on_rounded, color: AppTheme.primary, size: 22),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: MSpace.md),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(tr(context, 'Choose delivery address', 'Valitse toimitusosoite'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textPrimary)),
-                      Text(tr(context, 'Pin your address for the exact delivery fee', 'Merkitse osoitteesi tarkkaa toimitusmaksua varten'), style: TextStyle(fontSize: 12, color: textSecondary)),
+                      Text(tr(context, 'Choose delivery address', 'Valitse toimitusosoite'), style: TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w800, color: textPrimary)),
+                      Text(tr(context, 'Pin your address for the exact delivery fee', 'Merkitse osoitteesi tarkkaa toimitusmaksua varten'), style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
                     ],
                   ),
                 ),
                 IconButton(
                   tooltip: tr(context, 'Close', 'Sulje'),
-                  icon: const Icon(Icons.close_rounded, color: Colors.grey),
+                  icon: Icon(Icons.close_rounded, color: AppTheme.secondaryText(context)),
                   onPressed: () => Navigator.pop(context),
                 ),
               ],
@@ -189,16 +183,16 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
           Expanded(
             child: ListView(
               physics: const BouncingScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+              padding: const EdgeInsets.fromLTRB(MSpace.xl, 0, MSpace.xl, MSpace.xxl),
               children: [
                 // Pin the door on the OpenStreetMap map
                 GestureDetector(
                   onTap: () => _fromMap(),
                   child: Container(
                     margin: const EdgeInsets.only(bottom: 14),
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(MSpace.lg),
                     decoration: BoxDecoration(
-                      gradient: AppTheme.irisFuchsiaGradient,
+                      color: AppTheme.primary,
                       borderRadius: BorderRadius.circular(18),
                       boxShadow: [
                         BoxShadow(
@@ -211,8 +205,8 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                     child: Row(
                       children: [
                         Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                          padding: const EdgeInsets.all(MSpace.sm),
+                          decoration: const BoxDecoration(color: MPalette.white, shape: BoxShape.circle),
                           child: const Icon(Icons.map_rounded, color: AppTheme.primary, size: 20),
                         ),
                         const SizedBox(width: 14),
@@ -222,18 +216,18 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                             children: [
                               Text(
                                 tr(context, 'Pin your door on the map', 'Merkitse ovesi kartalle'),
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14),
+                                style: const TextStyle(color: AppTheme.onBrand, fontWeight: FontWeight.w800, fontSize: MTextSize.bodyM),
                               ),
                               const SizedBox(height: 2),
                               Text(
                                 tr(context, 'For the exact delivery fee and an easy find for your courier',
                                     'Tarkka toimitusmaksu, ja kuriiri löytää perille helposti'),
-                                style: const TextStyle(color: Colors.white70, fontSize: 11),
+                                style: TextStyle(color: AppTheme.onBrand.withValues(alpha: 0.7), fontSize: MTextSize.caption),
                               ),
                             ],
                           ),
                         ),
-                        const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white, size: 14),
+                        const Icon(Icons.arrow_forward_ios_rounded, color: AppTheme.onBrand, size: 14),
                       ],
                     ),
                   ),
@@ -246,10 +240,10 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                       child: GestureDetector(
                         onTap: () => _fromMap(locate: true),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+                          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: MSpace.md),
                           decoration: BoxDecoration(
-                            gradient: AppTheme.primaryGradient,
-                            borderRadius: BorderRadius.circular(16),
+                            color: AppTheme.primary,
+                            borderRadius: BorderRadius.circular(MRadius.md),
                             boxShadow: [
                               BoxShadow(color: AppTheme.primary.withValues(alpha: 0.25), blurRadius: 10, offset: const Offset(0, 3)),
                             ],
@@ -257,31 +251,31 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const Icon(Icons.my_location_rounded, color: Colors.white, size: 18),
-                              const SizedBox(width: 8),
-                              Text(tr(context, 'Use my location', 'Käytä sijaintiani'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
+                              const Icon(Icons.my_location_rounded, color: AppTheme.onBrand, size: 18),
+                              const SizedBox(width: MSpace.sm),
+                              Text(tr(context, 'Use my location', 'Käytä sijaintiani'), style: const TextStyle(color: AppTheme.onBrand, fontWeight: FontWeight.w800, fontSize: MTextSize.label)),
                             ],
                           ),
                         ),
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: MSpace.md),
                     Expanded(
                       child: GestureDetector(
                         onTap: () => setState(() => _showManualForm = !_showManualForm),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+                          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: MSpace.md),
                           decoration: BoxDecoration(
                             color: inputBg,
-                            borderRadius: BorderRadius.circular(16),
+                            borderRadius: BorderRadius.circular(MRadius.md),
                             border: Border.all(color: cardBorder),
                           ),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Icon(_showManualForm ? Icons.expand_less_rounded : Icons.edit_location_alt_rounded, color: AppTheme.primary, size: 18),
-                              const SizedBox(width: 8),
-                              Text(tr(context, 'Type it in', 'Kirjoita osoite'), style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w800, fontSize: 13)),
+                              const SizedBox(width: MSpace.sm),
+                              Text(tr(context, 'Type it in', 'Kirjoita osoite'), style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w800, fontSize: MTextSize.label)),
                             ],
                           ),
                         ),
@@ -292,9 +286,9 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
 
                 // Expandable Manual Entry Form
                 if (_showManualForm) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: MSpace.lg),
                   Container(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(MSpace.lg),
                     decoration: BoxDecoration(
                       color: inputBg,
                       borderRadius: BorderRadius.circular(18),
@@ -303,20 +297,20 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(tr(context, 'Street address *', 'Katuosoite *'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textPrimary)),
+                        Text(tr(context, 'Street address *', 'Katuosoite *'), style: TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.bold, color: textPrimary)),
                         const SizedBox(height: 6),
                         TextField(
                           controller: _streetCtrl,
-                          style: TextStyle(color: textPrimary, fontSize: 13),
+                          style: TextStyle(color: textPrimary, fontSize: MTextSize.label),
                           decoration: InputDecoration(
                             hintText: tr(context, 'e.g. Aleksanterinkatu 15', 'esim. Aleksanterinkatu 15'),
-                            hintStyle: TextStyle(color: textSecondary, fontSize: 13),
+                            hintStyle: TextStyle(color: textSecondary, fontSize: MTextSize.label),
                             filled: true,
                             fillColor: cardBg,
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: cardBorder)),
-                            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: cardBorder)),
-                            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppTheme.primary, width: 1.5)),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm), borderSide: BorderSide(color: cardBorder)),
+                            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm), borderSide: BorderSide(color: cardBorder)),
+                            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm), borderSide: const BorderSide(color: AppTheme.primary, width: 1.5)),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: MSpace.md),
                           ),
                         ),
                         const SizedBox(height: 10),
@@ -326,20 +320,20 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(tr(context, 'Apartment', 'Asunto'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textPrimary)),
+                                  Text(tr(context, 'Apartment', 'Asunto'), style: TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.bold, color: textPrimary)),
                                   const SizedBox(height: 6),
                                   TextField(
                                     controller: _aptCtrl,
-                                    style: TextStyle(color: textPrimary, fontSize: 13),
+                                    style: TextStyle(color: textPrimary, fontSize: MTextSize.label),
                                     decoration: InputDecoration(
                                       hintText: 'A 4',
-                                      hintStyle: TextStyle(color: textSecondary, fontSize: 13),
+                                      hintStyle: TextStyle(color: textSecondary, fontSize: MTextSize.label),
                                       filled: true,
                                       fillColor: cardBg,
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: cardBorder)),
-                                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: cardBorder)),
-                                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppTheme.primary, width: 1.5)),
-                                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm), borderSide: BorderSide(color: cardBorder)),
+                                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm), borderSide: BorderSide(color: cardBorder)),
+                                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm), borderSide: const BorderSide(color: AppTheme.primary, width: 1.5)),
+                                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: MSpace.md),
                                     ),
                                   ),
                                 ],
@@ -350,21 +344,21 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(tr(context, 'Postcode', 'Postinumero'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textPrimary)),
+                                  Text(tr(context, 'Postcode', 'Postinumero'), style: TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.bold, color: textPrimary)),
                                   const SizedBox(height: 6),
                                   TextField(
                                     controller: _postalCtrl,
                                     keyboardType: TextInputType.number,
-                                    style: TextStyle(color: textPrimary, fontSize: 13),
+                                    style: TextStyle(color: textPrimary, fontSize: MTextSize.label),
                                     decoration: InputDecoration(
                                       hintText: '00100',
-                                      hintStyle: TextStyle(color: textSecondary, fontSize: 13),
+                                      hintStyle: TextStyle(color: textSecondary, fontSize: MTextSize.label),
                                       filled: true,
                                       fillColor: cardBg,
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: cardBorder)),
-                                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: cardBorder)),
-                                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppTheme.primary, width: 1.5)),
-                                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm), borderSide: BorderSide(color: cardBorder)),
+                                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm), borderSide: BorderSide(color: cardBorder)),
+                                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm), borderSide: const BorderSide(color: AppTheme.primary, width: 1.5)),
+                                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: MSpace.md),
                                     ),
                                   ),
                                 ],
@@ -373,20 +367,20 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                           ],
                         ),
                         const SizedBox(height: 10),
-                        Text(tr(context, 'Door code (optional)', 'Ovikoodi (valinnainen)'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textPrimary)),
+                        Text(tr(context, 'Door code (optional)', 'Ovikoodi (valinnainen)'), style: TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.bold, color: textPrimary)),
                         const SizedBox(height: 6),
                         TextField(
                           controller: _buzzerCtrl,
-                          style: TextStyle(color: textPrimary, fontSize: 13),
+                          style: TextStyle(color: textPrimary, fontSize: MTextSize.label),
                           decoration: InputDecoration(
                             hintText: tr(context, 'e.g. A 1234', 'esim. A 1234'),
-                            hintStyle: TextStyle(color: textSecondary, fontSize: 13),
+                            hintStyle: TextStyle(color: textSecondary, fontSize: MTextSize.label),
                             filled: true,
                             fillColor: cardBg,
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: cardBorder)),
-                            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: cardBorder)),
-                            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppTheme.primary, width: 1.5)),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm), borderSide: BorderSide(color: cardBorder)),
+                            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm), borderSide: BorderSide(color: cardBorder)),
+                            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm), borderSide: const BorderSide(color: AppTheme.primary, width: 1.5)),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: MSpace.md),
                           ),
                         ),
                         const SizedBox(height: 14),
@@ -395,11 +389,11 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                           child: ElevatedButton(
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppTheme.primary,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(MRadius.sm)),
                               padding: const EdgeInsets.symmetric(vertical: 14),
                             ),
                             onPressed: _saveNewManualAddress,
-                            child: Text(tr(context, 'Save and use this address', 'Tallenna ja käytä tätä osoitetta'), style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                            child: Text(tr(context, 'Save and use this address', 'Tallenna ja käytä tätä osoitetta'), style: TextStyle(color: AppTheme.onBrand, fontWeight: FontWeight.bold)),
                           ),
                         ),
                       ],
@@ -407,30 +401,30 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                   ),
                 ],
 
-                const SizedBox(height: 20),
+                const SizedBox(height: MSpace.xl),
 
                 // Saved Addresses Section
-                Text(tr(context, 'SAVED ADDRESSES', 'TALLENNETUT OSOITTEET'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: textSecondary, letterSpacing: 0.8)),
-                const SizedBox(height: 8),
+                Text(tr(context, 'SAVED ADDRESSES', 'TALLENNETUT OSOITTEET'), style: TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w800, color: textSecondary, letterSpacing: 0.8)),
+                const SizedBox(height: MSpace.sm),
 
                 if (_loadingAddresses)
-                  const Center(child: Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator(color: AppTheme.primary)))
+                  const Center(child: Padding(padding: EdgeInsets.all(MSpace.md), child: CircularProgressIndicator(color: AppTheme.primary)))
                 else if (_savedAddresses.isEmpty)
                   Container(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(MSpace.lg),
                     decoration: BoxDecoration(
                       color: inputBg,
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: BorderRadius.circular(MRadius.md),
                       border: Border.all(color: cardBorder),
                     ),
                     child: Row(
                       children: [
                         Icon(Icons.location_off_outlined, color: textSecondary),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: MSpace.md),
                         Expanded(
                           child: Text(
                             tr(context, 'No saved addresses yet. Type one in or use your location above.', 'Ei vielä tallennettuja osoitteita. Kirjoita osoite tai käytä sijaintiasi yllä.'),
-                            style: TextStyle(fontSize: 12, color: textSecondary),
+                            style: TextStyle(fontSize: MTextSize.caption, color: textSecondary),
                           ),
                         ),
                       ],
@@ -439,23 +433,23 @@ class _LocationSelectorModalState extends State<LocationSelectorModal> {
                 else
                   ..._savedAddresses.map((addr) {
                     return Container(
-                      margin: const EdgeInsets.only(bottom: 8),
+                      margin: const EdgeInsets.only(bottom: MSpace.sm),
                       decoration: BoxDecoration(
                         color: cardBg,
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(MRadius.md),
                         border: Border.all(color: cardBorder),
                       ),
                       child: ListTile(
                         leading: Container(
-                          padding: const EdgeInsets.all(8),
+                          padding: const EdgeInsets.all(MSpace.sm),
                           decoration: BoxDecoration(
                             color: AppTheme.primary.withValues(alpha: 0.1),
                             shape: BoxShape.circle,
                           ),
                           child: const Icon(Icons.home_outlined, color: AppTheme.primary, size: 20),
                         ),
-                        title: Text('${addr['title'] ?? tr(context, 'Address', 'Osoite')}', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
-                        subtitle: Text(addr['subtitle'] ?? '', style: TextStyle(fontSize: 12, color: textSecondary)),
+                        title: Text('${addr['title'] ?? tr(context, 'Address', 'Osoite')}', style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyM, color: textPrimary)),
+                        subtitle: Text(addr['subtitle'] ?? '', style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
                         trailing: IconButton(
                           tooltip: tr(context, 'Use this address', 'Käytä tätä osoitetta'),
                           icon: const Icon(Icons.check_circle_outline, color: AppTheme.primary),

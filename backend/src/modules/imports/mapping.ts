@@ -2,31 +2,45 @@
  * Shared mapping for catalogue imports (Shopify feed and CSV): categories, prices, text, the common item shape.
  */
 
-/** The categories the store app offers (malvoya_vendor product editor). Imports map onto these. */
-export const PRODUCT_CATEGORIES = ["Clothing", "Shoes", "Bags", "Accessories", "Jewelry", "Beauty", "Home", "Other"] as const;
+import { TaxonomyMatch, matchTaxonomy } from "../catalog/matcher";
+import { SUBS } from "../catalog/taxonomy";
 
-// Order matters: the more specific categories are checked before the broad "Clothing" words.
-const KEYWORDS: [string, RegExp][] = [
-  ["Shoes", /\b(shoes?|sneakers?|boots?|sandals?|heels|loafers?|slippers?|kenk|tennari|saapa|sandaal|tossu)/i],
-  ["Bags", /\b(bags?|backpacks?|handbags?|totes?|purses?|wallets?|laukku|laukut|reppu|lompakko|kassi)/i],
-  ["Jewelry", /\b(jewel|necklaces?|rings?|earrings?|bracelets?|pendants?|koru|sormus|riipus)/i],
-  ["Beauty", /\b(beauty|cosmetics?|make-?up|lipsticks?|skin ?care|creams?|perfumes?|serum|kosmetiik|meikki|huulipuna|ihonhoito|voide|hajuvesi)/i],
-  ["Home", /\b(home|decor|candles?|pillows?|cushions?|blankets?|towels?|vases?|sisustus|kynttil|tyyny|peitto|pyyhe|maljakko)/i],
-  ["Accessories", /\b(accessor|hats?|caps?|scarf|scarves|belts?|gloves?|mittens?|sunglasses|ties?|beanies?|asuste|hattu|pipo|huivi|vyö|käsine|lapanen|aurinkolasi)/i],
-  ["Clothing", /\b(cloth|apparel|dress|shirt|t-shirt|tees?|tops?|blouse|jacket|coat|jeans|trousers|pants|skirt|sweater|hoodie|knit|shorts|suit|vaate|mekko|paita|takki|housut|farkut|hame|neule|huppari|shortsit|pusero)/i],
-];
+/**
+ * Category mapping (since 2.12.0): the taxonomy matcher of catalog/matcher.ts (spec §1.4: FI/EN keywords, Finnish
+ * compounds by their last word, audience and second-hand words, out-of-scope goods held). Hints are given in priority
+ * order; the description is the lowest-confidence hint.
+ */
+export function mapTaxonomy(hints: (string | null | undefined)[], description?: string | null): TaxonomyMatch {
+  return matchTaxonomy(hints, description);
+}
 
-/** First hint that names a valid category (any case) wins; then keywords (en/fi); otherwise "Other". */
-export function mapCategory(...hints: (string | null | undefined)[]): string {
-  const clean = hints.map((h) => (h ?? "").trim()).filter(Boolean);
-  for (const h of clean) {
-    const exact = PRODUCT_CATEGORIES.find((c) => c.toLowerCase() === h.toLowerCase());
-    if (exact) return exact;
+/** The legacy free-text category of a match: the subcategory's English name, or "Uncategorised". */
+export function legacyCategory(m: TaxonomyMatch): string {
+  return (m.slug && SUBS.get(m.slug)?.en) || "Uncategorised";
+}
+
+/** Option names that hold a shade (makeup, nails) rather than a size or colour. */
+export const SHADE_OPTION = /^(shades?|sävy|sävyt|nyans|nyanser|teinte|farbton)$/i;
+/** "30 ml", "50ml", "7,5 g": a beauty product's "Size" values are its content, not a clothing size (spec §1.4). */
+const CONTENT_VALUE = /^(\d{1,5}(?:[.,]\d{1,2})?)\s*(ml|g)$/i;
+
+export function parseContent(v: string | null | undefined): { amount: number; unit: "ml" | "g" } | null {
+  const m = (v ?? "").trim().match(CONTENT_VALUE);
+  return m ? { amount: Number(m[1].replace(",", ".")), unit: m[2].toLowerCase() as "ml" | "g" } : null;
+}
+
+/** Sizes that are really contents become contentAmount/contentUnit; a title like "Serum 30 ml" gives the product content. */
+export function refineItem(item: ImportItem): ImportItem {
+  const variants = item.variants.map((v) => {
+    const c = parseContent(v.size);
+    return c ? { ...v, size: undefined, contentAmount: c.amount, contentUnit: c.unit } : v;
+  }).filter((v) => v.size || v.color || v.shadeName || v.contentAmount);
+  let content = item.content ?? null;
+  if (!content && !variants.some((v) => v.contentAmount)) {
+    const m = item.name.match(/(\d{1,5}(?:[.,]\d{1,2})?)\s*(ml|g)\b/i);
+    if (m) content = { amount: Number(m[1].replace(",", ".")), unit: m[2].toLowerCase() as "ml" | "g" };
   }
-  for (const h of clean) {
-    for (const [cat, re] of KEYWORDS) if (re.test(h)) return cat;
-  }
-  return "Other";
+  return { ...item, variants, content };
 }
 
 /** "12,90" / "12.90" / "12" / "12,90 €" → 1290 cents; null when it is not a plain euro amount. */
@@ -82,7 +96,10 @@ export function cleanImageUrl(raw: string): string | null {
   }
 }
 
-export type ImportVariant = { size?: string; color?: string; stock: number; priceAdjustCents: number };
+export type ImportVariant = {
+  size?: string; color?: string; stock: number; priceAdjustCents: number;
+  shadeName?: string; shadeHex?: string; contentAmount?: number; contentUnit?: "ml" | "g";
+};
 
 /** One product as read from a source, before photos are copied and it is saved. */
 export type ImportItem = {
@@ -90,7 +107,13 @@ export type ImportItem = {
   label: string; // shown in the job's error list
   name: string;
   description?: string;
+  /** Legacy free text: the subcategory's English name (or "Uncategorised") */
   category: string;
+  /** The taxonomy match: categoryId, audience, second-hand, out-of-scope hold (2.12) */
+  match: TaxonomyMatch;
+  brand?: string;
+  /** Content of the pack when the product has no options with their own */
+  content?: { amount: number; unit: "ml" | "g" } | null;
   condition: "NEW" | "LIKE_NEW" | "GOOD" | "FAIR" | "POOR";
   isSecondHand?: boolean;
   tags: string[];

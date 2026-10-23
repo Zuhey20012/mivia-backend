@@ -1,0 +1,20 @@
+name: malvoya_ui_gallery
+description: Living gallery of the Birch Market components (light, dark, Finnish, large text).
+publish_to: "none"
+version: 1.0.0
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  malvoya_core:
+    path: ../../malvoya_core
+  malvoya_ui:
+    path: ..
+
+flutter:
+  uses-material-design: true

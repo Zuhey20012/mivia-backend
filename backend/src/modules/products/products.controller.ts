@@ -33,7 +33,7 @@ export async function createProduct(req: AuthRequest, res: Response) {
   const result = createProductSchema.safeParse(req.body);
   if (!result.success) return res.status(400).json({ ok: false, errors: result.error.flatten() });
   try {
-    res.status(201).json({ ok: true, product: await productsService.createProduct(req.user!.id, result.data) });
+    res.status(201).json({ ok: true, ...(await productsService.createProduct(req.user!.id, result.data)) });
   } catch (e) { sendError(res, e); }
 }
 
@@ -42,7 +42,7 @@ export async function updateProduct(req: AuthRequest, res: Response) {
   const result = updateProductSchema.safeParse(req.body);
   if (!id || !result.success) return res.status(400).json({ ok: false, errors: result.success ? undefined : result.error.flatten() });
   try {
-    res.json({ ok: true, product: await productsService.updateProduct(id, req.user!.id, result.data) });
+    res.json({ ok: true, ...(await productsService.updateProduct(id, req.user!.id, result.data)) });
   } catch (e) { sendError(res, e); }
 }
 

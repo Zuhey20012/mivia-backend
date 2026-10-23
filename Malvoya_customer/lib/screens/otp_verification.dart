@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
+import '../config/theme.dart';
 import '../auth_service.dart';
 
 class OtpVerificationScreen extends StatefulWidget {
@@ -34,9 +36,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
       Navigator.of(context).popUntil((route) => route.isFirst);
     } else if (mounted) {
       setState(() => _loading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error ?? 'Invalid OTP. Please try again.')),
-      );
+      MSnack.show(context, error ?? 'Invalid OTP. Please try again.');
     }
   }
 
@@ -45,21 +45,21 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Verify Phone')),
       body: Padding(
-        padding: const EdgeInsets.all(24.0),
+        padding: const EdgeInsets.all(MSpace.xxl),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            const SizedBox(height: 20),
-            const Text(
+            const SizedBox(height: MSpace.xl),
+            Text(
               'Enter the 6-digit code sent to',
-              style: TextStyle(fontSize: 16, color: Colors.grey),
+              style: TextStyle(fontSize: MTextSize.bodyL, color: AppTheme.secondaryText(context)),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: MSpace.sm),
             Text(
               widget.phoneNumber,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: const TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 40),
+            const SizedBox(height: MSpace.x4l),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: List.generate(6, (index) {
@@ -73,9 +73,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                     maxLength: 1,
                     decoration: InputDecoration(
                       counterText: '',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(MRadius.sm)),
                       focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(MRadius.sm),
                         borderSide: BorderSide(color: Theme.of(context).primaryColor, width: 2),
                       ),
                     ),
@@ -93,18 +93,18 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                 );
               }),
             ),
-            const SizedBox(height: 40),
+            const SizedBox(height: MSpace.x4l),
             SizedBox(
               width: double.infinity,
               height: 55,
               child: ElevatedButton(
                 onPressed: _loading ? null : _verifyOtp,
                 child: _loading 
-                  ? const CircularProgressIndicator(color: Colors.white)
+                  ? const CircularProgressIndicator(color: AppTheme.onBrand)
                   : const Text('Verify & Continue'),
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: MSpace.xl),
             TextButton(
               onPressed: () {},
               child: const Text('Resend Code'),

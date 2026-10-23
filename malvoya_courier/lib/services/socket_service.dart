@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
+import 'package:malvoya_core/malvoya_core.dart';
 import '../config/constants.dart';
-import '../core/app_version.dart';
 
 /// Live connection for job offers, order updates and chat with the customer.
 class CourierSocketService extends ChangeNotifier {
@@ -34,7 +34,7 @@ class CourierSocketService extends ChangeNotifier {
           // A fresh manager each time, so a new sign-in token is really used (the client caches sockets per host)
           .enableForceNew()
           .setAuth({'token': accessToken})
-          .setExtraHeaders(AppVersion.headers)
+          .setExtraHeaders({if (AppLanguage.appVersion != null) 'X-App-Version': AppLanguage.appVersion!})
           .enableAutoConnect()
           .enableReconnection()
           .setReconnectionDelay(2000)

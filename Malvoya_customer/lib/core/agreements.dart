@@ -1,9 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:malvoya_core/malvoya_core.dart';
 import '../auth_service.dart';
 import '../widgets/agreement_sheet.dart';
-import 'api_client.dart';
-import 'strings.dart';
 
 /// One document the customer is asked to accept (Terms of Service) or acknowledge (Privacy Policy),
 /// in one exact version.
@@ -39,11 +38,8 @@ class AgreementPrompt {
 
 /// "1.11.2026" in Finnish, "1 Nov 2026" in English (local time).
 String agreementDate(BuildContext context, dynamic value) {
-  final d = value is DateTime ? value.toLocal() : DateTime.tryParse('${value ?? ''}')?.toLocal();
-  if (d == null) return '';
-  if (isFinnish(context)) return '${d.day}.${d.month}.${d.year}';
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return '${d.day} ${months[d.month - 1]} ${d.year}';
+  final d = parseApiDate(value);
+  return d == null ? '' : dateText(context, d, short: true);
 }
 
 /// The customer's legal agreements (`GET /me/agreements`): what is required, what was accepted, and
@@ -97,22 +93,20 @@ class Agreements extends ChangeNotifier {
     final id = auth.currentUser?.id;
     loading = true;
     notifyListeners();
-    final res = await ApiClient(auth).get('/me/agreements');
+    final state = await AgreementsApi(ApiClient(auth)).load();
     loading = false;
     // Signed out or another account meanwhile: this answer is not theirs
     if (id != _userId && _userId != null) {
       notifyListeners();
       return false;
     }
-    if (!res.ok) {
-      error = res.error;
+    if (!state.ok) {
+      error = state.error;
       notifyListeners();
       return false;
     }
-    List<Map<String, dynamic>> maps(dynamic v) =>
-        v is List ? v.whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList() : <Map<String, dynamic>>[];
-    required = maps(res.data['required']);
-    history = maps(res.data['history']);
+    required = [for (final d in state.required) d.raw];
+    history = state.history;
     loaded = true;
     error = null;
     notifyListeners();
@@ -185,7 +179,9 @@ class Agreements extends ChangeNotifier {
 
   /// [ApiClient.onAgreementRequired]: the server refused an order with 428. Shows the sheet for the
   /// document it names and returns true once it is accepted (the request is then sent again).
-  Future<bool> handleRequired(Map<String, dynamic> data, AuthService? auth) async {
+  Future<bool> handleRequired(ApiResult result, ApiSession? session) async {
+    final auth = session is AuthService ? session : null;
+    final data = result.data;
     try {
       final open = _open;
       if (open != null) return await open;

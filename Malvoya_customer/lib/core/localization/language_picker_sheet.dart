@@ -1,44 +1,38 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../../config/theme.dart';
 import '../../l10n.dart';
-import '../../locale_provider.dart';
-import '../haptics.dart';
-import '../strings.dart';
 
 class LanguagePickerSheet {
   static void show(BuildContext context) {
     Haptics.selection();
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final modalBg = isDark ? const Color(0xFA1A161F) : Colors.white;
+    final modalBg = isDark ? MPalette.nightSurface : MPalette.white;
     final textPrimary = AppTheme.primaryText(context);
     final textSecondary = AppTheme.secondaryText(context);
-    final dividerColor = isDark ? Colors.white12 : Colors.grey.shade200;
+    final dividerColor = isDark ? MPalette.white.withValues(alpha: 0.12) : AppTheme.cardBorder(context);
 
-    showModalBottomSheet(
-      showDragHandle: false,
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
+    showMSheet(context, builder: (ctx) {
         final provider = Provider.of<LocaleProvider>(context, listen: false);
         final l10n = AppLocalizations.of(context);
 
         return Container(
           height: MediaQuery.of(context).size.height * 0.72,
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          padding: const EdgeInsets.symmetric(horizontal: MSpace.xl, vertical: MSpace.lg),
           decoration: BoxDecoration(
             color: modalBg,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
             border: Border(
               top: BorderSide(
-                color: isDark ? Colors.white24 : AppTheme.glassBorder,
+                color: isDark ? MPalette.white.withValues(alpha: 0.24) : AppTheme.primary.withValues(alpha: 0.12),
                 width: 1.5,
               ),
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.35),
+                color: MPalette.night.withValues(alpha: 0.35),
                 blurRadius: 28,
                 offset: const Offset(0, -6),
               ),
@@ -52,7 +46,7 @@ class LanguagePickerSheet {
                   width: 44,
                   height: 5,
                   decoration: BoxDecoration(
-                    color: isDark ? Colors.white24 : Colors.grey.shade300,
+                    color: isDark ? MPalette.white.withValues(alpha: 0.24) : AppTheme.cardBorder(context),
                     borderRadius: BorderRadius.circular(3),
                   ),
                 ),
@@ -67,7 +61,7 @@ class LanguagePickerSheet {
                       Text(
                         l10n.translate('selectLanguagePrompt'),
                         style: TextStyle(
-                          fontSize: 18,
+                          fontSize: MTextSize.title,
                           fontWeight: FontWeight.w900,
                           color: textPrimary,
                           letterSpacing: -0.2,
@@ -76,7 +70,7 @@ class LanguagePickerSheet {
                       const SizedBox(height: 3),
                       Text(
                         l10n.translate('atomicTranslationSub'),
-                        style: TextStyle(fontSize: 12, color: textSecondary, fontWeight: FontWeight.w500),
+                        style: TextStyle(fontSize: MTextSize.caption, color: textSecondary, fontWeight: FontWeight.w500),
                       ),
                     ],
                   ),
@@ -106,7 +100,7 @@ class LanguagePickerSheet {
                           entry.value,
                           style: TextStyle(
                             fontWeight: isSelected ? FontWeight.w900 : FontWeight.w500,
-                            fontSize: 15,
+                            fontSize: MTextSize.bodyL,
                             color: isSelected ? AppTheme.primary : textPrimary,
                           ),
                         ),
@@ -121,7 +115,7 @@ class LanguagePickerSheet {
                             SnackBar(
                               content: Text(l10n.translate('languageSwitchedTo').replaceAll('{lang}', entry.value)),
                               duration: const Duration(seconds: 2),
-                              backgroundColor: const Color(0xFF1E1B4B),
+                              backgroundColor: MPalette.night,
                               behavior: SnackBarBehavior.floating,
                             ),
                           );
@@ -134,7 +128,6 @@ class LanguagePickerSheet {
             ],
           ),
         );
-      },
-    );
+      }, transparent: true, isScrollControlled: true, useSafeArea: false);
   }
 }

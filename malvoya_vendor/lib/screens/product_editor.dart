@@ -6,14 +6,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/agreements.dart';
-import '../core/api_client.dart';
-import '../core/haptics.dart';
 import '../core/images.dart';
 import '../core/media_upload.dart';
-import '../core/strings.dart';
 
 /// Categories shared with the customer app's home screen and catalogue.
 const productCategories = ['Clothing', 'Shoes', 'Bags', 'Accessories', 'Jewelry', 'Beauty', 'Home', 'Other'];
@@ -126,7 +125,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(ctx, 'Keep editing', 'Jatka muokkausta'))),
           OutlinedButton(
-            style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFFD93025), side: const BorderSide(color: Color(0xFFD93025), width: 1.5), minimumSize: const Size(64, 48)),
+            style: OutlinedButton.styleFrom(foregroundColor: MPalette.red, side: const BorderSide(color: MPalette.red, width: 1.5), minimumSize: const Size(64, 48)),
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(tr(ctx, 'Discard', 'Hylkää')),
           ),
@@ -140,7 +139,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
   /// erased) or `"soft"` (kept only for past orders' records, gone from every list). Older servers only
   /// hide it, and it stays in the store's own list.
   Future<void> _delete() async {
-    const red = Color(0xFFD93025);
+    const red = MPalette.red;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -151,7 +150,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(ctx, 'Back', 'Takaisin'))),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: red, foregroundColor: Colors.white, minimumSize: const Size(64, 48)),
+            style: FilledButton.styleFrom(backgroundColor: red, foregroundColor: AppTheme.onPrimary, minimumSize: const Size(64, 48)),
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(tr(ctx, 'Remove', 'Poista')),
           ),
@@ -203,7 +202,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
   /// Three short tips for photos that sell; shown before the first photo on this phone, and any
   /// time from "Photo tips".
   Future<void> _showPhotoTips() {
-    Haptics.select();
+    Haptics.selection();
     Widget tip(IconData icon, String title, String body) => Padding(
           padding: const EdgeInsets.only(bottom: 14),
           child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -211,23 +210,20 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
               width: 40,
               height: 40,
               decoration: const BoxDecoration(color: AppTheme.sunshineLight, shape: BoxShape.circle),
-              child: Icon(icon, color: const Color(0xFF8A5A00), size: 22),
+              child: Icon(icon, color: MPalette.amberInk, size: 22),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: MSpace.md),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.bodyL)),
                 Text(body, style: const TextStyle(color: AppTheme.textSecondary, height: 1.35)),
               ]),
             ),
           ]),
         );
-    return showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) => SafeArea(
+    return showMSheet<void>(context, builder: (ctx) => SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+          padding: const EdgeInsets.fromLTRB(MSpace.xxl, 0, MSpace.xxl, MSpace.lg),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text(tr(ctx, 'Photos that sell', 'Myyvät kuvat'), style: AppTheme.display(size: 21)),
             const SizedBox(height: 14),
@@ -238,12 +234,11 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
             tip(Icons.threesixty_rounded, tr(ctx, 'At least 3 angles', 'Vähintään 3 kuvakulmaa'),
                 tr(ctx, 'Front, back and a close-up of the fabric or label. The first photo is the cover; drag photos to change the order.',
                     'Edestä, takaa ja lähikuva kankaasta tai merkistä. Ensimmäinen kuva on kansikuva; vedä kuvia muuttaaksesi järjestystä.')),
-            const SizedBox(height: 4),
+            const SizedBox(height: MSpace.xs),
             FilledButton(onPressed: () => Navigator.pop(ctx), child: Text(tr(ctx, 'Got it', 'Selvä'))),
           ]),
         ),
-      ),
-    );
+      ), isScrollControlled: true, useSafeArea: false);
   }
 
   Future<void> _addPhoto() async {
@@ -257,15 +252,12 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
         if (!mounted) return;
       }
     } catch (_) {}
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      builder: (ctx) => SafeArea(
+    final source = await showMSheet<ImageSource>(context, builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           ListTile(leading: const Icon(Icons.photo_camera_outlined), title: Text(tr(context, 'Take a photo', 'Ota kuva')), onTap: () => Navigator.pop(ctx, ImageSource.camera)),
           ListTile(leading: const Icon(Icons.photo_library_outlined), title: Text(tr(context, 'Choose from gallery', 'Valitse galleriasta')), onTap: () => Navigator.pop(ctx, ImageSource.gallery)),
         ]),
-      ),
-    );
+      ), isScrollControlled: false, useSafeArea: false);
     if (source == null) return;
     final picked = await ImagePicker().pickImage(source: source, maxWidth: 2000, maxHeight: 2000, imageQuality: 85);
     if (picked == null || !mounted) return;
@@ -288,15 +280,12 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
 
   Future<void> _addVideo() async {
     if (_videos.length >= _maxVideos) return;
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      builder: (ctx) => SafeArea(
+    final source = await showMSheet<ImageSource>(context, builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           ListTile(leading: const Icon(Icons.videocam_outlined), title: Text(tr(context, 'Record a video', 'Kuvaa video')), onTap: () => Navigator.pop(ctx, ImageSource.camera)),
           ListTile(leading: const Icon(Icons.video_library_outlined), title: Text(tr(context, 'Choose from gallery', 'Valitse galleriasta')), onTap: () => Navigator.pop(ctx, ImageSource.gallery)),
         ]),
-      ),
-    );
+      ), isScrollControlled: false, useSafeArea: false);
     if (source == null) return;
     final picked = await ImagePicker().pickVideo(source: source, maxDuration: const Duration(seconds: 60));
     if (picked == null || !mounted) return;
@@ -343,7 +332,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
     if (video.id != null && _editing) {
       final res = await _api.delete('/products/${widget.product!['id']}/videos/${video.id}');
       if (!res.ok) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.errorMessage)));
+        if (mounted) MSnack.show(context, res.errorMessage);
         return;
       }
     }
@@ -441,7 +430,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
       body: Form(
         key: _form,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
+          padding: const EdgeInsets.fromLTRB(MSpace.xl, MSpace.lg, MSpace.xl, MSpace.x4l),
           children: [
             Row(children: [
               Expanded(child: _label(tr(context, 'Photos', 'Kuvat'))),
@@ -459,7 +448,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
                 scrollDirection: Axis.horizontal,
                 buildDefaultDragHandles: false,
                 itemCount: _photos.length,
-                onReorderStart: (_) => Haptics.select(),
+                onReorderStart: (_) => Haptics.selection(),
                 onReorder: (from, to) => setState(() {
                   if (to > from) to--;
                   _photos.insert(to, _photos.removeAt(from));
@@ -491,16 +480,16 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
                 tr(context,
                     'Good light, a plain background and at least 3 angles show the item clearly. The first photo is the cover — long-press a photo and drag it to change the order. Use your own photos, or ones the brand allows you to use.',
                     'Hyvä valo, yksinkertainen tausta ja vähintään 3 kuvakulmaa näyttävät tuotteen selkeästi. Ensimmäinen kuva on kansikuva — paina kuvaa pitkään ja vedä muuttaaksesi järjestystä. Käytä omia kuviasi tai kuvia, joiden käyttöön brändi on antanut luvan.'),
-                style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
             if (_photos.isNotEmpty && _photos.length < 3)
               Padding(
-                padding: const EdgeInsets.only(top: 4),
+                padding: const EdgeInsets.only(top: MSpace.xs),
                 child: Text(
                     tr(context, 'Add ${3 - _photos.length} more angle${_photos.length == 2 ? '' : 's'} so shoppers can see the whole item.',
                         'Lisää vielä ${3 - _photos.length} kuvakulma${_photos.length == 2 ? '' : 'a'}, jotta asiakkaat näkevät koko tuotteen.'),
-                    style: const TextStyle(fontSize: 12, color: Color(0xFF8A5A00), fontWeight: FontWeight.w700)),
+                    style: const TextStyle(fontSize: MTextSize.caption, color: MPalette.amberInk, fontWeight: FontWeight.w700)),
               ),
-            const SizedBox(height: 20),
+            const SizedBox(height: MSpace.xl),
             _label(tr(context, 'Videos', 'Videot')),
             SizedBox(
               height: 150,
@@ -524,8 +513,8 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
             Text(
                 tr(context, 'Up to 3 videos of 60 seconds, with sound. Show the fit, the fabric moving and the details. Use only music you have the rights to.',
                     'Enintään 3 videota, 60 sekuntia, äänen kanssa. Näytä istuvuus, kankaan liike ja yksityiskohdat. Käytä vain musiikkia, johon sinulla on oikeudet.'),
-                style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
-            const SizedBox(height: 20),
+                style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
+            const SizedBox(height: MSpace.xl),
             TextFormField(
               controller: _name,
               maxLength: 200,
@@ -538,7 +527,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
               maxLines: 4,
               decoration: InputDecoration(labelText: tr(context, 'Description, materials and fit', 'Kuvaus, materiaalit ja istuvuus')),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: MSpace.sm),
             TextFormField(
               controller: _price,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -551,17 +540,17 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
                 child: Text(
                   tr(context, 'When you lower a price, shoppers see a reduction only if the old price was the lowest of the previous 30 days (EU rule).',
                       'Kun lasket hintaa, alennus näytetään vain, jos vanha hinta oli edeltävän 30 päivän alin (EU-sääntö).'),
-                  style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                  style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary),
                 ),
               ),
-            const SizedBox(height: 16),
+            const SizedBox(height: MSpace.lg),
             DropdownButtonFormField<String>(
               value: _category,
               decoration: InputDecoration(labelText: tr(context, 'Category', 'Kategoria')),
               items: _categories.map((c) => DropdownMenuItem(value: c, child: Text(_show(_categoryFi, c)))).toList(),
               onChanged: (v) => setState(() => _category = v!),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: MSpace.md),
             DropdownButtonFormField<String>(
               value: _condition,
               decoration: InputDecoration(labelText: tr(context, 'Condition', 'Kunto')),
@@ -574,7 +563,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
               }.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
               onChanged: (v) => setState(() => _condition = v!),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: MSpace.sm),
             SwitchListTile(contentPadding: EdgeInsets.zero, value: _secondHand, onChanged: (v) => setState(() => _secondHand = v), title: Text(tr(context, 'Second hand', 'Käytetty'))),
             SwitchListTile(contentPadding: EdgeInsets.zero, value: _eco, onChanged: (v) => setState(() => _eco = v), title: Text(tr(context, 'Eco-friendly', 'Ympäristöystävällinen'))),
             SwitchListTile(contentPadding: EdgeInsets.zero, value: _handmade, onChanged: (v) => setState(() => _handmade = v), title: Text(tr(context, 'Handmade', 'Käsintehty'))),
@@ -589,8 +578,8 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
             ]),
             if (_options.isEmpty) ...[
               Text(tr(context, 'No options: the item is sold as one piece.', 'Ei vaihtoehtoja: tuotetta myydään yhtenä.'),
-                  style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary)),
-              const SizedBox(height: 8),
+                  style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
+              const SizedBox(height: MSpace.sm),
               TextFormField(
                 controller: _stock,
                 keyboardType: TextInputType.number,
@@ -613,21 +602,16 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
               ),
             ],
             if (_error != null)
-              Padding(padding: const EdgeInsets.only(top: 12), child: Text(_error!, style: const TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w600))),
-            const SizedBox(height: 20),
+              Padding(padding: const EdgeInsets.only(top: MSpace.md), child: Text(_error!, style: const TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w600))),
+            const SizedBox(height: MSpace.xl),
             SizedBox(
               height: 54,
-              child: FilledButton(
-                onPressed: _saving || _deleting ? null : _save,
-                child: _saving
-                    ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : Text(_editing ? tr(context, 'Save changes', 'Tallenna muutokset') : tr(context, 'Add product', 'Lisää tuote')),
-              ),
+              child: MButton(label: _editing ? tr(context, 'Save changes', 'Tallenna muutokset') : tr(context, 'Add product', 'Lisää tuote'), loading: _saving, onPressed: _saving || _deleting ? null : _save),
             ),
             if (_editing) ...[
-              const SizedBox(height: 12),
+              const SizedBox(height: MSpace.md),
               OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFFD93025), side: const BorderSide(color: Color(0xFFD93025), width: 1.5)),
+                style: OutlinedButton.styleFrom(foregroundColor: MPalette.red, side: const BorderSide(color: MPalette.red, width: 1.5)),
                 onPressed: _saving || _deleting ? null : _delete,
                 icon: _deleting
                     ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
@@ -643,8 +627,8 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
   }
 
   Widget _label(String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Text(text, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppTheme.textPrimary)),
+        padding: const EdgeInsets.only(bottom: MSpace.sm),
+        child: Text(text, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyL, color: AppTheme.textPrimary)),
       );
 
   Widget _photoTile(_Photo p, {bool cover = false}) => Padding(
@@ -665,7 +649,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
                       if (p.progress > 0)
                         Padding(
                           padding: const EdgeInsets.only(top: 6),
-                          child: Text('${(p.progress * 100).round()} %', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppTheme.primary)),
+                          child: Text('${(p.progress * 100).round()} %', style: const TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w800, color: AppTheme.primary)),
                         ),
                     ]),
                   ),
@@ -675,14 +659,14 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
                     bottom: 4,
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(8)),
-                      child: Text(tr(context, 'Cover', 'Kansi'), style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppTheme.textPrimary)),
+                      decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(MRadius.xs)),
+                      child: Text(tr(context, 'Cover', 'Kansi'), style: const TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w800, color: AppTheme.textPrimary)),
                     ),
                   ),
                 if (p.error != null)
                   Padding(
                     padding: const EdgeInsets.all(6),
-                    child: Center(child: Text(p.error!, style: const TextStyle(fontSize: 10, color: AppTheme.accent), textAlign: TextAlign.center)),
+                    child: Center(child: Text(p.error!, style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.accent), textAlign: TextAlign.center)),
                   ),
                 Positioned(
                   top: 0,
@@ -704,7 +688,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
                           alignment: Alignment.topRight,
                           child: Padding(
                             padding: EdgeInsets.all(2),
-                            child: CircleAvatar(radius: 12, backgroundColor: Colors.black54, child: Icon(Icons.close_rounded, size: 14, color: Colors.white)),
+                            child: CircleAvatar(radius: 12, backgroundColor: AppTheme.scrim, child: Icon(Icons.close_rounded, size: 14, color: AppTheme.onPrimary)),
                           ),
                         ),
                       ),
@@ -736,17 +720,17 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              Container(color: Colors.black87),
+              Container(color: AppTheme.textPrimary),
               if (v.poster != null) CachedNetworkImage(imageUrl: v.poster!, fit: BoxFit.cover, errorWidget: (_, __, ___) => const SizedBox()),
               if (v.status == 'UPLOADING' && v.error == null)
-                Center(child: CircularProgressIndicator(value: v.progress > 0 ? v.progress : null, color: Colors.white)),
-              if (v.status == 'READY') const Center(child: Icon(Icons.play_circle_fill_rounded, color: Colors.white, size: 34)),
+                Center(child: CircularProgressIndicator(value: v.progress > 0 ? v.progress : null, color: AppTheme.onPrimary)),
+              if (v.status == 'READY') const Center(child: Icon(Icons.play_circle_fill_rounded, color: AppTheme.onPrimary, size: 34)),
               if (label != null)
                 Positioned(
                   left: 4,
                   right: 4,
                   bottom: 6,
-                  child: Text(label, textAlign: TextAlign.center, maxLines: 3, style: TextStyle(fontSize: 10, color: v.error != null ? AppTheme.accent : Colors.white, fontWeight: FontWeight.w600)),
+                  child: Text(label, textAlign: TextAlign.center, maxLines: 3, style: TextStyle(fontSize: MTextSize.caption, color: v.error != null ? AppTheme.accent : AppTheme.onPrimary, fontWeight: FontWeight.w600)),
                 ),
               Positioned(
                 top: 2,
@@ -756,7 +740,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
                   label: tr(context, 'Remove video', 'Poista video'),
                   child: GestureDetector(
                     onTap: () => _removeVideo(v),
-                    child: const CircleAvatar(radius: 12, backgroundColor: Colors.black54, child: Icon(Icons.close_rounded, size: 14, color: Colors.white)),
+                    child: const CircleAvatar(radius: 12, backgroundColor: AppTheme.scrim, child: Icon(Icons.close_rounded, size: 14, color: AppTheme.onPrimary)),
                   ),
                 ),
               ),
@@ -769,8 +753,8 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
 
   Widget _optionRow(_Option o) => Container(
         margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.fromLTRB(10, 10, 4, 4),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.divider)),
+        padding: const EdgeInsets.fromLTRB(10, 10, MSpace.xs, MSpace.xs),
+        decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.divider)),
         child: Column(children: [
           Row(children: [
             Expanded(
@@ -785,7 +769,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
                 onChanged: (v) => setState(() => o.size = v),
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: MSpace.sm),
             Expanded(
               child: DropdownButtonFormField<String?>(
                 value: o.color,
@@ -809,14 +793,14 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
               onPressed: o.stock > 0 ? () => setState(() => o.stock--) : null,
               icon: const Icon(Icons.remove_circle_outline),
             ),
-            SizedBox(width: 36, child: Text('${o.stock}', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
+            SizedBox(width: 36, child: Text('${o.stock}', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.bodyL))),
             IconButton(
               tooltip: tr(context, 'One more', 'Yksi lisää'),
               constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
               onPressed: () => setState(() => o.stock++),
               icon: const Icon(Icons.add_circle_outline),
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: MSpace.xs),
             IconButton(
               tooltip: tr(context, 'Remove option', 'Poista vaihtoehto'),
               constraints: const BoxConstraints(minWidth: 48, minHeight: 48),

@@ -3,11 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
+import 'config/constants.dart';
 import 'config/theme.dart';
-import 'core/font_licenses.dart';
-import 'core/app_gate.dart';
 import 'core/connectivity.dart';
-import 'core/app_version.dart';
 import 'core/location_disclosure.dart';
 import 'screens/courier_welcome.dart';
 import 'screens/courier_dashboard.dart';
@@ -17,13 +17,15 @@ import 'services/courier_telemetry_service.dart';
 import 'services/socket_service.dart';
 import 'auth_service.dart';
 import 'l10n.dart';
-import 'locale_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  registerFontLicenses();
+  registerMalvoyaFontLicenses();
+  ApiConfig.baseUrl = AppConstants.apiBase;
+  // A failed request lets the "No internet" strip appear even without a system network change
+  ApiConfig.onNetworkError = ConnectivityService.instance.verify;
   // "1.7.0+9", sent as X-App-Version with every API request
-  await AppVersion.load();
+  await AppLanguage.loadAppVersion();
   // Shows a "No internet" strip and lets screens refresh when the connection comes back
   ConnectivityService.instance.start();
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
@@ -71,9 +73,9 @@ class MalvoyaCourierApp extends StatelessWidget {
           return auth;
         }),
         ChangeNotifierProvider(create: (ctx) {
-          final locale = LocaleProvider();
+          final locale = LocaleProvider(followSystem: false);
           // Push notifications and emails follow the app language
-          locale.onChanged = (_) => Provider.of<AuthService>(ctx, listen: false).syncLocale();
+          locale.onUserChange = (_) => Provider.of<AuthService>(ctx, listen: false).syncLocale();
           return locale;
         }),
       ],

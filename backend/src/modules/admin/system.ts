@@ -150,11 +150,20 @@ export async function getSystemStatus(_req: Request, res: Response) {
     for (const s of ready.stores) attention.push(`Store "${s.name}" (#${s.id}) is ready for approval (Vendors)`);
     for (const c of ready.couriers) attention.push(`Courier "${c.name}" (#${c.id}) is ready for approval (Couriers)`);
     for (const d of legalDrafts) attention.push(`${LEGAL_DOCS[d.doc].title.en}: the text in the repository has changed but is not published; the published version stays in force until you publish it (Legal)`);
+    // Product safety and certificates (2.12)
+    const [openProductReports, pendingCerts, uncategorised] = await Promise.all([
+      prisma.productReport.count({ where: { status: "OPEN" } }),
+      prisma.certificate.count({ where: { status: "PENDING" } }),
+      prisma.product.count({ where: { isAvailable: true, deletedAt: null, categoryId: null } }),
+    ]);
+    if (openProductReports) attention.push(`${openProductReports} product report(s) to decide: product-safety notices within 3 working days (Product reports)`);
+    if (pendingCerts) attention.push(`${pendingCerts} certificate(s) waiting for verification (Certificates)`);
+    if (uncategorised) attention.push(`${uncategorised} visible product(s) made before 2.12 have no category and miss the required product information; ask the stores to complete them`);
     if (overPaid) attention.push(`${overPaid} delivered order(s) pay the store and courier more than the customer paid; Malvoya's Stripe balance covers the difference`);
 
     res.json({
       ok: true,
-      version: "2.11.0",
+      version: "2.12.0",
       region: "frankfurt",
       startedAt,
       readyForOrders: blockers.length === 0,

@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
-import '../core/strings.dart';
 import '../services/courier_telemetry_service.dart';
 
 /// A small OpenStreetMap view of the active job: the shop, the drop-off and the courier's own
@@ -35,8 +36,8 @@ class _JobMapState extends State<JobMap> {
   List<LatLng> get _points => [widget.store, if (widget.dropOff != null) widget.dropOff!, if (_me != null) _me!];
 
   CameraFit get _fit => _points.length == 1
-      ? CameraFit.coordinates(coordinates: [widget.store, LatLng(widget.store.latitude + 0.004, widget.store.longitude + 0.004)], padding: const EdgeInsets.all(40))
-      : CameraFit.coordinates(coordinates: _points, padding: const EdgeInsets.all(40), maxZoom: 17);
+      ? CameraFit.coordinates(coordinates: [widget.store, LatLng(widget.store.latitude + 0.004, widget.store.longitude + 0.004)], padding: const EdgeInsets.all(MSpace.x4l))
+      : CameraFit.coordinates(coordinates: _points, padding: const EdgeInsets.all(MSpace.x4l), maxZoom: 17);
 
   void _recentre() {
     if (_ready) _map.fitCamera(_fit);
@@ -102,7 +103,7 @@ class _JobMapState extends State<JobMap> {
               top: 8,
               right: 8,
               child: Material(
-                color: Colors.white,
+                color: AppTheme.surface,
                 shape: const CircleBorder(),
                 elevation: 2,
                 child: IconButton(
@@ -120,8 +121,8 @@ class _JobMapState extends State<JobMap> {
   }
 
   Widget _pin(IconData icon, Color color, bool target) => Container(
-        decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: Border.all(color: target ? AppTheme.sunshine : Colors.white, width: 3)),
-        child: Icon(icon, color: Colors.white, size: 18),
+        decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: Border.all(color: target ? AppTheme.sunshine : AppTheme.surface, width: 3)),
+        child: Icon(icon, color: AppTheme.onPrimary, size: 18),
       );
 }
 
@@ -131,10 +132,10 @@ class _MeDot extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         decoration: BoxDecoration(
-          color: const Color(0xFF2563EB),
+          color: MPalette.locationBlue,
           shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 3),
-          boxShadow: const [BoxShadow(color: Color(0x552563EB), blurRadius: 10, spreadRadius: 4)],
+          border: Border.all(color: AppTheme.surface, width: 3),
+          boxShadow: [BoxShadow(color: MPalette.locationBlue.withValues(alpha: 0.33), blurRadius: 10, spreadRadius: 4)],
         ),
       );
 }

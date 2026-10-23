@@ -7,9 +7,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import 'config/constants.dart';
-import 'core/api_client.dart';
-import 'core/app_language.dart';
 
 const _secureStorage = FlutterSecureStorage();
 
@@ -47,7 +47,7 @@ class User {
 
 /// Handles sign-in, secure token storage and automatic access-token refresh.
 /// Access tokens live 15 minutes; they are refreshed a minute before expiry.
-class AuthService extends ChangeNotifier {
+class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccount {
   // Resolved on first use so the app still opens if Firebase failed to initialise.
   fb_auth.FirebaseAuth get _firebaseAuth => fb_auth.FirebaseAuth.instance;
   String? _verificationId;
@@ -62,6 +62,7 @@ class AuthService extends ChangeNotifier {
   User? get currentUser => _currentUser;
   bool get isAuthenticated => _currentUser != null && _accessToken != null;
   bool get isAdmin => _currentUser?.role == 'ADMIN';
+  @override
   String? get accessToken => _accessToken;
   bool get isReady => _ready;
 
@@ -141,13 +142,14 @@ class AuthService extends ChangeNotifier {
   }
 
   /// Exchanges the refresh token for a new pair. Signs out if the session is no longer valid.
+  @override
   Future<bool> refreshSession() async {
     final refresh = _refreshToken;
     if (refresh == null) return false;
     try {
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/refresh'),
-              headers: {'Content-Type': 'application/json', ...AppLanguage.header}, body: jsonEncode({'refreshToken': refresh}))
+              headers: {'Content-Type': 'application/json', ...AppLanguage.headers}, body: jsonEncode({'refreshToken': refresh}))
           .timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         await _applySession(jsonDecode(res.body));
@@ -177,7 +179,7 @@ class AuthService extends ChangeNotifier {
     try {
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/login'),
-              headers: {'Content-Type': 'application/json', ...AppLanguage.header},
+              headers: {'Content-Type': 'application/json', ...AppLanguage.headers},
               body: jsonEncode({'email': emailOrPhone.trim(), 'password': password}))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) return await _applySession(jsonDecode(res.body), withPassword: true);
@@ -191,7 +193,7 @@ class AuthService extends ChangeNotifier {
     try {
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/register'),
-              headers: {'Content-Type': 'application/json', ...AppLanguage.header},
+              headers: {'Content-Type': 'application/json', ...AppLanguage.headers},
               body: jsonEncode({'name': name.trim(), 'email': email.trim(), 'password': password, 'role': kAppRole, 'acceptTerms': true}))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 201) return await _applySession(jsonDecode(res.body), withPassword: true);
@@ -222,7 +224,7 @@ class AuthService extends ChangeNotifier {
       if (idToken == null) return 'Google did not return a sign-in token';
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/google'),
-              headers: {'Content-Type': 'application/json', ...AppLanguage.header}, body: jsonEncode({'idToken': idToken, 'role': kAppRole}))
+              headers: {'Content-Type': 'application/json', ...AppLanguage.headers}, body: jsonEncode({'idToken': idToken, 'role': kAppRole}))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
       return _errorFrom(res, 'Google sign-in failed.');
@@ -233,9 +235,11 @@ class AuthService extends ChangeNotifier {
 
   // ── Linking Google to the signed-in account ──────────────────────────────
 
+  @override
   bool get googleLinked => _currentUser?.googleLinked ?? false;
 
   /// Links a Google account to this account, so "Sign in with Google" opens it from now on.
+  @override
   Future<String?> linkGoogle() async {
     try {
       final google = GoogleSignIn();
@@ -254,6 +258,7 @@ class AuthService extends ChangeNotifier {
     }
   }
 
+  @override
   Future<String?> unlinkGoogle() async {
     final res = await ApiClient(this).delete('/auth/google/link');
     if (!res.ok) return res.error;
@@ -324,7 +329,7 @@ class AuthService extends ChangeNotifier {
       if (firebaseToken == null) return 'Phone verification failed';
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/phone'),
-              headers: {'Content-Type': 'application/json', ...AppLanguage.header},
+              headers: {'Content-Type': 'application/json', ...AppLanguage.headers},
               body: jsonEncode({'firebaseToken': firebaseToken, 'role': kAppRole}))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
@@ -360,7 +365,7 @@ class AuthService extends ChangeNotifier {
     try {
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/phone'),
-              headers: {'Content-Type': 'application/json', ...AppLanguage.header},
+              headers: {'Content-Type': 'application/json', ...AppLanguage.headers},
               body: jsonEncode({'firebaseToken': firebaseIdToken, 'role': kAppRole}))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
@@ -385,7 +390,7 @@ class AuthService extends ChangeNotifier {
       if (firebaseToken == null) return 'Apple sign-in failed.';
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/apple'),
-              headers: {'Content-Type': 'application/json', ...AppLanguage.header},
+              headers: {'Content-Type': 'application/json', ...AppLanguage.headers},
               body: jsonEncode({'idToken': firebaseToken, 'role': kAppRole}))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
@@ -427,7 +432,7 @@ class AuthService extends ChangeNotifier {
       try {
         await http
             .post(Uri.parse('${AppConstants.apiBase}/auth/logout'),
-                headers: {'Content-Type': 'application/json', ...AppLanguage.header}, body: jsonEncode({'refreshToken': refresh}))
+                headers: {'Content-Type': 'application/json', ...AppLanguage.headers}, body: jsonEncode({'refreshToken': refresh}))
             .timeout(const Duration(seconds: 5));
       } catch (_) {}
     }

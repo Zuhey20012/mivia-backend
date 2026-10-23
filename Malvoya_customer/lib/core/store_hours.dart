@@ -1,5 +1,5 @@
 import 'package:flutter/widgets.dart';
-import 'strings.dart';
+import 'package:malvoya_core/malvoya_core.dart';
 
 /// "Closed · opens tomorrow 10:00" or "Not taking orders right now" for a store the API says is
 /// not open; null when it is open (or the API did not say).

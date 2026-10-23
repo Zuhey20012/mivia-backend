@@ -1,7 +1,7 @@
 import { ApiError } from "../../lib/errors";
 import {
   ImportIssue, ImportItem, MAX_IMAGES_PER_PRODUCT, MAX_IMPORT_PRODUCTS, MAX_VARIANTS,
-  MAX_PRICE_CENTS, cleanImageUrl, mapCategory, parseEuroCents, validGtin,
+  MAX_PRICE_CENTS, cleanImageUrl, legacyCategory, mapTaxonomy, parseEuroCents, refineItem, validGtin,
 } from "./mapping";
 
 /**
@@ -11,8 +11,18 @@ import {
  * each row one size/colour option.
  */
 
-export const CSV_COLUMNS = ["name", "description", "category", "price", "size", "colour", "stock", "image_urls", "condition", "gtin", "external_id"] as const;
-const ALIASES: Record<string, string> = { color: "colour", väri: "colour", koko: "size", nimi: "name", hinta: "price", images: "image_urls", image_url: "image_urls", ean: "gtin", id: "external_id", sku: "external_id" };
+export const CSV_COLUMNS = [
+  "name", "description", "category", "price", "size", "colour", "stock", "image_urls", "condition", "gtin", "external_id",
+  // 2.12: a category slug (preferred over "category"), audience, brand, shade per row, content per row
+  "category_slug", "audience", "brand", "shade", "shade_hex", "content_ml", "content_g",
+] as const;
+const ALIASES: Record<string, string> = {
+  color: "colour", väri: "colour", koko: "size", nimi: "name", hinta: "price", images: "image_urls", image_url: "image_urls", ean: "gtin", id: "external_id", sku: "external_id",
+  kategoria: "category", merkki: "brand", sävy: "shade", kenelle: "audience",
+};
+const AUDIENCES = new Map<string, "WOMEN" | "MEN" | "KIDS" | "UNISEX">([
+  ["women", "WOMEN"], ["naiset", "WOMEN"], ["men", "MEN"], ["miehet", "MEN"], ["kids", "KIDS"], ["lapset", "KIDS"], ["unisex", "UNISEX"],
+]);
 const MAX_ROWS = 5000;
 const CONDITIONS = new Map<string, ImportItem["condition"]>([
   ["new", "NEW"], ["uusi", "NEW"], ["like_new", "LIKE_NEW"], ["like new", "LIKE_NEW"], ["kuin uusi", "LIKE_NEW"],
@@ -101,18 +111,22 @@ export function csvToItems(text: string): { items: ImportItem[]; issues: ImportI
     if (row.get("size").length > 20) problems.push("size is longer than 20 characters");
     if (row.get("colour").length > 40) problems.push("colour is longer than 40 characters");
     if (row.get("description").length > 2000) problems.push("description is longer than 2000 characters");
+    if (row.get("shade").length > 40) problems.push("shade is longer than 40 characters");
+    if (row.get("shade_hex") && !/^#[0-9A-Fa-f]{6}$/.test(row.get("shade_hex"))) problems.push("shade_hex must look like #A0522D");
+    for (const c of ["content_ml", "content_g"]) if (row.get(c) && !/^\d{1,5}(?:[.,]\d{1,2})?$/.test(row.get(c))) problems.push(`${c} must be a number`);
+    if (row.get("audience") && !AUDIENCES.has(row.get("audience").toLowerCase())) problems.push("audience must be women, men, kids or unisex");
     if (problems.length) { fail(problems.join("; ")); group.bad++; continue; }
 
     const size = row.get("size") || undefined;
-    const color = row.get("colour") || undefined;
-    const optionKey = `${(size ?? "").toLowerCase()}|${(color ?? "").toLowerCase()}`;
+    const color = row.get("colour") || row.get("shade") || undefined;
+    const optionKey = `${(size ?? "").toLowerCase()}|${(color ?? "").toLowerCase()}|${row.get("content_ml")}|${row.get("content_g")}`;
     if (group.options.has(optionKey)) {
       fail(size || color ? "the same size/colour appears twice for this product" : "duplicate product row (give each row a size or colour, or a different external_id)");
       group.bad++;
       continue;
     }
     group.options.add(optionKey);
-    group.rows.push({ row, priceCents: priceCents!, stock, size, color });
+    group.rows.push({ row, priceCents: priceCents!, stock, size, color: row.get("colour") || undefined });
   }
 
   const items: ImportItem[] = [];
@@ -126,14 +140,23 @@ export function csvToItems(text: string): { items: ImportItem[]; issues: ImportI
     }
     const first = g.rows[0].row;
     const label = first.get("name").slice(0, 200);
-    const withOptions = g.rows.filter((x) => x.size || x.color);
+    const optionOf = (x: (typeof g.rows)[number]) => {
+      const ml = x.row.get("content_ml"), gr = x.row.get("content_g");
+      return {
+        size: x.size, color: x.color, stock: x.stock, priceAdjustCents: 0,
+        ...(x.row.get("shade") ? { shadeName: x.row.get("shade"), ...(x.row.get("shade_hex") ? { shadeHex: x.row.get("shade_hex") } : {}) } : {}),
+        ...(ml ? { contentAmount: Number(ml.replace(",", ".")), contentUnit: "ml" as const } : gr ? { contentAmount: Number(gr.replace(",", ".")), contentUnit: "g" as const } : {}),
+      };
+    };
+    const isOption = (x: (typeof g.rows)[number]) => !!(x.size || x.color || x.row.get("shade") || (g.rows.length > 1 && (x.row.get("content_ml") || x.row.get("content_g"))));
+    const withOptions = g.rows.filter(isOption);
     if (g.rows.length > 1 && withOptions.length !== g.rows.length) {
       skipped++;
       issues.push({ item: `row ${first.line}`, message: `"${label}": every row of a product with options needs a size or colour`, level: "error" });
       continue;
     }
     const base = Math.min(...g.rows.map((x) => x.priceCents));
-    const variants = withOptions.slice(0, MAX_VARIANTS).map((x) => ({ size: x.size, color: x.color, stock: x.stock, priceAdjustCents: x.priceCents - base }));
+    const variants = withOptions.slice(0, MAX_VARIANTS).map((x) => ({ ...optionOf(x), priceAdjustCents: x.priceCents - base }));
     if (withOptions.length > MAX_VARIANTS) issues.push({ item: `row ${first.line}`, message: `Only the first ${MAX_VARIANTS} options were imported`, level: "warning" });
 
     const urls = first.get("image_urls").split("|").map((u) => u.trim()).filter(Boolean);
@@ -143,21 +166,29 @@ export function csvToItems(text: string): { items: ImportItem[]; issues: ImportI
 
     const cond = first.get("condition").toLowerCase();
     const condition = CONDITIONS.get(cond.replace(/[-_]/g, " ")) ?? CONDITIONS.get(cond) ?? "NEW";
-    items.push({
+    const description = first.get("description") || undefined;
+    const match = mapTaxonomy([first.get("category_slug"), first.get("category"), label], description);
+    const audience = AUDIENCES.get(first.get("audience").toLowerCase());
+    if (audience) match.audience = audience;
+    const ml = first.get("content_ml"), gr = first.get("content_g");
+    items.push(refineItem({
       externalId: g.key.slice(0, 80),
       label: `row ${first.line} (${label})`,
       name: label,
-      description: first.get("description") || undefined,
-      category: mapCategory(first.get("category"), label),
+      description,
+      category: legacyCategory(match),
+      match,
+      brand: first.get("brand").slice(0, 60) || undefined,
+      content: !variants.length && (ml || gr) ? { amount: Number((ml || gr).replace(",", ".")), unit: ml ? "ml" : "g" } : null,
       condition,
-      isSecondHand: condition !== "NEW",
+      isSecondHand: condition !== "NEW" || match.secondHand,
       tags: [],
       priceCents: base,
       stockQuantity: variants.length ? variants.reduce((s, v) => s + v.stock, 0) : g.rows[0].stock,
       variants,
       imageUrls: imageUrls.slice(0, MAX_IMAGES_PER_PRODUCT),
       gtin: validGtin(first.get("gtin")),
-    });
+    }));
   }
   return { items, issues, skipped, groups: groups.size };
 }

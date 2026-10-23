@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/strings.dart';
-import '../widgets/loading_states.dart';
 import 'pending_approval.dart';
 import 'store_setup.dart';
 import 'vendor_dashboard.dart';
@@ -35,13 +35,13 @@ class _VendorHomeState extends State<VendorHome> {
     final auth = context.watch<AuthService>();
     switch (auth.storeState) {
       case StoreState.unknown:
-        return const Scaffold(backgroundColor: AppTheme.background, body: SafeArea(child: SkeletonList(button: true)));
+        return const Scaffold(backgroundColor: AppTheme.background, body: SafeArea(child: MSkeletonList(button: true)));
       case StoreState.error:
         return Scaffold(
           backgroundColor: AppTheme.background,
           body: SafeArea(
             child: ListView(children: [
-              ErrorState(message: auth.storeError, onRetry: auth.checkStore),
+              MStateMessage.error(scrollable: false, top: 56, message: auth.storeError, onRetry: auth.checkStore),
               Center(
                 child: TextButton(
                   onPressed: auth.logout,

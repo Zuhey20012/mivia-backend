@@ -48,6 +48,7 @@ export async function storeOnboarding(userId: number) {
       { key: "first_product", done: false, title: { en: "First product", fi: "Ensimmäinen tuote" }, action: "add_product" },
       { key: "tax_info", done: false, title: { en: "Tax details (DAC7)", fi: "Verotiedot (DAC7)" }, action: "tax_info" },
       { key: "agreement", done: agreement, title: { en: "Seller Terms", fi: "Myyjän ehdot" }, action: "accept_agreement" },
+      { key: "safety_pledge", done: false, title: { en: "Product safety pledge", fi: "Tuoteturvallisuussitoumus" }, action: "safety_pledge" },
       { key: "business_check", done: false, title: { en: "Business ID check", fi: "Y-tunnuksen tarkistus" }, action: "create_store" },
     ];
     return { store: null, ...summary(steps, false) };
@@ -62,6 +63,8 @@ export async function storeOnboarding(userId: number) {
     { key: "first_product", done: store._count.products > 0, title: { en: "First product", fi: "Ensimmäinen tuote" }, action: "add_product" },
     { key: "tax_info", done: taxInfoComplete(store, store.taxInfo), title: { en: "Tax details (DAC7)", fi: "Verotiedot (DAC7)" }, action: "tax_info" },
     { key: "agreement", done: agreement, title: { en: "Seller Terms", fi: "Myyjän ehdot" }, action: "accept_agreement" },
+    // GPSR Art. 22(10)(b) self-certification, once (2.12): POST /stores/my/safety-pledge
+    { key: "safety_pledge", done: !!store.safetyPledgeAt, title: { en: "Product safety pledge", fi: "Tuoteturvallisuussitoumus" }, action: "safety_pledge" },
     {
       key: "business_check", done: businessDone, title: { en: "Business ID check", fi: "Y-tunnuksen tarkistus" },
       // not_found / inactive / unavailable: the store fixes its Y-tunnus or waits for the registry; null = not checked yet

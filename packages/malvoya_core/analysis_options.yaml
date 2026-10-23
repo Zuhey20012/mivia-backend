@@ -1,0 +1,9 @@
+analyzer:
+  errors:
+    deprecated_member_use: ignore
+
+linter:
+  rules:
+    - public_member_api_docs
+    - prefer_const_constructors
+    - avoid_print

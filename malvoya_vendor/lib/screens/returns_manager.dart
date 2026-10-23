@@ -2,12 +2,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
-import '../core/strings.dart';
 import '../services/socket_service.dart';
-import '../widgets/loading_states.dart';
+import '../widgets/error_banner.dart';
 
 /// Returns from customers: approve, confirm you received the items, then refund through Stripe.
 class ReturnsManager extends StatefulWidget {
@@ -57,7 +57,7 @@ class _ReturnsManagerState extends State<ReturnsManager> {
     });
   }
 
-  static const _red = Color(0xFFD93025);
+  static const _red = MPalette.red;
 
   /// [storeNote] is the store's own reason or note (API 2.10 keeps it apart from the customer's
   /// `conditionNote`; a rejection requires it). [conditionNote] is only sent for a refund deduction,
@@ -74,7 +74,7 @@ class _ReturnsManagerState extends State<ReturnsManager> {
     HapticFeedback.mediumImpact();
     final res = await _send(r, status, storeNote: storeNote);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.ok ? tr(context, 'Updated', 'Päivitetty') : res.errorMessage)));
+    MSnack.show(context, res.ok ? tr(context, 'Updated', 'Päivitetty') : res.errorMessage);
     _load();
   }
 
@@ -95,9 +95,9 @@ class _ReturnsManagerState extends State<ReturnsManager> {
                   tr(ctx,
                       'Customers who bought from a business have a statutory 14-day right of withdrawal from delivery. Reject only with a real reason, for example the return period has passed or the item is not the one sold.',
                       'Yritykseltä ostaneella kuluttajalla on lakisääteinen 14 päivän peruuttamisoikeus toimituksesta. Hylkää vain todellisesta syystä, esimerkiksi jos palautusaika on päättynyt tai tuote ei ole myyty tuote.'),
-                  style: const TextStyle(fontSize: 13, height: 1.4, color: AppTheme.textSecondary),
+                  style: const TextStyle(fontSize: MTextSize.label, height: 1.4, color: AppTheme.textSecondary),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: MSpace.md),
                 TextField(
                   controller: reason,
                   autofocus: true,
@@ -140,10 +140,7 @@ class _ReturnsManagerState extends State<ReturnsManager> {
     final expected = _refundAmount(r);
     var busy = false;
     String? error;
-    final done = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
+    final done = await showMSheet<bool>(context, builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) {
           final ded = _cents(deduction.text);
           final finalCents = expected == null ? null : expected - (ded != null && ded > 0 ? ded : 0);
@@ -210,8 +207,8 @@ class _ReturnsManagerState extends State<ReturnsManager> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(tr(ctx, 'Refund the customer', 'Hyvitä asiakkaalle'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 8),
+                  Text(tr(ctx, 'Refund the customer', 'Hyvitä asiakkaalle'), style: const TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: MSpace.sm),
                   Text(
                     whole
                         ? tr(ctx,
@@ -220,9 +217,9 @@ class _ReturnsManagerState extends State<ReturnsManager> {
                         : tr(ctx,
                             'Only some items of the order are returned, so the refund covers those items. You may only deduct for wear beyond what was needed to try an item, and you must explain why.',
                             'Tilauksesta palautetaan vain osa, joten hyvitys koskee palautettuja tuotteita. Voit vähentää vain, jos tuotetta on käsitelty enemmän kuin sen kokeilemiseksi on tarpeen, ja sinun on perusteltava vähennys.'),
-                    style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary, height: 1.4),
+                    style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary, height: 1.4),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: MSpace.md),
                   TextField(
                     controller: deduction,
                     enabled: !busy,
@@ -241,46 +238,40 @@ class _ReturnsManagerState extends State<ReturnsManager> {
                   ),
                   if (finalCents != null)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.only(bottom: MSpace.sm),
                       child: Row(children: [
                         Expanded(child: Text(tr(ctx, 'The customer gets', 'Asiakas saa'), style: const TextStyle(fontWeight: FontWeight.w600))),
-                        Text(euro(ctx, finalCents < 0 ? 0 : finalCents), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+                        Text(euro(ctx, finalCents < 0 ? 0 : finalCents), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.title)),
                       ]),
                     ),
                   if (error != null)
                     Container(
                       width: double.infinity,
                       margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(color: const Color(0xFFFDECEA), borderRadius: BorderRadius.circular(14)),
+                      padding: const EdgeInsets.all(MSpace.md),
+                      decoration: BoxDecoration(color: MPalette.redLight, borderRadius: BorderRadius.circular(14)),
                       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                         const Icon(Icons.error_outline_rounded, color: _red, size: 20),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: MSpace.sm),
                         Expanded(child: Text(error!, style: const TextStyle(color: _red, fontWeight: FontWeight.w600, height: 1.35))),
                       ]),
                     ),
                   SizedBox(
                     width: double.infinity,
                     height: 54,
-                    child: FilledButton(
-                      onPressed: busy ? null : confirmAndSend,
-                      child: busy
-                          ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : Text(tr(ctx, 'Refund now', 'Hyvitä nyt')),
-                    ),
+                    child: MButton(label: tr(ctx, 'Refund now', 'Hyvitä nyt'), loading: busy, onPressed: busy ? null : confirmAndSend),
                   ),
                 ],
               ),
             ),
           );
         },
-      ),
-    );
+      ), isScrollControlled: true, useSafeArea: false);
     note.dispose();
     deduction.dispose();
     if (!mounted) return;
     if (done == true) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr(context, 'Refund sent', 'Hyvitys lähetetty'))));
+      MSnack.show(context, tr(context, 'Refund sent', 'Hyvitys lähetetty'));
     }
     _load();
   }
@@ -293,16 +284,15 @@ class _ReturnsManagerState extends State<ReturnsManager> {
       body: RefreshIndicator(
         onRefresh: _load,
         child: _loading
-            ? const SkeletonList(lines: 4, button: true)
+            ? const MSkeletonList(lines: 4, button: true)
             : ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(MSpace.lg),
                 children: [
-                  if (_error != null && _returns.isEmpty) ErrorState(message: _error, onRetry: _retry),
+                  if (_error != null && _returns.isEmpty) MStateMessage.error(scrollable: false, top: 56, message: _error, onRetry: _retry),
                   if (_error != null && _returns.isNotEmpty) ErrorBanner(message: _error!, onRetry: _retry),
                   if (_returns.isEmpty && _error == null)
-                    EmptyState(
-                      icon: Icons.assignment_return_outlined,
+                    MStateMessage(scrollable: false, top: 56, icon: Icons.assignment_return_outlined,
                       message: tr(context, 'No returns. Customers can return items from businesses within 14 days of delivery.',
                           'Ei palautuksia. Asiakkaat voivat palauttaa yrityksiltä ostettuja tuotteita 14 päivän kuluessa toimituksesta.'),
                     ),
@@ -371,15 +361,15 @@ class _ReturnsManagerState extends State<ReturnsManager> {
           Container(
             constraints: const BoxConstraints(minWidth: 34),
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-            decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(8)),
+            decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(MRadius.xs)),
             child: Text('$qty×', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.primary)),
           ),
           const SizedBox(width: 10),
           Expanded(child: Text(name, style: const TextStyle(fontWeight: FontWeight.w600))),
           if (unitCents != null)
             Padding(
-              padding: const EdgeInsets.only(left: 8),
-              child: Text('${euro(context, unitCents)} ${tr(context, 'each', '/ kpl')}', style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary)),
+              padding: const EdgeInsets.only(left: MSpace.sm),
+              child: Text('${euro(context, unitCents)} ${tr(context, 'each', '/ kpl')}', style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
             ),
         ]),
       );
@@ -397,11 +387,11 @@ class _ReturnsManagerState extends State<ReturnsManager> {
     }
     Widget note(String who, String text, Color bg) => Container(
           width: double.infinity,
-          margin: const EdgeInsets.only(top: 8),
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+          margin: const EdgeInsets.only(top: MSpace.sm),
+          padding: const EdgeInsets.fromLTRB(MSpace.md, MSpace.sm, MSpace.md, 10),
           decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(14)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(who, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppTheme.textSecondary)),
+            Text(who, style: const TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w800, color: AppTheme.textSecondary)),
             const SizedBox(height: 2),
             Text(text, style: const TextStyle(height: 1.35, color: AppTheme.textPrimary)),
           ]),
@@ -436,41 +426,41 @@ class _ReturnsManagerState extends State<ReturnsManager> {
       'OTHER': tr(context, 'Other', 'Muu'),
     };
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.divider)),
+      margin: const EdgeInsets.only(bottom: MSpace.md),
+      padding: const EdgeInsets.all(MSpace.lg),
+      decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(MRadius.md), border: Border.all(color: AppTheme.divider)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(children: [
-            Text('${tr(context, 'Order', 'Tilaus')} #${order['id']}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+            Text('${tr(context, 'Order', 'Tilaus')} #${order['id']}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyL)),
             const Spacer(),
-            Text(statusLabel, style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primary, fontSize: 12)),
+            Text(statusLabel, style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primary, fontSize: MTextSize.caption)),
           ]),
           Text(reasons[r['reason']] ?? '${r['reason']}', style: const TextStyle(color: AppTheme.textSecondary)),
           ..._notes(r),
           const SizedBox(height: 10),
           Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(color: returned.whole ? AppTheme.sand : AppTheme.sunshineLight, borderRadius: BorderRadius.circular(12)),
+            margin: const EdgeInsets.only(bottom: MSpace.sm),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: MSpace.xs),
+            decoration: BoxDecoration(color: returned.whole ? AppTheme.sand : AppTheme.sunshineLight, borderRadius: BorderRadius.circular(MRadius.sm)),
             child: Text(
               returned.whole
                   ? tr(context, 'Whole order returned', 'Koko tilaus palautetaan')
                   : tr(context, 'Part of the order: ${returned.returnedCount} of ${returned.orderCount} items',
                       'Osa tilauksesta: ${returned.returnedCount}/${returned.orderCount} tuotetta'),
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: returned.whole ? AppTheme.textPrimary : const Color(0xFF6A4500)),
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.caption, color: returned.whole ? AppTheme.textPrimary : MPalette.amberInk),
             ),
           ),
           ...returned.lines,
           if (_refundAmount(r) != null)
             Padding(
-              padding: const EdgeInsets.only(top: 4),
+              padding: const EdgeInsets.only(top: MSpace.xs),
               child: Row(children: [
                 Text(status == 'REFUNDED' ? tr(context, 'Refunded', 'Hyvitetty') : tr(context, 'Refund', 'Hyvitys'),
                     style: const TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
                 const Spacer(),
-                Text(euro(context, _refundAmount(r)), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                Text(euro(context, _refundAmount(r)), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.bodyL)),
               ]),
             ),
           const SizedBox(height: 10),

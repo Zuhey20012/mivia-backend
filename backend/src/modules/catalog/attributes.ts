@@ -80,6 +80,10 @@ export const VALUE_LABELS: Record<string, L> = {
   NEW: l("New", "Uusi"), LIKE_NEW: l("Like new", "Kuin uusi"), GOOD: l("Good", "Hyvä"), FAIR: l("Fair", "Kohtalainen"), POOR: l("Worn", "Kulunut"),
   WOMEN: l("Women", "Naiset"), MEN: l("Men", "Miehet"), KIDS: l("Kids", "Lapset"), UNISEX: l("Unisex", "Unisex"),
   true: l("Yes", "Kyllä"),
+  plus_size: l("Plus size", "Isot koot"), maternity: l("Maternity", "Äitiys"), petite: l("Petite", "Petite"), tall: l("Tall", "Tall"),
+  adaptive: l("Adaptive clothing", "Esteettömät vaatteet"),
+  BABY: l("Baby 0–2", "Vauvat 0–2 v"), TODDLER: l("Toddler 2–4", "Taaperot 2–4 v"), JUNIOR: l("Junior 8–14", "Juniorit 8–14 v"),
+  TEEN: l("Teens 13–17", "Nuoret 13–17 v"), ADULT: l("Adult", "Aikuiset"),
 };
 export function valueLabel(v: string): L {
   return VALUE_LABELS[v] ?? FIBRES[v] ?? { en: v.replace(/_/g, " "), fi: v.replace(/_/g, " ") };
@@ -115,11 +119,14 @@ export const ATTRS: AttrDef[] = [
   // COMMON
   { key: "brand", label: l("Brand", "Merkki"), kind: "text", max: 60, templates: "ALL", level: "malvoya" },
   { key: "countryOfManufacture", label: l("Made in", "Valmistusmaa"), kind: "text", max: 2, min: 2, templates: "ALL", facet: true },
+  // The seller declares the origin / handmade fact (an origin claim, not a sustainability claim): needed for the
+  // "Made in Finland" and "Handmade" collections; evidence on request
+  { key: "originDeclared", label: l("I declare the country of manufacture (and handmade, if ticked) is true", "Vakuutan valmistusmaan (ja käsityön, jos valittu) oikeaksi"), kind: "bool", templates: "ALL" },
   { key: "colourFamily", label: l("Colour", "Väri"), kind: "enum", values: COLOUR_FAMILIES, templates: NON_BEAUTY, facet: true, level: "malvoya" },
   { key: "colourName", label: l("Colour name", "Värin nimi"), kind: "text", max: 40, templates: NON_BEAUTY },
   { key: "pattern", label: l("Pattern", "Kuosi"), kind: "enum", values: ["plain", "striped", "checked", "floral", "animal", "dotted", "graphic", "other"], templates: [...TEXTILE, ...BAGS], facet: true },
   { key: "season", label: l("Season", "Kausi"), kind: "enums", values: ["spring", "summer", "autumn", "winter", "all"], templates: WEARABLE, facet: true },
-  { key: "productType", label: l("Type", "Tyyppi"), kind: "text", max: 40, templates: [...COSM, "BEAUTY_TOOL"], facet: true },
+  { key: "productType", label: l("Type", "Tyyppi"), kind: "text", max: 40, templates: [...COSM, "BEAUTY_TOOL", "HAIR_TOOL"], facet: true },
   // second-hand condition (§2.13)
   { key: "defectsNote", label: l("Defects", "Viat"), kind: "text", max: 300, templates: NON_BEAUTY },
   { key: "hasTags", label: l("With tags", "Hintalappu tallella"), kind: "bool", templates: NON_BEAUTY },
@@ -136,6 +143,8 @@ export const ATTRS: AttrDef[] = [
   { key: "textileUnder80", label: l("Less than 80 % textile by weight (e.g. leather gloves)", "Alle 80 % tekstiiliä painosta (esim. nahkakäsineet)"), kind: "bool", templates: ["APPAREL_ACCESSORY", ...BAGS] },
   { key: "sizeSystem", label: l("Size system", "Kokojärjestelmä"), kind: "enum", values: ["letter", "eu_numeric", "jeans_wl", "kids_height", "one_size", "bra", "eu", "uk", "us_w", "us_m", "kids_eu", "head_cm", "glove"], templates: WEARABLE, level: "malvoya" },
   { key: "sizeChart", label: l("Size chart", "Kokotaulukko"), kind: "sizeChart", templates: WEARABLE },
+  // Fit collections (owner, category-sections-v2 §2): filters and Home collections, not separate trees
+  { key: "fitCollection", label: l("Fit range", "Kokomallisto"), kind: "enums", values: ["plus_size", "maternity", "petite", "tall", "adaptive"], templates: ["APPAREL", "FOOTWEAR"], facet: true },
   { key: "fit", label: l("Fit", "Istuvuus"), kind: "enum", values: ["slim", "regular", "relaxed", "oversized", "skinny", "straight", "wide", "flared"], templates: APP, facet: true },
   { key: "modelHeightCm", label: l("Model's height (cm)", "Mallin pituus (cm)"), kind: "int", min: 50, max: 230, templates: APP },
   { key: "modelSizeWorn", label: l("Size the model wears", "Mallin käyttämä koko"), kind: "text", max: 20, templates: APP },
@@ -171,14 +180,16 @@ export const ATTRS: AttrDef[] = [
 
   // EYEWEAR and WATCH (§2.6)
   { key: "uvFilterCategory", label: l("UV filter category", "UV-suojaluokka"), kind: "int", min: 0, max: 4, templates: ["EYEWEAR"], facet: true, level: "law" },
-  { key: "ceMarked", label: l("CE marked", "CE-merkitty"), kind: "bool", templates: ["EYEWEAR"], level: "law" },
+  { key: "ceMarked", label: l("CE marked", "CE-merkitty"), kind: "bool", templates: ["EYEWEAR", "HAIR_TOOL"], level: "law" },
+  { key: "ratedVoltage", label: l("Rated voltage", "Nimellisjännite"), kind: "text", max: 30, templates: ["HAIR_TOOL"] },
+  { key: "plugType", label: l("Plug", "Pistoke"), kind: "enum", values: ["eu_schuko", "eu_type_c", "usb", "battery_only"], templates: ["HAIR_TOOL"] },
   { key: "polarised", label: l("Polarised", "Polarisoitu"), kind: "bool", templates: ["EYEWEAR"], facet: true },
   { key: "frameMaterial", label: l("Frame material", "Kehyksen materiaali"), kind: "text", max: 60, templates: ["EYEWEAR"] },
   { key: "movement", label: l("Movement", "Koneisto"), kind: "enum", values: ["quartz", "automatic", "mechanical", "smart"], templates: ["WATCH"], facet: true },
   { key: "caseMaterial", label: l("Case material", "Kotelon materiaali"), kind: "text", max: 60, templates: ["WATCH"] },
   { key: "strapMaterial", label: l("Strap material", "Rannekkeen materiaali"), kind: "text", max: 60, templates: ["WATCH"] },
   { key: "waterResistance", label: l("Water resistance", "Vesitiiviys"), kind: "enum", values: ["none", "3atm", "5atm", "10atm", "20atm"], templates: ["WATCH"], facet: true },
-  { key: "containsBattery", label: l("Contains a battery", "Sisältää pariston"), kind: "bool", templates: ["WATCH"] },
+  { key: "containsBattery", label: l("Contains a battery", "Sisältää pariston"), kind: "bool", templates: ["WATCH", "HAIR_TOOL"] },
 
   // JEWELLERY (§2.10, REACH Annex XVII)
   { key: "metal", label: l("Metal", "Metalli"), kind: "enum", values: ["gold", "white_gold", "rose_gold", "silver_925", "sterling_silver", "platinum", "palladium", "stainless_steel_316l", "titanium", "brass", "copper", "aluminium", "alloy_unknown", "none"], templates: ["JEWELLERY"], facet: true, level: "malvoya" },
@@ -317,7 +328,8 @@ export function validateAttributes(template: Template | null, raw: unknown): { o
       const key = String(i.path[0] ?? "");
       const def = DEFS.get(key);
       const name = def?.label ?? l(key, key);
-      issues.push({ field: `attributes.${i.path.join(".")}`, code: "invalid", message: l(`${name.en}: ${i.message}`, `${name.fi}: virheellinen arvo`) });
+      const why = i.code === "invalid_enum_value" ? "not an allowed value" : i.message;
+      issues.push({ field: `attributes.${i.path.join(".")}`, code: "invalid", message: l(`${name.en}: ${why}`, `${name.fi}: virheellinen arvo`) });
     }
     return { ok: false, issues };
   }
@@ -335,12 +347,14 @@ const EXTRA_FACETS: Record<string, L> = {
   shadeFamily: l("Shade family", "Sävyperhe"),
   undertone: l("Undertone", "Alasävy"),
   nickelFree: l("Nickel-free (verified)", "Nikkelitön (todennettu)"),
+  madeInFinland: l("Made in Finland", "Suomessa valmistettu"),
 };
 /** Columns and relations every category can filter on (handled in the search query itself). */
 export const COLUMN_FILTERS: Record<string, L> = {
   condition: l("Condition", "Kunto"),
   audience: l("For", "Kenelle"),
   certificate: l("Certificates", "Sertifikaatit"),
+  ageGroup: l("Age", "Ikä"),
 };
 
 export function facetKeysFor(template: Template): string[] {
@@ -350,6 +364,7 @@ export function facetKeysFor(template: Template): string[] {
   if (["APPAREL", "APPAREL_ACCESSORY", "BAG", "ACCESSORY"].includes(template)) keys.push("fibre");
   if (template === "COSMETIC_MAKEUP" || template === "COSMETIC_NAIL") keys.push("shadeFamily", "undertone");
   if (template === "JEWELLERY") keys.push("nickelFree");
+  keys.push("madeInFinland");
   return [...new Set(keys)];
 }
 
@@ -372,6 +387,8 @@ export function facetRows(template: Template | null, attrs: Record<string, any>,
     out.set(`${key}|${norm}`, { key, value: norm });
   };
   if (attrs.brand) add("brand", attrs.brand);
+  // Origin claim only with the seller's declaration
+  if (attrs.originDeclared === true && String(attrs.countryOfManufacture ?? "").toUpperCase() === "FI") add("madeInFinland", "true");
   if (!template) return [...out.values()];
   const allowed = new Set(facetKeysFor(template));
   for (const a of attrsFor(template)) {

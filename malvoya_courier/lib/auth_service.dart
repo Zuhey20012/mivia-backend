@@ -6,18 +6,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import 'config/constants.dart';
-import 'core/api_client.dart';
-import 'core/app_version.dart';
-import 'core/server_messages.dart';
 
 const _secureStorage = FlutterSecureStorage();
 
 /// Messages from this file follow the app language (no BuildContext here).
-String _t(String en, String fi) => ServerMessages.pick(en, fi);
+String _t(String en, String fi) => AppLanguage.pick(en, fi);
 
 /// Every request names the app language, so the server can send notifications and emails in it.
-Map<String, String> get _jsonHeaders => {'Content-Type': 'application/json', 'Accept-Language': ServerMessages.languageCode, ...AppVersion.headers};
+Map<String, String> get _jsonHeaders => {'Content-Type': 'application/json', 'Accept-Language': AppLanguage.code, if (AppLanguage.appVersion != null) 'X-App-Version': AppLanguage.appVersion!};
 
 /// The account role this app is for. Other roles are refused at sign-in.
 const String kAppRole = 'COURIER';
@@ -81,7 +80,7 @@ class PasswordResetResult {
 
 /// Handles sign-in, secure token storage and automatic access-token refresh.
 /// Access tokens live 15 minutes; they are refreshed a minute before expiry.
-class AuthService extends ChangeNotifier {
+class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccount {
   // Resolved on first use so the app still opens if Firebase failed to initialise.
   fb_auth.FirebaseAuth get _firebaseAuth => fb_auth.FirebaseAuth.instance;
   String? _verificationId;
@@ -96,6 +95,7 @@ class AuthService extends ChangeNotifier {
   User? get currentUser => _currentUser;
   bool get isAuthenticated => _currentUser != null && _accessToken != null;
   bool get isAdmin => _currentUser?.role == 'ADMIN';
+  @override
   String? get accessToken => _accessToken;
   bool get isReady => _ready;
 
@@ -167,6 +167,7 @@ class AuthService extends ChangeNotifier {
   }
 
   /// Exchanges the refresh token for a new pair. Signs out if the session is no longer valid.
+  @override
   Future<bool> refreshSession() async {
     final refresh = _refreshToken;
     if (refresh == null) return false;
@@ -269,7 +270,7 @@ class AuthService extends ChangeNotifier {
   Future<void> syncLocale() async {
     final user = _currentUser;
     if (user == null || _accessToken == null) return;
-    final code = ServerMessages.languageCode;
+    final code = AppLanguage.code;
     final key = '${user.id}:$code';
     if (_localeSynced == key) return;
     _localeSynced = key;
@@ -299,9 +300,11 @@ class AuthService extends ChangeNotifier {
 
   // ── Linking Google to the signed-in account ──────────────────────────────
 
+  @override
   bool get googleLinked => _currentUser?.googleLinked ?? false;
 
   /// Links a Google account to this account, so "Sign in with Google" opens it from now on.
+  @override
   Future<String?> linkGoogle() async {
     try {
       final google = GoogleSignIn();
@@ -328,6 +331,7 @@ class AuthService extends ChangeNotifier {
     return null;
   }
 
+  @override
   Future<String?> unlinkGoogle() async {
     final res = await ApiClient(this).delete('/auth/google/link');
     if (!res.ok) return res.error;
@@ -420,7 +424,7 @@ class AuthService extends ChangeNotifier {
     if (token == null) return false;
     try {
       final res = await http
-          .get(Uri.parse('${AppConstants.apiBase}/courier/me'), headers: {'Authorization': 'Bearer $token', 'Accept-Language': ServerMessages.languageCode, ...AppVersion.headers})
+          .get(Uri.parse('${AppConstants.apiBase}/courier/me'), headers: {'Authorization': 'Bearer $token', 'Accept-Language': AppLanguage.code, if (AppLanguage.appVersion != null) 'X-App-Version': AppLanguage.appVersion!})
           .timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         _isApproved = jsonDecode(res.body)['courier']?['isApproved'] == true;

@@ -9,6 +9,7 @@ import { pushToUser, pushToUsers } from "../../lib/push";
 import { sendDropRemovedEmail } from "../../services/notificationDeliveryService";
 import { localeOfUser, t } from "../../lib/i18n";
 import { priceInfoFor, presentProduct, productInclude } from "../products/pricing";
+import { mayPersonalise } from "../../lib/minors";
 import { deliveryInfo } from "../stores/stores.service";
 import { describe, UploadProof, verifyOwnedUpload } from "../media/media.service";
 
@@ -167,6 +168,10 @@ export async function getFeed(opts: { mode: "foryou" | "latest" | "following"; c
     take: 1000,
   });
 
+  // Under-18 guard (lib/minors.ts): the ranking below is not personal; if a personal signal is ever added to it,
+  // it may only be used when this is true
+  const personalise = opts.mode === "foryou" && (await mayPersonalise(viewer));
+  void personalise;
   const reasons = new Map<number, string>();
   let ordered: number[];
   if (opts.mode !== "foryou" || opts.storeId) {

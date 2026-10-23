@@ -16,12 +16,12 @@ export const createStoreSchema = z.object({
     if (raw === 'SKINCARE') return 'COSMETICS' as const;
     if (raw === 'BOUTIQUES' || raw === 'CLOTHING') return 'APPAREL' as const;
     if (raw === 'HOME_BASED') return 'HOME_DECOR' as const;
-    const valid = ["APPAREL","COSMETICS","THRIFT","ACCESSORIES","HOME_DECOR","HANDMADE","ECO_FRIENDLY","OTHER"];
+    // ECO_FRIENDLY was removed in 2.12.0 (a generic environmental claim): older app builds sending it get OTHER
+    const valid = ["APPAREL","COSMETICS","THRIFT","ACCESSORIES","HOME_DECOR","HANDMADE","OTHER"];
     if (valid.includes(raw)) return raw as any;
     return "OTHER" as const;
   }),
   isHomeBased:   z.boolean().default(false),
-  isEcoFriendly: z.boolean().default(false),
   address:       z.string().optional(),
   latitude:      z.number().optional(),
   longitude:     z.number().optional(),
@@ -44,7 +44,6 @@ export const updateStoreSchema = z.object({
   name:        z.string().min(2).max(100).optional(),
   description: z.string().max(1000).optional(),
   isHomeBased: z.boolean().optional(),
-  isEcoFriendly: z.boolean().optional(),
   address:     z.string().optional(),
   latitude:    z.number().optional(),
   longitude:   z.number().optional(),

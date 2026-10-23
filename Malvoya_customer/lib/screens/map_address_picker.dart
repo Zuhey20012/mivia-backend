@@ -4,11 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
 import '../core/current_position.dart';
-import '../core/strings.dart';
 import '../local_notification_service.dart';
-import '../core/haptics.dart';
 
 
 class AddressResult {
@@ -214,24 +214,14 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
           _currentCenter = target;
           _reverseGeocode(target);
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(tr(context, 'Address not found. Drag the map so the pin is on your door.',
-                  'Osoitetta ei löytynyt. Vedä karttaa, kunnes merkki on ovesi kohdalla.')),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
+          MSnack.show(context, tr(context, 'Address not found. Drag the map so the pin is on your door.',
+                  'Osoitetta ei löytynyt. Vedä karttaa, kunnes merkki on ovesi kohdalla.'));
         }
       }
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(tr(context, 'The search did not answer. Drag the map to your door instead.',
-                'Haku ei vastannut. Vedä kartta ovesi kohdalle.')),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        MSnack.show(context, tr(context, 'The search did not answer. Drag the map to your door instead.',
+                'Haku ei vastannut. Vedä kartta ovesi kohdalle.'));
       }
     } finally {
       if (mounted) setState(() => _isSearching = false);
@@ -292,12 +282,12 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                 children: [
                   // Speech bubble showing 'Deliver here'
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: MSpace.md, vertical: 6),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF17131C),
-                      borderRadius: BorderRadius.circular(16),
+                      color: MPalette.night,
+                      borderRadius: BorderRadius.circular(MRadius.md),
                       boxShadow: [
-                        BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 10, offset: const Offset(0, 4)),
+                        BoxShadow(color: MPalette.night.withValues(alpha: 0.35), blurRadius: 10, offset: const Offset(0, 4)),
                       ],
                     ),
                     child: Row(
@@ -306,27 +296,27 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                         if (_isGeocoding)
                           const SizedBox(
                             width: 12, height: 12,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.onBrand),
                           )
                         else
-                          const Icon(Icons.touch_app_rounded, color: Colors.white, size: 14),
+                          const Icon(Icons.touch_app_rounded, color: AppTheme.onBrand, size: 14),
                         const SizedBox(width: 6),
                         Text(
                           tr(context, 'Deliver here', 'Toimitus tähän'),
-                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                          style: const TextStyle(color: AppTheme.onBrand, fontSize: MTextSize.caption, fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: MSpace.xs),
                   // Pin Marker
                   Container(
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      gradient: AppTheme.primaryGradient,
+                      color: AppTheme.primary,
                       shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 3),
+                      border: Border.all(color: MPalette.white, width: 3),
                       boxShadow: [
                         BoxShadow(
                           color: AppTheme.primary.withValues(alpha: 0.55),
@@ -335,14 +325,14 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                         ),
                       ],
                     ),
-                    child: const Icon(Icons.location_on_rounded, color: Colors.white, size: 24),
+                    child: const Icon(Icons.location_on_rounded, color: AppTheme.onBrand, size: 24),
                   ),
                   // Pin Point Stem Shadow
                   Container(
                     width: 10,
                     height: 5,
                     decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.45),
+                      color: MPalette.night.withValues(alpha: 0.45),
                       borderRadius: BorderRadius.circular(10),
                     ),
                   ),
@@ -354,7 +344,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
           // 3. Top Floating Search & Back Header
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.md, MSpace.lg, 0),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -367,10 +357,10 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                           height: 48,
                           decoration: BoxDecoration(
                             color: cardBg,
-                            borderRadius: BorderRadius.circular(16),
+                            borderRadius: BorderRadius.circular(MRadius.md),
                             border: Border.all(color: borderColor),
                             boxShadow: [
-                              BoxShadow(color: Colors.black.withValues(alpha: 0.12), blurRadius: 12, offset: const Offset(0, 4)),
+                              BoxShadow(color: MPalette.night.withValues(alpha: 0.12), blurRadius: 12, offset: const Offset(0, 4)),
                             ],
                           ),
                           child: Icon(Icons.arrow_back_rounded, color: textPrimary, size: 20),
@@ -382,26 +372,26 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                           height: 46,
                           decoration: BoxDecoration(
                             color: cardBg,
-                            borderRadius: BorderRadius.circular(16),
+                            borderRadius: BorderRadius.circular(MRadius.md),
                             border: Border.all(color: borderColor),
                             boxShadow: [
-                              BoxShadow(color: Colors.black.withValues(alpha: 0.12), blurRadius: 12, offset: const Offset(0, 4)),
+                              BoxShadow(color: MPalette.night.withValues(alpha: 0.12), blurRadius: 12, offset: const Offset(0, 4)),
                             ],
                           ),
                           child: Row(
                             children: [
                               const SizedBox(width: 14),
                               const Icon(Icons.search_rounded, color: AppTheme.primary, size: 20),
-                              const SizedBox(width: 8),
+                              const SizedBox(width: MSpace.sm),
                               Expanded(
                                 child: TextField(
                                   controller: _searchCtrl,
                                   textInputAction: TextInputAction.search,
                                   onSubmitted: _searchAddress,
-                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textPrimary),
+                                  style: TextStyle(fontSize: MTextSize.label, fontWeight: FontWeight.w600, color: textPrimary),
                                   decoration: InputDecoration(
                                     hintText: tr(context, 'Search street, building, city…', 'Hae katu, rakennus, kaupunki…'),
-                                    hintStyle: TextStyle(fontSize: 13, color: textSecondary),
+                                    hintStyle: TextStyle(fontSize: MTextSize.label, color: textSecondary),
                                     border: InputBorder.none,
                                     enabledBorder: InputBorder.none,
                                     focusedBorder: InputBorder.none,
@@ -412,13 +402,13 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                               ),
                               if (_isSearching)
                                 const Padding(
-                                  padding: EdgeInsets.only(right: 12),
+                                  padding: EdgeInsets.only(right: MSpace.md),
                                   child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
                                 )
                               else if (_searchCtrl.text.isNotEmpty)
                                 IconButton(
                                   tooltip: tr(context, 'Clear', 'Tyhjennä'),
-                                  icon: const Icon(Icons.clear_rounded, size: 16, color: Colors.grey),
+                                  icon: Icon(Icons.clear_rounded, size: 16, color: AppTheme.secondaryText(context)),
                                   onPressed: () {
                                     _searchCtrl.clear();
                                     setState(() {});
@@ -432,7 +422,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                   ),
                   const SizedBox(height: 10),
 
-                  const Text('© OpenStreetMap contributors', style: TextStyle(fontSize: 10.5, color: Colors.grey)),
+                  Text('© OpenStreetMap contributors', style: TextStyle(fontSize: MTextSize.caption, color: AppTheme.secondaryText(context))),
                 ],
               ),
             ),
@@ -456,13 +446,13 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                     );
                   },
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: MSpace.sm),
                     decoration: BoxDecoration(
                       color: cardBg,
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: BorderRadius.circular(MRadius.md),
                       border: Border.all(color: borderColor),
                       boxShadow: [
-                        BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 10, offset: const Offset(0, 3)),
+                        BoxShadow(color: MPalette.night.withValues(alpha: 0.15), blurRadius: 10, offset: const Offset(0, 3)),
                       ],
                     ),
                     child: Row(
@@ -470,7 +460,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                       children: [
                         const Icon(Icons.travel_explore_rounded, color: AppTheme.primary, size: 16),
                         const SizedBox(width: 5),
-                        Text(tr(context, 'Open in Maps', 'Avaa kartat'), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: textPrimary)),
+                        Text(tr(context, 'Open in Maps', 'Avaa kartat'), style: TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w800, color: textPrimary)),
                       ],
                     ),
                   ),
@@ -492,7 +482,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                       borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
                       border: Border.all(color: borderColor),
                       boxShadow: [
-                        BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 8, offset: const Offset(0, 2)),
+                        BoxShadow(color: MPalette.night.withValues(alpha: 0.1), blurRadius: 8, offset: const Offset(0, 2)),
                       ],
                     ),
                     child: Icon(Icons.add_rounded, color: textPrimary, size: 20),
@@ -517,7 +507,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                         bottom: BorderSide(color: borderColor),
                       ),
                       boxShadow: [
-                        BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 8, offset: const Offset(0, 2)),
+                        BoxShadow(color: MPalette.night.withValues(alpha: 0.1), blurRadius: 8, offset: const Offset(0, 2)),
                       ],
                     ),
                     child: Icon(Icons.remove_rounded, color: textPrimary, size: 20),
@@ -539,7 +529,7 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                       shape: BoxShape.circle,
                       border: Border.all(color: borderColor),
                       boxShadow: [
-                        BoxShadow(color: Colors.black.withValues(alpha: 0.14), blurRadius: 10, offset: const Offset(0, 3)),
+                        BoxShadow(color: MPalette.night.withValues(alpha: 0.14), blurRadius: 10, offset: const Offset(0, 3)),
                       ],
                     ),
                     child: _locating
@@ -560,10 +550,10 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
                 color: cardBg,
-                borderRadius: BorderRadius.circular(24),
+                borderRadius: BorderRadius.circular(MRadius.lg),
                 border: Border.all(color: borderColor, width: 1.2),
                 boxShadow: [
-                  BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 24, offset: const Offset(0, 8)),
+                  BoxShadow(color: MPalette.night.withValues(alpha: 0.15), blurRadius: 24, offset: const Offset(0, 8)),
                 ],
               ),
               child: Column(
@@ -573,10 +563,10 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                   Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(8),
+                        padding: const EdgeInsets.all(MSpace.sm),
                         decoration: BoxDecoration(
                           color: AppTheme.primary.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(MRadius.sm),
                         ),
                         child: const Icon(Icons.location_on_rounded, color: AppTheme.primary, size: 20),
                       ),
@@ -589,14 +579,14 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                               _street.isNotEmpty
                                   ? (_houseNumber.isNotEmpty ? '$_street $_houseNumber' : _street)
                                   : (_isGeocoding || _locating ? tr(context, 'Finding the address…', 'Haetaan osoitetta…') : tr(context, 'Pinned spot', 'Merkitty kohta')),
-                              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: textPrimary),
+                              style: TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.bodyL, color: textPrimary),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
                             const SizedBox(height: 2),
                             Text(
                               '${_currentCenter.latitude.toStringAsFixed(4)}° N, ${_currentCenter.longitude.toStringAsFixed(4)}° E',
-                              style: TextStyle(fontSize: 11, color: textSecondary, fontWeight: FontWeight.w500),
+                              style: TextStyle(fontSize: MTextSize.caption, color: textSecondary, fontWeight: FontWeight.w500),
                             ),
                           ],
                         ),
@@ -605,22 +595,22 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                         const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
                     ],
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: MSpace.md),
                   Container(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(MSpace.md),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF1C1333) : const Color(0xFFF6F3EE),
+                      color: isDark ? MPalette.nightSurfaceVariant : MPalette.birch,
                       borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: isDark ? const Color(0xFF3A3242) : AppTheme.glassBorder),
+                      border: Border.all(color: isDark ? MPalette.nightRaised : AppTheme.primary.withValues(alpha: 0.12)),
                     ),
                     child: Row(
                       children: [
                         const Icon(Icons.home_outlined, color: AppTheme.primary, size: 16),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: MSpace.sm),
                         Expanded(
                           child: Text(
                             _fullAddress.isNotEmpty ? _fullAddress : tr(context, 'Drag the map so the pin is on your door', 'Vedä karttaa, kunnes merkki on ovesi kohdalla'),
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textPrimary),
+                            style: TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w600, color: textPrimary),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -628,14 +618,14 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: MSpace.lg),
                   SizedBox(
                     width: double.infinity,
                     height: 52,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.primary,
-                        foregroundColor: Colors.white,
+                        foregroundColor: AppTheme.onBrand,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
                         elevation: 2,
                       ),
@@ -643,12 +633,12 @@ class _MapAddressPickerScreenState extends State<MapAddressPickerScreen> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
-                          const SizedBox(width: 8),
+                          const Icon(Icons.check_circle_rounded, color: AppTheme.onBrand, size: 18),
+                          const SizedBox(width: MSpace.sm),
                           Flexible(
                             child: Text(tr(context, 'Confirm this spot', 'Vahvista tämä kohta'),
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white)),
+                                style: const TextStyle(fontSize: MTextSize.bodyL, fontWeight: FontWeight.w800, color: AppTheme.onBrand)),
                           ),
                         ],
                       ),

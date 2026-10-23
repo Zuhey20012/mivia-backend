@@ -3,24 +3,26 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
+import 'config/constants.dart';
 import 'config/theme.dart';
-import 'core/font_licenses.dart';
-import 'core/api_client.dart';
-import 'core/app_gate.dart';
 import 'core/connectivity.dart';
 import 'screens/login.dart';
 import 'screens/returns_manager.dart';
 import 'screens/vendor_home.dart';
 import 'auth_service.dart';
 import 'l10n.dart';
-import 'locale_provider.dart';
 import 'core/push_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  registerFontLicenses();
+  registerMalvoyaFontLicenses();
+  ApiConfig.baseUrl = AppConstants.apiBase;
+  // A failed request lets the "No internet" strip appear even without a system network change
+  ApiConfig.onNetworkError = ConnectivityService.instance.verify;
   // Sent as X-App-Version with every request (the server records it with agreement acceptances)
-  await ApiClient.loadAppVersion();
+  await AppLanguage.loadAppVersion();
   // Shows a "No internet" strip and lets screens refresh when the connection comes back
   ConnectivityService.instance.start();
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
@@ -71,11 +73,13 @@ class MalvoyaVendorApp extends StatelessWidget {
           PushService.instance.attach(auth);
           // Tapping a notification opens the matching screen
           PushService.instance.onOpen = (data) => _openFromNotification(auth, data);
-          // A new language also changes the language of the account's notifications and emails
-          LocaleProvider.onUserChange = (_) => auth.syncLocale();
           return auth;
         }),
-        ChangeNotifierProvider(create: (_) => LocaleProvider()),
+        ChangeNotifierProvider(
+          create: (ctx) => LocaleProvider(followSystem: false)
+            // A new language also changes the language of the account's notifications and emails
+            ..onUserChange = (_) => Provider.of<AuthService>(ctx, listen: false).syncLocale(),
+        ),
       ],
       child: Consumer<LocaleProvider>(
         builder: (context, localeProvider, child) => MaterialApp(

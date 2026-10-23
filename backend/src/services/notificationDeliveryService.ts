@@ -267,7 +267,7 @@ export interface OrderConfirmationData {
   customerName: string;
   email?: string | null;
   storeName: string;
-  items: { name: string; quantity: number; unitCents: number }[];
+  items: { name: string; quantity: number; unitCents: number; hygieneSealed?: boolean }[];
   subtotalCents: number;
   deliveryFeeCents: number;
   serviceFeeCents?: number;
@@ -283,6 +283,19 @@ export interface OrderConfirmationData {
 /**
  * Order confirmation (tilausvahvistus). The seller is the store, not Malvoya — this is not a VAT invoice.
  */
+/**
+ * Hygiene-sealed items (KSL 6:13 and 6:16): the confirmation repeats that the right of withdrawal is lost once the seal
+ * is opened, and names the items it applies to.
+ */
+function sealedNote(items: OrderConfirmationData["items"], L: Locale) {
+  const sealed = items.filter((i) => i.hygieneSealed).map((i) => escapeHtml(i.name));
+  if (!sealed.length) return "";
+  const text = L === "fi"
+    ? `Hygieniasinetöidyt tuotteet: ${sealed.join(", ")}. Niitä ei voi palauttaa peruuttamisoikeudella, jos sinetti avataan. Avaamattomina voit palauttaa ne 14 päivän kuluessa, ja virheelliset tuotteet aina.`
+    : `Hygiene-sealed items: ${sealed.join(", ")}. They can't be returned under the right of withdrawal once the seal is opened. Unopened, you can return them within 14 days, and faulty items always.`;
+  return `<p style="margin:8px 0 0;color:#6E6E73;font-size:13px;line-height:1.5">${text}</p>`;
+}
+
 export async function sendOrderConfirmation(data: OrderConfirmationData): Promise<DeliveryResult> {
   if (!isDeliverableEmail(data.email)) return { delivered: false };
   const L = await localeOfEmail(data.email);
@@ -307,7 +320,8 @@ ${data.tipCents ? row(p("Courier tip", "Tippi lähetille"), data.tipCents) : ""}
 <tr><td style="padding:10px 0;font-weight:700">${p("Total (incl. VAT)", "Yhteensä (sis. ALV)")}</td><td style="padding:10px 0;text-align:right;font-weight:700">${money(data.totalCents, L)}</td></tr></table>
 ${data.deliveryAddress ? `<p style="margin:16px 0 0;color:#6E6E73;font-size:14px">${p("Delivery address", "Toimitusosoite")}: ${escapeHtml(data.deliveryAddress)}</p>` : ""}
 ${data.deliveryWindow ? `<p style="margin:8px 0 0;color:#6E6E73;font-size:14px">${p("Delivery time", "Toimitusaika")}: ${escapeHtml(pick(data.deliveryWindow, L))}</p>` : ""}
-<p style="margin:20px 0 0;color:#6E6E73;font-size:13px;line-height:1.5">${p("You have a 14-day right of withdrawal from the day you receive the item.", "Sinulla on 14 päivän peruuttamisoikeus tuotteen vastaanottamisesta.")}</p>`,
+<p style="margin:20px 0 0;color:#6E6E73;font-size:13px;line-height:1.5">${p("You have a 14-day right of withdrawal from the day you receive the item.", "Sinulla on 14 päivän peruuttamisoikeus tuotteen vastaanottamisesta.")}</p>
+${sealedNote(data.items, L)}`,
     L,
   );
   const text = p(`Order #${data.orderId} from ${data.storeName}. Total ${money(data.totalCents, L)} incl. VAT.`,

@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
 import '../core/strings.dart';
-import '../widgets/loading_states.dart';
+import '../widgets/error_banner.dart';
 
 /// Payouts through Stripe. Stripe collects identity and bank details on its own pages, so
 /// none of it passes through this app.
@@ -75,7 +76,7 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
     if (!mounted) return;
     setState(() => _opening = false);
     if (!res.ok) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.errorMessage)));
+      MSnack.show(context, res.errorMessage);
       return;
     }
     await launchUrl(Uri.parse(res.data['url']), mode: LaunchMode.externalApplication);
@@ -91,17 +92,17 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
       body: RefreshIndicator(
         onRefresh: _load,
         child: _loading
-            ? const SkeletonList(count: 3, lines: 5, button: true)
+            ? const MSkeletonList(count: 3, lines: 5, button: true)
             : _error != null && _status == null
-                ? ListView(physics: const AlwaysScrollableScrollPhysics(), children: [ErrorState(message: _error, onRetry: _retry)])
+                ? ListView(physics: const AlwaysScrollableScrollPhysics(), children: [MStateMessage.error(scrollable: false, top: 56, message: _error, onRetry: _retry)])
                 : ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(MSpace.lg),
                     children: [
                       if (_error != null) ErrorBanner(message: _error!, onRetry: _retry),
                       Container(
                         padding: const EdgeInsets.all(18),
-                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppTheme.divider)),
+                        decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppTheme.divider)),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -115,23 +116,23 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
                                       : hasAccount
                                           ? tr(context, 'Finish your payout setup', 'Viimeistele tilitysten käyttöönotto')
                                           : tr(context, 'Set up payouts to get paid', 'Ota tilitykset käyttöön saadaksesi rahat'),
-                                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyL),
                                 ),
                               ),
                             ]),
-                            const SizedBox(height: 8),
+                            const SizedBox(height: MSpace.sm),
                             Text(
                               tr(
                                   context,
                                   'Malvoya sends each sale to your Stripe account 15 days after delivery, when the 14-day return window has passed, and Stripe pays it into your bank account. Malvoya keeps a commission of ${commissionText(widget.commissionRate)} of the item price (not of the delivery fee); refunds are deducted. Stripe checks your identity (EU anti-money-laundering rules).',
                                   'Malvoya siirtää jokaisen myynnin Stripe-tilillesi 15 päivää toimituksen jälkeen, kun 14 päivän palautusaika on päättynyt, ja Stripe maksaa sen pankkitilillesi. Malvoya pidättää provisiona ${commissionText(widget.commissionRate)} tuotteiden hinnasta (ei toimitusmaksusta); hyvitykset vähennetään. Stripe tarkistaa henkilöllisyytesi (EU:n rahanpesulainsäädäntö).'),
-                              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4),
+                              style: const TextStyle(color: AppTheme.textSecondary, fontSize: MTextSize.label, height: 1.4),
                             ),
                             if (!enabled && (asInt(_status?['requirementsDue']) ?? 0) > 0)
                               Padding(
                                 padding: const EdgeInsets.only(top: 6),
                                 child: Text(tr(context, 'Stripe still needs ${_status!['requirementsDue']} detail(s) from you.', 'Stripe tarvitsee vielä ${_status!['requirementsDue']} tietoa.'),
-                                    style: const TextStyle(color: AppTheme.accent, fontSize: 13)),
+                                    style: const TextStyle(color: AppTheme.accent, fontSize: MTextSize.label)),
                               ),
                             const SizedBox(height: 14),
                             SizedBox(
@@ -147,17 +148,17 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
                         ),
                       ),
                       if (_summary != null) ...[
-                        const SizedBox(height: 16),
+                        const SizedBox(height: MSpace.lg),
                         Row(children: [
                           _stat(tr(context, 'Sent to Stripe', 'Siirretty Stripeen'), _summary!['paidCents']),
                           const SizedBox(width: 10),
                           _stat(tr(context, 'Coming', 'Tulossa'), (asInt(_summary!['scheduledCents']) ?? 0) + (asInt(_summary!['waitingForAccountCents']) ?? 0)),
                         ]),
                       ],
-                      const SizedBox(height: 16),
+                      const SizedBox(height: MSpace.lg),
                       if (_payouts.isEmpty)
                         Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 24),
+                          padding: const EdgeInsets.symmetric(vertical: MSpace.xxl),
                           child: Text(tr(context, 'No payouts yet. Each sale is listed here with its payout date.', 'Ei vielä tilityksiä. Jokainen myynti näkyy täällä tilityspäivineen.'),
                               textAlign: TextAlign.center, style: const TextStyle(color: AppTheme.textSecondary, height: 1.4)),
                         ),
@@ -171,10 +172,10 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
   Widget _stat(String label, dynamic cents) => Expanded(
         child: Container(
           padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.divider)),
+          decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(MRadius.md), border: Border.all(color: AppTheme.divider)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(label, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12.5)),
-            Text(euro(context, cents), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 20)),
+            Text(label, style: const TextStyle(color: AppTheme.textSecondary, fontSize: MTextSize.caption)),
+            Text(euro(context, cents), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.displayS)),
           ]),
         ),
       );
@@ -189,7 +190,7 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
       _ => tr(context, 'Failed — the Malvoya team will look into it', 'Epäonnistui — Malvoyan tiimi selvittää asian'),
     };
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+      contentPadding: const EdgeInsets.symmetric(horizontal: MSpace.xs),
       title: Text('${tr(context, 'Order', 'Tilaus')} #${p['orderId']}'),
       subtitle: Text(label),
       trailing: Text(euro(context, p['amountCents']), style: const TextStyle(fontWeight: FontWeight.w700)),

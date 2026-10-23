@@ -2,10 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:malvoya_core/malvoya_core.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import 'api_client.dart';
-import 'strings.dart';
 
 /// Google Play's "prominent disclosure" for location (User Data and Location policies).
 ///

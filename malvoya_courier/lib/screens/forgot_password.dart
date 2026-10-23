@@ -2,9 +2,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/strings.dart';
 import 'help_screen.dart';
 
 enum _Step { email, code, password, unavailable }
@@ -195,8 +196,7 @@ class _ForgotPasswordSheetState extends State<ForgotPasswordSheet> {
     if (result.ok) {
       // The password changed, but signing in with it did not work (e.g. not a courier account)
       Navigator.of(context).pop(email);
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
-          content: Text('${tr(context, 'Your password was changed.', 'Salasanasi vaihdettiin.')} ${result.signInError}')));
+      MSnack.show(context, '${tr(context, 'Your password was changed.', 'Salasanasi vaihdettiin.')} ${result.signInError}');
       return;
     }
     if (result.unavailable) {
@@ -236,13 +236,13 @@ class _ForgotPasswordSheetState extends State<ForgotPasswordSheet> {
     return Container(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(MRadius.lg)),
       ),
       child: SafeArea(
         top: false,
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+          padding: const EdgeInsets.fromLTRB(MSpace.xxl, MSpace.md, MSpace.xxl, MSpace.xxl),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Center(
               child: Container(
@@ -251,7 +251,7 @@ class _ForgotPasswordSheetState extends State<ForgotPasswordSheet> {
                 decoration: BoxDecoration(color: AppTheme.divider, borderRadius: BorderRadius.circular(2)),
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: MSpace.sm),
             Row(children: [
               if (_step == _Step.code || _step == _Step.password)
                 IconButton(
@@ -264,9 +264,9 @@ class _ForgotPasswordSheetState extends State<ForgotPasswordSheet> {
               const Spacer(),
               if (stepIndex > 0)
                 Text(tr(context, 'Step $stepIndex of 3', 'Vaihe $stepIndex/3'),
-                    style: const TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.w700, fontSize: 13)),
+                    style: const TextStyle(color: AppTheme.textSecondary, fontWeight: FontWeight.w700, fontSize: MTextSize.label)),
             ]),
-            const SizedBox(height: 4),
+            const SizedBox(height: MSpace.xs),
             ...switch (_step) {
               _Step.email => _emailStep(),
               _Step.code => _codeStep(),
@@ -282,30 +282,30 @@ class _ForgotPasswordSheetState extends State<ForgotPasswordSheet> {
   Widget _title(String text) => Text(text, style: AppTheme.display(size: 24));
 
   Widget _body(String text) => Padding(
-        padding: const EdgeInsets.only(top: 8),
-        child: Text(text, style: const TextStyle(color: AppTheme.textSecondary, height: 1.4, fontSize: 14.5)),
+        padding: const EdgeInsets.only(top: MSpace.sm),
+        child: Text(text, style: const TextStyle(color: AppTheme.textSecondary, height: 1.4, fontSize: MTextSize.bodyM)),
       );
 
   Widget _message() {
     final error = _error;
     final info = _info;
-    if (error == null && info == null) return const SizedBox(height: 4);
+    if (error == null && info == null) return const SizedBox(height: MSpace.xs);
     final isError = error != null;
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(top: 14),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: isError ? const Color(0xFFFFF0F0) : const Color(0xFFE6F3EC),
+        color: isError ? MPalette.redLight : MPalette.mint,
         borderRadius: BorderRadius.circular(14),
       ),
       child: Row(children: [
         Icon(isError ? Icons.error_outline_rounded : Icons.check_circle_outline_rounded,
             size: 18, color: isError ? AppTheme.danger : AppTheme.success),
-        const SizedBox(width: 8),
+        const SizedBox(width: MSpace.sm),
         Expanded(
           child: Text(error ?? info!,
-              style: TextStyle(color: isError ? AppTheme.danger : AppTheme.successDark, fontSize: 13.5, fontWeight: FontWeight.w600)),
+              style: TextStyle(color: isError ? AppTheme.danger : AppTheme.successDark, fontSize: MTextSize.label, fontWeight: FontWeight.w600)),
         ),
       ]),
     );
@@ -314,12 +314,7 @@ class _ForgotPasswordSheetState extends State<ForgotPasswordSheet> {
   Widget _primary({required String label, required VoidCallback? onPressed}) => SizedBox(
         width: double.infinity,
         height: 56,
-        child: FilledButton(
-          onPressed: _busy ? null : onPressed,
-          child: _busy
-              ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
-              : Text(label),
-        ),
+        child: MButton(label: label, loading: _busy, onPressed: _busy ? null : onPressed),
       );
 
   List<Widget> _emailStep() => [
@@ -347,11 +342,11 @@ class _ForgotPasswordSheetState extends State<ForgotPasswordSheet> {
         _message(),
         const SizedBox(height: 18),
         _primary(label: tr(context, 'Send code', 'Lähetä koodi'), onPressed: _sendCode),
-        const SizedBox(height: 12),
+        const SizedBox(height: MSpace.md),
         Text(
           tr(context, 'Signed up with your phone number or Google? Those accounts have no password: sign in with the same option instead.',
               'Rekisteröidyitkö puhelinnumerolla tai Googlella? Niillä tileillä ei ole salasanaa: kirjaudu samalla tavalla kuin rekisteröidyit.'),
-          style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary, height: 1.4),
+          style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary, height: 1.4),
         ),
       ];
 
@@ -362,7 +357,7 @@ class _ForgotPasswordSheetState extends State<ForgotPasswordSheet> {
       _title(tr(context, 'Check your email', 'Tarkista sähköpostisi')),
       _body(tr(context, 'If ${_email.text.trim()} has a courier account with a password, a 6-digit code is on its way. It works for 15 minutes. Check the spam folder too.',
           'Jos osoitteella ${_email.text.trim()} on lähettitili ja salasana, 6-numeroinen koodi on tulossa. Se toimii 15 minuuttia. Katso myös roskapostikansio.')),
-      const SizedBox(height: 20),
+      const SizedBox(height: MSpace.xl),
       _CodeBoxes(controller: _code, focusNode: _codeFocus, length: _codeLength, onSubmitted: _toPassword),
       Align(
         alignment: Alignment.centerLeft,
@@ -376,7 +371,7 @@ class _ForgotPasswordSheetState extends State<ForgotPasswordSheet> {
       _message(),
       const SizedBox(height: 14),
       _primary(label: tr(context, 'Continue', 'Jatka'), onPressed: _code.text.length == _codeLength ? _toPassword : null),
-      const SizedBox(height: 8),
+      const SizedBox(height: MSpace.sm),
       Center(
         child: TextButton(
           style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
@@ -395,10 +390,10 @@ class _ForgotPasswordSheetState extends State<ForgotPasswordSheet> {
           child: Row(children: [
             Icon(ok ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
                 size: 18, color: ok ? AppTheme.success : AppTheme.textSecondary),
-            const SizedBox(width: 8),
+            const SizedBox(width: MSpace.sm),
             Expanded(
               child: Text(text,
-                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: ok ? AppTheme.successDark : AppTheme.textSecondary)),
+                  style: TextStyle(fontSize: MTextSize.label, fontWeight: FontWeight.w600, color: ok ? AppTheme.successDark : AppTheme.textSecondary)),
             ),
           ]),
         );
@@ -440,14 +435,14 @@ class _ForgotPasswordSheetState extends State<ForgotPasswordSheet> {
           width: 56,
           height: 56,
           decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(18)),
-          child: const Icon(Icons.support_agent_rounded, color: Color(0xFF6A4500), size: 30),
+          child: const Icon(Icons.support_agent_rounded, color: MPalette.amberInk, size: 30),
         ),
         const SizedBox(height: 14),
         _title(tr(context, 'We can help you get back in', 'Autamme sinut takaisin sisään')),
         _body(tr(context,
             'Resetting a password by email is not available right now. Send a message to the Malvoya team and we will help you get back into your account. If you also signed up with your phone number or Google, you can sign in with that.',
             'Salasanan vaihto sähköpostilla ei ole juuri nyt käytettävissä. Lähetä viesti Malvoyan tiimille, niin autamme sinut takaisin tilillesi. Jos rekisteröidyit myös puhelinnumerolla tai Googlella, voit kirjautua niillä.')),
-        const SizedBox(height: 20),
+        const SizedBox(height: MSpace.xl),
         SizedBox(
           width: double.infinity,
           height: 56,
@@ -461,7 +456,7 @@ class _ForgotPasswordSheetState extends State<ForgotPasswordSheet> {
             label: Text(tr(context, 'Contact support', 'Ota yhteyttä tukeen')),
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: MSpace.sm),
         SizedBox(
           width: double.infinity,
           height: 56,
@@ -495,10 +490,10 @@ class _CodeBoxes extends StatelessWidget {
             final text = controller.text;
             return Row(children: [
               for (var i = 0; i < length; i++) ...[
-                if (i > 0) const SizedBox(width: 8),
+                if (i > 0) const SizedBox(width: MSpace.sm),
                 Expanded(
                   child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
+                    duration: MMotion.fast,
                     height: 60,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
 import '../screens/login.dart';
-import 'strings.dart';
 
 /// Opens sign-in over the current screen. Returns true once the customer is signed in (the sign-in
 /// screen closes itself); the bag and the screen underneath are kept.
@@ -32,13 +33,13 @@ class SignInCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.person_outline_rounded, color: Color(0xFF8A5A00)),
+              const Icon(Icons.person_outline_rounded, color: MPalette.amberInk),
               const SizedBox(width: 10),
               Expanded(child: Text(title, style: AppTheme.display(context, size: 18))),
             ],
           ),
           const SizedBox(height: 6),
-          Text(message, style: TextStyle(fontSize: 13.5, height: 1.35, color: AppTheme.primaryText(context))),
+          Text(message, style: TextStyle(fontSize: MTextSize.label, height: 1.35, color: AppTheme.primaryText(context))),
           const SizedBox(height: 14),
           SizedBox(
             width: double.infinity,

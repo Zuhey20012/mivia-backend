@@ -1,27 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/agreements.dart';
-import '../core/api_client.dart';
-import '../core/haptics.dart';
-import '../core/legal_links.dart';
-import '../core/strings.dart';
 
 /// "Agreement update": what the document is, what changes (for an update), a link to the full
 /// text, a required checkbox and Accept (`POST /me/agreements/accept`). Returns true once the
 /// server recorded the acceptance. The customer can always close it ("Not now").
 Future<bool> showAgreementSheet(BuildContext context, AgreementPrompt prompt) async {
   final messenger = ScaffoldMessenger.maybeOf(context);
-  final result = await showModalBottomSheet<_Accepted>(
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    showDragHandle: false,
-    backgroundColor: Colors.transparent,
-    builder: (_) => _AgreementSheet(prompt: prompt),
-  );
+  final result = await showMSheet<_Accepted>(context, builder: (_) => _AgreementSheet(prompt: prompt), transparent: true, isScrollControlled: true, useSafeArea: true);
   if (result == null) return false;
   if (result.emailed && result.message != null) {
     messenger?.showSnackBar(SnackBar(content: Text(result.message!), behavior: SnackBarBehavior.floating));
@@ -65,13 +56,11 @@ class _AgreementSheetState extends State<_AgreementSheet> {
 
   Future<void> _loadSummary() async {
     final version = _prompt.version;
-    final res = await const ApiClient().get('/legal/${_prompt.doc}/versions');
-    if (!mounted || !res.ok || version != _prompt.version) return;
-    final versions = res.data['versions'];
-    if (versions is! List) return;
+    final versions = await const AgreementsApi(ApiClient()).versions(_prompt.doc);
+    if (!mounted || version != _prompt.version) return;
     for (final v in versions) {
-      if (v is Map && v['version'] == version) {
-        setState(() => _loadedSummary = v['summary']);
+      if (v.version == version) {
+        setState(() => _loadedSummary = v.summary);
         return;
       }
     }
@@ -101,17 +90,17 @@ class _AgreementSheetState extends State<_AgreementSheet> {
       _notice = null;
     });
     final auth = context.read<AuthService>();
-    final res = await ApiClient(auth).post('/me/agreements/accept', {'doc': _prompt.doc, 'version': _prompt.version});
+    final res = await AgreementsApi(ApiClient(auth)).accept(_prompt.doc, _prompt.version);
     if (!mounted) return;
     if (res.ok) {
-      final emailed = res.data['emailed'] == true;
+      final emailed = res.emailed;
       final message = emailed ? tr(context, 'A copy has been emailed to you.', 'Kopio on lähetetty sähköpostiisi.') : null;
       // The list (Profile banner, Agreements screen) follows the new state
       await Agreements.instance.load(auth);
       if (mounted) Navigator.pop(context, _Accepted(emailed, message));
       return;
     }
-    if (res.status == 409 && !_retried) {
+    if (res.conflict && !_retried) {
       // The version changed meanwhile: read the list again and take the version the server expects
       _retried = true;
       await Agreements.instance.load(auth);
@@ -143,7 +132,7 @@ class _AgreementSheetState extends State<_AgreementSheet> {
     }
     setState(() {
       _busy = false;
-      _error = res.errorText(context) ?? tr(context, 'Could not save. Please try again.', 'Tallennus ei onnistunut. Yritä uudelleen.');
+      _error = res.result.errorText(context) ?? tr(context, 'Could not save. Please try again.', 'Tallennus ei onnistunut. Yritä uudelleen.');
     });
   }
 
@@ -218,23 +207,23 @@ class _AgreementSheetState extends State<_AgreementSheet> {
             ),
             const SizedBox(height: 18),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: MSpace.md, vertical: 6),
               decoration: BoxDecoration(
                 color: AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine),
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Text(eyebrow,
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.isDarkMode(context) ? AppTheme.sunshine : const Color(0xFF8A5A00))),
+                  style: TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w700, color: AppTheme.isDarkMode(context) ? AppTheme.sunshine : MPalette.amberInk)),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: MSpace.md),
             Semantics(header: true, child: Text(title, style: AppTheme.display(context, size: 24))),
             const SizedBox(height: 10),
-            Text(explanation, style: TextStyle(fontSize: 14.5, height: 1.45, color: textPrimary)),
+            Text(explanation, style: TextStyle(fontSize: MTextSize.bodyM, height: 1.45, color: textPrimary)),
             if (p.isUpdate && summary != null) ...[
-              const SizedBox(height: 16),
+              const SizedBox(height: MSpace.lg),
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(MSpace.lg),
                 decoration: BoxDecoration(
                   color: AppTheme.pastel(context, AppTheme.lilac, AppTheme.primary),
                   borderRadius: BorderRadius.circular(AppTheme.radiusMd),
@@ -243,20 +232,20 @@ class _AgreementSheetState extends State<_AgreementSheet> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(tr(context, 'What changes', 'Mitä muuttuu'),
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: textPrimary)),
+                        style: TextStyle(fontSize: MTextSize.label, fontWeight: FontWeight.w800, color: textPrimary)),
                     const SizedBox(height: 6),
-                    Text(summary, style: TextStyle(fontSize: 14, height: 1.45, color: textPrimary)),
-                    const SizedBox(height: 8),
+                    Text(summary, style: TextStyle(fontSize: MTextSize.bodyM, height: 1.45, color: textPrimary)),
+                    const SizedBox(height: MSpace.sm),
                     Text(
                       tr(context, 'This is Malvoya\'s short description of the change. The full text is what applies.',
                           'Tämä on Malvoyan lyhyt kuvaus muutoksesta. Voimassa on aina koko teksti.'),
-                      style: TextStyle(fontSize: 12, height: 1.35, color: textSecondary),
+                      style: TextStyle(fontSize: MTextSize.caption, height: 1.35, color: textSecondary),
                     ),
                   ],
                 ),
               ),
             ],
-            const SizedBox(height: 16),
+            const SizedBox(height: MSpace.lg),
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
@@ -284,27 +273,21 @@ class _AgreementSheetState extends State<_AgreementSheet> {
                 contentPadding: EdgeInsets.zero,
                 activeColor: AppTheme.primary,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusSm)),
-                title: Text(checkboxText, style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: textPrimary)),
+                title: Text(checkboxText, style: TextStyle(fontSize: MTextSize.bodyM, fontWeight: FontWeight.w600, color: textPrimary)),
               ),
             ),
             if (_notice != null) ...[
               const SizedBox(height: 6),
-              Text(_notice!, style: const TextStyle(fontSize: 13, height: 1.35, color: Color(0xFFB86E00))),
+              Text(_notice!, style: const TextStyle(fontSize: MTextSize.label, height: 1.35, color: MPalette.amberInk)),
             ],
             if (_error != null) ...[
               const SizedBox(height: 6),
-              Text(_error!, style: const TextStyle(fontSize: 13, height: 1.35, color: Color(0xFFD93025))),
+              Text(_error!, style: const TextStyle(fontSize: MTextSize.label, height: 1.35, color: MPalette.red)),
             ],
             const SizedBox(height: 14),
             SizedBox(
               width: double.infinity,
-              child: FilledButton(
-                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(54)),
-                onPressed: _checked && !_busy ? _accept : null,
-                child: _busy
-                    ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white))
-                    : Text(acceptText),
-              ),
+              child: MButton(label: acceptText, loading: _busy, onPressed: _checked && !_busy ? _accept : null),
             ),
             const SizedBox(height: 6),
             SizedBox(

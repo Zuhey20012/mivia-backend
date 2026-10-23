@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart' show localizeServerMessage;
+
 import '../core/blocked_users.dart';
-import '../core/strings.dart';
 
 /// The few reasons offered when reporting a comment or a review (keys of the API's REPORT_REASONS).
 const _shortReasons = {
@@ -18,34 +19,30 @@ const _shortReasons = {
 
 /// Asks why the content is reported. Returns the reason key, or null if the customer cancelled.
 Future<String?> pickReportReason(BuildContext context, {required String title}) {
-  return showModalBottomSheet<String>(
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    builder: (ctx) {
+  return showMSheet<String>(context, builder: (ctx) {
       String? selected;
       return StatefulBuilder(
         builder: (ctx, setSheet) => SafeArea(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            padding: const EdgeInsets.fromLTRB(MSpace.lg, 0, MSpace.lg, MSpace.lg),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: MSpace.sm),
                   child: Text(title, style: AppTheme.display(ctx, size: 20)),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: MSpace.xs),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: MSpace.sm),
                   child: Text(
                     tr(ctx, 'Our team reviews every report. The person is not told who reported them.',
                         'Tiimimme käy jokaisen ilmoituksen läpi. Henkilölle ei kerrota, kuka ilmoitti.'),
-                    style: TextStyle(fontSize: 13, color: AppTheme.secondaryText(ctx)),
+                    style: TextStyle(fontSize: MTextSize.label, color: AppTheme.secondaryText(ctx)),
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: MSpace.sm),
                 RadioGroup<String>(
                   groupValue: selected,
                   onChanged: (v) => setSheet(() => selected = v),
@@ -55,12 +52,12 @@ Future<String?> pickReportReason(BuildContext context, {required String title}) 
                         RadioListTile<String>(
                           value: e.key,
                           title: Text(isFinnish(ctx) ? e.value[1] : e.value[0]),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: MSpace.xs),
                         ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: MSpace.sm),
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton(
@@ -80,8 +77,7 @@ Future<String?> pickReportReason(BuildContext context, {required String title}) 
           ),
         ),
       );
-    },
-  );
+    }, isScrollControlled: true, useSafeArea: true);
 }
 
 /// Confirms and blocks [userId]. Their comments and reviews disappear at once. Returns true when
@@ -101,7 +97,7 @@ Future<bool> confirmAndBlock(BuildContext context, {required int userId, require
         TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(ctx, 'Cancel', 'Peruuta'))),
         TextButton(
           onPressed: () => Navigator.pop(ctx, true),
-          style: TextButton.styleFrom(foregroundColor: const Color(0xFFD93025)),
+          style: TextButton.styleFrom(foregroundColor: MPalette.red),
           child: Text(tr(ctx, 'Block', 'Estä')),
         ),
       ],
@@ -111,21 +107,16 @@ Future<bool> confirmAndBlock(BuildContext context, {required int userId, require
   final auth = Provider.of<AuthService>(context, listen: false);
   final error = await BlockedUsers.instance.block(auth, userId, name.trim());
   if (!context.mounted) return error == null;
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-    content: Text(error == null
+  MSnack.show(context, error == null
         ? tr(context, '$shown is blocked.', '$shown on estetty.')
-        : tr(context, 'Could not block: ${localizeServerMessage(context, error)}', 'Estäminen ei onnistunut: ${localizeServerMessage(context, error)}')),
-  ));
+        : tr(context, 'Could not block: ${localizeServerMessage(context, error)}', 'Estäminen ei onnistunut: ${localizeServerMessage(context, error)}'));
   return error == null;
 }
 
 /// The actions offered on someone else's comment or review, as a bottom sheet (long-press) —
 /// the same items as the ⋮ menu.
 Future<String?> showUgcActions(BuildContext context, {required bool canReport, required bool canBlock, bool canDelete = false}) {
-  return showModalBottomSheet<String>(
-    context: context,
-    useSafeArea: true,
-    builder: (ctx) => SafeArea(
+  return showMSheet<String>(context, builder: (ctx) => SafeArea(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -143,15 +134,14 @@ Future<String?> showUgcActions(BuildContext context, {required bool canReport, r
             ),
           if (canBlock)
             ListTile(
-              leading: const Icon(Icons.block_rounded, color: Color(0xFFD93025)),
-              title: Text(tr(ctx, 'Block user', 'Estä käyttäjä'), style: const TextStyle(color: Color(0xFFD93025))),
+              leading: const Icon(Icons.block_rounded, color: MPalette.red),
+              title: Text(tr(ctx, 'Block user', 'Estä käyttäjä'), style: const TextStyle(color: MPalette.red)),
               onTap: () => Navigator.pop(ctx, 'block'),
             ),
-          const SizedBox(height: 8),
+          const SizedBox(height: MSpace.sm),
         ],
       ),
-    ),
-  );
+    ), isScrollControlled: false, useSafeArea: true);
 }
 
 /// The public author id on a comment or review payload, when the server sends one.

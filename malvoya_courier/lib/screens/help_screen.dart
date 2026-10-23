@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import '../core/api_client.dart';
-import '../core/legal_links.dart';
-import '../core/strings.dart';
 
 /// Help for couriers: a message to the Malvoya team (POST /support, answered by email and shown
 /// in the admin panel), optionally about the order being carried.
@@ -89,7 +88,7 @@ class _HelpScreenState extends State<HelpScreen> {
     if (!res.ok) _snack(res.error!);
   }
 
-  void _snack(String t) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t), behavior: SnackBarBehavior.floating));
+  void _snack(String t) => MSnack.show(context, t);
 
   @override
   Widget build(BuildContext context) {
@@ -97,18 +96,18 @@ class _HelpScreenState extends State<HelpScreen> {
       backgroundColor: AppTheme.background,
       appBar: AppBar(title: Text(tr(context, 'Help', 'Apua'))),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+        padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.sm, MSpace.lg, MSpace.x3l),
         children: [
           if (widget.stoppingDelivery)
             Container(
-              margin: const EdgeInsets.only(bottom: 16),
-              padding: const EdgeInsets.all(16),
+              margin: const EdgeInsets.only(bottom: MSpace.lg),
+              padding: const EdgeInsets.all(MSpace.lg),
               decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
               child: Text(
                 tr(context,
                     'Tell us where order #${widget.orderId} is now (still at the shop, with you, or somewhere else) and why you had to stop, so we can sort it out with the shop and the customer. The order stays assigned to you until we do.',
                     'Kerro, missä tilaus #${widget.orderId} on nyt (vielä kaupassa, mukanasi vai muualla) ja miksi jouduit keskeyttämään, niin selvitämme asian kaupan ja asiakkaan kanssa. Tilaus pysyy sinulla siihen asti.'),
-                style: const TextStyle(color: Color(0xFF6A4500), height: 1.45),
+                style: const TextStyle(color: MPalette.amberInk, height: 1.45),
               ),
             ),
           Text(tr(context, 'Contact the Malvoya team', 'Ota yhteyttä Malvoyan tiimiin'), style: AppTheme.display(size: 20)),
@@ -117,12 +116,12 @@ class _HelpScreenState extends State<HelpScreen> {
             tr(context, 'Your message goes to the Malvoya team, and we reply by email.', 'Viestisi menee Malvoyan tiimille, ja vastaamme sähköpostitse.'),
             style: const TextStyle(color: AppTheme.textSecondary, height: 1.4),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: MSpace.md),
           if (_sent != null)
             Container(
-              margin: const EdgeInsets.only(bottom: 12),
+              margin: const EdgeInsets.only(bottom: MSpace.md),
               padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(color: const Color(0xFFE6F3EC), borderRadius: BorderRadius.circular(14)),
+              decoration: BoxDecoration(color: MPalette.mint, borderRadius: BorderRadius.circular(14)),
               child: Row(children: [
                 const Icon(Icons.check_circle_rounded, color: AppTheme.success),
                 const SizedBox(width: 10),
@@ -155,12 +154,12 @@ class _HelpScreenState extends State<HelpScreen> {
             child: FilledButton.icon(
               onPressed: _sending ? null : _send,
               icon: _sending
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.onPrimary))
                   : const Icon(Icons.send_rounded),
               label: Text(tr(context, 'Send to Malvoya', 'Lähetä Malvoyalle')),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: MSpace.lg),
           TextButton.icon(
             onPressed: () => openLegal('couriers'),
             icon: const Icon(Icons.gavel_rounded),

@@ -2,7 +2,7 @@ import { fetchPublicJson } from "./safeFetch";
 import { ApiError } from "../../lib/errors";
 import {
   ImportIssue, ImportItem, ImportVariant, MAX_IMAGES_PER_PRODUCT, MAX_IMPORT_PRODUCTS, MAX_PRICE_CENTS, MAX_VARIANTS,
-  cleanImageUrl, htmlToText, mapCategory, parseEuroCents, validGtin,
+  SHADE_OPTION, cleanImageUrl, htmlToText, legacyCategory, mapTaxonomy, parseEuroCents, refineItem, validGtin,
 } from "./mapping";
 
 /**
@@ -30,7 +30,7 @@ type ShopifyVariant = {
   inventory_quantity?: number; available?: boolean; barcode?: string | null;
 };
 type ShopifyProduct = {
-  id?: number | string; title?: string; body_html?: string | null; product_type?: string; tags?: string | string[];
+  id?: number | string; title?: string; body_html?: string | null; product_type?: string; tags?: string | string[]; vendor?: string;
   options?: { name?: string; position?: number }[]; variants?: ShopifyVariant[]; images?: { src?: string; position?: number }[];
 };
 
@@ -104,6 +104,7 @@ export function mapShopifyProduct(p: ShopifyProduct, issues: ImportIssue[]): Imp
   const options = (p.options ?? []).map((o, i) => ({ name: String(o.name ?? ""), index: (o.position ?? i + 1) - 1 }));
   const sizeIdx = options.find((o) => SIZE_OPTION.test(o.name.trim()))?.index;
   const colorIdx = options.find((o) => COLOR_OPTION.test(o.name.trim()))?.index;
+  const shadeIdx = options.find((o) => SHADE_OPTION.test(o.name.trim()))?.index;
   const valueAt = (v: ShopifyVariant, idx: number | undefined) => {
     if (idx === undefined) return undefined;
     const val = [v.option1, v.option2, v.option3][idx];
@@ -131,17 +132,18 @@ export function mapShopifyProduct(p: ShopifyProduct, issues: ImportIssue[]): Imp
     for (const [i, v] of variants.entries()) {
       let size = valueAt(v, sizeIdx)?.slice(0, 20);
       const color = valueAt(v, colorIdx)?.slice(0, 40);
-      if (!size && !color) {
+      const shadeName = valueAt(v, shadeIdx)?.slice(0, 40);
+      if (!size && !color && !shadeName) {
         // An option that is neither size nor colour (e.g. "Material"): kept as the size label
         size = String(v.option1 ?? v.title ?? "").trim().slice(0, 20) || undefined;
         otherOption = true;
       }
-      if (!size && !color) continue;
-      const key = `${size ?? ""}|${color ?? ""}`.toLowerCase();
+      if (!size && !color && !shadeName) continue;
+      const key = `${size ?? ""}|${color ?? ""}|${shadeName ?? ""}`.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
       if (out.length >= MAX_VARIANTS) { add(`Only the first ${MAX_VARIANTS} options were imported`); break; }
-      out.push({ size, color, stock: stockOf(v), priceAdjustCents: prices[i] - base });
+      out.push({ size, color, ...(shadeName ? { shadeName } : {}), stock: stockOf(v), priceAdjustCents: prices[i] - base });
     }
     if (otherOption) add("An option that is not a size or colour was imported as the size; check it before publishing");
     stockQuantity = out.reduce((s, v) => s + v.stock, 0);
@@ -159,19 +161,23 @@ export function mapShopifyProduct(p: ShopifyProduct, issues: ImportIssue[]): Imp
   const used = tags.some((t) => USED_TAG.test(t));
   if (used) add("Tagged as used/vintage: condition set to Good, check it before publishing");
 
-  return {
+  const description = htmlToText(p.body_html) || undefined;
+  const match = mapTaxonomy([p.product_type, ...tags, name], description);
+  return refineItem({
     externalId: String(p.id),
     label,
     name,
-    description: htmlToText(p.body_html) || undefined,
-    category: mapCategory(p.product_type, ...tags, name),
-    condition: used ? "GOOD" : "NEW",
-    isSecondHand: used,
+    description,
+    category: legacyCategory(match),
+    match,
+    brand: typeof p.vendor === "string" && p.vendor.trim() ? p.vendor.trim().slice(0, 60) : undefined,
+    condition: used || match.secondHand ? "GOOD" : "NEW",
+    isSecondHand: used || match.secondHand,
     tags,
     priceCents: base,
     stockQuantity,
     variants: out,
     imageUrls: images.slice(0, MAX_IMAGES_PER_PRODUCT),
     gtin: variants.map((v) => validGtin(v.barcode)).find(Boolean) ?? null,
-  };
+  });
 }

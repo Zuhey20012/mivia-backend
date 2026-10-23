@@ -1,0 +1,22 @@
+{
+  "customer": {
+    "hex": 1,
+    "fontSize": 1,
+    "colors": 0
+  },
+  "store": {
+    "hex": 0,
+    "fontSize": 1,
+    "colors": 0
+  },
+  "courier": {
+    "hex": 0,
+    "fontSize": 0,
+    "colors": 0
+  },
+  "malvoya_core": {
+    "hex": 0,
+    "fontSize": 0,
+    "colors": 0
+  }
+}

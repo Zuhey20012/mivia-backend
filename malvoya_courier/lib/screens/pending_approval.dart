@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/delete_account_tile.dart';
-import '../core/legal_links.dart';
 import '../core/push_service.dart';
-import '../core/strings.dart';
 import '../widgets/onboarding_checklist.dart';
 import 'agreements_screen.dart';
 import 'help_screen.dart';
@@ -79,9 +79,7 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> with Widg
       _lastChecked = DateTime.now();
     });
     if (!approved && !silent) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(tr(context, 'Still under review. This screen keeps checking for you.', 'Vielä tarkistettavana. Tämä näkymä tarkistaa tilanteen puolestasi.'))),
-      );
+      MSnack.show(context, tr(context, 'Still under review. This screen keeps checking for you.', 'Vielä tarkistettavana. Tämä näkymä tarkistaa tilanteen puolestasi.'));
     }
   }
 
@@ -96,11 +94,11 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> with Widg
       backgroundColor: AppTheme.background,
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+          padding: const EdgeInsets.symmetric(horizontal: MSpace.xxl, vertical: MSpace.x3l),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SizedBox(height: 12),
+              const SizedBox(height: MSpace.md),
               Center(
                 child: Container(
                   width: 88,
@@ -123,9 +121,9 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> with Widg
                         'Tee alla olevat vaiheet. Sen jälkeen Malvoyan tiimi käsittelee hakemuksesi.')
                     : tr(context, 'Your courier application is being reviewed.', 'Lähettihakemuksesi on tarkistettavana.'),
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 16, height: 1.4, color: AppTheme.textSecondary),
+                style: const TextStyle(fontSize: MTextSize.bodyL, height: 1.4, color: AppTheme.textSecondary),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: MSpace.xxl),
               OnboardingChecklist(
                 key: _checklist,
                 onLoaded: (data) {
@@ -151,7 +149,7 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> with Widg
                   ),
                 ]),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: MSpace.xxl),
               _step(Icons.person_search_outlined, tr(context, 'A person reviews it', 'Hakemuksen käsittelee ihminen'),
                   tr(context,
                       'Approval is done by hand by the Malvoya team, not automatically. They check your identity, that you are at least 18 and your right to work in Finland. No documents are uploaded in this app; if the team needs something from you, they use the contact details you signed up with.',
@@ -160,27 +158,22 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> with Widg
                   tr(context,
                       'This screen checks your status by itself every minute while it is open, and whenever you come back to the app. When you are approved, the app opens your courier view here.',
                       'Tämä näkymä tarkistaa tilanteesi itse minuutin välein, kun se on auki, ja aina kun palaat sovellukseen. Kun hakemuksesi on hyväksytty, sovellus avaa lähettinäkymän tähän.')),
-              const SizedBox(height: 24),
+              const SizedBox(height: MSpace.xxl),
               SizedBox(
                 width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _checking ? null : () => _check(),
-                  child: _checking
-                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : Text(tr(context, 'Check status now', 'Tarkista tilanne nyt')),
-                ),
+                child: MButton(label: tr(context, 'Check status now', 'Tarkista tilanne nyt'), loading: _checking, onPressed: _checking ? null : () => _check()),
               ),
               if (_lastChecked != null) ...[
-                const SizedBox(height: 8),
+                const SizedBox(height: MSpace.sm),
                 Text(
                   tr(context, 'Last checked at ${_time(_lastChecked!)}', 'Tarkistettu viimeksi klo ${_time(_lastChecked!)}'),
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary),
+                  style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary),
                 ),
               ],
-              const SizedBox(height: 20),
+              const SizedBox(height: MSpace.xl),
               Container(
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.divider)),
+                decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.divider)),
                 child: Column(children: [
                   ListTile(
                     leading: const Icon(Icons.support_agent_rounded),
@@ -199,7 +192,7 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> with Widg
                   const DeleteAccountTile(),
                 ]),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: MSpace.md),
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
@@ -227,9 +220,9 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> with Widg
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                Text(title, style: const TextStyle(fontSize: MTextSize.bodyL, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
                 const SizedBox(height: 2),
-                Text(body, style: const TextStyle(fontSize: 14, height: 1.35, color: AppTheme.textSecondary)),
+                Text(body, style: const TextStyle(fontSize: MTextSize.bodyM, height: 1.35, color: AppTheme.textSecondary)),
               ],
             ),
           ),

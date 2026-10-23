@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
 import '../theme_provider.dart';
 import '../auth_service.dart';
-import '../locale_provider.dart';
 import '../l10n.dart';
-import '../core/strings.dart';
-import '../core/google_link_tile.dart';
 import 'terms_legal_screen.dart';
 import 'privacy_gdpr_screen.dart';
 
@@ -46,10 +45,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final error = await auth.updateName(name);
     if (!mounted) return;
     setState(() => _savingName = false);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(error ?? tr(context, 'Name saved', 'Nimi tallennettu')),
-      behavior: SnackBarBehavior.floating,
-    ));
+    MSnack.show(context, error ?? tr(context, 'Name saved', 'Nimi tallennettu'));
   }
 
   Widget _buildCard({
@@ -63,14 +59,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final textSecondary = AppTheme.secondaryText(context);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
+      margin: const EdgeInsets.only(bottom: MSpace.lg),
       decoration: BoxDecoration(
         color: cardBg,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: borderColor),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.03),
+            color: MPalette.night.withValues(alpha: isDark ? 0.2 : 0.03),
             blurRadius: 10,
             offset: const Offset(0, 3),
           ),
@@ -81,11 +77,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+            padding: const EdgeInsets.fromLTRB(MSpace.lg, 14, MSpace.lg, MSpace.sm),
             child: Text(
               title,
               style: TextStyle(
-                fontSize: 12,
+                fontSize: MTextSize.caption,
                 fontWeight: FontWeight.w800,
                 color: textSecondary,
                 letterSpacing: 0.6,
@@ -122,7 +118,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           appBar: AppBar(
             title: Text(
               l10n.translate('settings'),
-              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18, color: textPrimary),
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.title, color: textPrimary),
             ),
             elevation: 0,
             backgroundColor: appbarBg,
@@ -130,7 +126,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           body: ListView(
             physics: const BouncingScrollPhysics(),
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(MSpace.lg),
             children: [
               // 1. ACCOUNT
               _buildCard(
@@ -143,11 +139,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       radius: 24,
                       child: Text(
                         userName.isNotEmpty ? userName[0].toUpperCase() : 'M',
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                        style: const TextStyle(color: AppTheme.onBrand, fontWeight: FontWeight.bold, fontSize: MTextSize.title),
                       ),
                     ),
-                    title: Text(userName, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: textPrimary)),
-                    subtitle: contact.isEmpty ? null : Text(contact, style: TextStyle(color: textSecondary, fontSize: 12)),
+                    title: Text(userName, style: TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.bodyL, color: textPrimary)),
+                    subtitle: contact.isEmpty ? null : Text(contact, style: TextStyle(color: textSecondary, fontSize: MTextSize.caption)),
                     trailing: _savingName
                         ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                         : TextButton(
@@ -156,7 +152,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                   ),
                   Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
-                  const GoogleLinkTile(leading: Icon(Icons.link_rounded, color: AppTheme.primary, size: 22)),
+                  GoogleLinkTile(account: Provider.of<AuthService>(context, listen: false), leading: const Icon(Icons.link_rounded, color: AppTheme.primary, size: 22)),
                 ],
               ),
 
@@ -167,25 +163,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   ListTile(
                     leading: const Icon(Icons.language_rounded, color: AppTheme.primary, size: 22),
-                    title: Text(l10n.translate('activeLanguage'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: textPrimary)),
-                    subtitle: Text(AppLocalizations.languages[localeProvider.locale.languageCode] ?? 'English', style: TextStyle(fontSize: 12, color: textSecondary)),
-                    trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
+                    title: Text(l10n.translate('activeLanguage'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: MTextSize.bodyM, color: textPrimary)),
+                    subtitle: Text(AppLocalizations.languages[localeProvider.locale.languageCode] ?? 'English', style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
+                    trailing: Icon(Icons.chevron_right_rounded, color: AppTheme.secondaryText(context)),
                     onTap: () {
-                      showModalBottomSheet(
-                        context: context,
-                        isScrollControlled: true,
-                        builder: (ctx) {
+                      showMSheet(context, builder: (ctx) {
                           final mBg = AppTheme.cardBackground(context);
                           final mText = AppTheme.primaryText(context);
 
                           return Container(
                             color: mBg,
                             constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.75),
-                            padding: const EdgeInsets.all(20),
+                            padding: const EdgeInsets.all(MSpace.xl),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(l10n.translate('selectLanguagePrompt'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: mText)),
+                                Text(l10n.translate('selectLanguagePrompt'), style: TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.bold, color: mText)),
                                 const SizedBox(height: 10),
                                 Expanded(
                                   child: ListView(
@@ -205,25 +198,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ],
                             ),
                           );
-                        },
-                      );
+                        }, isScrollControlled: true, useSafeArea: false);
                     },
                   ),
                   Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
                   ListTile(
                     leading: const Icon(Icons.palette_outlined, color: AppTheme.primary, size: 22),
-                    title: Text(l10n.translate('displayAppearance'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: textPrimary)),
+                    title: Text(l10n.translate('displayAppearance'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: MTextSize.bodyM, color: textPrimary)),
                     subtitle: Text(
                       themeProvider.mode == AppThemeMode.light
                           ? l10n.translate('themeLight')
                           : (themeProvider.mode == AppThemeMode.dark ? l10n.translate('themeDark') : l10n.translate('themeAmber')),
-                      style: TextStyle(fontSize: 12, color: textSecondary),
+                      style: TextStyle(fontSize: MTextSize.caption, color: textSecondary),
                     ),
-                    trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
+                    trailing: Icon(Icons.chevron_right_rounded, color: AppTheme.secondaryText(context)),
                     onTap: () {
-                      showModalBottomSheet(
-                        context: context,
-                        builder: (ctx) {
+                      showMSheet(context, builder: (ctx) {
                           final mBg = AppTheme.cardBackground(context);
                           final mText = AppTheme.primaryText(context);
 
@@ -234,7 +224,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   ListTile(
-                                    leading: const Icon(Icons.light_mode_outlined, color: Color(0xFFEAB308)),
+                                    leading: const Icon(Icons.light_mode_outlined, color: MPalette.amber),
                                     title: Text(l10n.translate('themeLight'), style: TextStyle(color: mText, fontWeight: FontWeight.w600)),
                                     trailing: themeProvider.mode == AppThemeMode.light ? const Icon(Icons.check, color: AppTheme.primary) : null,
                                     onTap: () {
@@ -243,7 +233,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     },
                                   ),
                                   ListTile(
-                                    leading: const Icon(Icons.dark_mode_outlined, color: Color(0xFF6D2E8C)),
+                                    leading: const Icon(Icons.dark_mode_outlined, color: MPalette.malva),
                                     title: Text(l10n.translate('themeDark'), style: TextStyle(color: mText, fontWeight: FontWeight.w600)),
                                     trailing: themeProvider.mode == AppThemeMode.dark ? const Icon(Icons.check, color: AppTheme.primary) : null,
                                     onTap: () {
@@ -252,7 +242,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     },
                                   ),
                                   ListTile(
-                                    leading: const Icon(Icons.wb_sunny_outlined, color: Color(0xFFB86E00)),
+                                    leading: const Icon(Icons.wb_sunny_outlined, color: MPalette.amberInk),
                                     title: Text(l10n.translate('themeAmber'), style: TextStyle(color: mText, fontWeight: FontWeight.w600)),
                                     trailing: themeProvider.mode == AppThemeMode.eyeComfort ? const Icon(Icons.check, color: AppTheme.primary) : null,
                                     onTap: () {
@@ -264,8 +254,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ),
                             ),
                           );
-                        },
-                      );
+                        }, isScrollControlled: false, useSafeArea: false);
                     },
                   ),
                 ],
@@ -278,25 +267,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   ListTile(
                     leading: const Icon(Icons.download_rounded, color: AppTheme.primary, size: 22),
-                    title: Text(l10n.translate('exportData'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: textPrimary)),
-                    subtitle: Text(l10n.translate('rightOfAccessArt15Sub'), style: TextStyle(fontSize: 12, color: textSecondary)),
-                    trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
+                    title: Text(l10n.translate('exportData'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: MTextSize.bodyM, color: textPrimary)),
+                    subtitle: Text(l10n.translate('rightOfAccessArt15Sub'), style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
+                    trailing: Icon(Icons.chevron_right_rounded, color: AppTheme.secondaryText(context)),
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PrivacyGdprScreen())),
                   ),
                   Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
                   ListTile(
-                    leading: const Icon(Icons.gavel_rounded, color: Color(0xFFB86E00), size: 22),
-                    title: Text(l10n.translate('termsOfServiceLaw'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: textPrimary)),
-                    subtitle: Text(l10n.translate('fourteenDayWithdrawal'), style: TextStyle(fontSize: 12, color: textSecondary)),
-                    trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
+                    leading: const Icon(Icons.gavel_rounded, color: MPalette.amberInk, size: 22),
+                    title: Text(l10n.translate('termsOfServiceLaw'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: MTextSize.bodyM, color: textPrimary)),
+                    subtitle: Text(l10n.translate('fourteenDayWithdrawal'), style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
+                    trailing: Icon(Icons.chevron_right_rounded, color: AppTheme.secondaryText(context)),
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TermsLegalScreen())),
                   ),
                   Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
                   ListTile(
-                    leading: const Icon(Icons.delete_forever_rounded, color: Color(0xFFB3261E), size: 22),
-                    title: Text(l10n.translate('deleteAccount'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Color(0xFFB3261E))),
-                    subtitle: Text(l10n.translate('eraseAccountArt17'), style: TextStyle(fontSize: 12, color: textSecondary)),
-                    trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
+                    leading: const Icon(Icons.delete_forever_rounded, color: MPalette.redInk, size: 22),
+                    title: Text(l10n.translate('deleteAccount'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyM, color: MPalette.redInk)),
+                    subtitle: Text(l10n.translate('eraseAccountArt17'), style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
+                    trailing: Icon(Icons.chevron_right_rounded, color: AppTheme.secondaryText(context)),
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PrivacyGdprScreen())),
                   ),
                 ],
@@ -307,7 +296,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: Text(
                   l10n.translate('platformLegalFooter'),
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 11, color: textSecondary, height: 1.4),
+                  style: TextStyle(fontSize: MTextSize.caption, color: textSecondary, height: 1.4),
                 ),
               ),
               const SizedBox(height: 30),

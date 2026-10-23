@@ -2,9 +2,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../config/theme.dart';
-import 'haptics.dart';
-import 'strings.dart';
 
 /// The navigation app the courier hands a route to.
 enum NavApp { googleMaps, waze, system }
@@ -40,23 +40,21 @@ class NavApps {
 
   /// Asks which app to use (and whether to remember it). Null = cancelled.
   static Future<NavApp?> choose(BuildContext context, {bool offerRemember = true}) async {
-    Haptics.select();
+    Haptics.selection();
     var remember = true;
     final current = await saved();
     if (!context.mounted) return null;
-    final picked = await showModalBottomSheet<NavApp>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
+    final picked = await showMSheet<NavApp>(context, builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) => SafeArea(
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+              padding: const EdgeInsets.fromLTRB(MSpace.xxl, 0, MSpace.xxl, MSpace.sm),
               child: Text(tr(ctx, 'Navigate with', 'Navigoi sovelluksella'), style: AppTheme.display(size: 20)),
             ),
             for (final app in NavApp.values)
               ListTile(
                 minTileHeight: 56,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+                contentPadding: const EdgeInsets.symmetric(horizontal: MSpace.xxl),
                 leading: Icon(switch (app) {
                   NavApp.googleMaps => Icons.map_outlined,
                   NavApp.waze => Icons.directions_car_outlined,
@@ -68,18 +66,17 @@ class NavApps {
               ),
             if (offerRemember)
               CheckboxListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                contentPadding: const EdgeInsets.symmetric(horizontal: MSpace.lg),
                 value: remember,
                 onChanged: (v) => setSheet(() => remember = v ?? true),
                 title: Text(tr(ctx, 'Remember my choice', 'Muista valintani')),
                 subtitle: Text(tr(ctx, 'Change it any time in your account, or long-press Navigate.', 'Voit vaihtaa sen milloin vain tililtäsi tai painamalla Navigoi-painiketta pitkään.')),
                 controlAffinity: ListTileControlAffinity.leading,
               ),
-            const SizedBox(height: 8),
+            const SizedBox(height: MSpace.sm),
           ]),
         ),
-      ),
-    );
+      ), isScrollControlled: false, useSafeArea: false);
     if (picked != null && (remember || !offerRemember)) await _save(picked);
     return picked;
   }
@@ -97,7 +94,7 @@ class NavApps {
       app = await choose(context);
       if (app == null) return true; // cancelled: nothing to report
     }
-    Haptics.select();
+    Haptics.selection();
     final q = hasPoint ? '$lat,$lng' : Uri.encodeComponent(text);
     final google = <Uri>[
       if (Platform.isAndroid) Uri.parse('google.navigation:q=$q&mode=b'),

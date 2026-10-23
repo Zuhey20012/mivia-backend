@@ -4,21 +4,17 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
-import '../core/app_language.dart';
-import '../core/api_client.dart';
-import '../core/strings.dart';
-import '../core/legal_links.dart';
 import '../config/constants.dart';
 import '../config/theme.dart';
 import '../l10n.dart';
-import '../locale_provider.dart';
 import '../auth_service.dart';
 import '../local_notification_service.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import 'address_management_screen.dart';
 import 'support_hub_screen.dart';
 import 'agreements_screen.dart';
-import '../core/haptics.dart';
 
 /// Privacy: download your data (GDPR art. 15), correct it, ask about it, and delete the account
 /// (art. 17; the server anonymises the user and keeps order records for the Accounting Act).
@@ -53,7 +49,7 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
     try {
       final res = await http.get(
         Uri.parse('${AppConstants.apiBase}/auth/me/data'),
-        headers: {'Authorization': 'Bearer ${auth.accessToken}', ...AppLanguage.header},
+        headers: {'Authorization': 'Bearer ${auth.accessToken}', ...AppLanguage.headers},
       );
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
@@ -86,18 +82,12 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
 
         return Container(
           color: cardBg,
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(MSpace.xxl),
           constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.85),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Center(
-                child: Container(
-                  width: 44,
-                  height: 5,
-                  decoration: BoxDecoration(color: Colors.grey.shade400, borderRadius: BorderRadius.circular(3)),
-                ),
-              ),
+              const SizedBox.shrink(),
               const SizedBox(height: 18),
               Row(
                 children: [
@@ -109,36 +99,36 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                     ),
                     child: const Icon(Icons.file_download_rounded, color: AppTheme.primary, size: 24),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: MSpace.md),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(l10n.translate('gdprArt15ArchiveTitle'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textPrimary)),
-                        Text(l10n.translate('portableJsonFormat'), style: TextStyle(fontSize: 12, color: textSecondary)),
+                        Text(l10n.translate('gdprArt15ArchiveTitle'), style: TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w800, color: textPrimary)),
+                        Text(l10n.translate('portableJsonFormat'), style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
                       ],
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: MSpace.lg),
               Expanded(
                 child: Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: inputBg,
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(MRadius.md),
                     border: Border.all(color: AppTheme.cardBorder(ctx)),
                   ),
                   child: SingleChildScrollView(
                     child: SelectableText(
                       prettyJson,
-                      style: TextStyle(fontFamily: 'monospace', fontSize: 11, height: 1.4, color: textPrimary),
+                      style: TextStyle(fontFamily: 'monospace', fontSize: MTextSize.caption, height: 1.4, color: textPrimary),
                     ),
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: MSpace.lg),
               Row(
                 children: [
                   Expanded(
@@ -148,13 +138,11 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                       onPressed: () {
                         Clipboard.setData(ClipboardData(text: prettyJson));
                         Navigator.pop(ctx);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(l10n.translate('gdprCopied')), behavior: SnackBarBehavior.floating),
-                        );
+                        MSnack.show(context, l10n.translate('gdprCopied'));
                       },
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: MSpace.md),
                   Expanded(
                     child: ElevatedButton.icon(
                       icon: const Icon(Icons.email_outlined, size: 18),
@@ -191,29 +179,29 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
 
         return AlertDialog(
           backgroundColor: cardBg,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(MRadius.lg)),
           title: Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(MSpace.sm),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFD93025).withValues(alpha: 0.12),
+                  color: MPalette.red.withValues(alpha: 0.12),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.delete_forever_rounded, color: Color(0xFFB3261E), size: 24),
+                child: const Icon(Icons.delete_forever_rounded, color: MPalette.redInk, size: 24),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: MSpace.md),
               Expanded(
                 child: Text(
                   l10n.translate('confirmDelete'),
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: textPrimary),
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.title, color: textPrimary),
                 ),
               ),
             ],
           ),
           content: Text(
             l10n.translate('deleteAccountSimpleMsg'),
-            style: TextStyle(fontSize: 14, height: 1.4, color: textSecondary),
+            style: TextStyle(fontSize: MTextSize.bodyM, height: 1.4, color: textSecondary),
           ),
           actions: [
             TextButton(
@@ -222,8 +210,8 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFB3261E),
-                foregroundColor: Colors.white,
+                backgroundColor: MPalette.redInk,
+                foregroundColor: AppTheme.onBrand,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
               onPressed: () async {
@@ -239,7 +227,7 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                       child: AlertDialog(
                         content: Row(children: [
                           const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5)),
-                          const SizedBox(width: 16),
+                          const SizedBox(width: MSpace.lg),
                           Expanded(child: Text(tr(context, 'Deleting your account…', 'Poistetaan tiliäsi…'))),
                         ]),
                       ),
@@ -276,7 +264,7 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(l10n.translate('accountErasedNotifBody')),
-                      backgroundColor: const Color(0xFF55226E),
+                      backgroundColor: MPalette.malvaStrong,
                       behavior: SnackBarBehavior.floating,
                       duration: const Duration(seconds: 4),
                     ),
@@ -308,7 +296,7 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
           appBar: AppBar(
             title: Text(
               l10n.translate('privacyPolicy'),
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: textPrimary),
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.title, color: textPrimary),
             ),
             backgroundColor: cardBg,
             elevation: 0,
@@ -322,25 +310,25 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
               ? const Center(child: CircularProgressIndicator())
               : ListView(
                   physics: const BouncingScrollPhysics(),
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(MSpace.lg),
                   children: [
                     // GDPR Summary Header Card
                     Container(
                       padding: const EdgeInsets.all(18),
                       decoration: BoxDecoration(
                         color: cardBg,
-                        borderRadius: BorderRadius.circular(24),
+                        borderRadius: BorderRadius.circular(MRadius.lg),
                         border: Border.all(color: borderColor),
                       ),
                       child: Row(
                         children: [
                           Container(
-                            padding: const EdgeInsets.all(12),
+                            padding: const EdgeInsets.all(MSpace.md),
                             decoration: BoxDecoration(
-                              color: Colors.teal.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(16),
+                              color: MPalette.green.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(MRadius.md),
                             ),
-                            child: const Icon(Icons.privacy_tip_rounded, color: Colors.teal, size: 28),
+                            child: const Icon(Icons.privacy_tip_rounded, color: MPalette.green, size: 28),
                           ),
                           const SizedBox(width: 14),
                           Expanded(
@@ -349,12 +337,12 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                               children: [
                                 Text(
                                   l10n.translate('euGdprSovereignty'),
-                                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: textPrimary),
+                                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.bodyL, color: textPrimary),
                                 ),
                                 const SizedBox(height: 3),
                                 Text(
                                   l10n.translate('euGdprSubtitle'),
-                                  style: TextStyle(fontSize: 12, color: textSecondary, height: 1.4),
+                                  style: TextStyle(fontSize: MTextSize.caption, color: textSecondary, height: 1.4),
                                 ),
                               ],
                             ),
@@ -362,7 +350,7 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: MSpace.lg),
 
                     // 1. DATA ACCESS & EXPORT SECTION
                     _buildCard(
@@ -373,22 +361,22 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                       children: [
                         ListTile(
                           leading: const Icon(Icons.download_for_offline_outlined, color: AppTheme.primary),
-                          title: Text(l10n.translate('rightOfAccessArt15'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
-                          subtitle: Text(l10n.translate('rightOfAccessArt15Sub'), style: TextStyle(fontSize: 12, color: textSecondary)),
-                          trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
+                          title: Text(l10n.translate('rightOfAccessArt15'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyM, color: textPrimary)),
+                          subtitle: Text(l10n.translate('rightOfAccessArt15Sub'), style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
+                          trailing: Icon(Icons.chevron_right_rounded, color: AppTheme.secondaryText(context)),
                           onTap: () => _exportUserData(auth, l10n),
                         ),
                         Divider(height: 1, indent: 56, color: dividerColor),
                         ListTile(
-                          leading: const Icon(Icons.edit_location_alt_outlined, color: Color(0xFF248A52)),
-                          title: Text(l10n.translate('rightToRectificationArt16'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
-                          subtitle: Text(l10n.translate('rightToRectificationArt16Sub'), style: TextStyle(fontSize: 12, color: textSecondary)),
-                          trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
+                          leading: const Icon(Icons.edit_location_alt_outlined, color: MPalette.green),
+                          title: Text(l10n.translate('rightToRectificationArt16'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyM, color: textPrimary)),
+                          subtitle: Text(l10n.translate('rightToRectificationArt16Sub'), style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
+                          trailing: Icon(Icons.chevron_right_rounded, color: AppTheme.secondaryText(context)),
                           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AddressManagementScreen())),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: MSpace.lg),
 
                     // 2. No tracking to consent to
                     _buildCard(
@@ -401,20 +389,20 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                           leading: const Icon(Icons.verified_user_outlined, color: AppTheme.primary),
                           title: Text(
                             tr(context, 'No ads, no analytics trackers', 'Ei mainoksia, ei analytiikkaseurantaa'),
-                            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary),
+                            style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyM, color: textPrimary),
                           ),
                           subtitle: Text(
                             tr(context,
                                 'Malvoya uses your data only to run your orders and account, so there is nothing extra to consent to. The Drops feed is ranked without a personal profile.',
                                 'Malvoya käyttää tietojasi vain tilaustesi ja tilisi hoitamiseen, joten erillistä suostumusta ei tarvita. Drops-syöte järjestetään ilman henkilökohtaista profiilia.'),
-                            style: TextStyle(fontSize: 12, color: textSecondary, height: 1.4),
+                            style: TextStyle(fontSize: MTextSize.caption, color: textSecondary, height: 1.4),
                           ),
                         ),
                         Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
                         ListTile(
                           leading: const Icon(Icons.description_outlined, color: AppTheme.primary),
                           title: Text(tr(context, 'Read the full privacy policy', 'Lue koko tietosuojaseloste'),
-                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyM, color: textPrimary)),
                           trailing: const Icon(Icons.open_in_new_rounded, size: 18),
                           onTap: () => openLegal('privacy'),
                         ),
@@ -423,16 +411,16 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                           ListTile(
                             leading: const Icon(Icons.handshake_outlined, color: AppTheme.primary),
                             title: Text(tr(context, 'Agreements', 'Sopimukset'),
-                                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
+                                style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyM, color: textPrimary)),
                             subtitle: Text(tr(context, 'What you have accepted and when, with copies', 'Mitä olet hyväksynyt ja milloin, sekä kopiot'),
-                                style: TextStyle(fontSize: 12, color: textSecondary)),
-                            trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
+                                style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
+                            trailing: Icon(Icons.chevron_right_rounded, color: AppTheme.secondaryText(context)),
                             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AgreementsScreen())),
                           ),
                         ],
                       ],
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: MSpace.lg),
 
                     // 3. DPO & REGULATORY CONTACT
                     _buildCard(
@@ -442,65 +430,65 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                       textSecondary: textSecondary,
                       children: [
                         ListTile(
-                          leading: const Icon(Icons.contact_mail_outlined, color: Color(0xFF3B82F6)),
+                          leading: const Icon(Icons.contact_mail_outlined, color: MPalette.moss),
                           title: Text(tr(context, 'Ask Malvoya about your data', 'Kysy Malvoyalta tiedoistasi'),
-                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyM, color: textPrimary)),
                           subtitle: Text(tr(context, 'Send a message under "Account and privacy". We reply by email.',
                                   'Lähetä viesti aiheella "Tili ja tietosuoja". Vastaamme sähköpostitse.'),
-                              style: TextStyle(fontSize: 12, color: textSecondary)),
-                          trailing: const Icon(Icons.arrow_forward_rounded, color: Colors.grey, size: 18),
+                              style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
+                          trailing: Icon(Icons.arrow_forward_rounded, color: AppTheme.secondaryText(context), size: 18),
                           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SupportHubScreen())),
                         ),
                         Divider(height: 1, indent: 56, color: dividerColor),
                         ListTile(
-                          leading: const Icon(Icons.shield_outlined, color: Color(0xFF248A52)),
+                          leading: const Icon(Icons.shield_outlined, color: MPalette.green),
                           title: Text(tr(context, 'Data Protection Ombudsman', 'Tietosuojavaltuutettu'),
-                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textPrimary)),
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyM, color: textPrimary)),
                           subtitle: Text(tr(context, 'You can also complain to the Finnish supervisory authority (tietosuoja.fi).',
                                   'Voit myös tehdä valituksen valvovalle viranomaiselle (tietosuoja.fi).'),
-                              style: TextStyle(fontSize: 12, color: textSecondary)),
-                          trailing: const Icon(Icons.open_in_new_rounded, color: Colors.grey, size: 18),
+                              style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
+                          trailing: Icon(Icons.open_in_new_rounded, color: AppTheme.secondaryText(context), size: 18),
                           onTap: () => launchUrl(Uri.parse('https://tietosuoja.fi'), mode: LaunchMode.externalApplication),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: MSpace.lg),
 
                     // 4. PERMANENT ACCOUNT ERASURE (GDPR ARTICLE 17)
                     Container(
                       padding: const EdgeInsets.all(18),
                       decoration: BoxDecoration(
                         color: cardBg,
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: const Color(0xFFD93025).withValues(alpha: 0.4), width: 1.5),
+                        borderRadius: BorderRadius.circular(MRadius.lg),
+                        border: Border.all(color: MPalette.red.withValues(alpha: 0.4), width: 1.5),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
                             children: [
-                              const Icon(Icons.warning_amber_rounded, color: Color(0xFFB3261E), size: 22),
-                              const SizedBox(width: 8),
+                              const Icon(Icons.warning_amber_rounded, color: MPalette.redInk, size: 22),
+                              const SizedBox(width: MSpace.sm),
                               Text(
                                 l10n.translate('rightToErasureArt17'),
-                                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: textPrimary),
+                                style: TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.bodyL, color: textPrimary),
                               ),
                             ],
                           ),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: MSpace.sm),
                           Text(
                             l10n.translate('rightToErasureArt17Sub'),
-                            style: TextStyle(fontSize: 12, height: 1.4, color: textSecondary),
+                            style: TextStyle(fontSize: MTextSize.caption, height: 1.4, color: textSecondary),
                           ),
                           const SizedBox(height: 14),
                           SizedBox(
                             width: double.infinity,
                             child: OutlinedButton.icon(
-                              icon: const Icon(Icons.delete_forever_rounded, color: Color(0xFFB3261E)),
-                              label: Text(l10n.translate('eraseAccountPersonalData'), style: const TextStyle(color: Color(0xFFB3261E), fontWeight: FontWeight.w800)),
+                              icon: const Icon(Icons.delete_forever_rounded, color: MPalette.redInk),
+                              label: Text(l10n.translate('eraseAccountPersonalData'), style: const TextStyle(color: MPalette.redInk, fontWeight: FontWeight.w800)),
                               style: OutlinedButton.styleFrom(
-                                side: const BorderSide(color: Color(0xFFB3261E), width: 1.5),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                side: const BorderSide(color: MPalette.redInk, width: 1.5),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(MRadius.md)),
                                 padding: const EdgeInsets.symmetric(vertical: 14),
                               ),
                               onPressed: () => _confirmDeleteAccount(auth, l10n),
@@ -527,7 +515,7 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
     return Container(
       decoration: BoxDecoration(
         color: cardBg,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(MRadius.lg),
         border: Border.all(color: borderColor),
       ),
       clipBehavior: Clip.antiAlias,
@@ -535,10 +523,10 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(18, 16, 18, 8),
+            padding: const EdgeInsets.fromLTRB(18, MSpace.lg, 18, MSpace.sm),
             child: Text(
               title,
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: textSecondary, letterSpacing: 0.6),
+              style: TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w800, color: textSecondary, letterSpacing: 0.6),
             ),
           ),
           ...children,

@@ -1,8 +1,8 @@
 import pino from "pino";
-import { Prisma, Audience } from "@prisma/client";
+import { Prisma, Audience, AgeGroup } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { haversineKm } from "../../utils/distance";
-import { COLLECTIONS, SECOND_HAND_TOP, SUBS, TAXONOMY, Template } from "./taxonomy";
+import { BEAUTY_TOPS, COLLECTIONS, SECOND_HAND_TOP, SUBS, TAXONOMY, Template } from "./taxonomy";
 import { COLUMN_FILTERS, facetKeysFor, facetLabel, facetRows, valueLabel } from "./attributes";
 import { matchTaxonomy } from "./matcher";
 import { isGreenTag } from "./claims";
@@ -36,7 +36,7 @@ export async function categoryIndex(): Promise<Index> {
 /** Called after an admin edit and after the seed. Also clears the counts cache. */
 export function invalidateCategories() {
   index = null;
-  treeCache.clear();
+  invalidateCategoryCounts();
 }
 
 // ─── Seed and one-off backfill ───────────────────────────────────────────────
@@ -167,14 +167,20 @@ export async function storesInReach(lat: number | null, lng: number | null): Pro
   return rows.filter((s) => haversineKm(lat, lng, s.latitude!, s.longitude!) <= REACH_KM).map((s) => s.id);
 }
 
-/** Unisex products appear under both Women and Men. */
-export function audienceWhere(audience: string | undefined | null): Prisma.ProductWhereInput {
-  if (!audience) return {};
-  const a = audience.toUpperCase();
-  if (a === "WOMEN" || a === "MEN") return { audience: { in: [a as Audience, "UNISEX"] } };
-  if (a === "KIDS" || a === "UNISEX") return { audience: a as Audience };
-  return {};
+/** Unisex products appear under both Women and Men. An age group (Kids row, Teens) narrows it further. */
+export function audienceWhere(audience: string | undefined | null, ageGroup?: string | null): Prisma.ProductWhereInput {
+  const a = audience?.toUpperCase();
+  const where: Prisma.ProductWhereInput =
+    a === "WOMEN" || a === "MEN" ? { audience: { in: [a as Audience, "UNISEX"] } }
+    : a === "KIDS" || a === "UNISEX" ? { audience: a as Audience }
+    : {};
+  if (ageGroup) where.ageGroup = ageGroup as AgeGroup;
+  return where;
 }
+
+/** Kids sections never promote beauty or fragrance (owner rule, category-sections-v2 §2). */
+export const isKidsView = (audience?: string | null, ageGroup?: string | null) =>
+  audience?.toUpperCase() === "KIDS" || ["BABY", "TODDLER", "KIDS", "JUNIOR", "TEEN"].includes(ageGroup ?? "");
 
 /** What shoppers can buy: visible, in stock, not deleted, from an approved store (optionally within reach). */
 export function availableWhere(storeIds: number[] | null): Prisma.ProductWhereInput {
@@ -222,13 +228,20 @@ export async function templatesOf(slug: string): Promise<Template[]> {
 
 // ─── Tree with counts ────────────────────────────────────────────────────────
 
-type TreeOpts = { lat: number | null; lng: number | null; audience?: string; includeEmpty?: boolean };
+type TreeOpts = { lat: number | null; lng: number | null; audience?: string; ageGroup?: string; includeEmpty?: boolean };
 const treeCache = new Map<string, { at: number; value: unknown }>();
 const TREE_TTL_MS = 30_000;
+
+const otherCountCaches: (() => void)[] = [];
+/** Other count caches (collections) that product writes clear too. */
+export function registerCountCache(clear: () => void) {
+  otherCountCaches.push(clear);
+}
 
 /** Product writes call this so counts never lag behind on this instance (other instances refresh within 30 s). */
 export function invalidateCategoryCounts() {
   treeCache.clear();
+  for (const c of otherCountCaches) c();
 }
 
 function presentNode(n: CatRow, count: number) {
@@ -269,7 +282,7 @@ function nodeCount(idx: Index, n: CatRow, c: Awaited<ReturnType<typeof countsFor
 
 /** GET /categories: the tree with live counts of buyable products within reach; empty nodes hidden unless includeEmpty. */
 export async function categoryTree(o: TreeOpts) {
-  const key = JSON.stringify([o.lat === null ? null : Math.round(o.lat * 100), o.lng === null ? null : Math.round(o.lng * 100), o.audience ?? null, !!o.includeEmpty]);
+  const key = JSON.stringify([o.lat === null ? null : Math.round(o.lat * 100), o.lng === null ? null : Math.round(o.lng * 100), o.audience ?? null, o.ageGroup ?? null, !!o.includeEmpty]);
   const hit = treeCache.get(key);
   if (hit && Date.now() - hit.at < TREE_TTL_MS) return hit.value as Awaited<ReturnType<typeof buildTree>>;
   const value = await buildTree(o);
@@ -281,8 +294,9 @@ export async function categoryTree(o: TreeOpts) {
 async function buildTree(o: TreeOpts) {
   const idx = await categoryIndex();
   const storeIds = await storesInReach(o.lat, o.lng);
-  const counts = await countsFor({ ...availableWhere(storeIds), ...audienceWhere(o.audience) });
-  const tops = idx.rows.filter((r) => r.parentId === null && r.active);
+  const counts = await countsFor({ ...availableWhere(storeIds), ...audienceWhere(o.audience, o.ageGroup) });
+  const kids = isKidsView(o.audience, o.ageGroup);
+  const tops = idx.rows.filter((r) => r.parentId === null && r.active && !(kids && BEAUTY_TOPS.includes(r.slug)));
   const categories = tops.map((t) => {
     const children = (idx.children.get(t.id) ?? []).filter((c) => c.active)
       .map((c) => presentNode(c, nodeCount(idx, c, counts)))
@@ -292,6 +306,7 @@ async function buildTree(o: TreeOpts) {
   return {
     categories,
     audience: o.audience ?? null,
+    ageGroup: o.ageGroup ?? null,
     reach: { km: REACH_KM, located: storeIds !== null, stores: storeIds?.length ?? null },
   };
 }
@@ -303,12 +318,13 @@ const MAX_FACET_VALUES = 30;
 /** Facets (filters) available for a set of products, with counts. */
 export async function facetsFor(templates: Template[], where: Prisma.ProductWhereInput) {
   const keys = [...new Set(templates.flatMap((t) => facetKeysFor(t)))];
-  const [attrRows, conditions, audiences, certs] = await Promise.all([
+  const [attrRows, conditions, audiences, ageGroups, certs] = await Promise.all([
     keys.length
       ? prisma.productFacet.groupBy({ by: ["key", "value"], where: { key: { in: keys }, product: where }, _count: { _all: true } })
       : Promise.resolve([] as { key: string; value: string; _count: { _all: number } }[]),
     prisma.product.groupBy({ by: ["condition"], where, _count: { _all: true } }),
     prisma.product.groupBy({ by: ["audience"], where, _count: { _all: true } }),
+    prisma.product.groupBy({ by: ["ageGroup"], where, _count: { _all: true } }),
     prisma.productCertificate.findMany({
       where: { product: where, certificate: liveCertificateWhere() },
       select: { productId: true, certificate: { select: { scheme: true } } }, take: 5000,
@@ -327,6 +343,7 @@ export async function facetsFor(templates: Template[], where: Prisma.ProductWher
   };
   col("condition", conditions.map((r) => ({ value: r.condition, count: r._count._all })));
   col("audience", audiences.map((r) => ({ value: r.audience, count: r._count._all })));
+  col("ageGroup", ageGroups.filter((r) => r.ageGroup).map((r) => ({ value: r.ageGroup!, count: r._count._all })));
   const byScheme = new Map<string, Set<number>>();
   for (const c of certs) byScheme.set(c.certificate.scheme, (byScheme.get(c.certificate.scheme) ?? new Set()).add(c.productId));
   const certValues = [...byScheme].map(([scheme, ids]) => ({ value: scheme, label: SCHEMES[scheme]?.name ?? { en: scheme, fi: scheme }, count: ids.size }))
@@ -342,7 +359,7 @@ export async function categoryDetail(slug: string, o: TreeOpts) {
   if (!node || !node.active) return null;
   const parent = node.parentId ? idx.byId.get(node.parentId) ?? null : null;
   const storeIds = await storesInReach(o.lat, o.lng);
-  const base = { ...availableWhere(storeIds), ...audienceWhere(o.audience) };
+  const base = { ...availableWhere(storeIds), ...audienceWhere(o.audience, o.ageGroup) };
   const counts = await countsFor(base);
   const filter = (await categoryFilter(slug)) ?? {};
   const where = { AND: [base, filter] };

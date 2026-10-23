@@ -4,11 +4,10 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
-import 'api_client.dart';
-import 'legal_links.dart';
-import 'strings.dart';
 
 /// Versioned agreements (API 2.11).
 ///
@@ -17,98 +16,16 @@ import 'strings.dart';
 /// then retries by itself. Going offline is never blocked, and the privacy notice never blocks.
 /// An announced (pending) version can be accepted early but never blocks before its date.
 
-/// The body of a 428 `AGREEMENT_REQUIRED` answer.
-class AgreementRequired {
-  final String doc;
-  final String version;
-  final Map? title;
-  final String? url;
-  final String? message;
-
-  const AgreementRequired({required this.doc, required this.version, this.title, this.url, this.message});
-
-  /// Null when [res] is anything else.
-  static AgreementRequired? from(ApiResult res) {
-    if (res.status != 428 || res.data['code'] != 'AGREEMENT_REQUIRED') return null;
-    final doc = res.data['doc'];
-    final version = res.data['version'];
-    if (doc is! String || version is! String) return null;
-    return AgreementRequired(
-      doc: doc,
-      version: version,
-      title: res.data['title'] is Map ? res.data['title'] as Map : null,
-      url: res.data['url'] is String ? res.data['url'] as String : null,
-      message: res.error,
-    );
-  }
-}
-
-/// One document of `GET /me/agreements` → `required`.
-class AgreementDoc {
-  final Map<String, dynamic> raw;
-  const AgreementDoc(this.raw);
-
-  static DateTime? _date(dynamic v) => v == null ? null : DateTime.tryParse('$v');
-
-  String get doc => '${raw['doc'] ?? ''}';
-  Map? get title => raw['title'] is Map ? raw['title'] as Map : null;
-  bool get blocking => raw['blocking'] != false;
-  String? get currentVersion => raw['currentVersion'] as String?;
-  DateTime? get effectiveAt => _date(raw['effectiveAt']);
-  bool get accepted => raw['accepted'] == true;
-  DateTime? get acceptedAt => _date(raw['acceptedAt']);
-  String? get url => raw['url'] as String?;
-  String? get pendingVersion => raw['pendingVersion'] as String?;
-  DateTime? get pendingEffectiveAt => _date(raw['pendingEffectiveAt']);
-  bool get pendingAccepted => raw['pendingAccepted'] == true;
-  String? get pendingUrl => raw['pendingUrl'] as String?;
-  Map? get summary => raw['summary'] is Map ? raw['summary'] as Map : null;
-
-  /// An announced version the courier has not accepted yet.
-  bool get hasOpenUpdate => pendingVersion != null && !pendingAccepted;
-}
-
-class AgreementState {
-  /// 0 = no connection, 404 = a server without agreements (before 2.11).
-  final int status;
-  final String? error;
-  final List<AgreementDoc> required;
-  final List<Map<String, dynamic>> history;
-
-  const AgreementState({required this.status, this.error, this.required = const [], this.history = const []});
-
-  bool get ok => error == null;
-  bool get unsupported => status == 404;
-
-  AgreementDoc? docOf(String doc) => required.where((d) => d.doc == doc).firstOrNull;
-}
-
 class Agreements {
   Agreements._();
 
-  static const courierAgreement = 'courier-agreement';
+  static const courierAgreement = AgreementDocs.courierAgreement;
 
-  static Future<AgreementState> load(AuthService auth) async {
-    final res = await ApiClient(auth).get('/me/agreements');
-    if (!res.ok) return AgreementState(status: res.status, error: res.error);
-    List<Map<String, dynamic>> maps(dynamic v) => ((v as List?) ?? const []).whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList();
-    return AgreementState(
-      status: res.status,
-      required: maps(res.data['required']).map(AgreementDoc.new).toList(),
-      history: maps(res.data['history']),
-    );
-  }
+  /// `GET /me/agreements` (malvoya_core's data layer).
+  static Future<AgreementState> load(AuthService auth) => AgreementsApi(ApiClient(auth)).load();
 
   /// "Courier Agreement" / "Lähettisopimus" from a server title, with a fallback per document.
-  static String titleOf(BuildContext context, String doc, [Map? title]) {
-    final fromServer = localizedText(context, title);
-    if (fromServer != null) return fromServer;
-    return switch (doc) {
-      courierAgreement => tr(context, 'Courier Agreement', 'Lähettisopimus'),
-      'privacy' => tr(context, 'Privacy Policy', 'Tietosuojaseloste'),
-      _ => tr(context, 'Agreement', 'Sopimus'),
-    };
-  }
+  static String titleOf(BuildContext context, String doc, [Map? title]) => agreementTitle(context, title, doc);
 
   /// Opens a document (an exact version when [url] is given) in the in-app browser.
   static Future<void> openDocument(String? url, String doc) async {
@@ -156,7 +73,7 @@ class Agreements {
     final d = state.docOf(doc);
     if (d == null) {
       // An older server, or no network: the text can still be read
-      if (!state.ok) ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(state.unsupported ? tr(context, 'Opening the agreement.', 'Avataan sopimus.') : state.error!)));
+      if (!state.ok) MSnack.show(context, state.unsupported ? tr(context, 'Opening the agreement.', 'Avataan sopimus.') : state.error!);
       if (state.unsupported) await openDocument(null, doc);
       return false;
     }
@@ -166,11 +83,10 @@ class Agreements {
 
   /// Opens the copy of an accepted version through a 10-minute signed link.
   static Future<void> openCopy(BuildContext context, AuthService auth, int id) async {
-    final res = await ApiClient(auth).get('/me/agreements/$id/copy/link');
+    final (url, res) = await AgreementsApi(ApiClient(auth)).copyLink(id);
     if (!context.mounted) return;
-    final url = res.ok ? Uri.tryParse('${res.data['url'] ?? ''}') : null;
-    if (url == null || !url.hasScheme) {
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(res.error ?? tr(context, 'Could not open the copy. Please try again.', 'Kopiota ei voitu avata. Yritä uudelleen.'))));
+    if (url == null) {
+      MSnack.show(context, res.error ?? tr(context, 'Could not open the copy. Please try again.', 'Kopiota ei voitu avata. Yritä uudelleen.'));
       return;
     }
     await launchUrl(url, mode: LaunchMode.inAppBrowserView);
@@ -181,7 +97,7 @@ class Agreements {
     final done = privacy ? tr(context, 'Marked as read.', 'Merkitty luetuksi.') : tr(context, 'Accepted.', 'Hyväksytty.');
     // Only when the server says the email really went out
     final text = emailed ? '$done ${tr(context, 'A copy has been emailed to you.', 'Kopio on lähetetty sinulle sähköpostilla.')}' : done;
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(text)));
+    MSnack.show(context, text);
   }
 
   static Future<_AcceptResult?> _show(
@@ -195,10 +111,7 @@ class Agreements {
     DateTime? pendingAt,
     Map? changeSummary,
   }) =>
-      showModalBottomSheet<_AcceptResult>(
-        context: context,
-        isScrollControlled: true,
-        builder: (_) => _AgreementSheet(
+      showMSheet<_AcceptResult>(context, builder: (_) => _AgreementSheet(
           auth: auth,
           doc: doc,
           version: version,
@@ -207,8 +120,7 @@ class Agreements {
           blocking: blocking,
           pendingAt: pendingAt,
           changeSummary: changeSummary,
-        ),
-      );
+        ), isScrollControlled: true, useSafeArea: false);
 }
 
 class _AcceptResult {
@@ -267,27 +179,22 @@ class _AgreementSheetState extends State<_AgreementSheet> {
   }
 
   Future<void> _loadDetails() async {
-    final results = await Future.wait([_api.get('/legal/${widget.doc}/versions'), _api.get('/me/agreements')]);
+    final api = AgreementsApi(_api);
+    final (list, mine) = await (api.versions(widget.doc), api.load()).wait;
     if (!mounted) return;
-    final versions = results[0];
-    final mine = results[1];
     setState(() {
-      if (versions.ok) {
-        final list = ((versions.data['versions'] as List?) ?? const []).whereType<Map>().toList();
-        final row = list.where((v) => v['version'] == _version).firstOrNull;
+      if (list.isNotEmpty) {
+        final row = list.where((v) => v.version == _version).firstOrNull;
         if (row != null) {
-          _changeSummary ??= row['summary'] is Map ? row['summary'] as Map : null;
-          _effectiveAt = DateTime.tryParse('${row['effectiveAt'] ?? ''}');
-          _url ??= row['url'] as String?;
-          if (row['status'] == 'pending') _pendingAt ??= _effectiveAt;
+          _changeSummary ??= row.summary;
+          _effectiveAt = row.effectiveAt;
+          _url ??= row.url;
+          if (row.status == 'pending') _pendingAt ??= _effectiveAt;
         }
         // The very first published version has no "what changed"
-        _firstVersion = list.length <= 1 || (list.isNotEmpty && list.last['version'] == _version);
+        _firstVersion = list.length <= 1 || list.last.version == _version;
       }
-      if (mine.ok) {
-        final history = ((mine.data['history'] as List?) ?? const []).whereType<Map>();
-        _changed = history.any((h) => h['doc'] == widget.doc && h['version'] != _version);
-      }
+      if (mine.ok) _changed = mine.acceptedEarlier(widget.doc, _version);
     });
   }
 
@@ -298,20 +205,20 @@ class _AgreementSheetState extends State<_AgreementSheet> {
       _accepting = true;
       _error = null;
     });
-    final res = await _api.post('/me/agreements/accept', {'doc': widget.doc, 'version': _version});
+    final res = await AgreementsApi(_api).accept(widget.doc, _version);
     if (!mounted) return;
     if (res.ok) {
-      Navigator.pop(context, _AcceptResult(res.data['emailed'] == true));
+      Navigator.pop(context, _AcceptResult(res.emailed));
       return;
     }
     setState(() {
       _accepting = false;
       _error = res.error;
     });
-    if (res.status == 409) {
+    if (res.conflict) {
       // A newer version came into force meanwhile: show that one and ask again
-      final current = res.data['currentVersion'] as String?;
-      final pending = res.data['pendingVersion'] as String?;
+      final current = res.currentVersion;
+      final pending = res.pendingVersion;
       final next = _pending ? (pending ?? current) : current;
       if (next != null && next != _version) {
         setState(() {
@@ -370,7 +277,7 @@ class _AgreementSheetState extends State<_AgreementSheet> {
           'Read and accept it to go online and take jobs. Deliveries you have already accepted, your earnings, payouts and support are not affected.',
           'Lue ja hyväksy se, niin voit mennä linjoille ja ottaa keikkoja. Jo hyväksymäsi toimitukset, ansiosi, tilitykset ja tuki toimivat silti.');
     }
-    final change = (_pending || _changed) && !_firstVersion ? localizedText(context, _changeSummary) : null;
+    final change = (_pending || _changed) && !_firstVersion ? localized(context, _changeSummary) : null;
     final summary = _summary(context);
     final String checkLabel = switch (widget.doc) {
       Agreements.courierAgreement => tr(context, 'I have read the Courier Agreement and accept it.', 'Olen lukenut lähettisopimuksen ja hyväksyn sen.'),
@@ -382,7 +289,7 @@ class _AgreementSheetState extends State<_AgreementSheet> {
       child: Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+          padding: const EdgeInsets.fromLTRB(MSpace.xl, 0, MSpace.xl, MSpace.lg),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Container(
@@ -391,7 +298,7 @@ class _AgreementSheetState extends State<_AgreementSheet> {
                 decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(14)),
                 child: Icon(_privacy ? Icons.shield_outlined : Icons.gavel_rounded, color: AppTheme.primary),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: MSpace.md),
               Expanded(child: Text(heading, style: AppTheme.display(size: 21))),
             ]),
             const SizedBox(height: 10),
@@ -404,15 +311,15 @@ class _AgreementSheetState extends State<_AgreementSheet> {
                 decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(_pending ? tr(context, 'What changes', 'Mitä muuttuu') : tr(context, 'What changed', 'Mitä muuttui'),
-                      style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF8A5A00))),
-                  const SizedBox(height: 4),
+                      style: const TextStyle(fontWeight: FontWeight.w800, color: MPalette.amberInk)),
+                  const SizedBox(height: MSpace.xs),
                   Text(change, style: const TextStyle(height: 1.4, color: AppTheme.textPrimary)),
                 ]),
               ),
             ],
             if (summary.isNotEmpty) ...[
               const SizedBox(height: 14),
-              Text(tr(context, 'In short', 'Lyhyesti'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+              Text(tr(context, 'In short', 'Lyhyesti'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.bodyL)),
               const SizedBox(height: 6),
               for (final line in summary)
                 Padding(
@@ -422,15 +329,15 @@ class _AgreementSheetState extends State<_AgreementSheet> {
                       padding: EdgeInsets.only(top: 6, right: 10),
                       child: CircleAvatar(radius: 3, backgroundColor: AppTheme.primary),
                     ),
-                    Expanded(child: Text(line, style: const TextStyle(height: 1.4, fontSize: 14))),
+                    Expanded(child: Text(line, style: const TextStyle(height: 1.4, fontSize: MTextSize.bodyM))),
                   ]),
                 ),
               Text(tr(context, 'This summary does not replace the agreement; the full text applies.', 'Tämä tiivistelmä ei korvaa sopimusta; koko teksti on voimassa.'),
-                  style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary)),
+                  style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
             ],
             const SizedBox(height: 6),
             TextButton.icon(
-              style: TextButton.styleFrom(minimumSize: const Size(48, 48), padding: const EdgeInsets.symmetric(horizontal: 4)),
+              style: TextButton.styleFrom(minimumSize: const Size(48, 48), padding: const EdgeInsets.symmetric(horizontal: MSpace.xs)),
               onPressed: () => Agreements.openDocument(_url, widget.doc),
               icon: const Icon(Icons.open_in_new_rounded, size: 20),
               label: Text(tr(context, 'Read the full $title', 'Lue koko $titleFiLower')),
@@ -440,9 +347,9 @@ class _AgreementSheetState extends State<_AgreementSheet> {
                 '${tr(context, 'Version', 'Versio')} $_version',
                 if (!_pending && _effectiveAt != null) tr(context, 'in force since ${dateText(context, _effectiveAt!)}', 'voimassa ${dateText(context, _effectiveAt!)} alkaen'),
               ].join(' · '),
-              style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+              style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: MSpace.sm),
             Material(
               color: AppTheme.sand,
               borderRadius: BorderRadius.circular(AppTheme.radiusMd),
@@ -451,7 +358,7 @@ class _AgreementSheetState extends State<_AgreementSheet> {
                 onChanged: _accepting ? null : (v) => setState(() => _checked = v == true),
                 controlAffinity: ListTileControlAffinity.leading,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
-                title: Text(checkLabel, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                title: Text(checkLabel, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: MTextSize.bodyM)),
               ),
             ),
             if (_error != null)
@@ -459,17 +366,12 @@ class _AgreementSheetState extends State<_AgreementSheet> {
                 padding: const EdgeInsets.only(top: 10),
                 child: Text(_error!, style: const TextStyle(color: AppTheme.danger, fontWeight: FontWeight.w600)),
               ),
-            const SizedBox(height: 12),
+            const SizedBox(height: MSpace.md),
             SizedBox(
               width: double.infinity,
-              child: FilledButton(
-                onPressed: _checked && !_accepting ? _accept : null,
-                child: _accepting
-                    ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
-                    : Text(_privacy ? tr(context, 'Mark as read', 'Merkitse luetuksi') : tr(context, 'Accept', 'Hyväksy')),
-              ),
+              child: MButton(label: _privacy ? tr(context, 'Mark as read', 'Merkitse luetuksi') : tr(context, 'Accept', 'Hyväksy'), loading: _accepting, onPressed: _checked && !_accepting ? _accept : null),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: MSpace.xs),
             Center(
               child: TextButton(
                 style: TextButton.styleFrom(minimumSize: const Size(64, 48), foregroundColor: AppTheme.textSecondary),
@@ -538,16 +440,16 @@ class AgreementUpdateBannerState extends State<AgreementUpdateBanner> {
     final when = d.pendingEffectiveAt == null ? null : dateText(context, d.pendingEffectiveAt!);
     final title = Agreements.titleOf(context, d.doc, d.title);
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      padding: const EdgeInsets.fromLTRB(14, 6, 4, 6),
+      margin: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.sm, MSpace.lg, 0),
+      padding: const EdgeInsets.fromLTRB(14, 6, MSpace.xs, 6),
       decoration: BoxDecoration(color: AppTheme.sunshineLight, borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
       child: Row(children: [
-        const Icon(Icons.gavel_rounded, color: Color(0xFF8A5A00), size: 20),
+        const Icon(Icons.gavel_rounded, color: MPalette.amberInk, size: 20),
         const SizedBox(width: 10),
         Expanded(
           child: Text(
             when == null ? tr(context, 'The $title is changing.', '$title muuttuu.') : tr(context, 'The $title changes on $when.', '$title muuttuu $when.'),
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: AppTheme.textPrimary),
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.label, color: AppTheme.textPrimary),
           ),
         ),
         TextButton(
