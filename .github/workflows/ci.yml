@@ -1,0 +1,114 @@
+# Malvoya CI: proves every push works before anything is released.
+# Runs on GitHub's free runners for public repositories. Needs no secrets: the backend e2e uses
+# throwaway values from backend/test/e2e/test.env and local mocks (stripe-mock, Cloudinary mock).
+name: CI
+
+on:
+  push:
+    branches: [master, birch-market]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend build + e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      # Same container names and ports as the local setup (e2e.js runs `docker exec malvoya-test-db psql`)
+      - name: Start Postgres and stripe-mock
+        run: |
+          docker run -d --name malvoya-test-db -e POSTGRES_PASSWORD=test -e POSTGRES_DB=malvoya_test -p 56432:5432 postgres:15
+          docker run -d --name malvoya-stripe-mock -p 12111:12111 stripe/stripe-mock:latest
+          for i in $(seq 1 30); do docker exec malvoya-test-db pg_isready -U postgres && break; sleep 2; done
+      - name: Migrate a fresh database and check for drift
+        env:
+          DATABASE_URL: postgresql://postgres:test@localhost:56432/malvoya_test
+        run: |
+          npx prisma migrate deploy
+          npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code
+      - name: Run the end-to-end suite
+        run: |
+          node test/e2e/cloudinary_mock.js > cloudinary.log 2>&1 &
+          set -a; . test/e2e/test.env; set +a
+          export REDIS_URL=
+          node dist/index.js > api.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:4555/health && break; sleep 2; done
+          timeout 1500 node test/e2e/e2e.js
+      - name: API log on failure
+        if: failure()
+        run: tail -200 api.log || true
+
+  admin:
+    name: Admin build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: malvoya_admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: malvoya_admin/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  flutter:
+    name: Flutter analyze + test (${{ matrix.dir }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: [packages/malvoya_core, packages/malvoya_ui, Malvoya_customer, malvoya_vendor, malvoya_courier]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.41.2
+          channel: stable
+          cache: true
+      - name: Pub get
+        working-directory: ${{ matrix.dir }}
+        run: flutter pub get
+      - name: Analyze
+        working-directory: ${{ matrix.dir }}
+        run: flutter analyze
+      - name: Test
+        working-directory: ${{ matrix.dir }}
+        # Golden images were rendered on Windows; font rasterising differs slightly on Linux,
+        # so goldens are skipped here and run locally (see docs/design-system/README.md).
+        run: |
+          if [ -d test ]; then
+            files=$(find test -name '*_test.dart' ! -name 'goldens_test.dart' | sort)
+            if [ -n "$files" ]; then flutter test $files; else echo "no tests yet"; fi
+          else echo "no tests yet"; fi
+
+  design-tokens:
+    name: Design token lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.41.2
+          channel: stable
+      - run: dart run tool/check_tokens.dart --baseline
