@@ -28,6 +28,8 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
+      # The Prisma client is generated, not committed (Render's build command does the same)
+      - run: npx prisma generate
       - run: npm run build
       # Same container names and ports as the local setup (e2e.js runs `docker exec malvoya-test-db psql`)
       - name: Start Postgres and stripe-mock
