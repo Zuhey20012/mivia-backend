@@ -1,0 +1,22 @@
+---
+/** Questions as native <details> (no JavaScript). Answers are short trusted HTML written in this repo. */
+export type FaqItem = { q: string; a: string };
+
+interface Props {
+  items: FaqItem[];
+  id?: string;
+}
+
+const { items, id } = Astro.props;
+---
+
+<div class="faq" id={id}>
+  {
+    items.map((i) => (
+      <details>
+        <summary>{i.q}</summary>
+        <div class="answer" set:html={i.a} />
+      </details>
+    ))
+  }
+</div>

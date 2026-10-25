@@ -1,0 +1,82 @@
+---
+import Base from "../layouts/Base.astro";
+import Icon from "../components/Icon.astro";
+import { helpAlternates, helpPath, r, type HelpKey, type Lang } from "../i18n/routes";
+import { helpArticle, helpArticles } from "../lib/help";
+import { breadcrumbJsonLd } from "../lib/seo";
+
+interface Props {
+  lang: Lang;
+  articleKey: HelpKey;
+}
+
+const { lang, articleKey } = Astro.props;
+const fi = lang === "fi";
+const a = helpArticle(lang, articleKey);
+const others = helpArticles(lang).filter((x) => x.key !== articleKey);
+const site = Astro.site?.href ?? "";
+const helpName = fi ? "Apua" : "Help";
+const crumbs = breadcrumbJsonLd(site, [
+  { name: "Malvoya", path: r("home", lang) },
+  { name: helpName, path: r("help", lang) },
+  { name: a.title, path: a.path },
+]);
+const { Content } = a;
+---
+
+<Base lang={lang} title={`${a.title} · ${helpName}`} description={a.description} alternates={helpAlternates(articleKey)} section="help" jsonLd={[crumbs]}>
+  <div class="wrap section-tight" style="padding-bottom:0">
+    <nav class="breadcrumbs" aria-label={fi ? "Murupolku" : "Breadcrumb"}>
+      <ol>
+        <li><a href={r("home", lang)}>Malvoya</a></li>
+        <li><a href={r("help", lang)}>{helpName}</a></li>
+        <li aria-current="page">{a.title}</li>
+      </ol>
+    </nav>
+  </div>
+  <article class="wrap" aria-labelledby="article-title">
+    <header class="prose">
+      <h1 id="article-title" style="font-size:clamp(2.1rem,1.6rem + 2.4vw,3.4rem)">{a.title}</h1>
+      <p class="lead">{a.description}</p>
+    </header>
+    <div class="prose">
+      <Content />
+    </div>
+  </article>
+
+  <section class="section" aria-labelledby="still-title">
+    <div class="wrap">
+      <div class="tile tile-sun" style="max-width:52rem">
+        <h2 id="still-title" style="font-size:1.5rem">{fi ? "Tarvitsetko vielä apua?" : "Still need help?"}</h2>
+        <p class="muted">
+          {fi ? "Ota yhteyttä sovelluksessa: Profiili → Apua → Ota yhteyttä. Vastaamme sähköpostilla." : "Contact us in the app: Profile → Help → Contact us. We reply by email."}
+        </p>
+        {
+          articleKey !== "contact" && (
+            <a class="btn" href={helpPath("contact", lang)}>
+              <Icon name="chat" />
+              {fi ? "Näin otat yhteyttä" : "How to contact us"}
+            </a>
+          )
+        }
+      </div>
+
+      <h2 style="font-size:1.5rem;margin-top:48px">{fi ? "Muut ohjeet" : "Other articles"}</h2>
+      <ul class="link-list" style="max-width:52rem">
+        {
+          others.map((o) => (
+            <li>
+              <a class="link-row" href={o.path}>
+                <span class="t">
+                  <strong>{o.title}</strong>
+                  <span>{o.description}</span>
+                </span>
+                <Icon name="arrow" />
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+</Base>

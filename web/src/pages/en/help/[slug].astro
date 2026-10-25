@@ -1,0 +1,12 @@
+---
+import HelpArticleView from "../../../views/HelpArticleView.astro";
+import { HELP_ARTICLES, type HelpKey } from "../../../i18n/routes";
+
+export function getStaticPaths() {
+  return HELP_ARTICLES.map((a) => ({ params: { slug: a.en }, props: { articleKey: a.key } }));
+}
+
+const { articleKey } = Astro.props as { articleKey: HelpKey };
+---
+
+<HelpArticleView lang="en" articleKey={articleKey} />

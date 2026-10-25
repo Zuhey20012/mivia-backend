@@ -1,0 +1,487 @@
+---
+import Base from "../layouts/Base.astro";
+import Icon from "../components/Icon.astro";
+import type { IconName } from "../components/icons";
+import Phone from "../components/Phone.astro";
+import Faq, { type FaqItem } from "../components/Faq.astro";
+import { LEGAL, appHref } from "../config/site";
+import { ROUTES, r, type Lang } from "../i18n/routes";
+import { faqJsonLd } from "../lib/seo";
+import storeShot from "../assets/screens/store-sign-in-fi.png";
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+const fi = lang === "fi";
+const getApp = appHref("store", r("download", lang));
+
+const benefits: { icon: IconName; tile: string; title: string; text: string }[] = fi
+  ? [
+      {
+        icon: "pin",
+        tile: "tile-mint",
+        title: "Lähellä olevat asiakkaat löytävät sinut",
+        text: "Kaupat näytetään asiakkaalle etäisyyden ja arvosanan mukaan. Malvoya ei myy parempaa näkyvyyttä, joten pieni kauppa on samalla viivalla kuin iso.",
+      },
+      {
+        icon: "play",
+        tile: "tile-lilac",
+        title: "Dropit myyvät näyttämällä",
+        text: "Julkaise lyhyitä videoita ja kuvia, ja linkitä niihin tuotteesi. Kauppaasi seuraavat saavat ilmoituksen, kun uusi drop julkaistaan.",
+      },
+      {
+        icon: "bell",
+        tile: "tile-sun",
+        title: "Et missaa tilausta",
+        text: "Uusi maksettu tilaus hälyttää puhelimessasi, kunnes vastaat. Hyväksy tai hylkää yhdellä napautuksella.",
+      },
+      {
+        icon: "bike",
+        tile: "tile-peach",
+        title: "Toimitus tai nouto",
+        text: "Paikallinen lähetti hakee tilauksen kaupastasi. Varaa ja nouda -tilaukset asiakas hakee itse, ja tarkistat noutokoodin sovelluksessa.",
+      },
+      {
+        icon: "clock",
+        tile: "tile-clay",
+        title: "Auki, kun sinä olet",
+        text: "Aseta aukioloajat tai keskeytä uudet tilaukset yhdellä kytkimellä, kun tarvitset taukoa.",
+      },
+      {
+        icon: "return",
+        tile: "tile-surface",
+        title: "Palautukset hallitusti",
+        text: "Palautukset ja hyvitykset käsitellään sovelluksessa. Voit kirjoittaa asiakkaalle oman selityksesi, ja tilitys odottaa, kunnes palautus on ratkaistu.",
+      },
+    ]
+  : [
+      {
+        icon: "pin",
+        tile: "tile-mint",
+        title: "Shoppers near you find you",
+        text: "Shops are listed to shoppers by distance and rating. Malvoya does not sell better placement, so a small shop stands on the same line as a big one.",
+      },
+      {
+        icon: "play",
+        tile: "tile-lilac",
+        title: "Drops sell by showing",
+        text: "Post short videos and photos and link your products to them. People who follow your shop get a notification when a new drop goes live.",
+      },
+      {
+        icon: "bell",
+        tile: "tile-sun",
+        title: "Never miss an order",
+        text: "A new paid order rings on your phone until you answer. Accept or decline with one tap.",
+      },
+      {
+        icon: "bike",
+        tile: "tile-peach",
+        title: "Delivery or pickup",
+        text: "A local courier collects the order from your shop. Reserve & collect orders are picked up by the customer, and you check the pickup code in the app.",
+      },
+      {
+        icon: "clock",
+        tile: "tile-clay",
+        title: "Open when you are",
+        text: "Set your opening hours, or pause new orders with one switch when you need a break.",
+      },
+      {
+        icon: "return",
+        tile: "tile-surface",
+        title: "Returns, under control",
+        text: "Returns and refunds are handled in the app. You can write your own explanation to the customer, and the payout waits until the return is settled.",
+      },
+    ];
+
+const join = fi
+  ? [
+      {
+        title: "Lataa Malvoya Store",
+        text: "Luo tili ja valitse, myytkö yrityksenä (Y-tunnus) vai yksityishenkilönä. Asiakkaat näkevät tämän kauppasivullasi.",
+      },
+      {
+        title: "Käy läpi aloituslista",
+        text: "Kaupan tiedot, sijainti kartalla, aukioloajat, tilitykset (Stripe), ensimmäinen tuote, verotiedot (DAC7), myyjän ehdot ja tuoteturvallisuussitoumus. Sovellus näyttää, mitä on jäljellä.",
+      },
+      {
+        title: "Automaattinen Y-tunnuksen tarkistus",
+        text: "Jos myyt yrityksenä, Y-tunnus tarkistetaan heti ja sitä verrataan PRH:n avoimeen yritysrekisteriin: onko yritys olemassa, toiminnassa ja samanniminen. Tarkistus ei hyväksy kauppaa itse.",
+      },
+      {
+        title: "Hyväksyntä",
+        text: "Kun lista on valmis, Malvoyan tiimi saa tiedon ja ihminen tarkistaa kaupan. Hyväksynnän jälkeen kauppasi näkyy lähellä oleville asiakkaille.",
+      },
+    ]
+  : [
+      {
+        title: "Download Malvoya Store",
+        text: "Create an account and choose whether you sell as a business (with a Y-tunnus, the Finnish business ID) or as a private person. Shoppers see this on your shop page.",
+      },
+      {
+        title: "Work through the setup checklist",
+        text: "Shop details, location on the map, opening hours, payouts (Stripe), your first product, tax details (DAC7), the seller terms and the product safety pledge. The app shows what is left.",
+      },
+      {
+        title: "Automatic business-ID check",
+        text: "If you sell as a business, your Y-tunnus is checked at once against the Finnish Patent and Registration Office's open data: does the company exist, is it active and does the name match. The check never approves a shop by itself.",
+      },
+      {
+        title: "Approval",
+        text: "When the checklist is done, the Malvoya team is told and a person reviews your shop. Once it is approved, your shop is visible to shoppers nearby.",
+      },
+    ];
+
+const fees = fi
+  ? [
+      "Malvoya veloittaa provision jokaisesta toimitetusta tai noudetusta tilauksesta. Se lasketaan tuotteiden hinnasta, ei toimitusmaksusta.",
+      "Provisio on kauppakohtainen. Se sovitaan, kun liityt, ja näet sen sovelluksessa ja myyjän ehdoissa ennen kuin myyt mitään. Siksi emme julkaise tällä sivulla hintoja.",
+      "Jos provisiosi muuttuu, muutos koskee vain sen jälkeen tehtyjä tilauksia. Jokainen tilaus säilyttää oman provisionsa.",
+      "Juomarahoista ei peritä provisiota: ne menevät kokonaan lähetille.",
+      "Malvoyan alennus- ja kutsukoodien alennukset maksaa Malvoya. Ne eivät pienennä myyntiäsi eivätkä tilitystäsi.",
+      "Tilitys maksetaan omalle pankkitilillesi Stripe Connectin kautta 15 päivän kuluttua toimituksesta (palautusajan jälkeen), hyvitykset ja provisio vähennettyinä. Tilitys odottaa, jos palautus on kesken.",
+    ]
+  : [
+      "Malvoya charges a commission on every order that is delivered or collected. It is calculated on the price of the items, not on the delivery fee.",
+      "The commission is set per shop. It is agreed when you join, and you see it in the app and in the seller terms before you sell anything. That is why this page lists no rates.",
+      "If your commission changes, the change applies only to orders made after it. Every order keeps its own commission.",
+      "There is no commission on tips: they go to the courier in full.",
+      "Discounts from Malvoya's promo and invite codes are paid by Malvoya. They do not reduce your sales or your payout.",
+      "Payouts go to your own bank account through Stripe Connect 15 days after delivery (after the return period), with refunds and commission deducted. A payout waits while a return is open.",
+    ];
+
+const included: { icon: IconName; title: string; text: string }[] = fi
+  ? [
+      {
+        icon: "receipt",
+        title: "Kuukausiraportit",
+        text: "Jokainen toimitettu tai noudettu tilaus myynteineen, hyvityksineen, provisioineen ja tilityksineen sekä kuukauden yhteissummat. Tulostettavissa kirjanpitoa varten.",
+      },
+      {
+        icon: "file",
+        title: "DAC7-verotiedot",
+        text: "Sovellus kerää EU:n DAC7-direktiivin vaatimat myyjätiedot, ja Malvoya ilmoittaa ne Verohallinnolle. Veronumero tallennetaan salattuna. Muistutamme, jos tietoja puuttuu.",
+      },
+      {
+        icon: "upload",
+        title: "Tuonti Shopifysta, WooCommercesta tai CSV:stä",
+        text: "Tuo valikoimasi olemassa olevasta verkkokaupasta tai taulukosta. Tuodut tuotteet tulevat piilotettuina luonnoksina, jotta voit tarkistaa ne ennen julkaisua.",
+      },
+      {
+        icon: "box",
+        title: "Tuotteet, koot ja varasto",
+        text: "Kuvat, enintään kolme lyhyttä videota tuotetta kohden, koot ja muut vaihtoehdot varastosaldoineen. Asiakkaat näkevät vain, onko tuotetta saatavilla, eivät saldoasi.",
+      },
+      {
+        icon: "euro",
+        title: "Hintahistoria",
+        text: "Hintamuutokset tallennetaan, joten ”ennen”-hinta näytetään vain EU:n 30 päivän säännön mukaisesti. Sinun ei tarvitse laskea sitä itse.",
+      },
+      {
+        icon: "shield",
+        title: "Tuoteturvallisuus",
+        text: "Tuoteturvallisuussitoumus ja takaisinvetojen käsittely: jos tuote vedetään pois myynnistä, ostajille ilmoitetaan suoraan.",
+      },
+    ]
+  : [
+      {
+        icon: "receipt",
+        title: "Monthly statements",
+        text: "Every order delivered or collected, with its sales, refunds, commission and payout, plus the month's totals. Printable for your bookkeeping.",
+      },
+      {
+        icon: "file",
+        title: "DAC7 tax data",
+        text: "The app collects the seller details the EU DAC7 directive requires, and Malvoya reports them to the Finnish Tax Administration. Your tax number is stored encrypted. We remind you if details are missing.",
+      },
+      {
+        icon: "upload",
+        title: "Imports from Shopify, WooCommerce or CSV",
+        text: "Bring your catalogue from an existing web shop or a spreadsheet. Imported products arrive as hidden drafts, so you can check them before they go live.",
+      },
+      {
+        icon: "box",
+        title: "Products, sizes and stock",
+        text: "Photos, up to three short videos per product, and sizes or other options with stock. Shoppers only see whether an item is available, never your stock count.",
+      },
+      {
+        icon: "euro",
+        title: "Price history",
+        text: "Price changes are recorded, so a “was” price is only shown when it follows the EU 30-day rule. You don't have to work it out yourself.",
+      },
+      {
+        icon: "shield",
+        title: "Product safety",
+        text: "A product safety pledge and a recall process: if a product is recalled, the people who bought it are told directly.",
+      },
+    ];
+
+const faq: FaqItem[] = fi
+  ? [
+      {
+        q: "Paljonko Malvoya maksaa kaupalle?",
+        a: "<p>Malvoya veloittaa provision tuotteiden hinnasta jokaisesta toimitetusta tai noudetusta tilauksesta. Provisio sovitaan kauppakohtaisesti, kun liityt, ja se näkyy sovelluksessa ja myyjän ehdoissa ennen kuin myyt. Emme julkaise täällä lukuja, koska ne sovitaan kanssasi.</p>",
+      },
+      {
+        q: "Voinko myydä yksityishenkilönä?",
+        a: "<p>Voit. Valitse kauppaa perustaessasi yksityinen myyjä, niin asiakkaat näkevät sen kauppasivullasi. Verotiedot (DAC7) tarvitaan silloinkin. Yksityismyyjän ostoihin ei sovelleta lakisääteistä peruuttamisoikeutta, mutta asiakas voi lähettää palautuspyynnön, ja sinä päätät.</p>",
+      },
+      {
+        q: "Milloin saan rahat?",
+        a: "<p>Tilitys maksetaan Stripe Connectin kautta omalle pankkitilillesi 15 päivän kuluttua toimituksesta eli asiakkaan palautusajan jälkeen. Hyvitykset ja provisio vähennetään. Jos tilauksesta on palautus kesken, tilitys odottaa, kunnes se on ratkaistu.</p>",
+      },
+      {
+        q: "Mitä jos en ehdi vastata tilaukseen?",
+        a: "<p>Tilaus, johon ei vastata 10 minuutissa, perutaan ja asiakkaalle palautetaan rahat. Pidä siksi ilmoitukset päällä. Kun et voi ottaa tilauksia vastaan, keskeytä ne yhdellä kytkimellä.</p>",
+      },
+      {
+        q: "Tarvitsenko oman verkkokaupan?",
+        a: "<p>Et tarvitse. Voit lisätä tuotteet suoraan sovelluksessa. Jos sinulla on jo Shopify- tai WooCommerce-kauppa tai tuotetaulukko, voit tuoda valikoimasi sieltä. Tuodut tuotteet tulevat piilotettuina luonnoksina tarkistettavaksi.</p>",
+      },
+      {
+        q: "Mitä Malvoyassa voi myydä?",
+        a: "<p>Vaatteita, kenkiä, laukkuja, asusteita, koruja, meikkejä, ihon- ja hiustenhoitotuotteita, tuoksuja sekä käytettyä ja vintagea. Tuotetietojen pitää noudattaa lakia, esimerkiksi tekstiilien kuituselosteita ja kosmetiikan ainesosaluetteloita. Sisustustuotteet ja sähköiset hiustenmuotoilulaitteet eivät toistaiseksi kuulu valikoimaan.</p>",
+      },
+      {
+        q: "Kuka toimittaa tilaukset?",
+        a: "<p>Paikalliset lähetit, jotka käyttävät Malvoya Courier -sovellusta. He hakevat tilauksen kaupastasi, kun merkitset sen valmiiksi. Varaa ja nouda -tilauksissa asiakas hakee tilauksen itse, ja tarkistat hänen 6-numeroisen noutokoodinsa sovelluksessa.</p>",
+      },
+      {
+        q: "Missä Malvoya aloittaa?",
+        a: "<p>Malvoya avautuu alue kerrallaan, joten tilauksia on aluksi vähän. Ensimmäiset kaupat auttavat meitä päättämään, mistä aloitamme. Lataa Malvoya Store ja aloita aloituslista, niin tiimimme on yhteydessä.</p>",
+      },
+    ]
+  : [
+      {
+        q: "What does Malvoya cost a shop?",
+        a: "<p>Malvoya charges a commission on the price of the items in every order that is delivered or collected. The commission is agreed per shop when you join, and it is shown in the app and in the seller terms before you sell. We don't publish figures here, because they are agreed with you.</p>",
+      },
+      {
+        q: "Can I sell as a private person?",
+        a: "<p>Yes. Choose private seller when you set up your shop, and shoppers see it on your shop page. Tax details (DAC7) are still needed. The legal right of withdrawal does not apply to purchases from private sellers, but a customer can send a return request and you decide.</p>",
+      },
+      {
+        q: "When do I get paid?",
+        a: "<p>Payouts go to your own bank account through Stripe Connect 15 days after delivery, which is after the customer's return period. Refunds and commission are deducted. If a return on the order is open, the payout waits until it is settled.</p>",
+      },
+      {
+        q: "What if I can't answer an order in time?",
+        a: "<p>An order that is not answered within 10 minutes is cancelled and the customer is refunded, so keep notifications on. When you can't take orders, pause them with one switch.</p>",
+      },
+      {
+        q: "Do I need my own web shop?",
+        a: "<p>No. You can add products directly in the app. If you already have a Shopify or WooCommerce shop or a product spreadsheet, you can import your catalogue from there. Imported products arrive as hidden drafts for you to check.</p>",
+      },
+      {
+        q: "What can I sell on Malvoya?",
+        a: "<p>Clothing, shoes, bags, accessories, jewellery, makeup, skincare and haircare, fragrance, and second-hand and vintage. Product information has to follow the law, for example textile fibre labels and cosmetics ingredient lists. Home décor and electrical hair tools are not part of the range for now.</p>",
+      },
+      {
+        q: "Who delivers the orders?",
+        a: "<p>Local couriers using the Malvoya Courier app. They collect the order from your shop once you mark it ready. With Reserve &amp; collect, the customer picks the order up and you check their 6-digit pickup code in the app.</p>",
+      },
+      {
+        q: "Where is Malvoya starting?",
+        a: "<p>Malvoya is opening one area at a time, so order volumes will be small at first. The first shops help us decide where we start. Download Malvoya Store and start the checklist, and our team will be in touch.</p>",
+      },
+    ];
+---
+
+<Base
+  lang={lang}
+  title={fi ? "Kauppiaille – myy lähellä oleville asiakkaille" : "For shops – sell to shoppers near you"}
+  description={fi
+    ? "Malvoya Store itsenäisille muoti- ja kauneuskaupoille: lähiasiakkaat, Dropit-videot, toimitus tai nouto. Kauppakohtainen provisio, kuukausiraportit, DAC7 ja tuonti Shopifysta, WooCommercesta tai CSV:stä."
+    : "Malvoya Store for independent fashion and beauty shops: local shoppers, Drops videos, delivery or pickup. Commission agreed per shop, monthly statements, DAC7 and imports from Shopify, WooCommerce or CSV."}
+  alternates={ROUTES.sell}
+  app="store"
+  section="sell"
+  jsonLd={[faqJsonLd(faq, lang)]}
+>
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="blob" style="width:420px;height:420px;background:var(--mint);left:-180px;top:-140px"></div>
+    <div class="blob" style="width:280px;height:280px;background:var(--sand);right:-100px;bottom:-40px"></div>
+    <div class="wrap hero-grid">
+      <div>
+        <p class="eyebrow">Malvoya Store</p>
+        <h1 id="hero-title">
+          {
+            fi ? (
+              <>
+                Kauppasi lähellä asuvien <span class="accent">taskuun</span>.
+              </>
+            ) : (
+              <>
+                Your shop, in your <span class="accent">neighbours'</span> pockets.
+              </>
+            )
+          }
+        </h1>
+        <p class="lead">
+          {
+            fi
+              ? "Malvoya Store on sovellus itsenäisille muoti- ja kauneuskaupoille sekä second hand -myyjille. Lähellä olevat asiakkaat löytävät tuotteesi ja dropisi, ja paikallinen lähetti hakee tilaukset kaupastasi – tai asiakas noutaa ne itse."
+              : "Malvoya Store is the app for independent fashion and beauty shops and second-hand sellers. Shoppers nearby find your products and your drops, and a local courier collects the orders from your shop, or the customer picks them up."
+          }
+        </p>
+        <div class="btn-row">
+          <a class="btn" href={getApp}>
+            <Icon name="download" />
+            {fi ? "Lataa Malvoya Store" : "Get Malvoya Store"}
+          </a>
+          <a class="btn btn-ghost" href="#liity">{fi ? "Näin liityt" : "How to join"}</a>
+        </div>
+        <p class="hero-note">
+          <Icon name="info" />
+          <span>
+            {
+              fi
+                ? "Malvoya on uusi ja avautuu alue kerrallaan, joten tilauksia on aluksi vähän. Kerromme sen suoraan jo nyt."
+                : "Malvoya is new and opening one area at a time, so order volumes will be small at first. We'd rather say so now."
+            }
+          </span>
+        </p>
+      </div>
+      <figure style="margin:0">
+        <div class="phones">
+          <div class="phones-stage"></div>
+          <Phone
+            src={storeShot}
+            eager
+            class="float"
+            alt={fi
+              ? "Malvoya Store -sovelluksen kirjautumisnäkymä suomeksi: Malvoya Store, Myy paikallisesti, kirjautuminen sähköpostilla, Googlella tai puhelinnumerolla."
+              : "The Malvoya Store app's sign-in screen in Finnish: Malvoya Store, Sell locally, sign in with email, Google or a phone number."}
+          />
+        </div>
+        <figcaption class="shot-caption">
+          {fi ? "Oikea kuvakaappaus Malvoya Store -sovelluksesta." : "A real screenshot of the Malvoya Store app (Finnish)."}
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section-tight" aria-labelledby="benefits-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">{fi ? "Miksi Malvoya" : "Why Malvoya"}</p>
+        <h2 id="benefits-title">{fi ? "Lähikauppa, joka toimii myös puhelimessa." : "A local shop that works on the phone, too."}</h2>
+      </div>
+      <div class="grid grid-3">
+        {
+          benefits.map((b) => (
+            <div class:list={["tile reveal", b.tile]}>
+              <span class="icon-chip">
+                <Icon name={b.icon} />
+              </span>
+              <h3>{b.title}</h3>
+              <p class="muted">{b.text}</p>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="liity" aria-labelledby="join-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">{fi ? "Näin liityt" : "How joining works"}</p>
+        <h2 id="join-title">{fi ? "Neljä vaihetta, kaikki sovelluksessa." : "Four steps, all in the app."}</h2>
+      </div>
+      <ol class="steps steps-4">
+        {
+          join.map((s, i) => (
+            <li class="reveal">
+              <div class:list={["tile", ["tile-mint", "tile-sand", "tile-sun", "tile-lilac"][i]]} style="height:100%">
+                <h3>{s.title}</h3>
+                <p class="muted">{s.text}</p>
+              </div>
+            </li>
+          ))
+        }
+      </ol>
+    </div>
+  </section>
+
+  <section class="section-tight" id="maksut" aria-labelledby="fees-title">
+    <div class="wrap split">
+      <div>
+        <p class="eyebrow">{fi ? "Maksut" : "Fees"}</p>
+        <h2 id="fees-title">{fi ? "Provisio, suoraan sanottuna." : "The commission, plainly."}</h2>
+        <p class="lead">
+          {
+            fi
+              ? "Ei pientä präntättyä tekstiä. Kaikki kauppaasi koskevat maksut on kirjattu myyjän ehtoihin, ja näet oman provisiosi ennen kuin myyt."
+              : "No small print. Every fee that applies to your shop is written in the seller terms, and you see your own commission before you sell."
+          }
+        </p>
+        <a class="btn btn-ghost" href={LEGAL.sellers}>
+          <Icon name="file" />
+          {fi ? "Lue myyjän ehdot" : "Read the seller terms"}
+        </a>
+      </div>
+      <div class="tile tile-surface">
+        <ul class="checks" style="margin:0">
+          {fees.map((f) => <li>{f}</li>)}
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="included-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">{fi ? "Mukana" : "Included"}</p>
+        <h2 id="included-title">{fi ? "Paperityöt hoituvat sivussa." : "The paperwork, taken care of."}</h2>
+      </div>
+      <div class="grid grid-3">
+        {
+          included.map((b, i) => (
+            <div class:list={["tile reveal", ["tile-mint", "tile-sand", "tile-lilac", "tile-sun", "tile-peach", "tile-clay"][i]]}>
+              <span class="icon-chip">
+                <Icon name={b.icon} />
+              </span>
+              <h3>{b.title}</h3>
+              <p class="muted">{b.text}</p>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <section class="section-tight" aria-labelledby="cta-title">
+    <div class="wrap">
+      <div class="cta-band">
+        <div class="ring" aria-hidden="true"></div>
+        <h2 id="cta-title">{fi ? "Valmis avaamaan kauppasi Malvoyassa?" : "Ready to open your shop on Malvoya?"}</h2>
+        <p>
+          {
+            fi
+              ? "Lataa Malvoya Store, käy aloituslista läpi omaan tahtiisi ja lähetä kauppasi tarkistettavaksi. Myyjän ehdot näet ennen kuin hyväksyt ne."
+              : "Download Malvoya Store, go through the checklist at your own pace and send your shop for review. You see the seller terms before you accept them."
+          }
+        </p>
+        <div class="btn-row">
+          <a class="btn btn-sun" href={getApp}>
+            <Icon name="download" />
+            {fi ? "Lataa Malvoya Store" : "Get Malvoya Store"}
+          </a>
+          <a class="btn btn-ghost" href={LEGAL.sellers}>{fi ? "Myyjän ehdot" : "Seller terms"}</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section-tight" aria-labelledby="faq-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">{fi ? "Usein kysyttyä" : "FAQ"}</p>
+        <h2 id="faq-title">{fi ? "Kauppiaiden kysymyksiä" : "Questions from shops"}</h2>
+      </div>
+      <Faq items={faq} />
+    </div>
+  </section>
+</Base>

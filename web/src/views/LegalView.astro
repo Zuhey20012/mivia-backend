@@ -1,0 +1,91 @@
+---
+import Base from "../layouts/Base.astro";
+import Icon from "../components/Icon.astro";
+import { LEGAL } from "../config/site";
+import { ROUTES, r, type Lang } from "../i18n/routes";
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+const fi = lang === "fi";
+
+const docs = fi
+  ? [
+      { href: LEGAL.terms, title: "Käyttöehdot", text: "Asiakkaille: tilaaminen, hinnat, toimitus, peruuttaminen, palautukset ja virheet." },
+      { href: LEGAL.privacy, title: "Tietosuojaseloste", text: "Mitä henkilötietoja käsittelemme, miksi, kuinka kauan ja mitkä oikeutesi ovat." },
+      { href: LEGAL.sellers, title: "Myyjän ehdot", text: "Kaupoille: provisio, tilitykset, palautukset, DAC7, näkyvyys ja ehtojen muutokset." },
+      { href: LEGAL.couriers, title: "Lähettisopimus", text: "Lähetille: keikkojen tarjoaminen, palkkion kaava, tilitykset, sijainti ja muutokset." },
+      { href: LEGAL.deleteAccount, title: "Tilin poistaminen", text: "Miten poistat tilisi kaikissa kolmessa sovelluksessa ja mitä tiedoille tapahtuu." },
+      { href: LEGAL.recalls, title: "Takaisinvedot", text: "Malvoyassa myytyjen tuotteiden turvallisuussyistä tehdyt takaisinvedot." },
+    ]
+  : [
+      { href: LEGAL.terms, title: "Terms of service", text: "For shoppers: ordering, prices, delivery, cancelling, returns and defects." },
+      { href: LEGAL.privacy, title: "Privacy policy", text: "What personal data we process, why, for how long, and your rights." },
+      { href: LEGAL.sellers, title: "Seller terms", text: "For shops: commission, payouts, returns, DAC7, ranking and changes to the terms." },
+      { href: LEGAL.couriers, title: "Courier agreement", text: "For couriers: how jobs are offered, the pay formula, payouts, location and changes." },
+      { href: LEGAL.deleteAccount, title: "Delete your account", text: "How to delete your account in all three apps, and what happens to your data." },
+      { href: LEGAL.recalls, title: "Product recalls", text: "Safety recalls of products sold on Malvoya." },
+    ];
+---
+
+<Base
+  lang={lang}
+  title={fi ? "Ehdot ja tietosuoja" : "Legal"}
+  description={fi
+    ? "Malvoyan voimassa olevat käyttöehdot, tietosuojaseloste, myyjän ehdot, lähettisopimus, tilin poistaminen ja takaisinvedot."
+    : "Malvoya's terms of service, privacy policy, seller terms, courier agreement, account deletion and product recalls, as currently in force."}
+  alternates={ROUTES.legal}
+  section="legal"
+>
+  <section class="hero" aria-labelledby="hero-title" style="padding-bottom:24px">
+    <div class="wrap">
+      <p class="eyebrow">{fi ? "Ehdot" : "Legal"}</p>
+      <h1 id="hero-title">{fi ? "Ehdot ja tietosuoja" : "Terms and privacy"}</h1>
+      <p class="lead">
+        {
+          fi
+            ? "Ehdot julkaistaan Malvoyan palvelimella, jossa näkyy aina voimassa oleva versio. Jokainen aiempi versio pysyy luettavissa, ja muutoksista kerrotaan etukäteen."
+            : "The legal texts are published on Malvoya's server, which always shows the version in force. Every earlier version stays readable, and changes are announced in advance."
+        }
+      </p>
+    </div>
+  </section>
+
+  <section class="section-tight" style="padding-top:0" aria-label={fi ? "Asiakirjat" : "Documents"}>
+    <div class="wrap">
+      <ul class="link-list" style="max-width:52rem">
+        {
+          docs.map((d) => (
+            <li>
+              <a class="link-row" href={d.href}>
+                <span class="t">
+                  <strong>{d.title}</strong>
+                  <span>{d.text}</span>
+                </span>
+                <Icon name="external" />
+              </a>
+            </li>
+          ))
+        }
+        <li>
+          <a class="link-row" href={r("cookies", lang)}>
+            <span class="t">
+              <strong>{fi ? "Evästeet" : "Cookies"}</strong>
+              <span>{fi ? "Tämä sivusto ei käytä evästeitä eikä seurantaa." : "This website uses no cookies and no tracking."}</span>
+            </span>
+            <Icon name="arrow" />
+          </a>
+        </li>
+      </ul>
+      <p class="muted small" style="margin-top:24px;max-width:52rem">
+        {
+          fi
+            ? "Linkit avautuvat osoitteessa malvoya-api-eu.onrender.com, joka on Malvoyan oma palvelin (EU, Frankfurt)."
+            : "The links open at malvoya-api-eu.onrender.com, Malvoya's own server (EU, Frankfurt)."
+        }
+      </p>
+    </div>
+  </section>
+</Base>

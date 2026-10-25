@@ -1,0 +1,167 @@
+---
+import { Image } from "astro:assets";
+import type { ImageMetadata } from "astro";
+import Base from "../layouts/Base.astro";
+import Icon from "../components/Icon.astro";
+import { APPS, LEGAL, type AppKey } from "../config/site";
+import { ROUTES, r, type Lang } from "../i18n/routes";
+import customerIcon from "../assets/icons/customer-icon.png";
+import storeIcon from "../assets/icons/store-icon.png";
+import courierIcon from "../assets/icons/courier-icon.png";
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+const fi = lang === "fi";
+
+const cards: { key: AppKey; icon: ImageMetadata; tile: string; who: string; text: string; more: string; moreLabel: string; terms: string; termsLabel: string }[] = [
+  {
+    key: "customer",
+    icon: customerIcon,
+    tile: "tile-lilac",
+    who: fi ? "Asiakkaille" : "For shoppers",
+    text: fi
+      ? "Muotia ja kauneutta lähikaupoista. Tänään perille tai varaa ja nouda. Koko hinta etukäteen ja rehelliset palautukset."
+      : "Fashion and beauty from shops near you. Delivered today, or reserve and collect. The whole price up front and honest returns.",
+    more: r("home", lang),
+    moreLabel: fi ? "Lue lisää" : "Learn more",
+    terms: LEGAL.terms,
+    termsLabel: fi ? "Käyttöehdot" : "Terms of service",
+  },
+  {
+    key: "store",
+    icon: storeIcon,
+    tile: "tile-mint",
+    who: fi ? "Kaupoille" : "For shops",
+    text: fi
+      ? "Myy lähellä oleville asiakkaille: tuotteet, Dropit, tilaukset, palautukset, kuukausiraportit ja tilitykset samassa sovelluksessa."
+      : "Sell to shoppers near you: products, Drops, orders, returns, monthly statements and payouts in one app.",
+    more: r("sell", lang),
+    moreLabel: fi ? "Kauppiaille" : "For shops",
+    terms: LEGAL.sellers,
+    termsLabel: fi ? "Myyjän ehdot" : "Seller terms",
+  },
+  {
+    key: "courier",
+    icon: courierIcon,
+    tile: "tile-peach",
+    who: fi ? "Lähetille" : "For couriers",
+    text: fi
+      ? "Toimita lähitilauksia omaan tahtiisi. Näet palkkion ja sen laskutavan ennen kuin hyväksyt keikan."
+      : "Deliver local orders on your own schedule. See the pay, and how it is calculated, before you accept a job.",
+    more: r("deliver", lang),
+    moreLabel: fi ? "Lähetiksi" : "Deliver",
+    terms: LEGAL.couriers,
+    termsLabel: fi ? "Lähettisopimus" : "Courier agreement",
+  },
+];
+---
+
+<Base
+  lang={lang}
+  title={fi ? "Lataa sovellukset" : "Get the apps"}
+  description={fi
+    ? "Malvoya, Malvoya Store ja Malvoya Courier. Sovellukset julkaistaan ensin Google Playssa; latauslinkit tulevat tälle sivulle, kun ne ovat saatavilla."
+    : "Malvoya, Malvoya Store and Malvoya Courier. The apps come to Google Play first; the download links appear on this page when they are available."}
+  alternates={ROUTES.download}
+  section="download"
+>
+  <section class="hero" aria-labelledby="hero-title" style="padding-bottom:32px">
+    <div class="wrap">
+      <p class="eyebrow">{fi ? "Lataa" : "Download"}</p>
+      <h1 id="hero-title">{fi ? "Kolme sovellusta, yksi lähikauppa." : "Three apps, one local market."}</h1>
+      <p class="lead">
+        {
+          fi
+            ? "Sovellukset ovat vielä testauksessa. Ne julkaistaan ensin Google Playssa Androidille, ja iPhone-versiot tulevat myöhemmin. Latauslinkit ilmestyvät tänne heti, kun ne toimivat – emme näytä linkkejä, jotka eivät vielä vie minnekään."
+            : "The apps are still being tested. They come to Google Play for Android first, and the iPhone versions later. The download links will appear here as soon as they work – we don't show links that don't lead anywhere yet."
+        }
+      </p>
+    </div>
+  </section>
+
+  <section class="section-tight" aria-label={fi ? "Sovellukset" : "Apps"} style="padding-top:0">
+    <div class="wrap">
+      <ul class="card-list grid grid-3">
+        {
+          cards.map((c) => {
+            const app = APPS[c.key];
+            return (
+              <li class="reveal">
+                <article class:list={["tile app-card", c.tile]} aria-labelledby={`app-${c.key}`}>
+                  <Image src={c.icon} alt="" width={72} height={72} densities={[1, 2, 3]} class="app-icon" loading="lazy" />
+                  <p class="eyebrow" style="margin-bottom:6px">{c.who}</p>
+                  <h2 id={`app-${c.key}`} style="font-size:1.6rem">
+                    {app.name}
+                  </h2>
+                  <p class="muted">{c.text}</p>
+                  <p class="small">
+                    <a href={c.more}>{c.moreLabel}</a> · <a href={c.terms}>{c.termsLabel}</a>
+                  </p>
+                  <div class="stores">
+                    {app.googlePlay.live && app.googlePlay.url ? (
+                      <a class="store-slot" href={app.googlePlay.url} rel="noopener">
+                        <Icon name="play_store" />
+                        <span class="label">
+                          <small>{fi ? "Lataa" : "Get it on"}</small>
+                          <span>Google Play</span>
+                        </span>
+                      </a>
+                    ) : (
+                      <div class="store-slot" role="group" aria-label={fi ? "Google Play: tulossa pian" : "Google Play: coming soon"}>
+                        <Icon name="play_store" />
+                        <span class="label">
+                          <span>Google Play</span>
+                          <small>{fi ? "Tulossa pian – ei vielä ladattavissa" : "Coming soon – not available yet"}</small>
+                        </span>
+                      </div>
+                    )}
+                    {app.appStore.live && app.appStore.url ? (
+                      <a class="store-slot" href={app.appStore.url} rel="noopener">
+                        <Icon name="phone" />
+                        <span class="label">
+                          <small>{fi ? "Lataa" : "Download on the"}</small>
+                          <span>App Store</span>
+                        </span>
+                      </a>
+                    ) : (
+                      <div class="store-slot" role="group" aria-label={fi ? "App Store: myöhemmin" : "App Store: later"}>
+                        <Icon name="phone" />
+                        <span class="label">
+                          <span>App Store</span>
+                          <small>{fi ? "iPhone-versio tulee myöhemmin" : "iPhone version coming later"}</small>
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </article>
+              </li>
+            );
+          })
+        }
+      </ul>
+    </div>
+  </section>
+
+  <section class="section-tight" aria-labelledby="note-title">
+    <div class="wrap">
+      <div class="notice" style="max-width:52rem">
+        <Icon name="shield" />
+        <div>
+          <h2 id="note-title" style="font-size:1.15rem;font-family:var(--font-body);margin-bottom:6px">
+            {fi ? "Lataa vain virallisista sovelluskaupoista" : "Only download from the official app stores"}
+          </h2>
+          <p>
+            {
+              fi
+                ? "Malvoya-sovellukset julkaistaan Google Playssa ja myöhemmin App Storessa. Emme jaa asennustiedostoja tällä sivustolla. Kun sovellukset ovat kaupassa, tämän sivun painikkeet vievät suoraan niiden sivuille."
+                : "Malvoya's apps are published on Google Play and later on the App Store. We don't share install files on this website. Once the apps are in the stores, the buttons on this page lead straight to them."
+            }
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+</Base>

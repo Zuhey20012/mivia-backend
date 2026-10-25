@@ -1,0 +1,31 @@
+---
+/** A real app screenshot in a simple phone frame, optimised by astro:assets (AVIF/WebP, sized per screen). */
+import { Picture } from "astro:assets";
+import type { ImageMetadata } from "astro";
+
+interface Props {
+  src: ImageMetadata;
+  alt: string;
+  small?: boolean;
+  eager?: boolean;
+  class?: string;
+}
+
+const { src, alt, small = false, eager = false, class: className } = Astro.props;
+const sizes = small ? "(min-width: 640px) 210px, 44vw" : "(min-width: 640px) 270px, 62vw";
+---
+
+<div class:list={["phone", small && "phone-sm", className]}>
+  <Picture
+    src={src}
+    alt={alt}
+    widths={small ? [200, 300, 420] : [260, 390, 540]}
+    sizes={sizes}
+    formats={["avif", "webp"]}
+    fallbackFormat="png"
+    quality={72}
+    loading={eager ? "eager" : "lazy"}
+    fetchpriority={eager ? "high" : "auto"}
+    decoding="async"
+  />
+</div>

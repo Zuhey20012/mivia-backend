@@ -1,0 +1,506 @@
+---
+import Base from "../layouts/Base.astro";
+import Icon from "../components/Icon.astro";
+import type { IconName } from "../components/icons";
+import Phone from "../components/Phone.astro";
+import Faq, { type FaqItem } from "../components/Faq.astro";
+import { appHref } from "../config/site";
+import { ROUTES, helpPath, r, type Lang } from "../i18n/routes";
+import { faqJsonLd } from "../lib/seo";
+import signIn from "../assets/screens/customer-sign-in-en.png";
+import returnsPrivacy from "../assets/screens/customer-returns-privacy-en.png";
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+const fi = lang === "fi";
+const download = r("download", lang);
+const getApp = appHref("customer", download);
+
+const steps = fi
+  ? [
+      {
+        icon: "search",
+        title: "Löydä",
+        text: "Näet toimitusosoitteesi lähellä olevat kaupat, niiden etäisyyden, toimitusmaksun ja sen, ovatko ne nyt auki. Selaa kategorioittain tai katso kauppojen Dropit.",
+      },
+      {
+        icon: "basket",
+        title: "Tilaa",
+        text: "Näet koko hinnan ennen maksamista. Kauppa hyväksyy tilauksen muutamassa minuutissa – jos ei, tilaus perutaan ja rahat palautetaan automaattisesti.",
+      },
+      {
+        icon: "bike",
+        title: "Tänään perille tai nouda",
+        text: "Paikallinen lähetti tuo tilauksen ovellesi, ja voit seurata häntä kartalla. Tai valitse Varaa ja nouda ja hae ostoksesi kaupasta koodilla, ilman toimitusmaksua.",
+      },
+    ]
+  : [
+      {
+        icon: "search",
+        title: "Find",
+        text: "See the shops near your delivery address, how far they are, the delivery fee and whether they are open right now. Browse by category or watch the shops' Drops.",
+      },
+      {
+        icon: "basket",
+        title: "Order",
+        text: "You see the whole price before you pay. The shop accepts your order within minutes. If it doesn't, the order is cancelled and refunded automatically.",
+      },
+      {
+        icon: "bike",
+        title: "Today, or pick it up",
+        text: "A local courier brings the order to your door, and you can follow them on a map. Or choose Reserve & collect and pick it up at the shop with a code, with no delivery fee.",
+      },
+    ];
+
+type Cat = { icon: IconName; tile: string; name: string; sub: string };
+const categories: Cat[] = fi
+  ? [
+      { icon: "hanger", tile: "lilac", name: "Vaatteet", sub: "Mekot, neuleet, takit, housut ja farkut" },
+      { icon: "shoe", tile: "clay", name: "Kengät", sub: "Tennarit, nilkkurit, talvi- ja kumisaappaat" },
+      { icon: "bag", tile: "mint", name: "Laukut", sub: "Käsilaukut, reput, lompakot" },
+      { icon: "watch", tile: "sun", name: "Asusteet", sub: "Pipot, huivit, aurinkolasit, kellot" },
+      { icon: "gem", tile: "lilac", name: "Korut", sub: "Korvakorut, kaulakorut, sormukset" },
+      { icon: "lipstick", tile: "peach", name: "Meikit", sub: "Kasvot, silmät, huulet ja kynnet" },
+      { icon: "drop", tile: "mint", name: "Ihonhoito", sub: "Puhdistus, seerumit, aurinkosuojat" },
+      { icon: "scissors", tile: "sun", name: "Hiustenhoito", sub: "Shampoot, muotoilu, hiusvärit" },
+      { icon: "perfume", tile: "peach", name: "Tuoksut", sub: "Parfyymit, vartalosuihkeet, matkakoot" },
+      { icon: "run", tile: "clay", name: "Urheilu ja ulkoilu", sub: "Urheiluvaatteet ja ulkoilukengät" },
+      { icon: "recycle", tile: "sand", name: "Käytetty ja vintage", sub: "Vintage, merkkituotteet, lastenvaatteet" },
+    ]
+  : [
+      { icon: "hanger", tile: "lilac", name: "Clothing", sub: "Dresses, knitwear, coats, trousers and jeans" },
+      { icon: "shoe", tile: "clay", name: "Shoes", sub: "Sneakers, ankle boots, winter and rubber boots" },
+      { icon: "bag", tile: "mint", name: "Bags", sub: "Handbags, backpacks, wallets" },
+      { icon: "watch", tile: "sun", name: "Accessories", sub: "Beanies, scarves, sunglasses, watches" },
+      { icon: "gem", tile: "lilac", name: "Jewellery", sub: "Earrings, necklaces, rings" },
+      { icon: "lipstick", tile: "peach", name: "Makeup", sub: "Face, eyes, lips and nails" },
+      { icon: "drop", tile: "mint", name: "Skincare", sub: "Cleansers, serums, sun care" },
+      { icon: "scissors", tile: "sun", name: "Haircare", sub: "Shampoo, styling, hair colour" },
+      { icon: "perfume", tile: "peach", name: "Fragrance", sub: "Perfume, body mists, travel sizes" },
+      { icon: "run", tile: "clay", name: "Sport & outdoor", sub: "Sportswear and outdoor shoes" },
+      { icon: "recycle", tile: "sand", name: "Second-hand & vintage", sub: "Vintage, designer, kids' clothes" },
+    ];
+const tileVar: Record<string, string> = {
+  lilac: "var(--lilac)",
+  clay: "var(--clay)",
+  mint: "var(--mint)",
+  sun: "var(--sun-soft)",
+  peach: "var(--peach)",
+  sand: "var(--surface-2)",
+};
+
+const trust = fi
+  ? [
+      {
+        icon: "return",
+        tile: "tile-lilac",
+        title: "Rehelliset palautukset",
+        text: `Yritysmyyjiltä ostetuilla tuotteilla on 14 päivän peruuttamisoikeus. Aloitat palautuksen sovelluksessa koko tilaukselle tai vain osalle tuotteista. Hygieniasinetöidyt kosmetiikka- ja tuoksutuotteet merkitään jo ennen ostoa, ja viallisen tuotteen voi aina palauttaa. <a href="${helpPath("returns", lang)}">Lue palautuksista</a>`,
+      },
+      {
+        icon: "euro",
+        tile: "tile-sun",
+        title: "Koko hinta etukäteen",
+        text: "Näet tuotteet, toimitusmaksun, mahdolliset muut maksut ja alennuskoodin ennen kuin maksat. Ei piilomaksuja. ”Ennen”-hinta näytetään vain, kun se noudattaa EU:n 30 päivän sääntöä. Maksut hoitaa Stripe, eikä Malvoya näe korttisi numeroa.",
+      },
+      {
+        icon: "star",
+        tile: "tile-mint",
+        title: "Vain oikeita arvioita",
+        text: "Kaupan voi arvioida vain asiakas, jonka tilaus on toimitettu. Emme keksi arvioita emmekä näytä keksittyä kiirettä, kuten ”vain 2 jäljellä”, jos se ei ole totta. Jokaisella kauppasivulla kerrotaan, onko myyjä yritys vai yksityishenkilö.",
+      },
+      {
+        icon: "shield",
+        tile: "tile-peach",
+        title: "Tietosi pysyvät sinulla",
+        text: `Ei mainoksia eikä mainosseurantaa. Voit ladata tietosi tai poistaa tilisi sovelluksessa milloin tahansa. Palvelimemme ovat EU:ssa (Frankfurt). <a href="${helpPath("privacy", lang)}">Tietosuoja ja tietosi</a>`,
+      },
+    ]
+  : [
+      {
+        icon: "return",
+        tile: "tile-lilac",
+        title: "Honest returns",
+        text: `You can withdraw from purchases from business sellers within 14 days. You start the return in the app, for the whole order or only some items. Hygiene-sealed cosmetics and fragrances are marked before you buy, and a faulty item can always be returned. <a href="${helpPath("returns", lang)}">About returns</a>`,
+      },
+      {
+        icon: "euro",
+        tile: "tile-sun",
+        title: "The whole price, up front",
+        text: "You see the items, the delivery fee, any other fees and your discount code before you pay. No hidden fees. A “was” price is only shown when it follows the EU 30-day rule. Payments are handled by Stripe, and Malvoya never sees your card number.",
+      },
+      {
+        icon: "star",
+        tile: "tile-mint",
+        title: "Real reviews only",
+        text: "Only customers whose order was delivered can review a shop. We never invent reviews or fake urgency like “only 2 left” when it isn't true. Every shop page says whether the seller is a business or a private person.",
+      },
+      {
+        icon: "shield",
+        tile: "tile-peach",
+        title: "Your data stays yours",
+        text: `No ads and no ad tracking. You can download your data or delete your account in the app at any time. Our servers are in the EU (Frankfurt). <a href="${helpPath("privacy", lang)}">Privacy and your data</a>`,
+      },
+    ];
+
+const faq: FaqItem[] = fi
+  ? [
+      {
+        q: "Missä Malvoya toimii?",
+        a: "<p>Malvoya toimii Suomessa ja avautuu kaupunginosa kerrallaan. Lähelläsi ei ehkä vielä ole kauppoja. Lataa sovellus ja napauta ”Ilmoita kun täällä aukeaa”, niin kerromme, kun ensimmäinen kauppa avautuu lähelläsi.</p>",
+      },
+      {
+        q: "Mitä Malvoyasta voi ostaa?",
+        a: "<p>Vaatteita, kenkiä, laukkuja, asusteita ja koruja, meikkejä, ihon- ja hiustenhoitoa, tuoksuja sekä käytettyä ja vintagea – lähelläsi olevista itsenäisistä kaupoista ja second hand -myyjiltä. Sovellus näyttää vain kategoriat, joissa lähelläsi on tuotteita.</p>",
+      },
+      {
+        q: "Paljonko toimitus maksaa?",
+        a: "<p>Toimitusmaksu riippuu kaupan ja toimitusosoitteesi välisestä matkasta. Näet sen jo kauppalistassa ja tarkalleen kassalla ennen maksamista. Varaa ja nouda -tilauksissa ei ole toimitusmaksua.</p>",
+      },
+      {
+        q: "Kuinka nopeasti tilaus tulee perille?",
+        a: "<p>Kun kauppa on hyväksynyt tilauksen ja lähetti on vapaana, tilaus lähtee matkaan saman tien. Sovellus näyttää arvioidun ajan, ja voit seurata lähettiä kartalla. Jos kauppa ei hyväksy tilausta tai lähettiä ei löydy, tilaus perutaan ja koko summa palautetaan automaattisesti.</p>",
+      },
+      {
+        q: "Voinko palauttaa ostokseni?",
+        a: `<p>Yritysmyyjiltä ostetuilla tuotteilla on 14 päivän peruuttamisoikeus vastaanottamisesta, eikä syytä tarvitse kertoa. Avattua hygieniasinettiä ei voi palauttaa, mutta viallisen tuotteen voi aina. Yksityismyyjiltä ostettuihin tuotteisiin lakisääteinen peruuttamisoikeus ei päde, mutta voit lähettää palautuspyynnön, ja myyjä päättää. <a href="${helpPath("returns", lang)}">Lue lisää palautuksista</a>.</p>`,
+      },
+      {
+        q: "Maksaako sovellus jotain?",
+        a: "<p>Sovelluksen lataaminen ja käyttäminen on maksutonta. Maksat ostamasi tuotteet ja mahdolliset maksut, jotka näet kassalla ennen maksamista. Juomaraha lähetille on vapaaehtoinen, ja koko summa menee lähetille.</p>",
+      },
+      {
+        q: "Onko Malvoya iPhonelle?",
+        a: `<p>Ensimmäisenä julkaistaan Android-sovellus Google Playssa. iPhone-versiota valmistellaan. Kerromme <a href="${download}">lataussivulla</a>, kun kumpikin on ladattavissa.</p>`,
+      },
+      {
+        q: "Kuka Malvoyaa voi käyttää?",
+        a: "<p>Malvoya on 18 vuotta täyttäneille. Sovellus on suomeksi ja englanniksi.</p>",
+      },
+    ]
+  : [
+      {
+        q: "Where does Malvoya work?",
+        a: "<p>Malvoya is in Finland and is opening one district at a time, so there may be no shops near you yet. Get the app and tap “Notify me when it opens here”, and we will tell you when the first shop opens near you.</p>",
+      },
+      {
+        q: "What can I buy on Malvoya?",
+        a: "<p>Clothing, shoes, bags, accessories and jewellery, makeup, skincare and haircare, fragrance, and second-hand and vintage, from independent shops and second-hand sellers near you. The app only shows categories that have products near you.</p>",
+      },
+      {
+        q: "How much is delivery?",
+        a: "<p>The delivery fee depends on the distance between the shop and your delivery address. You see it in the list of shops, and exactly at checkout before you pay. Reserve &amp; collect orders have no delivery fee.</p>",
+      },
+      {
+        q: "How fast does my order arrive?",
+        a: "<p>Once the shop has accepted your order and a courier is free, your order is on its way. The app shows the estimated time, and you can follow the courier on a map. If the shop does not accept the order or no courier is found, the order is cancelled and the full amount is refunded automatically.</p>",
+      },
+      {
+        q: "Can I return what I bought?",
+        a: `<p>From business sellers you can withdraw within 14 days of receiving the item, without giving a reason. A hygiene seal that has been opened cannot be returned, but a faulty item always can. The legal right of withdrawal does not apply to private sellers, but you can still send a return request and the seller decides. <a href="${helpPath("returns", lang)}">More about returns</a>.</p>`,
+      },
+      {
+        q: "Does the app cost anything?",
+        a: "<p>Downloading and using the app is free. You pay for what you buy and any fees, which you see at checkout before you pay. A tip for the courier is optional, and all of it goes to the courier.</p>",
+      },
+      {
+        q: "Is Malvoya on iPhone?",
+        a: `<p>The Android app on Google Play comes first. An iPhone version is being prepared. The <a href="${download}">download page</a> will say when each one is available.</p>`,
+      },
+      {
+        q: "Who can use Malvoya?",
+        a: "<p>Malvoya is for people aged 18 or over. The app is in Finnish and English.</p>",
+      },
+    ];
+
+const title = fi ? "Malvoya – muotia ja kauneutta lähikaupoista, tänään" : "Malvoya – fashion and beauty from shops near you, today";
+const description = fi
+  ? "Lähelläsi olevien muoti- ja kauneuskauppojen valikoima yhdessä sovelluksessa. Tänään perille tai varaa ja nouda. Koko hinta etukäteen, rehelliset palautukset."
+  : "The fashion and beauty shops near you in one app. Delivered today or reserve and collect. The whole price up front and honest returns.";
+---
+
+<Base
+  lang={lang}
+  title={title}
+  fullTitle
+  description={description}
+  alternates={ROUTES.home}
+  section="home"
+  jsonLd={[faqJsonLd(faq, lang)]}
+>
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="blob" style="width:420px;height:420px;background:var(--lilac);left:-180px;top:-140px"></div>
+    <div class="blob" style="width:300px;height:300px;background:var(--mint);right:-120px;bottom:-60px"></div>
+    <div class="wrap hero-grid">
+      <div>
+        <p class="eyebrow">{fi ? "Avautuu alue kerrallaan" : "Opening district by district"}</p>
+        <h1 id="hero-title">
+          {
+            fi ? (
+              <>
+                Lähikauppojen muoti ja kauneus, <span class="accent">tänään</span>.
+              </>
+            ) : (
+              <>
+                Fashion and beauty from shops near you, <span class="accent">today</span>.
+              </>
+            )
+          }
+        </h1>
+        <p class="lead">
+          {
+            fi
+              ? "Malvoya kokoaa lähelläsi olevat itsenäiset muoti- ja kauneuskaupat yhteen sovellukseen. Tilaa, ja paikallinen lähetti hakee ostoksesi kaupasta ja tuo ne ovellesi jo samana päivänä, kun kauppa on auki ja lähetti vapaana. Tai varaa ja nouda itse."
+              : "Malvoya brings the independent fashion and beauty shops near you into one app. Order, and a local courier picks it up from the shop and brings it to your door the same day, when the shop is open and a courier is free. Or reserve it and collect it yourself."
+          }
+        </p>
+        <div class="btn-row">
+          <a class="btn" href={getApp}>
+            <Icon name="download" />
+            {fi ? "Lataa Malvoya" : "Get Malvoya"}
+          </a>
+          <a class="btn btn-ghost" href="#miten">{fi ? "Näin se toimii" : "How it works"}</a>
+        </div>
+        <p class="hero-note">
+          <Icon name="info" />
+          <span>
+            {
+              fi
+                ? "Malvoya on uusi eikä ole vielä auki kaikkialla. Avaamme kaupunginosa kerrallaan, joten lähelläsi ei ehkä vielä ole kauppoja."
+                : "Malvoya is new and not open everywhere yet. We open one district at a time, so there may be no shops near you yet."
+            }
+          </span>
+        </p>
+      </div>
+      <figure class="phones-figure" style="margin:0">
+        <div class="phones">
+          <div class="phones-stage"></div>
+          <Phone
+            src={signIn}
+            eager
+            class="float"
+            alt={fi
+              ? "Malvoya-sovelluksen kirjautumisnäkymä: Malvoya, Fashion from local stores, kirjautuminen sähköpostilla, Googlella tai kertakoodilla tai selaus ilman tiliä."
+              : "The Malvoya app's sign-in screen: Malvoya, Fashion from local stores, sign in with email, Google or a one-time code, or browse without an account."}
+          />
+          <Phone
+            src={returnsPrivacy}
+            small
+            class="float-slow"
+            alt={fi
+              ? "Malvoya-sovelluksen profiili: Maksaminen, Palautukset (14 päivän peruuttamisoikeus yritysmyyjiltä), Tietosi (lataa tai poista tietosi) sekä ehdot."
+              : "The Malvoya app's profile: Paying, Returns (14-day withdrawal for purchases from business sellers), Your data (download or delete your data) and Terms and policies."}
+          />
+        </div>
+        <figcaption class="shot-caption">
+          {fi ? "Oikeita kuvakaappauksia sovelluksesta (versio 1.7.0, englanniksi)." : "Real screenshots from the app (version 1.7.0)."}
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section" id="miten" aria-labelledby="how-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">{fi ? "Näin se toimii" : "How it works"}</p>
+        <h2 id="how-title">{fi ? "Löydä, tilaa – ja saat sen tänään tai noudat itse." : "Find it, order it – get it today or pick it up."}</h2>
+      </div>
+      <ol class="steps steps-3">
+        {
+          steps.map((s, i) => (
+            <li class="reveal">
+              <div class:list={["tile", ["tile-lilac", "tile-sun", "tile-mint"][i]]}>
+                <h3>{s.title}</h3>
+                <p class="muted">{s.text}</p>
+              </div>
+            </li>
+          ))
+        }
+      </ol>
+    </div>
+  </section>
+
+  <section class="section-tight" aria-labelledby="cat-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">{fi ? "Kategoriat" : "Categories"}</p>
+        <h2 id="cat-title">{fi ? "Muotia ja kauneutta, kaikki samassa paikassa." : "Fashion and beauty, all in one place."}</h2>
+        <p>
+          {
+            fi
+              ? "Valitse ylhäältä Kaikki, Naiset, Miehet tai Lapset, ja jokainen kategoria aukeaa alakategorioihin ja suodattimiin. Sovellus näyttää vain kategoriat, joissa lähelläsi on tuotteita."
+              : "Choose All, Women, Men or Kids at the top, and every category opens into subcategories and filters. The app only shows categories that have products near you."
+          }
+        </p>
+      </div>
+      <ul class="cat-grid">
+        {
+          categories.map((c) => (
+            <li class="reveal">
+              <div class="cat" style={`--tile:${tileVar[c.tile]}`}>
+                <span class="icon-chip">
+                  <Icon name={c.icon} />
+                </span>
+                <h3>{c.name}</h3>
+                <p>{c.sub}</p>
+              </div>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="drops-title">
+    <div class="wrap">
+      <div class="drops-panel">
+        <div class="drops-orbit"></div>
+        <div class="split">
+          <div>
+            <p class="eyebrow">Drops</p>
+            <h2 id="drops-title">{fi ? "Dropit: kauppojen omat videot." : "Drops: videos from the shops themselves."}</h2>
+            <p>
+              {
+                fi
+                  ? "Dropit ovat lähikauppojen julkaisemia lyhyitä videoita ja kuvia, ja niissä näkyvät tuotteet voit ostaa suoraan. Näet, miltä vaate laskeutuu tai miltä sävy näyttää, ennen kuin tilaat."
+                  : "Drops are short videos and photos posted by the shops near you, and you can buy the products in them straight away. See how a piece hangs or how a shade looks before you order."
+              }
+            </p>
+            <ul class="drop-tabs" aria-label={fi ? "Dropit-näkymän välilehdet" : "Drops tabs"}>
+              <li>{fi ? "Sinulle" : "For you"}</li>
+              <li>{fi ? "Seuratut" : "Following"}</li>
+              <li>{fi ? "Uusimmat" : "Latest"}</li>
+            </ul>
+            <ul class="checks">
+              <li>
+                {
+                  fi
+                    ? "”Sinulle” järjestää dropit sen mukaan, kuinka uusia ne ovat, miten ihmiset reagoivat, etäisyyden ja kaupan arvosanan mukaan. Emme profiloi sinua."
+                    : "“For you” orders drops by how new they are, how people react, distance and the shop's rating. We do not build a profile of you."
+                }
+              </li>
+              <li>
+                {
+                  fi
+                    ? "Seuraa kauppoja, joista pidät, niin saat ilmoituksen, kun ne julkaisevat uuden dropin."
+                    : "Follow the shops you like and get a notification when they post a new drop."
+                }
+              </li>
+              <li>
+                {
+                  fi
+                    ? "Video latautuu vasta, kun avaat Dropit – etusivu pysyy nopeana ja mobiilidataa säästyy."
+                    : "Video only loads when you open Drops, so Home stays fast and you save mobile data."
+                }
+              </li>
+            </ul>
+          </div>
+          <div class="drop-visual" aria-hidden="true">
+            <Icon name="play" size={120} />
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section-tight trust" aria-labelledby="trust-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">{fi ? "Luottamus" : "Trust"}</p>
+        <h2 id="trust-title">{fi ? "Ei temppuja. Sanomme asiat suoraan." : "No tricks. We say things straight."}</h2>
+      </div>
+      <div class="grid grid-2">
+        {
+          trust.map((t) => (
+            <div class:list={["tile reveal", t.tile]}>
+              <span class="icon-chip">
+                <Icon name={t.icon as IconName} />
+              </span>
+              <h3>{t.title}</h3>
+              <p class="muted" set:html={t.text} />
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="ilmoita" aria-labelledby="cta-title">
+    <div class="wrap">
+      <div class="cta-band">
+        <div class="ring" aria-hidden="true"></div>
+        <p class="pill" style="margin-bottom:18px">{fi ? "Tulossa" : "Coming soon"}</p>
+        <h2 id="cta-title">{fi ? "Tulossa sinunkin kaupunginosaasi." : "Coming to your district."}</h2>
+        <p>
+          {
+            fi
+              ? "Avaamme Malvoyan kaupunginosa kerrallaan. Jos lähelläsi ei vielä ole kauppoja, sovellus kertoo sen suoraan ja voit liittyä odotuslistalle:"
+              : "We are opening Malvoya one district at a time. If there are no shops near you yet, the app tells you so, and you can join the waiting list:"
+          }
+        </p>
+        <ol class="cta-steps">
+          <li><b>1</b><span>{fi ? "Lataa Malvoya ja valitse toimitusosoitteesi." : "Get Malvoya and choose your delivery address."}</span></li>
+          <li>
+            <b>2</b><span>{fi ? "Napauta ”Ilmoita kun täällä aukeaa”." : "Tap “Notify me when it opens here”."}</span>
+          </li>
+          <li>
+            <b>3</b><span
+              >{
+                fi
+                  ? "Saat yhden ilmoituksen, kun ensimmäinen kauppa avautuu enintään 10 km:n päähän. Voit perua sen milloin tahansa."
+                  : "You get one notification when the first shop opens within 10 km. You can cancel it at any time."
+              }</span
+            >
+          </li>
+        </ol>
+        <div class="btn-row">
+          <a class="btn btn-sun" href={getApp}>
+            <Icon name="bell" />
+            {fi ? "Lataa sovellus" : "Get the app"}
+          </a>
+          <a class="btn btn-ghost" href={r("sell", lang)}>{fi ? "Omistatko kaupan? Liity mukaan" : "Run a shop? Join us"}</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section-tight" aria-labelledby="faq-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">{fi ? "Usein kysyttyä" : "FAQ"}</p>
+        <h2 id="faq-title">{fi ? "Kysymyksiä ja vastauksia" : "Questions and answers"}</h2>
+      </div>
+      <Faq items={faq} />
+      <p class="muted" style="margin-top:24px">
+        {fi ? "Etkö löytänyt vastausta? " : "Didn't find your answer? "}
+        <a href={r("help", lang)}>{fi ? "Katso ohjeet" : "Visit the help centre"}</a>
+      </p>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .drop-visual {
+    display: grid;
+    place-items: center;
+    aspect-ratio: 4 / 3;
+    border-radius: var(--r-lg);
+    background:
+      radial-gradient(circle at 30% 30%, rgb(109 46 140 / 0.65), transparent 60%),
+      radial-gradient(circle at 75% 70%, rgb(242 193 78 / 0.35), transparent 55%),
+      #2a2331;
+    color: #f6f3ee;
+  }
+  .drop-visual :global(svg) {
+    width: 96px;
+    height: 96px;
+    stroke-width: 1.2;
+    opacity: 0.9;
+  }
+  .phones-figure {
+    padding-top: 12px;
+  }
+</style>

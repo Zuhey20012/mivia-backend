@@ -1,0 +1,35 @@
+---
+import Base from "../layouts/Base.astro";
+import Icon from "../components/Icon.astro";
+import { ROUTES } from "../i18n/routes";
+---
+
+<Base
+  lang="fi"
+  title="Sivua ei löytynyt / Page not found"
+  description="Etsimääsi sivua ei löytynyt. The page you were looking for was not found."
+  alternates={ROUTES.home}
+  noindex
+>
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="blob" style="width:380px;height:380px;background:var(--lilac);left:-160px;top:-120px"></div>
+    <div class="wrap" style="max-width:52rem">
+      <p class="eyebrow">404</p>
+      <h1 id="hero-title">Tätä sivua ei löytynyt.</h1>
+      <p class="lead">Linkki voi olla vanha, tai osoitteessa on kirjoitusvirhe. Aloita etusivulta tai katso ohjeet.</p>
+      <div class="btn-row">
+        <a class="btn" href="/"><Icon name="arrow" />Etusivulle</a>
+        <a class="btn btn-ghost" href="/apua/">Apua</a>
+      </div>
+
+      <div lang="en" style="margin-top:56px">
+        <h2>This page could not be found.</h2>
+        <p class="muted">The link may be old, or there is a typo in the address. Start from the home page or visit the help centre.</p>
+        <div class="btn-row">
+          <a class="btn btn-ghost" href="/en/">Home in English</a>
+          <a class="btn btn-ghost" href="/en/help/">Help centre</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</Base>

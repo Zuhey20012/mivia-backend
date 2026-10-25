@@ -1,0 +1,127 @@
+---
+import Base from "../layouts/Base.astro";
+import Icon from "../components/Icon.astro";
+import type { IconName } from "../components/icons";
+import Phone from "../components/Phone.astro";
+import { LEGAL } from "../config/site";
+import { ROUTES, helpPath, r, type HelpKey, type Lang } from "../i18n/routes";
+import { helpArticles } from "../lib/help";
+import helpShot from "../assets/screens/customer-help-en.png";
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+const fi = lang === "fi";
+const articles = helpArticles(lang);
+const look: Record<HelpKey, { icon: IconName; tile: string }> = {
+  ordering: { icon: "basket", tile: "tile-lilac" },
+  delivery: { icon: "bike", tile: "tile-sun" },
+  returns: { icon: "return", tile: "tile-mint" },
+  refunds: { icon: "euro", tile: "tile-peach" },
+  account: { icon: "key", tile: "tile-clay" },
+  privacy: { icon: "shield", tile: "tile-sand" },
+  contact: { icon: "chat", tile: "tile-surface" },
+};
+---
+
+<Base
+  lang={lang}
+  title={fi ? "Apua ja ohjeet" : "Help centre"}
+  description={fi
+    ? "Ohjeet Malvoyan käyttöön: tilaaminen, toimitus ja nouto, palautukset ja hygieniasinetti, hyvitykset, tili ja salasana, tietosuoja ja yhteydenotto."
+    : "How to use Malvoya: ordering, delivery and pickup, returns and the hygiene seal, refunds, account and password, privacy and how to contact us."}
+  alternates={ROUTES.help}
+  section="help"
+>
+  <section class="hero" aria-labelledby="hero-title" style="padding-bottom:24px">
+    <div class="wrap hero-grid">
+      <div>
+        <p class="eyebrow">{fi ? "Apua" : "Help"}</p>
+        <h1 id="hero-title">{fi ? "Miten voimme auttaa?" : "How can we help?"}</h1>
+        <p class="lead">
+          {
+            fi
+              ? "Lyhyet ja suorat ohjeet tilaamiseen, toimitukseen, palautuksiin ja tietoihisi. Jos et löydä vastausta, ota yhteyttä sovelluksessa: Profiili → Apua → Ota yhteyttä."
+              : "Short, straight answers about ordering, delivery, returns and your data. If you can't find what you need, contact us in the app: Profile → Help → Contact us."
+          }
+        </p>
+        <div class="btn-row">
+          <a class="btn" href={helpPath("contact", lang)}>
+            <Icon name="chat" />
+            {fi ? "Ota yhteyttä" : "Contact us"}
+          </a>
+          <a class="btn btn-ghost" href={helpPath("returns", lang)}>{fi ? "Palautukset" : "Returns"}</a>
+        </div>
+      </div>
+      <figure style="margin:0">
+        <div class="phones">
+          <div class="phones-stage"></div>
+          <Phone
+            src={helpShot}
+            eager
+            alt={fi
+              ? "Malvoya-sovelluksen profiili: Palautukset, Tietosi, Ehdot ja käytännöt sekä Apua-osio, jossa ovat Apuri ja Ota yhteyttä."
+              : "The Malvoya app's profile: Returns, Your data, Terms and policies, and the Help section with Help assistant and Contact us."}
+          />
+        </div>
+        <figcaption class="shot-caption">
+          {fi ? "Apua löytyy sovelluksessa Profiili-välilehdeltä (kuvakaappaus, englanniksi)." : "Help is in the app's Profile tab (real screenshot)."}
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section-tight" aria-labelledby="articles-title">
+    <div class="wrap">
+      <h2 id="articles-title" class="sr-only">{fi ? "Ohjeet" : "Articles"}</h2>
+      <ul class="article-list grid grid-3">
+        {
+          articles.map((a) => (
+            <li class="reveal">
+              <a class:list={["tile article-link", look[a.key].tile]} href={a.path}>
+                <span class="icon-chip">
+                  <Icon name={look[a.key].icon} />
+                </span>
+                <h3>{a.title}</h3>
+                <p class="muted">{a.description}</p>
+                <span class="more" aria-hidden="true">
+                  {fi ? "Lue ohje →" : "Read →"}
+                </span>
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+
+  <section class="section-tight" aria-labelledby="more-title">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="more-title">{fi ? "Ehdot ja tietosuoja" : "Terms and privacy"}</h2>
+      </div>
+      <ul class="link-list" style="max-width:52rem">
+        <li>
+          <a class="link-row" href={LEGAL.terms}>
+            <span class="t"><strong>{fi ? "Käyttöehdot" : "Terms of service"}</strong><span>{fi ? "Tilaaminen, toimitus, peruuttaminen ja palautukset" : "Ordering, delivery, cancelling and returns"}</span></span>
+            <Icon name="external" />
+          </a>
+        </li>
+        <li>
+          <a class="link-row" href={LEGAL.privacy}>
+            <span class="t"><strong>{fi ? "Tietosuojaseloste" : "Privacy policy"}</strong><span>{fi ? "Mitä tietoja käsittelemme ja miksi" : "What data we process and why"}</span></span>
+            <Icon name="external" />
+          </a>
+        </li>
+        <li>
+          <a class="link-row" href={r("legal", lang)}>
+            <span class="t"><strong>{fi ? "Kaikki ehdot ja takaisinvedot" : "All legal pages and recalls"}</strong><span>{fi ? "Myyjän ehdot, lähettisopimus, tilin poistaminen, evästeet" : "Seller terms, courier agreement, account deletion, cookies"}</span></span>
+            <Icon name="arrow" />
+          </a>
+        </li>
+      </ul>
+    </div>
+  </section>
+</Base>

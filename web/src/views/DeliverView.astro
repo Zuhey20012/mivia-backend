@@ -1,0 +1,408 @@
+---
+import Base from "../layouts/Base.astro";
+import Icon from "../components/Icon.astro";
+import Phone from "../components/Phone.astro";
+import Faq, { type FaqItem } from "../components/Faq.astro";
+import { COURIER_PAY as P, LEGAL, appHref } from "../config/site";
+import { ROUTES, r, type Lang } from "../i18n/routes";
+import { examplePay, euros, km, maxWaitPaidMinutes, routeKm } from "../lib/courierPay";
+import { faqJsonLd } from "../lib/seo";
+import courierShot from "../assets/screens/courier-start-fi.png";
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+const fi = lang === "fi";
+const getApp = appHref("courier", r("download", lang));
+const e = (c: number) => euros(c, lang);
+const k = (v: number) => km(v, lang);
+const factor = fi ? String(P.roadFactor).replace(".", ",") : String(P.roadFactor);
+
+const steps = fi
+  ? [
+      { title: "Hae sovelluksessa", text: "Rekisteröidy Malvoya Courier -sovelluksessa. Tiimimme ottaa yhteyttä ja tarkistaa henkilöllisyytesi, ikäsi ja oikeutesi tehdä työtä Suomessa. Sovellukseen ei ladata asiakirjoja." },
+      { title: "Tee aloituslista", text: "Nimi ja puhelin, kulkuneuvo, tilitykset (Stripe), lähettisopimus ja selvitys siitä, miten sijaintiasi käytetään. Hyväksynnän tekee aina ihminen." },
+      { title: "Linjoille, kun sopii", text: "Vuoroja tai minimitunteja ei ole. Mene linjoille, kun sinulle sopii, ja poistu, kun olet valmis." },
+      { title: "Valitse keikkasi", text: `Tarjoukset tulevat enintään ${k(P.dispatchRadiusKm)} päässä olevista kaupoista, lähimmät ensin. Sinä päätät, minkä otat. Mitään ei jaeta automaattisesti.` },
+    ]
+  : [
+      { title: "Apply in the app", text: "Sign up in the Malvoya Courier app. Our team contacts you to check your identity, your age and your right to work in Finland. No documents are uploaded in the app." },
+      { title: "Finish the checklist", text: "Name and phone, vehicle, payouts (Stripe), the courier agreement and how your location is used. Approval is always a person's decision." },
+      { title: "Go online when it suits you", text: "There are no shifts and no minimum hours. Go online when it suits you and go offline when you are done." },
+      { title: "Choose your jobs", text: `Offers come from shops within ${k(P.dispatchRadiusKm)}, nearest first. You decide which to take. Nothing is assigned automatically.` },
+    ];
+
+const maxRide = routeKm(P.approachMaxKm);
+const formula = fi
+  ? [
+      { op: "", what: "Perusmaksu", value: `${e(P.baseCents)} jokaisesta toimituksesta (nouto ja luovutus).` },
+      { op: "+", what: "Matka kaupalta asiakkaalle", value: `${e(P.perKmCents)}/km. Matka on linnuntie kerrottuna tiekertoimella ${factor} ja pyöristettynä 0,1 km:iin. Tiedät sen ennen kuin hyväksyt.` },
+      { op: "≥", what: "Vähimmäispalkkio", value: `Perusmaksu ja matka yhteensä vähintään ${e(P.minCents)}.` },
+      { op: "+", what: "Ajo kauppaan", value: `${e(P.approachPerKmCents)}/km ${k(P.approachFreeKm)} ylittävältä osalta, sijainnistasi hyväksymishetkellä kauppaan (sama tiekerroin), enintään ${k(maxRide)}.` },
+      { op: "+", what: "Odotus kaupalla", value: `Jos kauppa ei ole valmis: ensimmäiset ${P.waitFreeMinutes} min sisältyvät, sitten ${e(P.waitPerMinCents)}/min, enintään ${e(P.waitMaxCents)} (${maxWaitPaidMinutes} min) keikkaa kohden. Odotus alkaa, kun painat ”Saavuin liikkeeseen” 300 metrin säteellä.` },
+      { op: "+", what: "Juomaraha", value: "Asiakkaan juomaraha menee sinulle kokonaan. Malvoya ei ota siitä osuutta." },
+    ]
+  : [
+      { op: "", what: "Base fee", value: `${e(P.baseCents)} for every delivery (pickup and handover).` },
+      { op: "+", what: "Distance, shop to customer", value: `${e(P.perKmCents)}/km. The distance is the straight line times a road factor of ${factor}, rounded to 0.1 km. You know it before you accept.` },
+      { op: "≥", what: "Minimum", value: `The base fee and distance together pay at least ${e(P.minCents)}.` },
+      { op: "+", what: "Ride to the shop", value: `${e(P.approachPerKmCents)}/km beyond the first ${k(P.approachFreeKm)}, from where you are when you accept to the shop (same road factor), up to ${k(maxRide)}.` },
+      { op: "+", what: "Waiting at the shop", value: `If the shop isn't ready: the first ${P.waitFreeMinutes} min are included, then ${e(P.waitPerMinCents)}/min, up to ${e(P.waitMaxCents)} (${maxWaitPaidMinutes} min) per job. Waiting starts when you tap “Arrived at shop” within 300 m.` },
+      { op: "+", what: "Tips", value: "The customer's tip goes to you in full. Malvoya takes no share of it." },
+    ];
+
+const exA = { straight: 2, ride: 3, wait: 8, pay: examplePay(2, 3, 8) };
+const exB = { straight: 0.8, ride: 1.5, wait: 0, pay: examplePay(0.8, 1.5, 0) };
+
+const requirements = fi
+  ? [
+      "Olet vähintään 18-vuotias ja sinulla on oikeus tehdä työtä Suomessa.",
+      "Toimit itsenäisenä yrittäjänä: tarvitset Y-tunnuksen tai kevytyrittäjäpalvelun ja hoidat omat veroisi ja vakuutuksesi (esimerkiksi YEL, kun se koskee sinua).",
+      "Kulkuneuvo: polkupyörä, sähköpyörä, mopo, sähköpotkulauta, auto – tai kävellen.",
+      "Android-puhelin, jossa sijainti on käytössä, kun olet linjoilla.",
+      "Stripe-tili tilityksiä varten. Se avataan Stripen omilla sivuilla.",
+      "Hyväksyt lähettisopimuksen. Voit tehdä töitä myös muille alustoille.",
+    ]
+  : [
+      "You are at least 18 and have the right to work in Finland.",
+      "You work as an independent entrepreneur: you need a Y-tunnus (Finnish business ID) or a light-entrepreneur invoicing service, and you handle your own taxes and insurance (for example YEL, where it applies to you).",
+      "A way to get around: bicycle, e-bike, moped, e-scooter, car – or on foot.",
+      "An Android phone with location turned on while you are online.",
+      "A Stripe account for payouts, set up on Stripe's own pages.",
+      "You accept the courier agreement. You are free to work for other platforms too.",
+    ];
+
+const faq: FaqItem[] = fi
+  ? [
+      {
+        q: "Paljonko tienaan tunnissa?",
+        a: "<p>Emme lupaa tuntiansioita. Malvoya on uusi, ja keikkoja voi aluksi olla harvoin. Jokainen tarjous näyttää palkkiosi ja rivi riviltä, miten se on laskettu, ennen kuin hyväksyt – niin voit itse päättää, kannattaako keikka sinulle.</p>",
+      },
+      {
+        q: "Olenko Malvoyalla töissä?",
+        a: "<p>Et. Toimit itsenäisenä yrittäjänä lähettisopimuksen mukaan. Päätät itse, milloin olet linjoilla, mitkä keikat otat ja miten toimitat. Voit tehdä töitä myös muille alustoille.</p>",
+      },
+      {
+        q: "Voinko kieltäytyä keikasta?",
+        a: "<p>Voit, ilman seurauksia. Arvosanoja, hyväksymisprosenttia tai hylkäyksiä ei käytetä keikkojen tarjoamiseen eikä palkkion laskemiseen.</p>",
+      },
+      {
+        q: "Milloin saan palkkion?",
+        a: "<p>Jokaisen toimituksen palkkio maksetaan omalle Stripe-tilillesi toimituksen jälkeen. Stripe vahvistaa henkilöllisyytesi ja pankkitilisi omilla sivuillaan.</p>",
+      },
+      {
+        q: "Voivatko palkkiot muuttua?",
+        a: `<p>Voivat. Tällä sivulla ovat nykyiset asetukset. Muutoksesta ilmoitetaan vähintään ${P.noticeDays} päivää etukäteen, ellei laki vaadi nopeampaa muutosta. Keikalle lukitaan tarjoushetken hinnat, joten myöhempi muutos ei koskaan pienennä jo tarjotun tai hyväksytyn keikan palkkiota.</p>`,
+      },
+      {
+        q: "Mitä jos asiakas ei ole paikalla?",
+        a: "<p>Ilmoita ongelmasta sovelluksessa. Kymmenen minuutin kuluttua voit palauttaa tilauksen kauppaan. Keikkasi palkkio ja mahdollinen juomaraha maksetaan silloinkin.</p>",
+      },
+      {
+        q: "Missä Malvoya toimii?",
+        a: "<p>Malvoya avautuu alue kerrallaan. Ensimmäisillä alueilla tarvitaan vain muutamia lähettejä, ja keikkoja voi aluksi olla vähän.</p>",
+      },
+    ]
+  : [
+      {
+        q: "How much will I earn per hour?",
+        a: "<p>We don't promise hourly earnings. Malvoya is new, and jobs may be rare at first. Every offer shows your pay, and line by line how it was calculated, before you accept, so you can decide whether a job is worth it to you.</p>",
+      },
+      {
+        q: "Am I employed by Malvoya?",
+        a: "<p>No. You work as an independent entrepreneur under the courier agreement. You decide when you are online, which jobs you take and how you deliver. You can work for other platforms too.</p>",
+      },
+      {
+        q: "Can I decline a job?",
+        a: "<p>Yes, without consequences. Ratings, acceptance rates and declines are not used to offer jobs or to calculate pay.</p>",
+      },
+      {
+        q: "When do I get paid?",
+        a: "<p>The pay for each delivery goes to your own Stripe account after the delivery. Stripe verifies your identity and bank account on its own pages.</p>",
+      },
+      {
+        q: "Can the pay change?",
+        a: `<p>Yes. This page shows the current settings. Changes are announced at least ${P.noticeDays} days in advance, unless the law requires a faster change. Each job keeps the rates from when it was offered, so a later change never lowers the pay of a job already offered or accepted.</p>`,
+      },
+      {
+        q: "What if the customer isn't there?",
+        a: "<p>Report the problem in the app. After ten minutes you can take the order back to the shop. Your pay for the job, and any tip, are still paid.</p>",
+      },
+      {
+        q: "Where does Malvoya operate?",
+        a: "<p>Malvoya is opening one area at a time. The first areas need only a few couriers, and jobs may be rare at first.</p>",
+      },
+    ];
+---
+
+<Base
+  lang={lang}
+  title={fi ? "Lähetiksi – toimita omaan tahtiisi" : "Deliver with Malvoya – on your own schedule"}
+  description={fi
+    ? "Toimita lähikauppojen tilauksia, kun sinulle sopii. Näet palkkion ja sen laskutavan ennen kuin hyväksyt keikan. Ei vuoroja, juomarahat kokonaan sinulle."
+    : "Deliver orders from local shops when it suits you. See the pay, and how it is calculated, before you accept a job. No shifts, and tips go to you in full."}
+  alternates={ROUTES.deliver}
+  app="courier"
+  section="deliver"
+  jsonLd={[faqJsonLd(faq, lang)]}
+>
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="blob" style="width:420px;height:420px;background:var(--peach);left:-180px;top:-140px"></div>
+    <div class="blob" style="width:280px;height:280px;background:var(--clay);right:-100px;bottom:-40px"></div>
+    <div class="wrap hero-grid">
+      <div>
+        <p class="eyebrow">Malvoya Courier</p>
+        <h1 id="hero-title">
+          {
+            fi ? (
+              <>
+                Toimita omaan tahtiisi. Näet palkkion <span class="accent">ennen</span> kuin hyväksyt.
+              </>
+            ) : (
+              <>
+                Deliver when it suits you. See the pay <span class="accent">before</span> you accept.
+              </>
+            )
+          }
+        </h1>
+        <p class="lead">
+          {
+            fi
+              ? "Malvoya Courier on sovellus itsenäisille lähettiyrittäjille, jotka toimittavat tilauksia paikallisista muoti- ja kauneuskaupoista asiakkaille. Pyörällä, mopolla, autolla tai kävellen."
+              : "Malvoya Courier is the app for independent couriers who deliver orders from local fashion and beauty shops to customers. By bike, moped, car or on foot."
+          }
+        </p>
+        <div class="btn-row">
+          <a class="btn" href={getApp}>
+            <Icon name="download" />
+            {fi ? "Lataa Malvoya Courier" : "Get Malvoya Courier"}
+          </a>
+          <a class="btn btn-ghost" href="#palkkio">{fi ? "Näin palkkio lasketaan" : "How pay works"}</a>
+        </div>
+        <p class="hero-note">
+          <Icon name="info" />
+          <span>
+            {
+              fi
+                ? "Malvoya on vasta aloittamassa. Kauppoja ja asiakkaita on vielä vähän, joten keikkoja voi aluksi olla harvoin. Emme lupaa tiettyä määrää keikkoja tai ansioita."
+                : "Malvoya is just starting. There are few shops and customers yet, so jobs may be rare at first. We don't promise any number of jobs or earnings."
+            }
+          </span>
+        </p>
+      </div>
+      <figure style="margin:0">
+        <div class="phones">
+          <div class="phones-stage"></div>
+          <Phone
+            src={courierShot}
+            eager
+            class="float"
+            alt={fi
+              ? "Malvoya Courier -sovelluksen aloitusnäkymä: Toimita Malvoyalla, palkkio näkyy jokaisessa keikassa ennen hyväksymistä, Malvoya on vasta aloittamassa, Hae lähetiksi."
+              : "The Malvoya Courier app's start screen in Finnish: Deliver with Malvoya, the pay is shown on every job before you accept, Malvoya is just starting, Apply as a courier."}
+          />
+        </div>
+        <figcaption class="shot-caption">
+          {fi ? "Oikea kuvakaappaus Malvoya Courier -sovelluksesta." : "A real screenshot of the Malvoya Courier app (Finnish)."}
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section-tight" aria-labelledby="how-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">{fi ? "Näin se toimii" : "How it works"}</p>
+        <h2 id="how-title">{fi ? "Sinä päätät milloin ja mitkä keikat." : "You decide when, and which jobs."}</h2>
+        <p>
+          {
+            fi
+              ? "Jos lähellä ei ole lähettiä, keikka näytetään kaikille linjoilla oleville. Keikalla sovellus neuvoo vaihe vaiheelta: mene kauppaan, ilmoittaudu, nouda, toimita. Luovuta tilaus henkilökohtaisesti tai jätä se ovelle ja ota paketista kuva – vain asiakas näkee kuvan, ja se poistetaan 30 päivän kuluttua."
+              : "If no courier is near, a job is shown to everyone online. On the job the app guides you step by step: go to the shop, check in, pick up, deliver. Hand the order over in person, or leave it at the door and take a photo of the parcel. Only the customer sees the photo, and it is deleted after 30 days."
+          }
+        </p>
+      </div>
+      <ol class="steps steps-4">
+        {
+          steps.map((s, i) => (
+            <li class="reveal">
+              <div class:list={["tile", ["tile-peach", "tile-sand", "tile-sun", "tile-clay"][i]]} style="height:100%">
+                <h3>{s.title}</h3>
+                <p class="muted">{s.text}</p>
+              </div>
+            </li>
+          ))
+        }
+      </ol>
+    </div>
+  </section>
+
+  <section class="section" id="palkkio" aria-labelledby="pay-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">{fi ? "Palkkio" : "Pay"}</p>
+        <h2 id="pay-title">{fi ? "Näin palkkio lasketaan." : "How your pay is calculated."}</h2>
+        <p class="pill" style="font-size:.9rem">
+          <Icon name="clock" size={16} />
+          {fi ? `Nykyiset asetukset – voivat muuttua ${P.noticeDays} päivän ennakkoilmoituksella` : `Current settings – may change with ${P.noticeDays} days' notice`}
+        </p>
+      </div>
+      <div class="split" style="align-items:start">
+        <div>
+          <ol class="formula">
+            {
+              formula.map((f) => (
+                <li>
+                  <span class="op" aria-hidden="true">{f.op || "€"}</span>
+                  <span class="what">{f.what}</span>
+                  <span class="value">{f.value}</span>
+                </li>
+              ))
+            }
+          </ol>
+          <p class="muted small" style="margin-top:16px">
+            {
+              fi
+                ? "Sama kaava kaikille lähetille. Arvosanat, hyväksymisprosentti tai hylkäykset eivät vaikuta palkkioon. Palkkio on erillinen asiakkaan maksamasta toimitusmaksusta. Keikalle lukitaan tarjoushetken hinnat."
+                : "The same formula for every courier. Ratings, acceptance rates and declines do not affect pay. Your pay is separate from the delivery fee the customer pays. Each job keeps the rates from when it was offered."
+            }
+          </p>
+        </div>
+        <div class="grid">
+          {
+            [exA, exB].map((x, i) => (
+              <div class="tile tile-surface example">
+                <table>
+                  <caption>
+                    {fi ? `Laskuesimerkki ${i + 1}` : `Worked example ${i + 1}`}
+                    <span class="muted small" style="display:block;font-family:var(--font-body);font-weight:500">
+                      {fi
+                        ? `${k(x.straight)} linnuntietä kaupalta asiakkaalle, ${k(x.ride)} kauppaan, odotus ${x.wait} min`
+                        : `${k(x.straight)} straight line shop to customer, ${k(x.ride)} to the shop, ${x.wait} min wait`}
+                    </span>
+                  </caption>
+                  <tbody>
+                    <tr>
+                      <th scope="row">{fi ? "Perusmaksu" : "Base fee"}</th>
+                      <td>{e(P.baseCents)}</td>
+                    </tr>
+                    <tr>
+                      <th scope="row">
+                        {fi ? "Matka" : "Distance"} {k(x.pay.distanceKm)} × {e(P.perKmCents)}
+                      </th>
+                      <td>{e(x.pay.distanceCents)}</td>
+                    </tr>
+                    {x.pay.topUpCents > 0 && (
+                      <tr>
+                        <th scope="row">{fi ? `Korotus ${e(P.minCents)} vähimmäispalkkioon` : `Top-up to the ${e(P.minCents)} minimum`}</th>
+                        <td>{e(x.pay.topUpCents)}</td>
+                      </tr>
+                    )}
+                    <tr>
+                      <th scope="row">
+                        {fi ? "Ajo kauppaan" : "Ride to the shop"} {k(x.pay.approachKm)}
+                        {x.pay.approachCents === 0 && (fi ? ` (alle ${k(P.approachFreeKm)})` : ` (under ${k(P.approachFreeKm)})`)}
+                      </th>
+                      <td>{e(x.pay.approachCents)}</td>
+                    </tr>
+                    <tr>
+                      <th scope="row">
+                        {fi ? "Odotus" : "Waiting"} {x.pay.waitMinutes} min
+                        {x.pay.waitCents > 0 && (fi ? ` (${x.pay.waitMinutes - P.waitFreeMinutes} min maksullista)` : ` (${x.pay.waitMinutes - P.waitFreeMinutes} paid min)`)}
+                      </th>
+                      <td>{e(x.pay.waitCents)}</td>
+                    </tr>
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <th scope="row">{fi ? "Yhteensä ennen juomarahaa" : "Total before tips"}</th>
+                      <td>{e(x.pay.totalCents)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            ))
+          }
+          <div class="notice">
+            <Icon name="info" />
+            <p>
+              {
+                fi
+                  ? "Esimerkit näyttävät, miten kaava toimii. Ne eivät ole lupaus ansioista: emme lupaa tuntiansioita emmekä keikkojen määrää."
+                  : "The examples show how the formula works. They are not a promise of earnings: we don't promise hourly earnings or a number of jobs."
+              }
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section-tight" aria-labelledby="req-title">
+    <div class="wrap split">
+      <div>
+        <p class="eyebrow">{fi ? "Vaatimukset" : "Requirements"}</p>
+        <h2 id="req-title">{fi ? "Mitä tarvitset" : "What you need"}</h2>
+        <ul class="checks">
+          {requirements.map((x) => <li>{x}</li>)}
+        </ul>
+      </div>
+      <div class="tile tile-ink" id="sijainti">
+        <span class="icon-chip" style="background:rgb(255 255 255 / .1);color:#f6f3ee">
+          <Icon name="pin" />
+        </span>
+        <h3>{fi ? "Sijaintisi" : "Your location"}</h3>
+        <p class="muted">
+          {
+            fi
+              ? "Malvoya Courier kerää tarkan sijaintisi, kun olet linjoilla, myös silloin kun sovellus on taustalla tai näyttö on pois päältä. Sijaintia käytetään lähellä olevien keikkojen tarjoamiseen, sen tarkistamiseen, että olet kaupalla, kauppaan ajon palkkion laskemiseen ja sijaintisi näyttämiseen toimittamasi tilauksen asiakkaalle ja kaupalle."
+              : "Malvoya Courier collects your precise location while you are online, including when the app is in the background or the screen is off. It is used to offer you nearby jobs, check that you are at the shop, calculate your pay for the ride to the shop, and show your position to the customer and the shop of the order you are delivering."
+          }
+        </p>
+        <p class="muted">
+          {
+            fi
+              ? "Ilmoitus näkyy koko ajan. Jakaminen loppuu, kun poistut linjoilta, ja tallennettu sijaintisi poistetaan silloin. Sijaintia ei käytetä mainontaan."
+              : "A notification shows the whole time. Sharing stops when you go offline, and your stored position is then deleted. Your location is not used for ads."
+          }
+        </p>
+        <p><a href={LEGAL.privacy}>{fi ? "Tietosuojaseloste" : "Privacy policy"}</a></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section-tight" aria-labelledby="cta-title">
+    <div class="wrap">
+      <div class="cta-band">
+        <div class="ring" aria-hidden="true"></div>
+        <h2 id="cta-title">{fi ? "Lue sopimus ja hae lähetiksi." : "Read the agreement and apply."}</h2>
+        <p>
+          {
+            fi
+              ? "Lähettisopimuksessa kerrotaan, miten keikkoja tarjotaan, miten palkkio lasketaan ja miten sopimus muuttuu. Kaikki versiot pysyvät luettavissa."
+              : "The courier agreement explains how jobs are offered, how pay is calculated and how the agreement changes. Every version stays readable."
+          }
+        </p>
+        <div class="btn-row">
+          <a class="btn btn-sun" href={getApp}>
+            <Icon name="download" />
+            {fi ? "Lataa Malvoya Courier" : "Get Malvoya Courier"}
+          </a>
+          <a class="btn btn-ghost" href={LEGAL.couriers}>{fi ? "Lähettisopimus" : "Courier agreement"}</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section-tight" aria-labelledby="faq-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">{fi ? "Usein kysyttyä" : "FAQ"}</p>
+        <h2 id="faq-title">{fi ? "Lähettien kysymyksiä" : "Questions from couriers"}</h2>
+      </div>
+      <Faq items={faq} />
+    </div>
+  </section>
+</Base>

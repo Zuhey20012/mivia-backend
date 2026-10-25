@@ -1,0 +1,122 @@
+---
+import "../styles/global.css";
+import Header from "../components/Header.astro";
+import Footer from "../components/Footer.astro";
+import { SITE_NAME, type AppKey } from "../config/site";
+import type { Alternates, Lang } from "../i18n/routes";
+
+interface Props {
+  lang: Lang;
+  /** Page title without the site name (the home page passes the full title and `fullTitle`). */
+  title: string;
+  fullTitle?: boolean;
+  description: string;
+  /** This page in both languages (paths). */
+  alternates: Alternates;
+  /** Brand colour of the audience: Malva (customers), Moss (shops), Lingon (couriers). */
+  app?: AppKey;
+  /** Open Graph image: one of the feature graphics in /public/og. */
+  og?: AppKey;
+  /** Extra JSON-LD blocks for this page. */
+  jsonLd?: Record<string, unknown>[];
+  noindex?: boolean;
+  /** Which top-level nav item is current. */
+  section?: "home" | "sell" | "deliver" | "help" | "download" | "legal";
+}
+
+const { lang, title, fullTitle = false, description, alternates, app = "customer", og = app, jsonLd = [], noindex = false, section } =
+  Astro.props;
+
+const site = (Astro.site?.href ?? "https://malvoya-web.onrender.com/").replace(/\/$/, "");
+const abs = (path: string) => `${site}${path}`;
+const canonical = abs(alternates[lang]);
+const pageTitle = fullTitle ? title : `${title} · ${SITE_NAME}`;
+const ogImage = abs(`/og/${og}-${lang}.png`);
+const ogAlt =
+  lang === "fi"
+    ? { customer: "Malvoya: muotia ja kauneutta lähikaupoista", store: "Malvoya Store: myy lähellä oleville", courier: "Malvoya Courier: toimita omaan tahtiisi" }[og]
+    : { customer: "Malvoya: fashion and beauty from shops near you", store: "Malvoya Store: sell to shoppers near you", courier: "Malvoya Courier: deliver on your own schedule" }[og];
+
+const organization = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "@id": `${site}/#organization`,
+  name: SITE_NAME,
+  url: `${site}/`,
+  logo: abs("/icon-512.png"),
+  description:
+    lang === "fi"
+      ? "Malvoya on paikallisen muodin ja kauneuden markkinapaikka Suomessa."
+      : "Malvoya is a local marketplace for fashion and beauty in Finland.",
+  areaServed: { "@type": "Country", name: "Finland" },
+};
+const website = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "@id": `${site}/#website`,
+  name: SITE_NAME,
+  url: `${site}/`,
+  inLanguage: ["fi", "en"],
+  publisher: { "@id": `${site}/#organization` },
+};
+const blocks = [organization, website, ...jsonLd];
+const json = (o: unknown) => JSON.stringify(o).replace(/</g, "\\u003c");
+---
+
+<!doctype html>
+<html lang={lang} dir="ltr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>{pageTitle}</title>
+    <meta name="description" content={description} />
+    {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={canonical} />}
+    {
+      !noindex && (
+        <>
+          <link rel="alternate" hreflang="fi" href={abs(alternates.fi)} />
+          <link rel="alternate" hreflang="en" href={abs(alternates.en)} />
+          <link rel="alternate" hreflang="x-default" href={abs(alternates.fi)} />
+        </>
+      )
+    }
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#F6F3EE" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#121015" media="(prefers-color-scheme: dark)" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <meta name="format-detection" content="telephone=no" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preload" href="/fonts/HankenGrotesk-400.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/BricolageGrotesque-800.woff2" as="font" type="font/woff2" crossorigin />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={SITE_NAME} />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1024" />
+    <meta property="og:image:height" content="500" />
+    <meta property="og:image:alt" content={ogAlt} />
+    <meta property="og:locale" content={lang === "fi" ? "fi_FI" : "en_GB"} />
+    <meta property="og:locale:alternate" content={lang === "fi" ? "en_GB" : "fi_FI"} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={pageTitle} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+    <meta name="twitter:image:alt" content={ogAlt} />
+
+    {blocks.map((b) => <script type="application/ld+json" set:html={json(b)} />)}
+  </head>
+  <body data-app={app}>
+    <a class="skip-link" href="#main">{lang === "fi" ? "Siirry sisältöön" : "Skip to content"}</a>
+    <Header lang={lang} alternates={alternates} section={section} />
+    <main id="main" tabindex="-1">
+      <slot />
+    </main>
+    <Footer lang={lang} alternates={alternates} />
+  </body>
+</html>

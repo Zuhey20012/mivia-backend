@@ -1,0 +1,93 @@
+---
+import Icon from "./Icon.astro";
+import Mark from "./Mark.astro";
+import { LEGAL } from "../config/site";
+import { helpPath, r, type Alternates, type Lang } from "../i18n/routes";
+
+interface Props {
+  lang: Lang;
+  alternates: Alternates;
+}
+
+const { lang, alternates } = Astro.props;
+const fi = lang === "fi";
+const ext = fi ? "(avautuu Malvoyan palvelimelta)" : "(opens on Malvoya's server)";
+const year = new Date().getFullYear();
+
+const cols = [
+  {
+    title: "Malvoya",
+    links: [
+      { href: r("home", lang), label: fi ? "Asiakkaille" : "For shoppers" },
+      { href: r("sell", lang), label: fi ? "Kauppiaille" : "For shops" },
+      { href: r("deliver", lang), label: fi ? "Lähetiksi" : "Deliver with Malvoya" },
+      { href: r("download", lang), label: fi ? "Lataa sovellukset" : "Get the apps" },
+    ],
+  },
+  {
+    title: fi ? "Apua" : "Help",
+    links: [
+      { href: r("help", lang), label: fi ? "Ohjeet" : "Help centre" },
+      { href: helpPath("returns", lang), label: fi ? "Palautukset" : "Returns" },
+      { href: helpPath("refunds", lang), label: fi ? "Hyvitykset" : "Refunds" },
+      { href: helpPath("contact", lang), label: fi ? "Ota yhteyttä" : "Contact us" },
+    ],
+  },
+  {
+    title: fi ? "Ehdot" : "Legal",
+    links: [
+      { href: LEGAL.terms, label: fi ? "Käyttöehdot" : "Terms of service", external: true },
+      { href: LEGAL.privacy, label: fi ? "Tietosuojaseloste" : "Privacy policy", external: true },
+      { href: LEGAL.sellers, label: fi ? "Myyjän ehdot" : "Seller terms", external: true },
+      { href: LEGAL.couriers, label: fi ? "Lähettisopimus" : "Courier agreement", external: true },
+      { href: LEGAL.recalls, label: fi ? "Takaisinvedot" : "Product recalls", external: true },
+      { href: r("cookies", lang), label: fi ? "Evästeet" : "Cookies" },
+      { href: r("legal", lang), label: fi ? "Kaikki ehdot" : "All legal pages" },
+    ],
+  },
+];
+---
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="brand-link" href={r("home", lang)}>
+          <Mark />
+          <span>Malvoya</span>
+        </a>
+        <p>
+          {
+            fi
+              ? "Muotia ja kauneutta lähikaupoista. Malvoya on uusi ja avautuu Suomessa alue kerrallaan."
+              : "Fashion and beauty from shops near you. Malvoya is new and opening in Finland one district at a time."
+          }
+        </p>
+      </div>
+      {
+        cols.map((c) => (
+          <nav aria-label={c.title}>
+            <h2>{c.title}</h2>
+            <ul>
+              {c.links.map((l) => (
+                <li>
+                  <a href={l.href}>
+                    {l.label}
+                    {"external" in l && l.external && <span class="sr-only"> {ext}</span>}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        ))
+      }
+    </div>
+    <div class="footer-bottom">
+      <span>© {year} Malvoya</span>
+      <span>{fi ? "Tällä sivustolla ei ole evästeitä eikä seurantaa." : "This site uses no cookies and no tracking."}</span>
+      <a href={fi ? alternates.en : alternates.fi} hreflang={fi ? "en" : "fi"} lang={fi ? "en" : "fi"}>
+        <Icon name="globe" size={18} />&nbsp;{fi ? "In English" : "Suomeksi"}
+      </a>
+    </div>
+  </div>
+</footer>

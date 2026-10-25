@@ -1,0 +1,89 @@
+---
+import Icon from "./Icon.astro";
+import Mark from "./Mark.astro";
+import { r, type Alternates, type Lang } from "../i18n/routes";
+
+interface Props {
+  lang: Lang;
+  alternates: Alternates;
+  section?: string;
+}
+
+const { lang, alternates, section } = Astro.props;
+const fi = lang === "fi";
+
+const items = [
+  { key: "home", href: r("home", lang), label: fi ? "Asiakkaille" : "For shoppers" },
+  { key: "sell", href: r("sell", lang), label: fi ? "Kauppiaille" : "For shops" },
+  { key: "deliver", href: r("deliver", lang), label: fi ? "Lähetiksi" : "Deliver" },
+  { key: "help", href: r("help", lang), label: fi ? "Apua" : "Help" },
+  { key: "download", href: r("download", lang), label: fi ? "Lataa sovellus" : "Get the apps" },
+];
+const other: Lang = fi ? "en" : "fi";
+const otherHref = alternates[other];
+---
+
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand-link" href={r("home", lang)} aria-label={fi ? "Malvoya, etusivu" : "Malvoya, home"}>
+      <Mark />
+      <span aria-hidden="true">Malvoya</span>
+    </a>
+
+    <nav class="primary-nav" aria-label={fi ? "Päävalikko" : "Main"}>
+      <ul>
+        {
+          items.map((i) => (
+            <li>
+              <a class="nav-link" href={i.href} aria-current={section === i.key ? "page" : undefined}>
+                {i.label}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </nav>
+
+    <a class="lang-link" href={otherHref} hreflang={other} lang={other}>
+      <Icon name="globe" />
+      <span aria-hidden="true">{fi ? "EN" : "FI"}</span>
+      <span class="sr-only">{fi ? "In English" : "Suomeksi"}</span>
+    </a>
+
+    <details class="menu">
+      <summary>
+        <Icon name="menu" />
+        <span>{fi ? "Valikko" : "Menu"}</span>
+      </summary>
+      <nav class="menu-panel" aria-label={fi ? "Päävalikko" : "Main"}>
+        <ul>
+          {
+            items.map((i) => (
+              <li>
+                <a href={i.href} aria-current={section === i.key ? "page" : undefined}>
+                  {i.label}
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+      </nav>
+    </details>
+  </div>
+</header>
+
+<script>
+  // Close the mobile menu with Escape or after a click outside it (it works without this, too).
+  const menu = document.querySelector<HTMLDetailsElement>(".menu");
+  if (menu) {
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && menu.open) {
+        menu.open = false;
+        menu.querySelector("summary")?.focus();
+      }
+    });
+    document.addEventListener("click", (e) => {
+      if (menu.open && !menu.contains(e.target as Node)) menu.open = false;
+    });
+  }
+</script>

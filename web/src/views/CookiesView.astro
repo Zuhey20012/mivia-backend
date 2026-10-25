@@ -1,0 +1,90 @@
+---
+import Base from "../layouts/Base.astro";
+import { LEGAL } from "../config/site";
+import { ROUTES, type Lang } from "../i18n/routes";
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+const fi = lang === "fi";
+---
+
+<Base
+  lang={lang}
+  title={fi ? "Evästeet" : "Cookies"}
+  description={fi
+    ? "Tämä sivusto ei käytä evästeitä, analytiikkaa eikä seurantaa. Siksi emme kysy evästesuostumusta."
+    : "This website uses no cookies, no analytics and no tracking. That is why we never ask for cookie consent."}
+  alternates={ROUTES.cookies}
+  section="legal"
+>
+  <section class="hero" aria-labelledby="hero-title" style="padding-bottom:16px">
+    <div class="wrap">
+      <p class="eyebrow">{fi ? "Evästekäytäntö" : "Cookie policy"}</p>
+      <h1 id="hero-title">{fi ? "Ei evästeitä. Ei seurantaa." : "No cookies. No tracking."}</h1>
+    </div>
+  </section>
+  <section class="section-tight" style="padding-top:0">
+    <div class="wrap prose">
+      {
+        fi ? (
+          <>
+            <p class="lead">
+              Tämä verkkosivusto ei tallenna laitteellesi evästeitä eikä muita tunnisteita, eikä se käytä analytiikka-, mainos- tai
+              seurantatyökaluja. Siksi emme näytä evästebanneria emmekä kysy suostumusta.
+            </p>
+            <h2>Mitä sivusto tekee</h2>
+            <ul>
+              <li>Sivut ovat tavallisia staattisia sivuja. Fontit ja kuvat ladataan tältä samalta sivustolta, ei kolmansien osapuolten palveluista.</li>
+              <li>Sivusto ei käytä selaimen paikallista tallennustilaa (localStorage, sessionStorage tai IndexedDB).</li>
+              <li>Kieli- ja teema-asetus seuraa selaimesi ja laitteesi asetuksia, eikä niitä tallenneta.</li>
+            </ul>
+            <h2>Palvelimen lokit</h2>
+            <p>
+              Kuten kaikki verkkopalvelimet, sivuston palveluntarjoaja (Render) voi käsitellä teknisiä tietoja, kuten IP-osoitteen ja
+              pyydetyn sivun, toimittaakseen sivun ja suojatakseen palvelua. Emme käytä niitä sinun tunnistamiseesi tai seurantaan.
+            </p>
+            <h2>Linkit muualle</h2>
+            <p>
+              Ehtojen ja tietosuojan linkit vievät Malvoyan palvelimelle (malvoya-api-eu.onrender.com). Kun sovellukset julkaistaan,
+              latauspainikkeet vievät Google Playhin tai App Storeen, joilla on omat käytäntönsä.
+            </p>
+            <p>
+              Jos lisäämme joskus evästeitä tai mittausta, päivitämme tämän sivun ensin ja kysymme suostumuksesi silloin, kun laki sitä
+              vaatii. Tietosuojasta kokonaisuudessaan: <a href={LEGAL.privacy}>tietosuojaseloste</a>.
+            </p>
+          </>
+        ) : (
+          <>
+            <p class="lead">
+              This website stores no cookies or other identifiers on your device, and it uses no analytics, advertising or tracking
+              tools. That is why there is no cookie banner and we never ask for consent.
+            </p>
+            <h2>What the site does</h2>
+            <ul>
+              <li>The pages are plain static pages. Fonts and images load from this same site, not from third-party services.</li>
+              <li>The site does not use your browser's local storage (localStorage, sessionStorage or IndexedDB).</li>
+              <li>Language and light or dark appearance follow your browser and device settings and are not stored.</li>
+            </ul>
+            <h2>Server logs</h2>
+            <p>
+              Like every web server, the site's host (Render) may process technical data such as your IP address and the page
+              requested, to deliver the page and protect the service. We don't use it to identify or track you.
+            </p>
+            <h2>Links elsewhere</h2>
+            <p>
+              The legal links lead to Malvoya's server (malvoya-api-eu.onrender.com). Once the apps are published, the download buttons
+              lead to Google Play or the App Store, which have their own policies.
+            </p>
+            <p>
+              If we ever add cookies or measurement, we will update this page first and ask for your consent where the law requires it.
+              For privacy as a whole, see the <a href={LEGAL.privacy}>privacy policy</a>.
+            </p>
+          </>
+        )
+      }
+    </div>
+  </section>
+</Base>
