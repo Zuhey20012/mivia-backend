@@ -91,7 +91,21 @@ export async function googleUnlink(req: AuthRequest, res: Response) {
   }
 }
 export const phoneLogin  = tokenHandler("firebaseToken", socialService.loginWithPhone);
-export const appleLogin  = tokenHandler("idToken", socialService.loginWithApple);
+/** Sign in with Apple: { idToken, role?, name? } (name only for new accounts, trimmed, at most 100 characters). */
+export async function appleLogin(req: Request, res: Response) {
+  const token = req.body?.idToken;
+  if (typeof token !== "string" || !token) return res.status(400).json({ ok: false, error: "idToken is required" });
+  const rawName = req.body?.name;
+  if (rawName !== undefined && rawName !== null && (typeof rawName !== "string" || rawName.trim().length > 100)) {
+    return res.status(400).json({ ok: false, error: "name must be text of at most 100 characters" });
+  }
+  const role = SIGNUP_ROLES.includes(req.body?.role) ? (req.body.role as socialService.SignupRole) : "CUSTOMER";
+  try {
+    res.json({ ok: true, ...(await socialService.loginWithApple(token, role, typeof rawName === "string" ? rawName.trim() || undefined : undefined)) });
+  } catch (e) {
+    sendError(res, e, 401);
+  }
+}
 
 export async function sendOtpHandler(req: Request, res: Response) {
   const { target, phone, email, channel } = req.body ?? {};

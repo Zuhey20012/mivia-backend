@@ -1,7 +1,7 @@
 name: malvoya_courier
 description: Malvoya Courier - Premium Delivery App
 publish_to: "none"
-version: 1.7.0+9
+version: 1.8.0+10
 
 environment:
   sdk: ">=3.4.0 <4.0.0"

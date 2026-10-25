@@ -159,6 +159,7 @@ model User {
   phone        String?
   passwordHash String
   googleSub    String?  @unique // Google account id ("sub"): set by Google sign-up or by linking Google in settings
+  appleSub     String?  @unique // Sign in with Apple user id (Firebase identities["apple.com"]): opens this account on Apple sign-in
   role         UserRole @default(CUSTOMER)
   avatarUrl    String?
   address      String?

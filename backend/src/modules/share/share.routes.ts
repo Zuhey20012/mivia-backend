@@ -27,6 +27,19 @@ shareRoutes.get("/.well-known/assetlinks.json", (_req, res) => {
   res.type("application/json").send(JSON.stringify(body));
 });
 
+/**
+ * Apple universal links for the customer app (iOS): the share, invite and drop pages open in the app. Served as JSON,
+ * 200, no redirect. APPLE_TEAM_ID (the Apple Developer Team ID) unset = no apps listed.
+ */
+shareRoutes.get("/.well-known/apple-app-site-association", (_req, res) => {
+  const team = (process.env.APPLE_TEAM_ID || "").trim();
+  const details = /^[A-Z0-9]{10}$/.test(team)
+    ? [{ appIDs: [`${team}.com.malvoya.customer`], components: [{ "/": "/s/*" }, { "/": "/r/*" }, { "/": "/d/*" }] }]
+    : [];
+  res.set("Cache-Control", "public, max-age=3600");
+  res.type("application/json").send(JSON.stringify({ applinks: { details } }));
+});
+
 /** "Open in the app" on Android: the https link inside the app if installed, otherwise the Play Store. */
 function openInAppLink(path: string) {
   const host = env.publicApiUrl.replace(/^https?:\/\//, "");

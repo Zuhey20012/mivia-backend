@@ -22,9 +22,12 @@ type SocialUser = { id: number; name: string; email: string; role: string; isAct
 export type SignupRole = "CUSTOMER" | "VENDOR" | "COURIER";
 
 /** The role only applies when a new account is created; existing accounts keep theirs. */
-async function createSocialUser(data: { email: string; name: string; phone?: string; googleSub?: string }, role: SignupRole) {
+async function createSocialUser(data: { email: string; name: string; phone?: string; googleSub?: string; appleSub?: string }, role: SignupRole) {
   const user = await prisma.user.create({
-    data: { email: data.email, name: data.name, phone: data.phone ?? null, googleSub: data.googleSub ?? null, passwordHash: unusablePasswordHash(), role },
+    data: {
+      email: data.email, name: data.name, phone: data.phone ?? null, googleSub: data.googleSub ?? null, appleSub: data.appleSub ?? null,
+      passwordHash: unusablePasswordHash(), role,
+    },
   });
   if (role === "COURIER") {
     await prisma.courier.create({ data: { userId: user.id, name: user.name, phone: data.phone ?? null, isActive: false } });
@@ -126,16 +129,50 @@ export async function loginWithPhone(firebaseToken: string, role: SignupRole = "
   return issueSession(user);
 }
 
-export async function loginWithApple(identityToken: string, role: SignupRole = "CUSTOMER") {
+export async function loginWithApple(identityToken: string, role: SignupRole = "CUSTOMER", name?: string) {
   const decoded = await verifyFirebaseToken(identityToken);
-  const email = decoded.email?.toLowerCase();
-  if (!email || decoded.email_verified === false) throw new AuthError("Apple sign-in did not provide a verified email", 401);
+  return signInWithAppleClaims(decoded, role, name);
+}
 
-  let user = await prisma.user.findFirst({ where: { email: { equals: email, mode: "insensitive" } } });
-  if (user) {
-    assertVerifiedSignInAllowed(user);
-  } else {
-    user = await createSocialUser({ email, name: decoded.name || "Customer" }, role);
+export type AppleClaims = {
+  email?: string;
+  email_verified?: boolean;
+  name?: string;
+  firebase?: { identities?: Record<string, unknown[] | undefined> };
+};
+
+/**
+ * Sign in with Apple, from the verified Firebase token's claims. The Apple user id (identities["apple.com"][0]) opens
+ * its account first, whatever the email (Apple may relay a private address, or none after the first sign-in). Otherwise
+ * the verified email finds an account (never one made by /register, assertVerifiedSignInAllowed) and the Apple id is
+ * remembered on first use; otherwise a new account is created with the Apple id and the name the app sends (Apple gives
+ * the name to the app only once, on the first sign-in).
+ */
+export async function signInWithAppleClaims(decoded: AppleClaims, role: SignupRole = "CUSTOMER", name?: string) {
+  const rawSub = decoded.firebase?.identities?.["apple.com"]?.[0];
+  const appleSub = typeof rawSub === "string" && rawSub.trim() ? rawSub.trim() : typeof rawSub === "number" ? String(rawSub) : null;
+  const email = decoded.email?.toLowerCase();
+  const emailVerified = !!email && decoded.email_verified !== false;
+  if (!appleSub && !emailVerified) throw new AuthError("Apple sign-in did not provide a verified email", 401);
+
+  let user = appleSub ? await prisma.user.findUnique({ where: { appleSub } }) : null;
+  if (!user && emailVerified) {
+    user = await prisma.user.findFirst({ where: { email: { equals: email!, mode: "insensitive" } } });
+    if (user) {
+      assertVerifiedSignInAllowed(user);
+      if (appleSub && !user.appleSub) {
+        try {
+          user = await prisma.user.update({ where: { id: user.id }, data: { appleSub } });
+        } catch (e: any) {
+          if (e?.code !== "P2002") throw e; // linked to another account at the same moment: keep signing in by email
+        }
+      }
+    }
+  }
+  if (!user) {
+    if (!emailVerified) throw new AuthError("Apple sign-in did not provide a verified email", 401);
+    const clean = name?.trim().slice(0, 100) || decoded.name?.trim().slice(0, 100) || "Customer";
+    user = await createSocialUser({ email: email!, name: clean, appleSub: appleSub ?? undefined }, role);
   }
   assertActive(user);
   return issueSession(user);

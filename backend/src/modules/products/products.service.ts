@@ -5,7 +5,7 @@ import { destroyResource, isOwnImageUrl, mediaConfigured } from "../../lib/cloud
 import { priceInfoFor, presentProduct, productInclude, recordPrice } from "./pricing";
 import { NAMED_FILTERS } from "./products.schema";
 import { assertPublishable, ownerPublishCheck, prepareCatalogWrite } from "../catalog/productWrite";
-import { audienceWhere, categoryFilter, categoryIndex, invalidateCategoryCounts, presentMatchedCategories, syncFacets, templatesOf } from "../catalog/categories";
+import { audienceWhere, categoryFilter, categoryIndex, invalidateCategoryCounts, presentMatchedCategories, storesInReach, syncFacets, templatesOf } from "../catalog/categories";
 import { ALL_FACET_KEYS, facetKeysFor, facetLabel } from "../catalog/attributes";
 import { categoriesForQuery } from "../catalog/matcher";
 import { liveCertificateWhere } from "../catalog/certificates";
@@ -91,7 +91,7 @@ export async function getProductById(id: number, viewerId?: number) {
 
 type SearchQuery = {
   q?: string; category?: string; audience?: string; ageGroup?: string; collection?: string; size?: string; color?: string; condition?: string; secondHand?: string;
-  handmade?: string; storeId?: number; minPrice?: number; maxPrice?: number; sort: string; page: number; limit: number;
+  handmade?: string; storeId?: number; lat?: number; lng?: number; minPrice?: number; maxPrice?: number; sort: string; page: number; limit: number;
   certificate?: string; attr?: Record<string, string>;
 } & Partial<Record<(typeof NAMED_FILTERS)[number], string>>;
 
@@ -146,6 +146,7 @@ export async function searchProducts(q: SearchQuery) {
   if (q.secondHand) and.push({ isSecondHand: q.secondHand === "true" });
   if (q.handmade) and.push({ isHandmade: true });
   if (q.storeId) and.push({ storeId: q.storeId });
+  if (q.lat !== undefined && q.lng !== undefined) and.push({ storeId: { in: (await storesInReach(q.lat, q.lng)) ?? [] } });
   if (q.size || q.color) {
     and.push({
       variants: {

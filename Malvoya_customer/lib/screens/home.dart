@@ -63,6 +63,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   List<Map<String, dynamic>> _newIn = [];
   List<Map<String, dynamic>> _secondHand = [];
 
+  /// "Delivered today": items of open shops, only when the API says same-day delivery is possible.
+  List<Map<String, dynamic>> _today = [];
+
+  /// The first delivery slot's `{en, fi}` label, when the API offers slots today.
+  dynamic _todayTitle;
+
   /// Numbers each catalogue load, so an older answer never replaces a newer one.
   int _catalogRequest = 0;
 
@@ -227,30 +233,37 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     };
   }
 
-  /// "New in near you" and "Second-hand finds": the newest items of shops within reach, at most two
-  /// per shop; a rail with fewer than four items is hidden.
+  /// The rails: "Delivered today" (only when `GET /delivery/today` says same-day delivery is possible),
+  /// "New in near you" and "Second-hand finds". The API limits search to shops within reach of the
+  /// pinned address; the app keeps at most two items per shop and hides a rail with fewer than four.
   Future<void> _loadRails(int request) async {
-    final nearby = _nearbyStores;
-    if (nearby.isEmpty) {
+    final place = DeliveryLocation.instance.query;
+    if (place.isEmpty) {
       setState(() {
         _newIn = [];
         _secondHand = [];
+        _today = [];
+        _todayTitle = null;
       });
       return;
     }
-    final base = {..._audience.query, 'sort': 'newest', 'limit': '50', 'page': '1'};
+    final base = {...place, ..._audience.query, 'sort': 'newest', 'limit': '50', 'page': '1'};
     final results = await Future.wait([
       _api.get('/products/search', query: base),
       _api.get('/products/search', query: {...base, 'secondHand': 'true'}),
+      _api.get('/delivery/today', query: place),
     ]);
     if (!mounted || request != _catalogRequest) return;
-    List<Map<String, dynamic>> rail(ApiResult res) {
+    List<Map<String, dynamic>> rail(ApiResult res, {bool openNowOnly = false}) {
       if (!res.ok) return [];
+      final open = {for (final s in stores) asInt(s['id']): s['openNow'] != false};
       final perShop = <int, int>{};
       final out = <Map<String, dynamic>>[];
       for (final p in _maps(res.data['products'])) {
         final storeId = asInt(p['storeId'] ?? p['store']?['id']);
-        if (storeId == null || !nearby.containsKey(storeId) || p['inStock'] == false) continue;
+        if (storeId == null || p['inStock'] == false) continue;
+        // Delivered today: only shops that are open now (shops not in the list are left out)
+        if (openNowOnly && open[storeId] != true) continue;
         if ((perShop[storeId] ?? 0) >= 2) continue;
         perShop[storeId] = (perShop[storeId] ?? 0) + 1;
         out.add(p);
@@ -259,10 +272,24 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       return out.length >= 4 ? out : [];
     }
 
+    final today = results[2];
+    final possible = today.ok && today.data['possible'] == true;
+    final slots = today.ok ? _maps(today.data['slots']) : const <Map<String, dynamic>>[];
     setState(() {
       _newIn = rail(results[0]);
       _secondHand = rail(results[1]);
+      _today = possible ? rail(results[0], openNowOnly: true) : [];
+      _todayTitle = possible && slots.isNotEmpty ? slots.first['label'] : null;
     });
+  }
+
+  /// "Delivered today", or "Delivery tonight 17.00–19.00" from the first slot the API offers (times
+  /// only ever come from the API).
+  String _todayRailTitle(BuildContext context) {
+    final label = localized(context, _todayTitle);
+    if (label == null) return tr(context, 'Delivered today', 'Tänään perille');
+    final lower = label.isEmpty ? label : label[0].toLowerCase() + label.substring(1);
+    return tr(context, 'Delivery $lower', 'Toimitus $lower');
   }
 
   Future<void> _loadAll() async {
@@ -964,7 +991,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   _services(context),
                   // One seasonal collection first, then the rest of the collections in season
                   _collectionRow(context, tr(context, 'Collections', 'Kokoelmat'), mainCollections),
-                  // "Delivered today" needs the API to say same-day delivery is possible; it has no such field yet, so the rail stays hidden
+                  _rail(context, title: _todayRailTitle(context), items: _today, seeAll: {'sort': 'newest'}),
                   _rail(context, title: tr(context, 'New in near you', 'Uutta lähelläsi'), items: _newIn, seeAll: {'sort': 'newest'}),
                   _rail(context, title: tr(context, 'Second-hand finds', 'Käytetyt löydöt'), items: _secondHand, seeAll: {'sort': 'newest', 'secondHand': 'true'}),
                   _collectionRow(context, tr(context, 'Gifts by price', 'Lahjat hinnan mukaan'), _giftCollections),

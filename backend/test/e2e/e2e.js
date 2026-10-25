@@ -54,7 +54,8 @@ async function startFeeApi(extraEnv) {
     env: { ...process.env, ...testEnv, PORT: "4556", PUBLIC_API_URL: FEE_BASE, DISABLE_SCHEDULER: "true", ...extraEnv },
     stdio: "ignore",
   });
-  for (let i = 0; i < 60; i++) {
+  // Up to 90 s: a cold start on a busy machine can take over 20 s
+  for (let i = 0; i < 180; i++) {
     try { if ((await fetch(`${FEE_BASE}/health`)).ok) return true; } catch {}
     await new Promise((r) => setTimeout(r, 500));
   }
@@ -1452,9 +1453,12 @@ function ean13(d12) {
 
   // This instance also runs as production without SMTP: password reset by email is unavailable there
   // DELIVERY_SLOTS empty (the default since 2.12): scheduled delivery is off, no invented time windows
-  const refUp = await startFeeApi({ NODE_ENV: "production", REFERRAL_DISCOUNT_CENTS: "500", REFERRAL_REWARD_CENTS: "300", ANDROID_APP_SHA256: `${"ab:".repeat(31)}cd, ${"12:".repeat(31)}EF, not-a-fingerprint`, DELIVERY_SLOTS: "" });
+  const refUp = await startFeeApi({ NODE_ENV: "production", REFERRAL_DISCOUNT_CENTS: "500", REFERRAL_REWARD_CENTS: "300", ANDROID_APP_SHA256: `${"ab:".repeat(31)}cd, ${"12:".repeat(31)}EF, not-a-fingerprint`, DELIVERY_SLOTS: "", APPLE_TEAM_ID: "AB12CD34EF" });
   check("API starts with invites switched on", refUp);
   const noSlotQ = await quote({ storeId, deliveryLat: 60.18, deliveryLng: 24.95, items: [{ productId, quantity: 1 }] }, otherCust.accessToken, FEE_API);
+  const aasaOn = await (await fetch(`${FEE_BASE}/.well-known/apple-app-site-association`)).json();
+  check("apple-app-site-association lists the customer app with the Team ID and the /s, /r, /d paths", JSON.stringify(aasaOn) === JSON.stringify({ applinks: { details: [{ appIDs: ["AB12CD34EF.com.malvoya.customer"], components: [{ "/": "/s/*" }, { "/": "/r/*" }, { "/": "/d/*" }] }] } }), aasaOn);
+  check("without DELIVERY_SLOTS GET /delivery/today lists no slots", ((await callAt(FEE_API, "GET", "/delivery/today?lat=60.17&lng=24.94")).body.slots ?? [1]).length === 0);
   check("without DELIVERY_SLOTS no delivery windows are offered and none can be booked (2.12 default)", noSlotQ.status === 200 && Array.isArray(noSlotQ.body.quote?.slots) && noSlotQ.body.quote.slots.length === 0 && (await quote({ storeId, deliveryLat: 60.18, deliveryLng: 24.95, items: [{ productId, quantity: 1 }], deliverySlot: { date: hel(new Date(Date.now() + 86_400_000)).date, start: "17:00", end: "19:00" } }, otherCust.accessToken, FEE_API)).status === 400, noSlotQ.body.quote?.slots);
   const noMail = await callAt(FEE_API, "POST", "/auth/password/forgot", { email: `reija${uniq}@example.fi` });
   check("without email sending, forgot password says so (503) for any address", noMail.status === 503 && noMail.body.error === "Password reset by email is not available yet. Contact support." && (await callAt(FEE_API, "POST", "/auth/password/forgot", { email: `nobody2-${uniq}@example.fi` })).status === 503, noMail.body);
@@ -1944,6 +1948,9 @@ function ean13(d12) {
     const bt = bea.accessToken;
     const img = (n) => ownImage(beaStore.id, n);
     const mk = (body, tok = bt, raw) => call("POST", "/products", { salePriceCents: 2900, stockQuantity: 5, images: [img(`p${Math.random().toString(36).slice(2, 8)}`)], ...body }, tok, raw);
+    // The legal checks above put a new version of the Seller Terms in force: Vera accepts it before publishing again
+    const veraAg = (await call("GET", "/me/agreements", null, vendor.accessToken)).body.required?.find((r) => r.doc === "seller-terms");
+    if (veraAg && !veraAg.accepted) await call("POST", "/me/agreements/accept", { doc: "seller-terms", version: veraAg.currentVersion }, vendor.accessToken);
 
     // Safety pledge (GPSR Art. 22(10)(b))
     const pl0 = await call("GET", "/stores/my/safety-pledge", null, bt);
@@ -2040,7 +2047,7 @@ function ean13(d12) {
     check("per kilogram for grams: 200 g at 19,90 € → 99,50 €/kg", cream.status === 201 && cream.body.product.unitPrice?.cents === 9950 && cream.body.product.unitPrice.per === "kg", cream.body.product?.unitPrice ?? cream.body);
     const edge50 = await mk({ name: "Käsivoide 50 ml", salePriceCents: 990, contentAmount: 50, contentUnit: "ml", ...cosm("skincare-hands-feet", { attributes: { skinType: ["dry"] } }) });
     const edge49 = await mk({ name: "Käsivoide 49,9 ml", salePriceCents: 990, contentAmount: 49.9, contentUnit: "ml", ...cosm("skincare-hands-feet") });
-    check("exactly 50 ml shows a unit price; 49,9 ml does not", edge50.body.product?.unitPrice?.cents === 198000 && edge49.status === 201 && edge49.body.product.unitPrice === null, [edge50.body.product?.unitPrice, edge49.body.product?.unitPrice]);
+    check("exactly 50 ml shows a unit price (9,90 € → 198,00 €/l); 49,9 ml does not", edge50.body.product?.unitPrice?.cents === 19800 && edge49.status === 201 && edge49.body.product.unitPrice === null, [edge50.body.product?.unitPrice, edge49.body.product?.unitPrice]);
     const lip = await mk({ name: "Velvet Lip 02", salePriceCents: 2400, ...cosm("makeup-lips", { attributes: { productType: "lipstick", finish: "matte" } }), variants: [{ shadeName: "02 Rose", shadeHex: "#C2185B", shadeFamily: "pink", undertone: "cool", finish: "matte", contentAmount: 3.5, contentUnit: "g", stock: 4 }] });
     check("shades are options with name, hex, family, undertone and finish; tiny packs have no unit price", lip.status === 201 && lip.body.product.variants[0].shadeHex === "#C2185B" && lip.body.product.variants[0].shadeFamily === "pink" && lip.body.product.variants[0].unitPrice === null, lip.body);
     check("a shade hex must be #RRGGBB", (await mk({ name: "Bad shade", ...cosm("makeup-lips"), variants: [{ shadeName: "x", shadeHex: "red", contentAmount: 3, contentUnit: "g" }] })).status === 400);
@@ -2107,6 +2114,7 @@ function ean13(d12) {
     const huuli = await s("q=huulipuna");
     check("search names the matching categories (huulipuna → Makeup › Lips) and finds the products filed there", huuli.categories?.[0]?.slug === "makeup-lips" && huuli.categories[0].path.map((x) => x.slug).join() === "makeup,makeup-lips" && huuli.categories[0].name.fi === "Huulet" && ids(huuli).includes(lip.body.product.id), huuli.categories);
     check("English queries name categories too (lipstick)", (await s("q=lipstick")).categories?.[0]?.slug === "makeup-lips");
+    check("search with a delivery location returns only products from stores within reach", ids(await s("category=clothing-dresses&lat=60.17&lng=24.94")).includes(dress.body.product.id) && (await s("lat=68.5&lng=27.0")).total === 0 && (await call("GET", "/products/search?lat=95&lng=0")).status === 400);
 
     // Certificates: submitted by the store, verified by an admin; only verified, unexpired ones show
     const certBody = { scheme: "nordic_swan", licenceNumber: "1234 5678", holderName: "Testi Tekstiili Oy", scope: "whole_product", validUntil: "2030-12-31", evidenceUrl: `https://res.cloudinary.com/testcloud/image/upload/v1/malvoya/certificates/s${beaStore.id}/swan.pdf` };
@@ -2244,6 +2252,8 @@ function ean13(d12) {
     check("CSV import maps category_slug, brand, audience and content per option (unit price)", j212?.status === "DONE" && iEdp?.categorySlug === "fragrance-parfum-edp" && iEdp.attributes.brand === "Testi" && iEdp.variants.map((v) => v.contentAmount).join() === "30,50" && iEdp.variants[1].unitPrice?.cents === 178000 && iEdp.category === "Parfum & eau de parfum" && iEdp.hygieneSealed === true, iEdp);
     check("CSV import: paths and Finnish words map with the audience (Naiset > Takit)", iCoat?.categorySlug === "clothing-jackets-coats" && iCoat.audience === "WOMEN");
     check("CSV import: out-of-scope goods are held, unmatched items stay drafts without a category, both reported", iCandle?.importHold === "home_decor" && iCandle.categorySlug === null && iGizmo?.categorySlug === null && j212.errors.some((e) => /On hold/.test(e.message)) && j212.errors.some((e) => /No category matched/.test(e.message)) && j212.errors.some((e) => /Missing before publishing/.test(e.message)), j212?.errors);
+    const wAg = (await call("GET", "/me/agreements", null, wilma.accessToken)).body.required?.find((r) => r.doc === "seller-terms");
+    if (wAg && !wAg.accepted) await call("POST", "/me/agreements/accept", { doc: "seller-terms", version: wAg.currentVersion }, wilma.accessToken);
     const p212 = (await call("POST", `/products/import/${cj212.body.job?.id}/publish`, null, wilma.accessToken)).body;
     check("an import publishes nothing incomplete: a held item says why", p212.published === 0 && p212.incomplete.find((x) => x.productId === iCandle?.id)?.missing.some((f) => f.code === "held"), p212);
 
@@ -2273,6 +2283,38 @@ function ean13(d12) {
     const minor = await call("PATCH", `/admin/users/${kaisa.user.id}/minor`, { isMinor: true }, adminToken);
     check("an admin can flag a user as under 18 (no profiling-based recommendations; audited); the feed still works", minor.status === 200 && sql(`select "isMinor" from "User" where id=${kaisa.user.id}`) === "t" && (await call("GET", "/drops/feed", null, kaisa.accessToken)).status === 200);
     await call("POST", `/products/${dress.body.product.id}/report`, { reason: "misleading", details: "The colour is not as shown" }, kaisa.accessToken);
+    // Same-day signal: a store open now within reach and an approved courier online recently; slots only from the configuration
+    const sd0 = (await call("GET", "/delivery/today?lat=68.5&lng=27.0")).body;
+    check("same-day delivery is not possible far from every store; slots never invented", sd0.ok && sd0.possible === false && sd0.reach.stores === 0 && sd0.slots.length === 0, sd0);
+    const cOnline = await register("Sami", "COURIER");
+    sql(`update "Courier" set "isApproved"=true where "userId"=${cOnline.user.id}`);
+    await call("POST", "/courier/status", { isOnline: true, latitude: 60.17, longitude: 24.94 }, cOnline.accessToken);
+    const sd1 = (await call("GET", "/delivery/today?lat=60.17&lng=24.94")).body;
+    const nowH = hel();
+    const todaySlots = ["17:00", "19:00"].filter((st) => Number(st.slice(0, 2)) * 60 >= Number(nowH.time.slice(0, 2)) * 60 + Number(nowH.time.slice(3, 5)) + 60);
+    check("same-day delivery is possible near an open store with a courier online; slots are today's configured ones still bookable", sd1.possible === true && sd1.date === nowH.date && sd1.slots.map((x) => x.start).join() === todaySlots.join() && sd1.slots.every((x) => x.label?.en && x.label?.fi && x.end), [sd1, todaySlots]);
+    await call("POST", "/courier/status", { isOnline: false }, cOnline.accessToken);
+    // Sign in with Apple (iOS): the Apple user id first, then the verified email; loaded from dist (no real Firebase token here)
+    const social = require(path.join(__dirname, "..", "..", "dist", "modules", "auth", "social.service.js"));
+    const appleId = (x) => ({ firebase: { identities: { "apple.com": [x] } } });
+    const subA = `001234.apple${uniq}.0101`;
+    const ap1 = await social.signInWithAppleClaims({ email: `apple${uniq}@privaterelay.appleid.com`, email_verified: true, ...appleId(subA) }, "CUSTOMER", "  Anna Apple  ");
+    check("Sign in with Apple creates the account with the Apple id and the name the app sends (trimmed)", ap1.user?.name === "Anna Apple" && !!ap1.accessToken && sql(`select "appleSub" from "User" where id=${ap1.user.id}`) === subA, ap1.user);
+    const ap2 = await social.signInWithAppleClaims({ ...appleId(subA) });
+    check("the Apple id opens the same account later, also without an email", ap2.user?.id === ap1.user.id);
+    let apRefused = null;
+    try { await social.signInWithAppleClaims({ email: `cecilia${uniq}@example.fi`, email_verified: true, ...appleId(`other.${uniq}`) }); } catch (e) { apRefused = e.status; }
+    check("Apple never opens an account made by /register (unproven email): 409", apRefused === 409, apRefused);
+    const subB = `001234.apple${uniq}.0202`;
+    const ap3 = await social.signInWithAppleClaims({ email: `OTP${uniq}@example.fi`, email_verified: true, ...appleId(subB) });
+    check("a verified-sign-in account found by its email gets the Apple id on first use", ap3.user?.id === codeNew.body.user.id && sql(`select "appleSub" from "User" where id=${codeNew.body.user.id}`) === subB);
+    let apNoEmail = null;
+    try { await social.signInWithAppleClaims({ ...appleId(`new.${uniq}`) }); } catch (e) { apNoEmail = e.status; }
+    check("a new Apple user without a verified email is refused (401)", apNoEmail === 401);
+    check("POST /auth/apple validates the name (≤ 100) and the token", (await call("POST", "/auth/apple", { idToken: "x", name: "a".repeat(101) })).status === 400 && (await call("POST", "/auth/apple", { name: "Anna" })).status === 400 && (await call("POST", "/auth/apple", { idToken: "not-a-token", name: "Anna" })).status === 401);
+    check("account deletion clears the Apple id", (await call("DELETE", "/auth/me", null, ap1.accessToken)).status === 200 && sql(`select "appleSub" is null from "User" where id=${ap1.user.id}`) === "t");
+    const aasa = await fetch(`${BASE}/.well-known/apple-app-site-association`, { redirect: "manual" });
+    check("apple-app-site-association: 200 JSON, no redirect; no apps without APPLE_TEAM_ID", aasa.status === 200 && /application\/json/.test(aasa.headers.get("content-type") || "") && JSON.stringify(await aasa.json()) === '{"applinks":{"details":[]}}');
     const sys212 = (await call("GET", "/admin/system", null, adminToken)).body;
     check("System lists open product reports and pending certificates", sys212.attention?.some((a) => /certificate\(s\) waiting/.test(a)) && sys212.attention.some((a) => /product report\(s\)/.test(a)), sys212.attention);
   }

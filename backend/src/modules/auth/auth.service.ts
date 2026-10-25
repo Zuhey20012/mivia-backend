@@ -271,6 +271,7 @@ export async function deleteUserAccount(userId: number) {
         longitude: null,
         passwordHash: crypto.randomBytes(32).toString("hex"),
         googleSub: null,
+        appleSub: null,
         referralCode: null,
         locale: null,
         isActive: false,

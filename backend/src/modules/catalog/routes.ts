@@ -9,6 +9,7 @@ import { TEMPLATES, Template, isCosmetic } from "./taxonomy";
 import { safetyRoutes } from "./safety";
 import { recallApiRoutes } from "./recalls";
 import { collectionRoutes } from "./collections";
+import { sameDayRoutes } from "./sameDay";
 
 /**
  * Public catalogue routes (mounted under /api/v1): the category tree with counts, one node with its facets, the
@@ -85,6 +86,7 @@ export function describeTemplate(t: Template) {
 }
 
 catalogRoutes.use(collectionRoutes);
+catalogRoutes.use(sameDayRoutes);
 catalogRoutes.use(safetyRoutes);
 catalogRoutes.use(recallApiRoutes);
 

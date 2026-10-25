@@ -117,6 +117,9 @@ export const searchQuerySchema = z.object({
   eco:       z.any().optional(),
   handmade:  z.enum(["true"]).optional(),
   storeId:   z.coerce.number().int().positive().optional(),
+  // Delivery location: only products from stores within reach (CATALOG_REACH_KM, the rule of the category counts)
+  lat:       z.coerce.number().min(-90).max(90).optional(),
+  lng:       z.coerce.number().min(-180).max(180).optional(),
   minPrice:  z.coerce.number().int().min(0).optional(),
   maxPrice:  z.coerce.number().int().min(0).optional(),
   // Attribute filters (comma-separated values = any of them); also as attr[key]=value

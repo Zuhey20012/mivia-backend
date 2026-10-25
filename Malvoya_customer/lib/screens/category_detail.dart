@@ -120,7 +120,9 @@ class _CategoryScreenState extends State<CategoryScreen> {
 
   List<Map<String, dynamic>> get _facets => _maps(_detail?['facets']);
 
+  // With a pinned address the API lists only shops within delivery reach
   Map<String, String> get _params => {
+        ...DeliveryLocation.instance.query,
         ...widget.audience.query,
         'category': _slug,
         ...facetQuery(_chosen),
@@ -556,7 +558,8 @@ class _ProductGridScreenState extends State<ProductGridScreen> {
   late String _sort = widget.params['sort'] ?? 'relevance';
 
   ApiClient get _api => ApiClient(Provider.of<AuthService>(context, listen: false));
-  Map<String, String> get _params => {...widget.params, 'sort': _sort, 'limit': '24'};
+  // With a pinned address the API lists only shops within delivery reach
+  Map<String, String> get _params => {...DeliveryLocation.instance.query, ...widget.params, 'sort': _sort, 'limit': '24'};
 
   @override
   void initState() {
@@ -581,6 +584,8 @@ class _ProductGridScreenState extends State<ProductGridScreen> {
       _error = null;
       _page = 1;
     });
+    await DeliveryLocation.instance.load();
+    if (!mounted) return;
     final res = await _api.get('/products/search', query: {..._params, 'page': '1'});
     if (!mounted) return;
     setState(() {
