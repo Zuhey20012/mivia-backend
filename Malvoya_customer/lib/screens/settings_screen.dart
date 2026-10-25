@@ -151,8 +151,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             child: Text(l10n.translate('editAction'), style: const TextStyle(fontWeight: FontWeight.bold)),
                           ),
                   ),
-                  Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
-                  GoogleLinkTile(account: Provider.of<AuthService>(context, listen: false), leading: const Icon(Icons.link_rounded, color: AppTheme.primary, size: 22)),
+                  // On iOS only when the build is set up for Google sign-in
+                  if (SignInSetup.google) ...[
+                    Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
+                    GoogleLinkTile(account: Provider.of<AuthService>(context, listen: false), leading: const Icon(Icons.link_rounded, color: AppTheme.primary, size: 22)),
+                  ],
                 ],
               ),
 

@@ -6,7 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:malvoya_core/malvoya_core.dart';
 import 'package:malvoya_ui/malvoya_ui.dart';
 import 'config/constants.dart';
@@ -216,9 +215,20 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
 
   // ── Google ────────────────────────────────────────────────────────────────
 
+  /// Android reads the client IDs from google-services.json. On iOS they come from the build
+  /// (`ios/Flutter/Malvoya.xcconfig` / GoogleService-Info.plist), and the server client ID makes the
+  /// ID token's audience the one the API checks.
+  GoogleSignIn _googleSignIn() => SignInSetup.isIOS
+      ? GoogleSignIn(clientId: SignInSetup.googleIosClientId, serverClientId: SignInSetup.googleIosServerClientId)
+      : GoogleSignIn();
+
+  static const _googleUnavailable = 'Google sign-in is not available in this version of the app.';
+
   Future<String?> loginWithGoogle() async {
+    // Without its iOS setup the Google SDK would stop the app; the button is hidden then too
+    if (!SignInSetup.google) return _googleUnavailable;
     try {
-      final googleUser = await GoogleSignIn().signIn();
+      final googleUser = await _googleSignIn().signIn();
       if (googleUser == null) return 'Google sign-in cancelled';
       final idToken = (await googleUser.authentication).idToken;
       if (idToken == null) return 'Google did not return a sign-in token';
@@ -241,8 +251,9 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
   /// Links a Google account to this account, so "Sign in with Google" opens it from now on.
   @override
   Future<String?> linkGoogle() async {
+    if (!SignInSetup.google) return _googleUnavailable;
     try {
-      final google = GoogleSignIn();
+      final google = _googleSignIn();
       // Show the account picker even if Google was used before, so the right account gets linked
       await google.signOut();
       final googleUser = await google.signIn();
@@ -293,6 +304,11 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
     required Function(String error) onError,
     Function()? onAutoVerified,
   }) async {
+    // On iOS Firebase stops the app if its callback URL scheme is missing (SignInSetup)
+    if (!SignInSetup.firebasePhone) {
+      onError('Could not send the verification code. Please try again.');
+      return;
+    }
     try {
       await _firebaseAuth.verifyPhoneNumber(
         phoneNumber: phoneNumber,
@@ -375,28 +391,29 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
     }
   }
 
+  /// Sign in with Apple (iOS only): Firebase runs Apple's sheet (and its nonce), then the API
+  /// exchanges the Firebase ID token for a Malvoya session. Apple shares the name only on the first
+  /// sign-in; Firebase keeps it as the display name, and it is sent along for new accounts.
   Future<String?> loginWithApple() async {
+    if (!SignInSetup.apple) return 'Sign in with Apple is not available in this version of the app.';
     try {
-      final credential = await SignInWithApple.getAppleIDCredential(
-        scopes: [AppleIDAuthorizationScopes.email, AppleIDAuthorizationScopes.fullName],
-      );
-      final oauth = fb_auth.OAuthProvider('apple.com').credential(
-        idToken: credential.identityToken,
-        accessToken: credential.authorizationCode,
-      );
-      // The API verifies Firebase ID tokens, so sign in to Firebase with the Apple credential first.
-      final result = await _firebaseAuth.signInWithCredential(oauth);
+      final provider = fb_auth.AppleAuthProvider()
+        ..addScope('email')
+        ..addScope('name');
+      final result = await _firebaseAuth.signInWithProvider(provider);
       final firebaseToken = await result.user?.getIdToken();
       if (firebaseToken == null) return 'Apple sign-in failed.';
+      final name = result.user?.displayName?.trim();
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/apple'),
               headers: {'Content-Type': 'application/json', ...AppLanguage.headers},
-              body: jsonEncode({'idToken': firebaseToken, 'role': kAppRole}))
+              body: jsonEncode({'idToken': firebaseToken, 'role': kAppRole, if (name != null && name.isNotEmpty) 'name': name}))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
       return _errorFrom(res, 'Apple sign-in failed.');
-    } on SignInWithAppleAuthorizationException catch (e) {
-      return e.code == AuthorizationErrorCode.canceled ? null : 'Apple sign-in failed.';
+    } on fb_auth.FirebaseAuthException catch (e) {
+      // Closing Apple's sheet is not an error
+      return e.code == 'canceled' || e.code == 'web-context-canceled' ? null : 'Apple sign-in failed.';
     } catch (_) {
       return 'Apple sign-in failed. Please try again.';
     }
@@ -436,7 +453,9 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
             .timeout(const Duration(seconds: 5));
       } catch (_) {}
     }
-    try { await GoogleSignIn().signOut(); } catch (_) {}
+    if (SignInSetup.google) {
+      try { await _googleSignIn().signOut(); } catch (_) {}
+    }
     try { await _firebaseAuth.signOut(); } catch (_) {}
     await _clearSession();
   }

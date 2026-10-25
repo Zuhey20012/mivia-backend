@@ -1,0 +1,13 @@
+{
+  "Simulator Target Bundle": "com.malvoya.customer",
+  "aps": {
+    "alert": {
+      "title": "Your order is on its way",
+      "body": "The courier picked up order #1 and is heading to you."
+    },
+    "sound": "default"
+  },
+  "gcm.message_id": "simulator-test-1",
+  "type": "order",
+  "orderId": "1"
+}

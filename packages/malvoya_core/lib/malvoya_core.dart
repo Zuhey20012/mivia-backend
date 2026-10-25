@@ -19,3 +19,4 @@ export 'src/media/image_url.dart';
 export 'src/platform/app_gate.dart';
 export 'src/platform/haptics.dart';
 export 'src/platform/legal_links.dart';
+export 'src/platform/sign_in_setup.dart';

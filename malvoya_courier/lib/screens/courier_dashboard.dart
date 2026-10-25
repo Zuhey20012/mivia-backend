@@ -390,7 +390,8 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
               subtitle: email.isEmpty || email.endsWith('@phone.malvoya.app') ? null : Text(email),
             ),
             const Divider(height: 16),
-            GoogleLinkTile(account: Provider.of<AuthService>(context, listen: false)),
+            // No Google sign-in on iPhone (App Review 4.8: the courier app uses Malvoya's own sign-in there)
+            if (!SignInSetup.isIOS) GoogleLinkTile(account: Provider.of<AuthService>(context, listen: false)),
             FutureBuilder<NavApp?>(
               future: NavApps.saved(),
               builder: (ctx, snap) => ListTile(

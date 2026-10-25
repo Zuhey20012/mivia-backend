@@ -1,0 +1,14 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["<TEAM_ID>.com.malvoya.customer"],
+        "components": [
+          { "/": "/s/*", "comment": "Store share pages" },
+          { "/": "/r/*", "comment": "Invite links" },
+          { "/": "/d/*", "comment": "Drop share pages" }
+        ]
+      }
+    ]
+  }
+}

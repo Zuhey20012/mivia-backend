@@ -1,41 +1,60 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:malvoya_core/malvoya_core.dart';
 import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
-import '../config/theme.dart';
+import '../catalog/catalog.dart';
 import '../core/agreements.dart';
 import '../core/images.dart';
 import '../core/media_upload.dart';
+import 'editor/category_picker.dart';
+import 'editor/shade_colour_picker.dart';
+import 'safety/certificates_screen.dart';
+import 'safety/operators_screen.dart';
+import 'safety/safety_pledge_screen.dart';
 
-/// Categories shared with the customer app's home screen and catalogue.
-const productCategories = ['Clothing', 'Shoes', 'Bags', 'Accessories', 'Jewelry', 'Beauty', 'Home', 'Other'];
-const productSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'One Size', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45'];
-const productColors = ['Black', 'White', 'Grey', 'Beige', 'Brown', 'Blue', 'Green', 'Red', 'Pink', 'Purple', 'Yellow', 'Multi'];
+part 'editor/editor_fields.dart';
+part 'editor/editor_basics.dart';
+part 'editor/editor_variants.dart';
+part 'editor/editor_materials.dart';
+part 'editor/editor_beauty.dart';
+part 'editor/editor_safety.dart';
+part 'editor/editor_photos.dart';
 
-/// Finnish names for the values above. The API keeps the English values (shared with the customer app).
-const _categoryFi = {
-  'Clothing': 'Vaatteet', 'Shoes': 'Kengät', 'Bags': 'Laukut', 'Accessories': 'Asusteet', 'Jewelry': 'Korut',
-  'Beauty': 'Kauneus', 'Home': 'Koti', 'Other': 'Muu',
-};
-const _colorFi = {
-  'Black': 'Musta', 'White': 'Valkoinen', 'Grey': 'Harmaa', 'Beige': 'Beige', 'Brown': 'Ruskea', 'Blue': 'Sininen',
-  'Green': 'Vihreä', 'Red': 'Punainen', 'Pink': 'Vaaleanpunainen', 'Purple': 'Violetti', 'Yellow': 'Keltainen', 'Multi': 'Monivärinen',
-};
-const _sizeFi = {'One Size': 'Yksi koko'};
+/// Create or edit a product (API 2.12), built around the category:
+///
+/// 1. Step 1 picks the category (two-level, searchable) and who it is for.
+/// 2. The form shows only that category's template (GET /categories/templates), in sections: Basics,
+///    Variants, Materials & care or Ingredients & label, Safety, Photos. Required fields carry a tag
+///    saying whether the law or Malvoya asks for them, with the reason on tap.
+///
+/// Drafts save with missing information. Publishing runs the server's rules: a 422
+/// PUBLISH_REQUIREMENTS lists every missing field, shown next to the field with "Fix next" to walk
+/// through them. Locked listings (recalls, PRODUCT_LOCKED) can be edited but never shown again.
+class ProductEditorScreen extends StatefulWidget {
+  final Map<String, dynamic>? product;
 
-class _Option {
-  int? id;
-  String? size;
-  String? color;
-  int stock;
-  _Option({this.id, this.size, this.color, this.stock = 1});
+  /// `GET /stores/my` (seller type and the safety pledge). Read from the server when not given.
+  final Map<String, dynamic>? store;
+
+  /// Problems to show at once (an import's "missing before publishing" list); else the product's own
+  /// `publishCheck.missing`.
+  final List<FieldIssue>? initialIssues;
+
+  /// Scroll to this field when the form opens (e.g. `attributes.fibreComposition`).
+  final String? focusField;
+
+  const ProductEditorScreen({super.key, this.product, this.store, this.initialIssues, this.focusField});
+
+  @override
+  State<ProductEditorScreen> createState() => _ProductEditorScreenState();
 }
 
 class _Photo {
@@ -56,113 +75,656 @@ class _Video {
   _Video({this.id, this.poster, this.status = 'UPLOADING'});
 }
 
-/// Create or edit a product. Photos upload as soon as they are picked.
-class ProductEditorScreen extends StatefulWidget {
-  final Map<String, dynamic>? product;
-  const ProductEditorScreen({super.key, this.product});
+/// One option (ProductVariant): a size × colour, a shade, or a content size.
+class _Option {
+  int? id;
+  String? size;
+  String? color;
+  String? sku;
+  int priceAdjustCents;
+  String? colourFamily;
+  String? shadeHex;
+  String? shadeFamily;
+  String? undertone;
+  String? finish;
+  String? contentUnit;
+  final Map<String, num> measurements;
+  final TextEditingController stockCtl;
+  final TextEditingController shadeCtl;
+  final TextEditingController contentCtl;
+  final TextEditingController priceCtl;
 
-  @override
-  State<ProductEditorScreen> createState() => _ProductEditorScreenState();
+  _Option({
+    this.id,
+    this.size,
+    this.color,
+    this.sku,
+    this.priceAdjustCents = 0,
+    this.colourFamily,
+    String? shadeName,
+    this.shadeHex,
+    this.shadeFamily,
+    this.undertone,
+    this.finish,
+    num? contentAmount,
+    this.contentUnit,
+    Map<String, num>? measurements,
+    int stock = 1,
+    String price = '',
+  })  : measurements = measurements ?? {},
+        stockCtl = TextEditingController(text: '$stock'),
+        shadeCtl = TextEditingController(text: shadeName ?? ''),
+        contentCtl = TextEditingController(text: contentAmount == null ? '' : _numText(contentAmount)),
+        priceCtl = TextEditingController(text: price);
+
+  factory _Option.fromJson(Map v, int? basePrice) {
+    final m = <String, num>{};
+    if (v['measurements'] is Map) {
+      (v['measurements'] as Map).forEach((k, val) {
+        if (val is num) m['$k'] = val;
+      });
+    }
+    final adjust = asInt(v['priceAdjustCents']) ?? 0;
+    return _Option(
+      id: asInt(v['id']),
+      size: v['size'] as String?,
+      color: v['color'] as String?,
+      sku: v['sku'] as String?,
+      priceAdjustCents: adjust,
+      colourFamily: v['colourFamily'] as String?,
+      shadeName: v['shadeName'] as String?,
+      shadeHex: v['shadeHex'] as String?,
+      shadeFamily: v['shadeFamily'] as String?,
+      undertone: v['undertone'] as String?,
+      finish: v['finish'] as String?,
+      contentAmount: v['contentAmount'] as num?,
+      contentUnit: v['contentUnit'] as String?,
+      measurements: m,
+      stock: asInt(v['stock']) ?? 0,
+      price: adjust != 0 && basePrice != null ? _centsText(basePrice + adjust) : '',
+    );
+  }
+
+  int get stock => int.tryParse(stockCtl.text.trim()) ?? 0;
+  String get shadeName => shadeCtl.text.trim();
+  num? get contentAmount => _parseNum(contentCtl.text);
+
+  void dispose() {
+    stockCtl.dispose();
+    shadeCtl.dispose();
+    contentCtl.dispose();
+    priceCtl.dispose();
+  }
+}
+
+/// One fibre row of a composition part.
+class _Fibre {
+  String? fibre;
+  final TextEditingController pct;
+  _Fibre({this.fibre, num? percent}) : pct = TextEditingController(text: percent == null ? '' : _numText(percent));
+  num? get percent => _parseNum(pct.text);
+}
+
+/// One part of the fibre composition (main fabric, lining, filling…).
+class _Component {
+  String component;
+  final List<_Fibre> fibres;
+  _Component(this.component, this.fibres);
+}
+
+String _numText(num v) => v == v.roundToDouble() ? '${v.round()}' : '$v'.replaceAll('.', ',');
+num? _parseNum(String s) {
+  final t = s.trim().replaceAll(',', '.');
+  if (t.isEmpty) return null;
+  final d = double.tryParse(t);
+  if (d == null) return null;
+  return d == d.roundToDouble() ? d.round() : d;
+}
+
+String _centsText(int cents) => (cents / 100).toStringAsFixed(2).replaceAll('.', ',');
+int? _parseCents(String s) {
+  final v = double.tryParse(s.trim().replaceAll(',', '.').replaceAll('€', '').replaceAll(' ', ''));
+  return v == null || v <= 0 ? null : (v * 100).round();
 }
 
 class _ProductEditorScreenState extends State<ProductEditorScreen> {
-  final _form = GlobalKey<FormState>();
-  late final _name = TextEditingController(text: widget.product?['name'] ?? '');
-  late final _description = TextEditingController(text: widget.product?['description'] ?? '');
-  late final _price = TextEditingController(
-      text: widget.product?['salePriceCents'] != null ? ((widget.product!['salePriceCents'] as num) / 100).toStringAsFixed(2).replaceAll('.', ',') : '');
-  late final _stock = TextEditingController(text: '${widget.product?['stockQuantity'] ?? 1}');
+  Json? get _p => widget.product;
+  bool get _editing => _p != null;
+  ApiClient get _api => ApiClient(Provider.of<AuthService>(context, listen: false));
 
-  // Imported products may bring their own category, sizes and colours: keep them selectable
-  late String _category = '${widget.product?['category'] ?? ''}'.trim().isEmpty ? 'Clothing' : '${widget.product!['category']}'.trim();
-  late final List<String> _categories = [...productCategories, if (!productCategories.contains(_category)) _category];
-  late String _condition = const ['NEW', 'LIKE_NEW', 'GOOD', 'FAIR', 'POOR'].contains(widget.product?['condition']) ? widget.product!['condition'] : 'NEW';
-  late bool _secondHand = widget.product?['isSecondHand'] == true;
-  late bool _eco = widget.product?['isEcoFriendly'] == true;
-  late bool _handmade = widget.product?['isHandmade'] == true;
-  late bool _available = widget.product?['isAvailable'] != false;
-  late final List<_Photo> _photos = ((widget.product?['images'] as List?) ?? []).map((u) => _Photo(url: '$u')).toList();
-  late final List<_Video> _videos = ((widget.product?['videos'] as List?) ?? [])
-      .map((v) => _Video(id: v['id'], poster: v['poster'], status: '${v['status'] ?? 'READY'}'))
+  /// setState for the part files (extensions may not call the protected member).
+  void _update(VoidCallback f) => setState(f);
+
+  // ── Catalogue data ─────────────────────────────────────────────────────
+  Map<String, Json>? _templates;
+  bool _loadingMeta = true;
+  String? _metaError;
+
+  // ── Category ───────────────────────────────────────────────────────────
+  late String? _slug = _p?['categorySlug'] as String?;
+  late Object? _catName = _p?['categoryName'];
+  Object? _topName;
+  String? _topSlug;
+  late String? _template = _p?['template'] as String?;
+  late String _audience = '${_p?['audience'] ?? 'UNISEX'}';
+  late String? _ageGroup = _p?['ageGroup'] as String?;
+
+  // ── Values ─────────────────────────────────────────────────────────────
+  late final Json _attrs = _p?['attributes'] is Map ? Json.from(_p!['attributes']) : {};
+  late final Set<String> _initialAttrKeys = {..._attrs.keys};
+  late final _name = TextEditingController(text: '${_p?['name'] ?? ''}');
+  late final _description = TextEditingController(text: '${_p?['description'] ?? ''}');
+  late final _price = TextEditingController(text: _p?['salePriceCents'] is num ? _centsText((_p!['salePriceCents'] as num).round()) : '');
+  late final _stock = TextEditingController(text: '${_p?['stockQuantity'] ?? 1}');
+  Json get _safety => _p?['safety'] is Map ? Json.from(_p!['safety']) : const {};
+  late final _model = TextEditingController(text: '${_safety['productModel'] ?? ''}');
+  late final _gtin = TextEditingController(text: '${_safety['gtin'] ?? ''}');
+  late final _batch = TextEditingController(text: '${_safety['batchOrSerial'] ?? ''}');
+  late final _warnFi = TextEditingController(text: '${(_safety['warnings'] as Map?)?['fi'] ?? ''}');
+  late final _warnSv = TextEditingController(text: '${(_safety['warnings'] as Map?)?['sv'] ?? ''}');
+  late final _warnEn = TextEditingController(text: '${(_safety['warnings'] as Map?)?['en'] ?? ''}');
+  late final _content = TextEditingController(text: _p?['contentAmount'] is num ? _numText(_p!['contentAmount'] as num) : '');
+  late String? _contentUnit = _p?['contentUnit'] as String?;
+  late bool _noWarnings = _safety['noWarnings'] == true;
+  late bool _sealed = _p?['hygieneSealed'] == true;
+  late String _condition = const ['NEW', 'LIKE_NEW', 'GOOD', 'FAIR', 'POOR'].contains(_p?['condition']) ? _p!['condition'] : 'NEW';
+  late bool _secondHand = _p?['isSecondHand'] == true;
+  late bool _handmade = _p?['isHandmade'] == true;
+  late final bool _wasVisible = _p?['isAvailable'] == true;
+  late int? _manufacturerId = asInt(_p?['manufacturerId']) ?? asInt((_safety['manufacturer'] as Map?)?['id']);
+  late int? _rpId = asInt(_p?['responsiblePersonId']) ?? asInt((_safety['responsiblePerson'] as Map?)?['id']);
+  late Json? _manufacturer = _safety['manufacturer'] is Map ? Json.from(_safety['manufacturer']) : null;
+  late Json? _rp = _safety['responsiblePerson'] is Map ? Json.from(_safety['responsiblePerson']) : null;
+  List<Json>? _certs;
+  late final Set<int> _certIds = {
+    for (final c in (_p?['certificates'] as List? ?? const []).whereType<Map>())
+      if (asInt(c['id']) != null) asInt(c['id'])!,
+  };
+
+  late final List<_Photo> _photos = ((_p?['images'] as List?) ?? []).map((u) => _Photo(url: '$u')).toList();
+  late final List<_Photo> _safetyPhotos = ((_safety['images'] as List?) ?? []).map((u) => _Photo(url: '$u')).toList();
+  late final List<_Video> _videos = ((_p?['videos'] as List?) ?? [])
+      .whereType<Map>()
+      .map((v) => _Video(id: asInt(v['id']), poster: v['poster'] as String?, status: '${v['status'] ?? 'READY'}'))
       .toList();
   static const _maxVideos = 3;
-  late final List<_Option> _options = ((widget.product?['variants'] as List?) ?? [])
-      .map((v) => _Option(id: asInt(v['id']), size: v['size'], color: v['color'], stock: asInt(v['stock']) ?? 0))
+  static const _maxPhotos = 10;
+  late final List<_Option> _options = ((_p?['variants'] as List?) ?? [])
+      .whereType<Map>()
+      .map((v) => _Option.fromJson(v, asInt(_p?['salePriceCents'])))
       .toList();
+  late final List<_Component> _composition = _readComposition(_attrs['fibreComposition']);
+  late String _measuredOn = _readMeasuredOn();
 
+  /// Text controllers of attribute fields, by key (`function.fi` for one language of a text).
+  final Map<String, TextEditingController> _ctl = {};
+
+  /// Sizes whose measurement fields are open.
+  final Set<String> _openSizes = {};
+
+  // ── Problems ───────────────────────────────────────────────────────────
+  /// Missing or invalid information, by where it shows (FieldIssue.anchor).
+  final Map<String, List<FieldIssue>> _issues = {};
+
+  /// Recommended or "check this" notes (never blocking), by anchor.
+  final Map<String, List<FieldIssue>> _notes = {};
+  final Map<String, GlobalKey> _anchorKeys = {};
+  final List<String> _anchorOrder = [];
+  final _summaryKey = GlobalKey();
+  int _fixIndex = -1;
+
+  // ── Screen state ───────────────────────────────────────────────────────
+  final _scroll = ScrollController();
   bool _saving = false;
   bool _deleting = false;
+  late bool _locked = _p?['lockedAt'] != null;
   String? _error;
-
-  /// What the form looked like when opened, to ask before throwing changes away.
-  late final String _initial;
+  late bool? _pledged = (widget.store?['safetyPledge'] as Map?)?['accepted'] as bool?;
+  late String _sellerType = '${widget.store?['sellerType'] ?? 'BUSINESS'}';
+  bool get _business => _sellerType != 'PRIVATE';
+  String? _initial;
 
   @override
   void initState() {
     super.initState();
-    _initial = _snapshot();
+    final check = _p?['publishCheck'];
+    _setIssues(widget.initialIssues ?? FieldIssue.parse(check is Map ? check['missing'] : null),
+        FieldIssue.parse(check is Map ? check['warnings'] : null));
+    _mergeSizeChart();
+    _loadMeta();
   }
 
-  String _snapshot() => jsonEncode({
-        'name': _name.text, 'description': _description.text, 'price': _price.text, 'stock': _stock.text,
-        'category': _category, 'condition': _condition, 'secondHand': _secondHand, 'eco': _eco, 'handmade': _handmade,
-        'available': _available,
-        'photos': _photos.map((p) => p.url ?? 'uploading').toList(),
-        'videos': _videos.map((v) => v.id ?? v.status).toList(),
-        'options': _options.map((o) => [o.id, o.size, o.color, o.stock]).toList(),
+  @override
+  void dispose() {
+    for (final c in [_name, _description, _price, _stock, _model, _gtin, _batch, _warnFi, _warnSv, _warnEn, _content, ..._ctl.values]) {
+      c.dispose();
+    }
+    for (final o in _options) {
+      o.dispose();
+    }
+    for (final comp in _composition) {
+      for (final f in comp.fibres) {
+        f.pct.dispose();
+      }
+    }
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _setIssues(List<FieldIssue> missing, List<FieldIssue> warnings) {
+    _issues.clear();
+    _notes.clear();
+    for (final i in missing) {
+      (_issues[i.anchor] ??= []).add(i);
+    }
+    for (final w in warnings) {
+      (_notes[w.anchor] ??= []).add(w);
+    }
+    _fixIndex = -1;
+  }
+
+  Future<void> _loadMeta() async {
+    setState(() {
+      _loadingMeta = true;
+      _metaError = null;
+    });
+    final api = _api;
+    final results = await Future.wait([
+      CatalogCache.loadTemplates(api),
+      CatalogCache.loadCategories(api),
+      if (widget.store == null) api.get('/stores/my') else Future.value(null),
+    ]);
+    if (!mounted) return;
+    final templates = results[0] as Map<String, Json>?;
+    final store = results[2];
+    if (store is ApiResult && store.ok && store.data['store'] is Map) {
+      final s = store.data['store'] as Map;
+      _sellerType = '${s['sellerType'] ?? 'BUSINESS'}';
+      _pledged = (s['safetyPledge'] as Map?)?['accepted'] as bool?;
+    }
+    setState(() {
+      _loadingMeta = false;
+      _templates = templates;
+      _metaError = templates == null ? tr(context, 'The product form could not be loaded.', 'Tuotelomaketta ei saatu ladattua.') : null;
+      final sel = CatalogCache.findSub(_slug);
+      if (sel != null) {
+        _catName = sel.$1['name'];
+        _topName = sel.$2['name'];
+        _topSlug = '${sel.$2['slug']}';
+        _template = '${sel.$1['template']}';
+      }
+    });
+    if (templates == null) return;
+    _loadOperators();
+    _loadCertificates();
+    _initial = _snapshot();
+    // A new product starts with step 1: the category
+    if (!_editing && _slug == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        final picked = await _pickCategory(firstStep: true);
+        if (!picked && mounted) Navigator.pop(context);
       });
+    } else if (widget.focusField != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _goTo(FieldIssue.anchorOf(widget.focusField!)));
+    }
+  }
 
-  bool get _hasChanges => !_saving && !_deleting && _snapshot() != _initial;
+  Future<void> _loadOperators() async {
+    final res = await _api.get('/stores/my/operators');
+    if (!mounted || !res.ok) return;
+    final list = ((res.data['operators'] as List?) ?? const []).whereType<Map>().map((m) => Json.from(m)).toList();
+    setState(() {
+      _manufacturer = list.where((o) => asInt(o['id']) == _manufacturerId).firstOrNull ?? _manufacturer;
+      _rp = list.where((o) => asInt(o['id']) == _rpId).firstOrNull ?? _rp;
+    });
+  }
 
-  String _show(Map<String, String> fi, String value) => isFinnish(context) ? (fi[value] ?? value) : value;
+  Future<void> _loadCertificates() async {
+    final res = await _api.get('/stores/my/certificates');
+    if (!mounted) return;
+    setState(() => _certs = res.ok ? ((res.data['certificates'] as List?) ?? const []).whereType<Map>().map((m) => Json.from(m)).toList() : const []);
+  }
 
-  Future<void> _confirmDiscard() async {
-    final discard = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(tr(ctx, 'Discard changes?', 'Hylätäänkö muutokset?')),
-        content: Text(tr(ctx, 'Your changes to this product have not been saved.', 'Tuotteeseen tekemiäsi muutoksia ei ole tallennettu.')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(ctx, 'Keep editing', 'Jatka muokkausta'))),
-          OutlinedButton(
-            style: OutlinedButton.styleFrom(foregroundColor: MPalette.red, side: const BorderSide(color: MPalette.red, width: 1.5), minimumSize: const Size(64, 48)),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(tr(ctx, 'Discard', 'Hylkää')),
-          ),
-        ],
+  /// Step 1 (or a change of category). Returns whether a category was chosen.
+  Future<bool> _pickCategory({bool firstStep = false}) async {
+    final choice = await Navigator.push<CategoryChoice>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CategoryPickerScreen(initialSlug: _slug, initialAudience: _editing || _slug != null ? _audience : null, initialAgeGroup: _ageGroup, firstStep: firstStep),
       ),
     );
+    if (choice == null || !mounted) return false;
+    final oldMode = _template == null ? null : _variantMode;
+    setState(() {
+      final templateChanged = choice.template != _template;
+      _slug = choice.slug;
+      _catName = choice.name;
+      _topName = choice.topName;
+      _topSlug = choice.topSlug;
+      _template = choice.template;
+      _audience = choice.audience;
+      _ageGroup = choice.ageGroup;
+      if (templateChanged) {
+        // The seal is on by default for sealed goods; beauty is never second-hand
+        _sealed = _sealAllowed && (isCosmeticTemplate(_template) || _slug == 'jewellery-piercing');
+        if (isCosmeticTemplate(_template)) {
+          _secondHand = false;
+          _condition = 'NEW';
+        }
+      }
+      _issues.remove('categorySlug');
+      _issues.remove('ageGroup');
+    });
+    // Options of another kind (e.g. sizes when the product became a lipstick) can't be kept
+    if (oldMode != null && oldMode != _variantMode && _options.isNotEmpty) {
+      setState(() {
+        for (final o in _options) {
+          o.dispose();
+        }
+        _options.clear();
+      });
+      MSnack.show(context, tr(context, 'This category has different options, so the earlier ones were cleared. Add them again below.',
+          'Tällä kategorialla on erilaiset vaihtoehdot, joten aiemmat poistettiin. Lisää ne uudelleen alla.'));
+    }
+    return true;
+  }
+
+  // ── Template helpers ───────────────────────────────────────────────────
+  Json? get _tpl => _template == null ? null : _templates?[_template];
+  List<Json> get _fields => ((_tpl?['fields'] as List?) ?? const []).whereType<Map>().map((m) => Json.from(m)).toList();
+  Json? _f(String key) => _fields.where((f) => f['key'] == key).firstOrNull;
+  bool _has(String key) => _f(key) != null;
+  bool get _cosmetic => isCosmeticTemplate(_template);
+  bool get _sealAllowed => _cosmetic || _slug == 'jewellery-piercing' || _slug == 'jewellery-earrings';
+  bool get _kids => _audience == 'KIDS';
+
+  // ── Snapshot (to ask before throwing changes away) ─────────────────────
+  String _snapshot() => jsonEncode({
+        ..._body(publish: _wasVisible),
+        'photos': _photos.map((p) => p.url ?? 'uploading').toList(),
+        'videos': _videos.map((v) => v.id ?? v.status).toList(),
+      });
+
+  bool get _hasChanges => !_saving && !_deleting && _initial != null && _snapshot() != _initial;
+
+  // ── Request body ───────────────────────────────────────────────────────
+  static const _secondHandKeys = {'defectsNote', 'hasTags', 'originalSizeLabel', 'authenticity', 'brandTier', 'vintage'};
+  static const _kidsKeys = {'ageRange', 'cordsDrawstrings', 'smallParts', 'costumeIsToy'};
+
+  bool _empty(Object? v) =>
+      v == null || (v is String && v.trim().isEmpty) || (v is List && v.isEmpty) || (v is Map && v.values.every(_empty));
+
+  Json _attributesForSave() {
+    final out = <String, dynamic>{};
+    for (final f in _fields) {
+      final k = '${f['key']}';
+      Object? v = _attrs[k];
+      if (k == 'fibreComposition') v = _compositionJson();
+      if (k == 'sizeChart') v = _sizeChartJson();
+      if (_secondHandKeys.contains(k) && !_secondHand) v = null;
+      if (_kidsKeys.contains(k) && !_kids) v = null;
+      if (k == 'hygieneSealDescription' && !_sealed) v = null;
+      if (v is String) v = v.trim();
+      if (v is Map) v = Map.fromEntries(v.entries.where((e) => !_empty(e.value)).map((e) => MapEntry(e.key, e.value is String ? (e.value as String).trim() : e.value)));
+      if (_empty(v)) v = null;
+      if (v == null && !_initialAttrKeys.contains(k)) continue;
+      out[k] = v;
+    }
+    return out;
+  }
+
+  Json _body({required bool publish}) {
+    final base = _parseCents(_price.text);
+    final content = _parseNum(_content.text);
+    final rowsHaveContent = _variantMode == _VMode.content && _options.isNotEmpty;
+    String? opt(TextEditingController c) => c.text.trim().isEmpty ? null : c.text.trim();
+    return {
+      'name': _name.text.trim(),
+      'description': _description.text.trim(),
+      if (_slug != null) 'categorySlug': _slug,
+      'audience': _audience,
+      'ageGroup': _ageGroup,
+      if (_template != null) 'attributes': _attributesForSave(),
+      'condition': _cosmetic ? 'NEW' : _condition,
+      'isSecondHand': !_cosmetic && _secondHand,
+      'isHandmade': _handmade,
+      'salePriceCents': base,
+      'canBeSold': true,
+      'images': _photos.where((p) => p.url != null).map((p) => p.url).toList(),
+      'safetyImages': _safetyPhotos.where((p) => p.url != null).map((p) => p.url).toList(),
+      if (_options.isEmpty) 'stockQuantity': int.tryParse(_stock.text.trim()) ?? 0,
+      'variants': [for (final o in _options) _optionJson(o, base)],
+      'contentAmount': rowsHaveContent || content == null || _contentUnit == null ? null : content,
+      'contentUnit': rowsHaveContent || content == null || _contentUnit == null ? null : _contentUnit,
+      'hygieneSealed': _sealAllowed && _sealed,
+      'manufacturerId': _manufacturerId,
+      'responsiblePersonId': _rpId,
+      'productModel': opt(_model),
+      'batchOrSerial': opt(_batch),
+      'gtin': _gtin.text.trim(),
+      'warnings': {'fi': _warnFi.text.trim(), 'sv': _warnSv.text.trim(), 'en': _warnEn.text.trim()},
+      'noWarnings': _noWarnings,
+      if (_certs != null) 'certificateIds': _certIds.toList(),
+      'isAvailable': publish && !_locked,
+    };
+  }
+
+  Json _optionJson(_Option o, int? base) {
+    final mode = _variantMode;
+    final optionPrice = _parseCents(o.priceCtl.text);
+    final adjust = optionPrice != null && base != null ? optionPrice - base : (mode == _VMode.content ? 0 : o.priceAdjustCents);
+    final content = o.contentAmount;
+    return {
+      if (o.id != null) 'id': o.id,
+      if (o.sku != null) 'sku': o.sku,
+      'stock': o.stock,
+      'priceAdjustCents': adjust,
+      if (mode == _VMode.size) ...{
+        if (o.size != null) 'size': o.size,
+        if (o.color != null) 'color': o.color,
+        'colourFamily': o.colourFamily,
+        if (o.measurements.isNotEmpty) 'measurements': o.measurements,
+      },
+      if (mode == _VMode.colour) ...{
+        if (o.color != null) 'color': o.color,
+        'colourFamily': o.colourFamily,
+      },
+      if (mode == _VMode.shade) ...{
+        if (o.shadeName.isNotEmpty) 'color': o.shadeName.length > 40 ? o.shadeName.substring(0, 40) : o.shadeName,
+        'shadeName': o.shadeName.isEmpty ? null : o.shadeName,
+        'shadeHex': o.shadeHex,
+        'shadeFamily': o.shadeFamily,
+        'undertone': o.undertone,
+        'finish': o.finish,
+      },
+      if (mode == _VMode.content) ...{
+        // Older app builds read the size label
+        if (content != null && o.contentUnit != null) 'size': '${_numText(content)} ${o.contentUnit}',
+        'contentAmount': content,
+        'contentUnit': content == null ? null : o.contentUnit,
+      },
+    };
+  }
+
+  // ── Saving ─────────────────────────────────────────────────────────────
+  bool _checkBasics() {
+    final local = <FieldIssue>[];
+    if (_name.text.trim().length < 2) local.add(const FieldIssue('name', 'required', {'en': 'Give the product a name.', 'fi': 'Anna tuotteelle nimi.'}));
+    if (_parseCents(_price.text) == null) local.add(const FieldIssue('salePriceCents', 'required', {'en': 'Enter a price.', 'fi': 'Anna hinta.'}));
+    final g = _gtin.text.trim();
+    if (g.isNotEmpty && !validGtin(g)) local.add(const FieldIssue('gtin', 'invalid', {'en': 'This is not a valid EAN code: check the digits.', 'fi': 'EAN-koodi ei ole kelvollinen: tarkista numerot.'}));
+    if (_variantMode == _VMode.shade && _options.any((o) => o.shadeName.isEmpty)) {
+      local.add(const FieldIssue('variants', 'required', {'en': 'Give every shade a name.', 'fi': 'Anna jokaiselle sävylle nimi.'}));
+    }
+    if (_variantMode == _VMode.content && _options.any((o) => o.contentAmount == null || o.contentUnit == null)) {
+      local.add(const FieldIssue('variants', 'required', {'en': 'Give every size its content in ml or g.', 'fi': 'Anna jokaiselle koolle sisältö millilitroina tai grammoina.'}));
+    }
+    if (local.isEmpty) return true;
+    setState(() {
+      for (final i in local) {
+        (_issues[i.anchor] ??= []).insert(0, i);
+      }
+    });
+    _goTo(local.first.anchor);
+    return false;
+  }
+
+  Future<void> _save({required bool publish}) async {
+    if (_saving) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _error = null;
+      for (final k in ['name', 'salePriceCents', 'gtin']) {
+        _issues[k]?.removeWhere((i) => i.code == 'required' || i.code == 'invalid');
+        if (_issues[k]?.isEmpty == true) _issues.remove(k);
+      }
+    });
+    if (!_checkBasics()) return;
+    if ([..._photos, ..._safetyPhotos].any((p) => p.url == null && p.error == null)) {
+      setState(() => _error = tr(context, 'Wait for the photos to finish uploading.', 'Odota, että kuvat on ladattu.'));
+      return;
+    }
+    if (_videos.any((v) => v.status == 'UPLOADING' && v.error == null)) {
+      setState(() => _error = tr(context, 'Wait for the videos to finish uploading.', 'Odota, että videot on ladattu.'));
+      return;
+    }
+    publish = publish && !_locked;
+    // The one-time safety pledge comes before the first publish
+    if (publish && _pledged != true) {
+      final given = await SafetyPledgeScreen.ensure(context);
+      if (!mounted) return;
+      if (!given) return;
+      setState(() {
+        _pledged = true;
+        _issues.remove('safetyPledge');
+      });
+    }
+    setState(() => _saving = true);
+    final body = _body(publish: publish);
+    final api = _api;
+    final res = await withAgreement(
+      context,
+      api,
+      () => _editing ? api.patch('/products/${_p!['id']}', body) : api.post('/products', body),
+    );
+    if (!mounted) return;
+    if (res.ok) {
+      await _afterSaved(res, publish: publish);
+      return;
+    }
+    final code = '${res.data['code'] ?? ''}';
+    setState(() {
+      _saving = false;
+      if (code == 'PUBLISH_REQUIREMENTS' || code == 'INVALID_PRODUCT_DATA') {
+        _setIssues(FieldIssue.parse(res.data['fields']), FieldIssue.parse(res.data['warnings']));
+        _error = null;
+      } else if (code == 'PRODUCT_LOCKED' || res.status == 409 && '${res.rawError}'.contains('recall')) {
+        _locked = true;
+        _error = res.errorMessage;
+      } else {
+        _error = res.errorMessage;
+      }
+    });
+    if (code == 'PUBLISH_REQUIREMENTS' || code == 'INVALID_PRODUCT_DATA') {
+      Haptics.warning();
+      final n = _issueCount;
+      MSnack.show(
+        context,
+        code == 'PUBLISH_REQUIREMENTS'
+            ? tr(context, 'Not published yet: $n ${n == 1 ? 'thing' : 'things'} to add. Nothing was saved.',
+                'Ei vielä julkaistu: lisättävää $n kohdassa. Mitään ei tallennettu.')
+            : tr(context, 'Check the marked fields.', 'Tarkista merkityt kentät.'),
+        kind: MSnackKind.error,
+      );
+      WidgetsBinding.instance.addPostFrameCallback((_) => _fixNext());
+    }
+  }
+
+  Future<void> _afterSaved(ApiResult res, {required bool publish}) async {
+    final product = res.data['product'] is Map ? Json.from(res.data['product']) : null;
+    final productId = _editing ? _p!['id'] : product?['id'];
+    final pending = _videos.where((v) => v.status == 'PENDING' && v.error == null).toList();
+    String? videoError;
+    for (final v in pending) {
+      videoError = await _attach(productId, v) ?? videoError;
+    }
+    _rememberComposition();
+    if (!mounted) return;
+    final check = product?['publishCheck'];
+    final missing = check is Map ? FieldIssue.parse(check['missing']).length : 0;
+    final claims = FieldIssue.parse(res.data['warnings']).length;
+    final parts = <String>[
+      if (publish) tr(context, 'Published.', 'Julkaistu.') else tr(context, 'Saved as a draft.', 'Tallennettu luonnokseksi.'),
+      if (!publish && missing > 0)
+        tr(context, '$missing ${missing == 1 ? 'thing is' : 'things are'} still needed before publishing.', 'Ennen julkaisua puuttuu vielä $missing ${missing == 1 ? 'tieto' : 'tietoa'}.'),
+      if (claims > 0) tr(context, 'Check the wording the claims check flagged.', 'Tarkista sanamuodot, joista väittämätarkistus huomautti.'),
+      if (videoError != null) '${tr(context, 'A video could not be added', 'Videota ei voitu lisätä')}: $videoError',
+      if (res.notice != null) res.notice!,
+    ];
+    HapticFeedback.mediumImpact();
+    MSnack.show(context, parts.join(' '), kind: MSnackKind.success, duration: Duration(seconds: parts.length > 1 ? 5 : 3));
+    Navigator.pop(context, true);
+  }
+
+  // ── Fix next ───────────────────────────────────────────────────────────
+  int get _issueCount => _issues.values.fold(0, (s, l) => s + l.length);
+
+  /// Every issue's anchor in the order the form shows them (unknown places last).
+  List<String> get _orderedIssueAnchors {
+    final known = _anchorOrder.where(_issues.containsKey).toList();
+    return [...known, ..._issues.keys.where((k) => !known.contains(k))];
+  }
+
+  void _fixNext() {
+    final anchors = _orderedIssueAnchors;
+    if (anchors.isEmpty) return;
+    _fixIndex = (_fixIndex + 1) % anchors.length;
+    final a = anchors[_fixIndex];
+    if (a == 'safetyPledge' && _anchorKeys[a]?.currentContext == null) {
+      _save(publish: true);
+      return;
+    }
+    _goTo(a);
+  }
+
+  void _goTo(String anchor) {
+    final ctx = _anchorKeys[anchor]?.currentContext ?? _summaryKey.currentContext;
+    if (ctx == null) return;
+    Haptics.selection();
+    Scrollable.ensureVisible(ctx, duration: MMotion.of(context, MMotion.base), curve: MMotion.standard, alignment: 0.15);
+  }
+
+  // ── Delete ─────────────────────────────────────────────────────────────
+  Future<void> _confirmDiscard() async {
+    final discard = await showMSheet<bool>(context, builder: (ctx) => MSheet(
+          title: tr(ctx, 'Discard changes?', 'Hylätäänkö muutokset?'),
+          actions: [
+            MButton(label: tr(ctx, 'Keep editing', 'Jatka muokkausta'), expand: true, onPressed: () => Navigator.pop(ctx, false)),
+            MButton(label: tr(ctx, 'Discard', 'Hylkää'), variant: MButtonVariant.danger, expand: true, onPressed: () => Navigator.pop(ctx, true)),
+          ],
+          child: Text(tr(ctx, 'Your changes to this product have not been saved. To keep them without publishing, save a draft.',
+              'Tuotteeseen tekemiäsi muutoksia ei ole tallennettu. Jos haluat säilyttää ne julkaisematta, tallenna luonnos.')),
+        ));
     if (discard == true && mounted) Navigator.pop(context);
   }
 
-  /// DELETE /products/:id. From API 2.10 the answer says what happened: `deleted: "hard"` (never ordered,
-  /// erased) or `"soft"` (kept only for past orders' records, gone from every list). Older servers only
-  /// hide it, and it stays in the store's own list.
+  /// DELETE /products/:id → `deleted: "hard"` (never ordered, erased) or `"soft"` (kept for past orders).
   Future<void> _delete() async {
-    const red = MPalette.red;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(tr(ctx, 'Remove this product?', 'Poistetaanko tuote?')),
-        content: Text(tr(ctx,
-            'Shoppers will no longer see or buy it. To only take it off sale for a while, switch it to sold out instead.',
-            'Asiakkaat eivät enää näe tai voi ostaa sitä. Jos haluat poistaa sen myynnistä vain väliaikaisesti, merkitse se loppuneeksi.')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(ctx, 'Back', 'Takaisin'))),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: red, foregroundColor: AppTheme.onPrimary, minimumSize: const Size(64, 48)),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(tr(ctx, 'Remove', 'Poista')),
-          ),
-        ],
-      ),
-    );
+    final ok = await showMSheet<bool>(context, builder: (ctx) => MSheet(
+          title: tr(ctx, 'Remove this product?', 'Poistetaanko tuote?'),
+          actions: [
+            MButton(label: tr(ctx, 'Remove', 'Poista'), variant: MButtonVariant.danger, expand: true, onPressed: () => Navigator.pop(ctx, true)),
+            MButton(label: tr(ctx, 'Back', 'Takaisin'), variant: MButtonVariant.text, expand: true, onPressed: () => Navigator.pop(ctx, false)),
+          ],
+          child: Text(tr(ctx, 'Shoppers will no longer see or buy it. To take it off sale for a while, move it to drafts instead.',
+              'Asiakkaat eivät enää näe tai voi ostaa sitä. Jos haluat poistaa sen myynnistä vain väliaikaisesti, siirrä se luonnoksiin.')),
+        ));
     if (ok != true || !mounted) return;
     setState(() {
       _deleting = true;
       _error = null;
     });
-    final res = await _api.delete('/products/${widget.product!['id']}');
+    final res = await _api.delete('/products/${_p!['id']}');
     if (!mounted) return;
     if (!res.ok) {
       setState(() {
@@ -172,642 +734,255 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
       return;
     }
     HapticFeedback.mediumImpact();
-    final name = '${widget.product!['name'] ?? ''}'.trim();
-    final message = switch ('${res.data['deleted'] ?? ''}') {
-      'hard' => tr(context, 'Product deleted.', 'Tuote poistettu.'),
-      'soft' => tr(context, 'Product removed. It is kept only in the records of past orders.', 'Tuote poistettu. Se säilyy vain aiempien tilausten tiedoissa.'),
-      _ => tr(context, 'Product hidden from shoppers. Past orders refer to it, so it stays in your list as hidden.',
-          'Tuote piilotettu asiakkailta. Aiemmat tilaukset viittaavat siihen, joten se jää listaasi piilotettuna.'),
-    };
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(name.isEmpty ? message : '$name: $message')));
+    final name = '${_p!['name'] ?? ''}'.trim();
+    final message = '${res.data['deleted'] ?? ''}' == 'soft'
+        ? tr(context, 'Product removed. It is kept only in the records of past orders.', 'Tuote poistettu. Se säilyy vain aiempien tilausten tiedoissa.')
+        : tr(context, 'Product deleted.', 'Tuote poistettu.');
+    MSnack.show(context, name.isEmpty ? message : '$name: $message');
     Navigator.pop(context, true);
   }
 
-  bool get _editing => widget.product != null;
-  ApiClient get _api => ApiClient(Provider.of<AuthService>(context, listen: false));
-
-  @override
-  void dispose() {
-    _name.dispose();
-    _description.dispose();
-    _price.dispose();
-    _stock.dispose();
-    super.dispose();
-  }
-
-  static const _tipsSeenKey = 'photo_tips_seen';
-
-  /// Three short tips for photos that sell; shown before the first photo on this phone, and any
-  /// time from "Photo tips".
-  Future<void> _showPhotoTips() {
-    Haptics.selection();
-    Widget tip(IconData icon, String title, String body) => Padding(
-          padding: const EdgeInsets.only(bottom: 14),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: const BoxDecoration(color: AppTheme.sunshineLight, shape: BoxShape.circle),
-              child: Icon(icon, color: MPalette.amberInk, size: 22),
-            ),
-            const SizedBox(width: MSpace.md),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.bodyL)),
-                Text(body, style: const TextStyle(color: AppTheme.textSecondary, height: 1.35)),
-              ]),
-            ),
-          ]),
-        );
-    return showMSheet<void>(context, builder: (ctx) => SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(MSpace.xxl, 0, MSpace.xxl, MSpace.lg),
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Text(tr(ctx, 'Photos that sell', 'Myyvät kuvat'), style: AppTheme.display(size: 21)),
-            const SizedBox(height: 14),
-            tip(Icons.wb_sunny_outlined, tr(ctx, 'Good light', 'Hyvä valo'),
-                tr(ctx, 'Daylight from a window, no flash. Colours then look true.', 'Päivänvaloa ikkunasta, ei salamaa. Silloin värit näkyvät oikein.')),
-            tip(Icons.crop_portrait_rounded, tr(ctx, 'Plain background', 'Yksinkertainen tausta'),
-                tr(ctx, 'A wall or a sheet in one colour keeps the eye on the item.', 'Yksivärinen seinä tai lakana pitää katseen tuotteessa.')),
-            tip(Icons.threesixty_rounded, tr(ctx, 'At least 3 angles', 'Vähintään 3 kuvakulmaa'),
-                tr(ctx, 'Front, back and a close-up of the fabric or label. The first photo is the cover; drag photos to change the order.',
-                    'Edestä, takaa ja lähikuva kankaasta tai merkistä. Ensimmäinen kuva on kansikuva; vedä kuvia muuttaaksesi järjestystä.')),
-            const SizedBox(height: MSpace.xs),
-            FilledButton(onPressed: () => Navigator.pop(ctx), child: Text(tr(ctx, 'Got it', 'Selvä'))),
-          ]),
-        ),
-      ), isScrollControlled: true, useSafeArea: false);
-  }
-
-  Future<void> _addPhoto() async {
-    if (_photos.length >= 8) return;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      if (prefs.getBool(_tipsSeenKey) != true) {
-        await prefs.setBool(_tipsSeenKey, true);
-        if (!mounted) return;
-        await _showPhotoTips();
-        if (!mounted) return;
-      }
-    } catch (_) {}
-    final source = await showMSheet<ImageSource>(context, builder: (ctx) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(leading: const Icon(Icons.photo_camera_outlined), title: Text(tr(context, 'Take a photo', 'Ota kuva')), onTap: () => Navigator.pop(ctx, ImageSource.camera)),
-          ListTile(leading: const Icon(Icons.photo_library_outlined), title: Text(tr(context, 'Choose from gallery', 'Valitse galleriasta')), onTap: () => Navigator.pop(ctx, ImageSource.gallery)),
-        ]),
-      ), isScrollControlled: false, useSafeArea: false);
-    if (source == null) return;
-    final picked = await ImagePicker().pickImage(source: source, maxWidth: 2000, maxHeight: 2000, imageQuality: 85);
-    if (picked == null || !mounted) return;
-    final photo = _Photo();
-    setState(() => _photos.add(photo));
-    try {
-      final url = await MediaUpload.uploadImage(
-        api: _api,
-        kind: 'product_image',
-        file: File(picked.path),
-        onProgress: (p) {
-          if (mounted) setState(() => photo.progress = p);
-        },
-      );
-      if (mounted) setState(() => photo.url = url);
-    } catch (e) {
-      if (mounted) setState(() => photo.error = '$e');
-    }
-  }
-
-  Future<void> _addVideo() async {
-    if (_videos.length >= _maxVideos) return;
-    final source = await showMSheet<ImageSource>(context, builder: (ctx) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(leading: const Icon(Icons.videocam_outlined), title: Text(tr(context, 'Record a video', 'Kuvaa video')), onTap: () => Navigator.pop(ctx, ImageSource.camera)),
-          ListTile(leading: const Icon(Icons.video_library_outlined), title: Text(tr(context, 'Choose from gallery', 'Valitse galleriasta')), onTap: () => Navigator.pop(ctx, ImageSource.gallery)),
-        ]),
-      ), isScrollControlled: false, useSafeArea: false);
-    if (source == null) return;
-    final picked = await ImagePicker().pickVideo(source: source, maxDuration: const Duration(seconds: 60));
-    if (picked == null || !mounted) return;
-    final video = _Video();
-    setState(() => _videos.add(video));
-    try {
-      final media = await MediaUpload.upload(
-        api: _api,
-        kind: 'product_video',
-        file: File(picked.path),
-        onProgress: (p) {
-          if (mounted) setState(() => video.progress = p);
-        },
-      );
-      if ((media.durationSec ?? 0) > 60) throw UploadException(tr(context, 'Product videos can be up to 60 seconds.', 'Tuotevideo voi olla enintään 60 sekuntia.'));
-      video.upload = media;
-      if (_editing) {
-        await _attach(widget.product!['id'], video);
-      } else if (mounted) {
-        setState(() => video.status = 'PENDING');
-      }
-    } catch (e) {
-      if (mounted) setState(() => video.error = '$e');
-    }
-  }
-
-  /// Adds an uploaded video to the product; the server checks the upload belongs to this store.
-  Future<String?> _attach(Object productId, _Video video) async {
-    final res = await _api.post('/products/$productId/videos', video.upload!.toProof());
-    if (!mounted) return null;
-    setState(() {
-      if (res.ok) {
-        video.id = res.data['video']['id'];
-        video.poster = res.data['video']['poster'];
-        video.status = '${res.data['video']['status']}';
-      } else {
-        video.error = res.error;
-      }
-    });
-    return res.ok ? null : res.error;
-  }
-
-  Future<void> _removeVideo(_Video video) async {
-    if (video.id != null && _editing) {
-      final res = await _api.delete('/products/${widget.product!['id']}/videos/${video.id}');
-      if (!res.ok) {
-        if (mounted) MSnack.show(context, res.errorMessage);
-        return;
-      }
-    }
-    if (mounted) setState(() => _videos.remove(video));
-  }
-
-  int? _priceCents() {
-    final v = double.tryParse(_price.text.trim().replaceAll(',', '.').replaceAll('€', ''));
-    return v == null || v <= 0 ? null : (v * 100).round();
-  }
-
-  Future<void> _save() async {
-    if (!_form.currentState!.validate()) return;
-    if (_photos.any((p) => p.url == null && p.error == null)) {
-      setState(() => _error = tr(context, 'Wait for the photos to finish uploading.', 'Odota, että kuvat on ladattu.'));
-      return;
-    }
-    if (_videos.any((v) => v.status == 'UPLOADING' && v.error == null)) {
-      setState(() => _error = tr(context, 'Wait for the videos to finish uploading.', 'Odota, että videot on ladattu.'));
-      return;
-    }
-    if (_options.any((o) => (o.size == null && o.color == null))) {
-      setState(() => _error = tr(context, 'Each option needs a size or a colour.', 'Jokaisella vaihtoehdolla on oltava koko tai väri.'));
-      return;
-    }
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-    final body = {
-      'name': _name.text.trim(),
-      'description': _description.text.trim(),
-      'category': _category,
-      'condition': _condition,
-      'isSecondHand': _secondHand,
-      'isEcoFriendly': _eco,
-      'isHandmade': _handmade,
-      'salePriceCents': _priceCents(),
-      'canBeSold': true,
-      'images': _photos.where((p) => p.url != null).map((p) => p.url).toList(),
-      if (_options.isEmpty) 'stockQuantity': int.tryParse(_stock.text.trim()) ?? 0,
-      'variants': _options
-          .map((o) => {
-                if (o.id != null) 'id': o.id,
-                if (o.size != null) 'size': o.size,
-                if (o.color != null) 'color': o.color,
-                'stock': o.stock,
-              })
-          .toList(),
-      if (_editing) 'isAvailable': _available,
-    };
-    final api = _api;
-    // A visible product needs the Seller Terms in force: on 428 the agreement sheet opens and the save is
-    // sent again once they are accepted (the 428 comes before anything is saved)
-    final res = await withAgreement(
-      context,
-      api,
-      () => _editing ? api.patch('/products/${widget.product!['id']}', body) : api.post('/products', body),
-    );
-    if (!mounted) return;
-    if (res.ok) {
-      // Videos picked while creating the product are attached once it exists
-      final productId = _editing ? widget.product!['id'] : res.data['product']?['id'];
-      final pending = _videos.where((v) => v.status == 'PENDING' && v.error == null).toList();
-      String? videoError;
-      for (final v in pending) {
-        videoError = await _attach(productId, v) ?? videoError;
-      }
-      if (!mounted) return;
-      if (videoError != null) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('${tr(context, 'The product was saved, but a video could not be added', 'Tuote tallennettiin, mutta videota ei voitu lisätä')}: $videoError'),
-        ));
-      }
-      HapticFeedback.mediumImpact();
-      Navigator.pop(context, true);
-    } else {
-      setState(() {
-        _saving = false;
-        _error = res.errorMessage;
-      });
-    }
-  }
-
+  // ── Build ──────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    final c = context.mColors;
+    _anchorOrder.clear();
     return PopScope(
       canPop: !_hasChanges,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _confirmDiscard();
       },
       child: Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(title: Text(_editing ? tr(context, 'Edit product', 'Muokkaa tuotetta') : tr(context, 'New product', 'Uusi tuote'))),
-      body: Form(
-        key: _form,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(MSpace.xl, MSpace.lg, MSpace.xl, MSpace.x4l),
-          children: [
-            Row(children: [
-              Expanded(child: _label(tr(context, 'Photos', 'Kuvat'))),
+        backgroundColor: c.background,
+        appBar: AppBar(
+          title: Text(_editing ? tr(context, 'Edit product', 'Muokkaa tuotetta') : tr(context, 'New product', 'Uusi tuote')),
+          actions: [
+            if (_issueCount > 0)
               TextButton.icon(
-                style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-                onPressed: _showPhotoTips,
-                icon: const Icon(Icons.lightbulb_outline_rounded, size: 18),
-                label: Text(tr(context, 'Photo tips', 'Kuvavinkit')),
+                style: TextButton.styleFrom(minimumSize: const Size(kMinTouchTarget, kMinTouchTarget)),
+                onPressed: _fixNext,
+                icon: const Icon(Icons.arrow_downward_rounded),
+                label: Text(tr(context, 'Fix next', 'Korjaa seuraava')),
               ),
-            ]),
-            SizedBox(
-              height: 112,
-              // The images list is saved in this order (the first is the cover): long-press and drag to move
-              child: ReorderableListView.builder(
-                scrollDirection: Axis.horizontal,
-                buildDefaultDragHandles: false,
-                itemCount: _photos.length,
-                onReorderStart: (_) => Haptics.selection(),
-                onReorder: (from, to) => setState(() {
-                  if (to > from) to--;
-                  _photos.insert(to, _photos.removeAt(from));
-                }),
-                proxyDecorator: (child, _, __) => Material(color: Colors.transparent, elevation: 6, borderRadius: BorderRadius.circular(14), child: child),
-                itemBuilder: (_, i) => ReorderableDelayedDragStartListener(
-                  key: ObjectKey(_photos[i]),
-                  index: i,
-                  child: _photoTile(_photos[i], cover: i == 0),
-                ),
-                footer: _photos.length < 8
-                    ? Semantics(
-                        button: true,
-                        label: tr(context, 'Add photo', 'Lisää kuva'),
-                        child: GestureDetector(
-                          onTap: _addPhoto,
-                          child: Container(
-                            width: 90,
-                            decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(14)),
-                            child: const Icon(Icons.add_a_photo_outlined, color: AppTheme.primary, size: 30),
-                          ),
-                        ),
-                      )
-                    : null,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-                tr(context,
-                    'Good light, a plain background and at least 3 angles show the item clearly. The first photo is the cover — long-press a photo and drag it to change the order. Use your own photos, or ones the brand allows you to use.',
-                    'Hyvä valo, yksinkertainen tausta ja vähintään 3 kuvakulmaa näyttävät tuotteen selkeästi. Ensimmäinen kuva on kansikuva — paina kuvaa pitkään ja vedä muuttaaksesi järjestystä. Käytä omia kuviasi tai kuvia, joiden käyttöön brändi on antanut luvan.'),
-                style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
-            if (_photos.isNotEmpty && _photos.length < 3)
-              Padding(
-                padding: const EdgeInsets.only(top: MSpace.xs),
-                child: Text(
-                    tr(context, 'Add ${3 - _photos.length} more angle${_photos.length == 2 ? '' : 's'} so shoppers can see the whole item.',
-                        'Lisää vielä ${3 - _photos.length} kuvakulma${_photos.length == 2 ? '' : 'a'}, jotta asiakkaat näkevät koko tuotteen.'),
-                    style: const TextStyle(fontSize: MTextSize.caption, color: MPalette.amberInk, fontWeight: FontWeight.w700)),
-              ),
-            const SizedBox(height: MSpace.xl),
-            _label(tr(context, 'Videos', 'Videot')),
-            SizedBox(
-              height: 150,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                children: [
-                  for (final v in _videos) _videoTile(v),
-                  if (_videos.length < _maxVideos)
-                    GestureDetector(
-                      onTap: _addVideo,
-                      child: Container(
-                        width: 90,
-                        decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(14)),
-                        child: const Icon(Icons.video_call_outlined, color: AppTheme.primary, size: 32),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-                tr(context, 'Up to 3 videos of 60 seconds, with sound. Show the fit, the fabric moving and the details. Use only music you have the rights to.',
-                    'Enintään 3 videota, 60 sekuntia, äänen kanssa. Näytä istuvuus, kankaan liike ja yksityiskohdat. Käytä vain musiikkia, johon sinulla on oikeudet.'),
-                style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
-            const SizedBox(height: MSpace.xl),
-            TextFormField(
-              controller: _name,
-              maxLength: 200,
-              decoration: InputDecoration(labelText: tr(context, 'Name', 'Nimi')),
-              validator: (v) => (v ?? '').trim().length < 2 ? tr(context, 'Give the product a name', 'Anna tuotteelle nimi') : null,
-            ),
-            TextFormField(
-              controller: _description,
-              maxLength: 2000,
-              maxLines: 4,
-              decoration: InputDecoration(labelText: tr(context, 'Description, materials and fit', 'Kuvaus, materiaalit ja istuvuus')),
-            ),
-            const SizedBox(height: MSpace.sm),
-            TextFormField(
-              controller: _price,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: InputDecoration(labelText: tr(context, 'Price (€, VAT included)', 'Hinta (€, sis. ALV)'), prefixIcon: const Icon(Icons.euro_rounded)),
-              validator: (_) => _priceCents() == null ? tr(context, 'Enter a price', 'Anna hinta') : null,
-            ),
-            if (_editing)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  tr(context, 'When you lower a price, shoppers see a reduction only if the old price was the lowest of the previous 30 days (EU rule).',
-                      'Kun lasket hintaa, alennus näytetään vain, jos vanha hinta oli edeltävän 30 päivän alin (EU-sääntö).'),
-                  style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary),
-                ),
-              ),
-            const SizedBox(height: MSpace.lg),
-            DropdownButtonFormField<String>(
-              value: _category,
-              decoration: InputDecoration(labelText: tr(context, 'Category', 'Kategoria')),
-              items: _categories.map((c) => DropdownMenuItem(value: c, child: Text(_show(_categoryFi, c)))).toList(),
-              onChanged: (v) => setState(() => _category = v!),
-            ),
-            const SizedBox(height: MSpace.md),
-            DropdownButtonFormField<String>(
-              value: _condition,
-              decoration: InputDecoration(labelText: tr(context, 'Condition', 'Kunto')),
-              items: {
-                'NEW': tr(context, 'New', 'Uusi'),
-                'LIKE_NEW': tr(context, 'Like new', 'Kuin uusi'),
-                'GOOD': tr(context, 'Good', 'Hyvä'),
-                'FAIR': tr(context, 'Fair', 'Kohtalainen'),
-                'POOR': tr(context, 'Worn', 'Kulunut'),
-              }.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
-              onChanged: (v) => setState(() => _condition = v!),
-            ),
-            const SizedBox(height: MSpace.sm),
-            SwitchListTile(contentPadding: EdgeInsets.zero, value: _secondHand, onChanged: (v) => setState(() => _secondHand = v), title: Text(tr(context, 'Second hand', 'Käytetty'))),
-            SwitchListTile(contentPadding: EdgeInsets.zero, value: _eco, onChanged: (v) => setState(() => _eco = v), title: Text(tr(context, 'Eco-friendly', 'Ympäristöystävällinen'))),
-            SwitchListTile(contentPadding: EdgeInsets.zero, value: _handmade, onChanged: (v) => setState(() => _handmade = v), title: Text(tr(context, 'Handmade', 'Käsintehty'))),
-            const Divider(height: 32),
-            Row(children: [
-              Expanded(child: _label(tr(context, 'Sizes and colours', 'Koot ja värit'))),
-              TextButton.icon(
-                onPressed: () => setState(() => _options.add(_Option())),
-                icon: const Icon(Icons.add_rounded),
-                label: Text(tr(context, 'Add option', 'Lisää vaihtoehto')),
-              ),
-            ]),
-            if (_options.isEmpty) ...[
-              Text(tr(context, 'No options: the item is sold as one piece.', 'Ei vaihtoehtoja: tuotetta myydään yhtenä.'),
-                  style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
-              const SizedBox(height: MSpace.sm),
-              TextFormField(
-                controller: _stock,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(labelText: tr(context, 'How many do you have?', 'Montako kappaletta sinulla on?')),
-                validator: (v) => int.tryParse((v ?? '').trim()) == null ? tr(context, 'Enter a number', 'Anna luku') : null,
-              ),
-            ],
-            for (final o in _options) _optionRow(o),
-            if (_editing) ...[
-              const Divider(height: 32),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                value: _available,
-                onChanged: (v) => setState(() => _available = v),
-                title: Text(tr(context, 'Visible in the store', 'Näkyy kaupassa')),
-                subtitle: Text(widget.product?['importJobId'] != null && widget.product?['isAvailable'] == false
-                    ? tr(context, 'Imported products stay hidden until you switch this on. Check the photos, price and stock first.',
-                        'Tuodut tuotteet pysyvät piilossa, kunnes kytket tämän päälle. Tarkista ensin kuvat, hinta ja varastosaldo.')
-                    : tr(context, 'Turn off to hide it without deleting.', 'Piilota poistamatta.')),
-              ),
-            ],
-            if (_error != null)
-              Padding(padding: const EdgeInsets.only(top: MSpace.md), child: Text(_error!, style: const TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w600))),
-            const SizedBox(height: MSpace.xl),
-            SizedBox(
-              height: 54,
-              child: MButton(label: _editing ? tr(context, 'Save changes', 'Tallenna muutokset') : tr(context, 'Add product', 'Lisää tuote'), loading: _saving, onPressed: _saving || _deleting ? null : _save),
-            ),
-            if (_editing) ...[
-              const SizedBox(height: MSpace.md),
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(foregroundColor: MPalette.red, side: const BorderSide(color: MPalette.red, width: 1.5)),
-                onPressed: _saving || _deleting ? null : _delete,
-                icon: _deleting
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.delete_outline_rounded),
-                label: Text(tr(context, 'Remove product', 'Poista tuote')),
-              ),
-            ],
           ],
         ),
-      ),
-    ),
-    );
-  }
-
-  Widget _label(String text) => Padding(
-        padding: const EdgeInsets.only(bottom: MSpace.sm),
-        child: Text(text, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyL, color: AppTheme.textPrimary)),
-      );
-
-  Widget _photoTile(_Photo p, {bool cover = false}) => Padding(
-        padding: const EdgeInsets.only(right: 10),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: SizedBox(
-            width: 90,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Container(color: AppTheme.primaryLight),
-                if (p.url != null) NetImage(p.url!, width: 90, height: 112),
-                if (p.url == null && p.error == null)
-                  Center(
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      CircularProgressIndicator(value: p.progress > 0 ? p.progress : null, color: AppTheme.primary),
-                      if (p.progress > 0)
+        bottomNavigationBar: _loadingMeta || _metaError != null ? null : _bottomBar(),
+        body: _loadingMeta
+            ? const MSkeletonDetail()
+            : _metaError != null
+                ? MStateMessage.error(message: _metaError, onRetry: _loadMeta)
+                : ListView(
+                    controller: _scroll,
+                    padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.md, MSpace.lg, MSpace.x4l),
+                    children: [
+                      if (_locked) _lockedBanner(),
+                      _summary(),
+                      _categoryTile(),
+                      const SizedBox(height: MSpace.md),
+                      if (_template != null) ...[
+                        _basicsSection(),
+                        _variantsSection(),
+                        if (_cosmetic) _beautySection() else _materialsSection(),
+                        _safetySection(),
+                        _photosSection(),
+                      ],
+                      if (_error != null)
                         Padding(
-                          padding: const EdgeInsets.only(top: 6),
-                          child: Text('${(p.progress * 100).round()} %', style: const TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w800, color: AppTheme.primary)),
-                        ),
-                    ]),
-                  ),
-                if (cover && p.url != null)
-                  Positioned(
-                    left: 4,
-                    bottom: 4,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(color: AppTheme.sunshine, borderRadius: BorderRadius.circular(MRadius.xs)),
-                      child: Text(tr(context, 'Cover', 'Kansi'), style: const TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w800, color: AppTheme.textPrimary)),
-                    ),
-                  ),
-                if (p.error != null)
-                  Padding(
-                    padding: const EdgeInsets.all(6),
-                    child: Center(child: Text(p.error!, style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.accent), textAlign: TextAlign.center)),
-                  ),
-                Positioned(
-                  top: 0,
-                  right: 0,
-                  child: Semantics(
-                    button: true,
-                    label: tr(context, 'Remove photo', 'Poista kuva'),
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () {
-                        HapticFeedback.selectionClick();
-                        setState(() => _photos.remove(p));
-                      },
-                      // 48 px touch area around the small visible button
-                      child: const SizedBox(
-                        width: 48,
-                        height: 48,
-                        child: Align(
-                          alignment: Alignment.topRight,
-                          child: Padding(
-                            padding: EdgeInsets.all(2),
-                            child: CircleAvatar(radius: 12, backgroundColor: AppTheme.scrim, child: Icon(Icons.close_rounded, size: 14, color: AppTheme.onPrimary)),
+                          padding: const EdgeInsets.only(top: MSpace.md),
+                          child: Semantics(
+                            liveRegion: true,
+                            child: Text(_error!, style: MType.bodyM.copyWith(color: c.danger, fontWeight: FontWeight.w600)),
                           ),
                         ),
-                      ),
-                    ),
+                      if (_editing) ...[
+                        const SizedBox(height: MSpace.xl),
+                        MButton(
+                          label: tr(context, 'Remove product', 'Poista tuote'),
+                          icon: Icons.delete_outline_rounded,
+                          variant: MButtonVariant.text,
+                          loading: _deleting,
+                          onPressed: _saving || _deleting ? null : _delete,
+                        ),
+                      ],
+                    ],
                   ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
+      ),
+    );
+  }
 
-  Widget _videoTile(_Video v) {
-    final label = v.error != null
-        ? v.error!
-        : switch (v.status) {
-            'UPLOADING' => '${(v.progress * 100).round()} %',
-            'PENDING' => tr(context, 'Added on save', 'Lisätään tallennettaessa'),
-            'PROCESSING' => tr(context, 'Processing…', 'Käsitellään…'),
-            'FAILED' => tr(context, 'Could not process', 'Käsittely epäonnistui'),
-            _ => null,
-          };
-    return Padding(
-      padding: const EdgeInsets.only(right: 10),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: SizedBox(
-          width: 90,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              Container(color: AppTheme.textPrimary),
-              if (v.poster != null) CachedNetworkImage(imageUrl: v.poster!, fit: BoxFit.cover, errorWidget: (_, __, ___) => const SizedBox()),
-              if (v.status == 'UPLOADING' && v.error == null)
-                Center(child: CircularProgressIndicator(value: v.progress > 0 ? v.progress : null, color: AppTheme.onPrimary)),
-              if (v.status == 'READY') const Center(child: Icon(Icons.play_circle_fill_rounded, color: AppTheme.onPrimary, size: 34)),
-              if (label != null)
-                Positioned(
-                  left: 4,
-                  right: 4,
-                  bottom: 6,
-                  child: Text(label, textAlign: TextAlign.center, maxLines: 3, style: TextStyle(fontSize: MTextSize.caption, color: v.error != null ? AppTheme.accent : AppTheme.onPrimary, fontWeight: FontWeight.w600)),
-                ),
-              Positioned(
-                top: 2,
-                right: 2,
-                child: Semantics(
-                  button: true,
-                  label: tr(context, 'Remove video', 'Poista video'),
-                  child: GestureDetector(
-                    onTap: () => _removeVideo(v),
-                    child: const CircleAvatar(radius: 12, backgroundColor: AppTheme.scrim, child: Icon(Icons.close_rounded, size: 14, color: AppTheme.onPrimary)),
-                  ),
-                ),
-              ),
-            ],
-          ),
+  Widget _bottomBar() {
+    final c = context.mColors;
+    final visible = _wasVisible && !_locked;
+    final busy = _saving || _deleting;
+    final primary = _locked
+        ? MButton(label: tr(context, 'Save', 'Tallenna'), expand: true, loading: _saving, onPressed: busy ? null : () => _save(publish: false))
+        : MButton(
+            label: visible ? tr(context, 'Save changes', 'Tallenna muutokset') : tr(context, 'Publish', 'Julkaise'),
+            icon: visible ? Icons.check_rounded : Icons.visibility_rounded,
+            expand: true,
+            loading: _saving,
+            onPressed: busy || _template == null ? null : () => _save(publish: true),
+          );
+    final secondary = _locked
+        ? null
+        : MButton(
+            label: visible ? tr(context, 'Move to drafts', 'Siirrä luonnoksiin') : tr(context, 'Save draft', 'Tallenna luonnos'),
+            variant: MButtonVariant.outline,
+            expand: true,
+            onPressed: busy ? null : () => _save(publish: false),
+          );
+    return Material(
+      color: c.surface,
+      elevation: 0,
+      child: SafeArea(
+        child: Container(
+          decoration: BoxDecoration(border: Border(top: BorderSide(color: c.outline))),
+          padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.sm, MSpace.lg, MSpace.sm),
+          child: Row(children: [
+            if (secondary != null) ...[Expanded(child: secondary), const SizedBox(width: MSpace.sm)],
+            Expanded(child: primary),
+          ]),
         ),
       ),
     );
   }
 
-  Widget _optionRow(_Option o) => Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.fromLTRB(10, 10, MSpace.xs, MSpace.xs),
-        decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.divider)),
-        child: Column(children: [
+  /// Recalled or removed by Malvoya: the listing can never be shown again (PRODUCT_LOCKED).
+  Widget _lockedBanner() {
+    final c = context.mColors;
+    final recall = _p?['recall'] is Map ? _p!['recall'] as Map : null;
+    final isRecall = _p?['lockedReason'] == 'RECALL' || recall != null;
+    return Container(
+      margin: const EdgeInsets.only(bottom: MSpace.md),
+      padding: const EdgeInsets.all(MSpace.lg),
+      decoration: BoxDecoration(color: c.dangerSoft, borderRadius: MRadius.brMd),
+      child: Semantics(
+        liveRegion: true,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Expanded(
-              child: DropdownButtonFormField<String?>(
-                value: o.size,
-                isExpanded: true,
-                decoration: InputDecoration(labelText: tr(context, 'Size', 'Koko')),
-                items: [
-                  DropdownMenuItem(value: null, child: Text(tr(context, 'None', 'Ei'))),
-                  ...{...productSizes, if (o.size != null) o.size!}.map((s) => DropdownMenuItem(value: s, child: Text(_show(_sizeFi, s)))),
-                ],
-                onChanged: (v) => setState(() => o.size = v),
-              ),
-            ),
+            Icon(Icons.lock_rounded, color: c.onDangerSoft),
             const SizedBox(width: MSpace.sm),
             Expanded(
-              child: DropdownButtonFormField<String?>(
-                value: o.color,
-                isExpanded: true,
-                decoration: InputDecoration(labelText: tr(context, 'Colour', 'Väri')),
-                items: [
-                  DropdownMenuItem(value: null, child: Text(tr(context, 'None', 'Ei'))),
-                  ...{...productColors, if (o.color != null) o.color!}.map((c) => DropdownMenuItem(value: c, child: Text(_show(_colorFi, c), overflow: TextOverflow.ellipsis))),
-                ],
-                onChanged: (v) => setState(() => o.color = v),
+              child: Text(
+                isRecall ? tr(context, 'Locked: product safety recall', 'Lukittu: tuoteturvallisuuteen liittyvä takaisinveto') : tr(context, 'Locked by Malvoya', 'Malvoyan lukitsema'),
+                style: MType.title.copyWith(color: c.onDangerSoft),
               ),
             ),
-            const SizedBox(width: 6),
           ]),
-          Row(children: [
-            Text(tr(context, 'In stock', 'Varastossa'), style: const TextStyle(fontWeight: FontWeight.w600)),
-            const Spacer(),
-            IconButton(
-              tooltip: tr(context, 'One less', 'Yksi vähemmän'),
-              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-              onPressed: o.stock > 0 ? () => setState(() => o.stock--) : null,
-              icon: const Icon(Icons.remove_circle_outline),
+          const SizedBox(height: MSpace.xs),
+          Text(
+            isRecall
+                ? tr(context, 'This product is part of a recall, so it can\'t be shown to shoppers again. You can still edit it for your records.',
+                    'Tuote kuuluu takaisinvetoon, joten sitä ei voi enää näyttää asiakkaille. Voit silti muokata sitä omia tietojasi varten.')
+                : tr(context, 'Malvoya removed this listing after a notice. It can\'t be shown again. Contact support if you think this is a mistake.',
+                    'Malvoya poisti tuotteen ilmoituksen perusteella. Sitä ei voi näyttää uudelleen. Ota yhteyttä tukeen, jos tämä on mielestäsi virhe.'),
+            style: MType.bodyM.copyWith(color: c.onDangerSoft),
+          ),
+          if (recall?['url'] != null)
+            Padding(
+              padding: const EdgeInsets.only(top: MSpace.sm),
+              child: MButton(
+                label: tr(context, 'Read the recall notice', 'Lue takaisinvetoilmoitus'),
+                variant: MButtonVariant.outline,
+                size: MButtonSize.sm,
+                icon: Icons.open_in_new_rounded,
+                onPressed: () => launchUrl(Uri.parse('${recall!['url']}'), mode: LaunchMode.externalApplication),
+              ),
             ),
-            SizedBox(width: 36, child: Text('${o.stock}', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.bodyL))),
-            IconButton(
-              tooltip: tr(context, 'One more', 'Yksi lisää'),
-              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-              onPressed: () => setState(() => o.stock++),
-              icon: const Icon(Icons.add_circle_outline),
-            ),
-            const SizedBox(width: MSpace.xs),
-            IconButton(
-              tooltip: tr(context, 'Remove option', 'Poista vaihtoehto'),
-              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-              icon: const Icon(Icons.delete_outline_rounded, color: AppTheme.accent),
-              onPressed: () => setState(() => _options.remove(o)),
-            ),
-          ]),
         ]),
-      );
+      ),
+    );
+  }
+
+  /// The completeness meter: what is missing before publishing, each tappable, and "Fix next".
+  Widget _summary() {
+    final c = context.mColors;
+    final count = _issueCount;
+    final notes = _notes.values.fold(0, (s, l) => s + l.length);
+    if (count == 0 && notes == 0) return SizedBox(key: _summaryKey);
+    final all = [for (final a in _orderedIssueAnchors) ..._issues[a]!];
+    return Container(
+      key: _summaryKey,
+      margin: const EdgeInsets.only(bottom: MSpace.md),
+      padding: const EdgeInsets.all(MSpace.lg),
+      decoration: BoxDecoration(color: count > 0 ? c.sunshineSoft : c.surfaceVariant, borderRadius: MRadius.brMd),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text(
+          count > 0
+              ? tr(context, 'Before you can publish: $count ${count == 1 ? 'thing' : 'things'} to add', 'Ennen julkaisua: lisättävää $count kohdassa')
+              : tr(context, 'Ready to publish', 'Valmis julkaistavaksi'),
+          style: MType.title.copyWith(color: count > 0 ? c.onSunshineSoft : c.onSurface),
+        ),
+        const SizedBox(height: MSpace.xs),
+        for (final i in all.take(6))
+          InkWell(
+            borderRadius: MRadius.brXs,
+            onTap: () => _goTo(i.anchor),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: kMinTouchTarget),
+              child: Row(children: [
+                Icon(Icons.error_outline_rounded, size: 18, color: c.onSunshineSoft),
+                const SizedBox(width: MSpace.sm),
+                Expanded(child: Text(i.text(context), style: MType.bodyM.copyWith(color: c.onSunshineSoft))),
+                Icon(Icons.chevron_right_rounded, color: c.onSunshineSoft),
+              ]),
+            ),
+          ),
+        if (all.length > 6)
+          Text(tr(context, '…and ${all.length - 6} more', '…ja ${all.length - 6} muuta'), style: MType.caption.copyWith(color: c.onSunshineSoft)),
+        if (notes > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: MSpace.xs),
+            child: Text(tr(context, '$notes ${notes == 1 ? 'tip' : 'tips'} to make the listing better, marked in the form.', '$notes ${notes == 1 ? 'vinkki' : 'vinkkiä'} tuotteen parantamiseksi, merkitty lomakkeeseen.'),
+                style: MType.caption.copyWith(color: count > 0 ? c.onSunshineSoft : c.onSurfaceVariant)),
+          ),
+        if (count > 0) ...[
+          const SizedBox(height: MSpace.sm),
+          MButton(label: tr(context, 'Fix next', 'Korjaa seuraava'), icon: Icons.arrow_downward_rounded, size: MButtonSize.sm, onPressed: _fixNext),
+        ],
+      ]),
+    );
+  }
+
+  Widget _categoryTile() {
+    final c = context.mColors;
+    final path = [localized(context, _topName), localized(context, _catName)].whereType<String>().join(' › ');
+    final audience = switch (_audience) {
+      'WOMEN' => tr(context, 'Women', 'Naiset'),
+      'MEN' => tr(context, 'Men', 'Miehet'),
+      'KIDS' => tr(context, 'Kids', 'Lapset'),
+      _ => tr(context, 'Unisex', 'Unisex'),
+    };
+    final age = switch (_ageGroup) {
+      'BABY' => tr(context, 'Baby 0–2', 'Vauvat 0–2 v'),
+      'TODDLER' => tr(context, 'Toddler 2–4', 'Taaperot 2–4 v'),
+      'KIDS' => tr(context, 'Kids 4–8', 'Lapset 4–8 v'),
+      'JUNIOR' => tr(context, 'Junior 8–14', 'Juniorit 8–14 v'),
+      'TEEN' => tr(context, 'Teens', 'Nuoret'),
+      'ADULT' => tr(context, 'Adult', 'Aikuiset'),
+      _ => null,
+    };
+    return _anchor(
+      'categorySlug',
+      _anchor(
+        'ageGroup',
+        Container(
+          decoration: BoxDecoration(
+            color: c.surface,
+            borderRadius: MRadius.brMd,
+            border: Border.all(color: _issues.containsKey('categorySlug') ? c.danger : c.outline),
+          ),
+          child: MListTile(
+            icon: categoryIcon(CatalogCache.findSub(_slug)?.$1['icon'] as String?),
+            title: _slug == null ? tr(context, 'Pick a category', 'Valitse kategoria') : path,
+            subtitle: _slug == null
+                ? tr(context, 'The form shows the fields of the category', 'Lomake näyttää kategorian kentät')
+                : [audience, if (age != null) age].join(' · '),
+            trailing: Text(tr(context, 'Change', 'Vaihda'), style: MType.label.copyWith(color: c.primary)),
+            onTap: _saving ? null : () => _pickCategory(),
+          ),
+        ),
+      ),
+    );
+  }
 }

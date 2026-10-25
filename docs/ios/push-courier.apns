@@ -1,0 +1,13 @@
+{
+  "Simulator Target Bundle": "com.malvoya.courier",
+  "aps": {
+    "alert": {
+      "title": "New delivery offer",
+      "body": "A pickup 1.2 km from you is waiting. Open the app to see the pay."
+    },
+    "sound": "default"
+  },
+  "gcm.message_id": "simulator-test-3",
+  "type": "offer",
+  "orderId": "1"
+}

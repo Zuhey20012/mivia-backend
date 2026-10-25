@@ -6,6 +6,8 @@ import '../auth_service.dart';
 import 'chatbot.dart';
 import 'settings_screen.dart';
 import 'returns_screen.dart';
+import 'my_recalls_screen.dart';
+import 'size_shade_help_screen.dart';
 import 'payment_methods_screen.dart';
 import 'address_management_screen.dart';
 import 'support_hub_screen.dart';
@@ -552,6 +554,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
 
               if (auth.isAuthenticated) _agreementBanner(context),
+              // Only when a product the customer bought has been recalled
+              if (auth.isAuthenticated) const MyRecallsNotice(),
 
               // Quick-Access Action Grid (4 Refined Cards: Orders, Returns/Swap, Addresses, Language)
               // Google Pay completely removed per brand guidelines
@@ -699,6 +703,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     title: l10n.translate('refundsReturns'),
                     subtitle: l10n.translate('refundsReturnsSubtitle'),
                     onTap: () => _nav(context, const ReturnsScreen()),
+                  ),
+                  Divider(height: 1, indent: 56, color: dividerColor),
+                  _buildTile(
+                    context: context,
+                    icon: Icons.straighten_rounded,
+                    iconColor: MPalette.malva,
+                    title: tr(context, 'Size & shade help', 'Koko- ja sävyapu'),
+                    subtitle: tr(context, 'How to measure, size charts and swatches', 'Mittaaminen, kokotaulukot ja sävynäytteet'),
+                    onTap: () => _nav(context, const SizeShadeHelpScreen()),
                   ),
                 ],
               ),

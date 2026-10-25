@@ -1,0 +1,13 @@
+{
+  "Simulator Target Bundle": "com.malvoya.vendor",
+  "aps": {
+    "alert": {
+      "title": "New order",
+      "body": "Order #1 is waiting for you to accept it."
+    },
+    "sound": "default"
+  },
+  "gcm.message_id": "simulator-test-2",
+  "type": "order",
+  "orderId": "1"
+}

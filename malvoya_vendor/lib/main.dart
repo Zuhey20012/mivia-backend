@@ -26,7 +26,15 @@ void main() async {
   // Shows a "No internet" strip and lets screens refresh when the connection comes back
   ConnectivityService.instance.start();
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
-  try { await Firebase.initializeApp(); } catch (e) { debugPrint('Firebase: $e'); }
+  // Firebase. On iOS it needs GoogleService-Info.plist (added on the Mac, never committed);
+  // without it the app runs without push and phone sign-in.
+  await SignInSetup.loadIos();
+  try {
+    final app = await Firebase.initializeApp();
+    SignInSetup.firebaseInitialised(appId: app.options.appId, iosClientId: app.options.iosClientId);
+  } catch (e) {
+    debugPrint('Firebase: $e');
+  }
   runApp(const MalvoyaVendorApp());
 }
 

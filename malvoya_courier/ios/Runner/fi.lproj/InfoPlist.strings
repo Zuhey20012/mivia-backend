@@ -1,5 +1,5 @@
 /* Purpose strings shown by iOS permission prompts (Finnish). Keep in sync with Info.plist. */
 "NSLocationWhenInUseUsageDescription" = "Kun olet linjoilla, Malvoya Courier käyttää sijaintiasi lähellä olevien keikkojen tarjoamiseen ja sen tarkistamiseen, että olet kaupalla, ja näyttää sijaintisi tilauksesi asiakkaalle ja kaupalle. Jakaminen loppuu, kun poistut linjoilta.";
-"NSLocationAlwaysAndWhenInUseUsageDescription" = "Kun olet linjoilla, Malvoya Courier käyttää sijaintiasi myös sovelluksen ollessa taustalla tai näytön ollessa pois päältä, jotta asiakas ja kauppa voivat seurata toimitusta. Se loppuu, kun poistut linjoilta.";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "Kun toimitat tilausta, Malvoya Courier käyttää sijaintiasi myös sovelluksen ollessa taustalla tai näytön ollessa pois päältä, jotta asiakas ja kauppa voivat seurata toimitusta. Se loppuu, kun toimitus päättyy tai poistut linjoilta.";
 "NSCameraUsageDescription" = "Malvoya Courier käyttää kameraa, kun otat kuvan paikasta, johon jätit tilauksen, toimituksen todisteeksi.";
 "NSPhotoLibraryUsageDescription" = "Malvoya Courier käyttää vain itse valitsemaasi kuvaa toimituksen todisteeksi. Se ei selaa kuvakirjastoasi.";

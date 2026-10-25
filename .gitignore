@@ -20,3 +20,6 @@ backend/create-admin.js
 
 # Golden test failure images (local only)
 **/test/failures/
+
+# iOS Firebase config: added on the Mac (or as a CI secret), never committed
+**/ios/Runner/GoogleService-Info.plist

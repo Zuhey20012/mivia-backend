@@ -4,9 +4,12 @@ import 'package:malvoya_core/malvoya_core.dart';
 import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
+import '../core/catalog.dart';
 import '../widgets/add_to_bag_sheet.dart';
 import '../widgets/app_image.dart';
 import '../widgets/product_gallery.dart';
+import '../widgets/product_info.dart';
+import 'category_detail.dart';
 import 'store_detail.dart';
 
 class ProductDetailScreen extends StatefulWidget {
@@ -29,6 +32,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   String? _error;
   bool _favorite = false;
 
+  /// The chosen option (size, colour, shade or content).
+  int? _variantId;
+
   @override
   void initState() {
     super.initState();
@@ -44,6 +50,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         _product = Map<String, dynamic>.from(res.data['product']);
         _favorite = _product!['isFavorite'] == true;
         _error = null;
+        final inStock = productVariants(_product!).where((v) => v['inStock'] == true).toList();
+        if (inStock.length == 1) _variantId = asInt(inStock.first['id']);
       } else {
         _error = res.errorText(context);
       }
@@ -68,6 +76,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   }
 
   void _snack(String text) => MSnack.show(context, text);
+
+  Map<String, dynamic>? get _selected =>
+      _product == null ? null : productVariants(_product!).where((v) => asInt(v['id']) == _variantId).firstOrNull;
 
   @override
   Widget build(BuildContext context) {
@@ -103,7 +114,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   expandedHeight: MediaQuery.of(context).size.width * 1.2,
                   backgroundColor: AppTheme.scaffoldBackground(context),
                   leading: Padding(
-                    padding: const EdgeInsets.all(6),
+                    padding: const EdgeInsets.all(MSpace.xs),
                     child: _circleButton(
                       icon: Icons.arrow_back_rounded,
                       tooltip: MaterialLocalizations.of(context).backButtonTooltip,
@@ -112,7 +123,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   ),
                   actions: [
                     Padding(
-                      padding: const EdgeInsets.all(6),
+                      padding: const EdgeInsets.all(MSpace.xs),
                       child: _circleButton(
                         icon: _favorite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
                         color: _favorite ? AppTheme.lingon : AppTheme.ink,
@@ -120,7 +131,15 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         onTap: _toggleFavorite,
                       ),
                     ),
-                    const SizedBox(width: 6),
+                    Padding(
+                      padding: const EdgeInsets.all(MSpace.xs),
+                      child: _circleButton(
+                        icon: Icons.more_horiz_rounded,
+                        tooltip: tr(context, 'More', 'Lisää'),
+                        onTap: _openMenu,
+                      ),
+                    ),
+                    const SizedBox(width: MSpace.xs),
                   ],
                   flexibleSpace: FlexibleSpaceBar(background: _gallery(p)),
                 ),
@@ -134,6 +153,25 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     );
   }
 
+  void _openMenu() {
+    showMSheet(
+      context,
+      builder: (ctx) => MSheet(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          MListTile(
+            title: tr(ctx, 'Report this product', 'Ilmoita tuotteesta'),
+            subtitle: tr(ctx, 'Unsafe, counterfeit, misleading or illegal', 'Vaarallinen, väärennös, harhaanjohtava tai laiton'),
+            icon: Icons.flag_outlined,
+            onTap: () {
+              Navigator.pop(ctx);
+              showReportProductSheet(context, widget.productId);
+            },
+          ),
+        ]),
+      ),
+    );
+  }
+
   Widget _circleButton({required IconData icon, required String tooltip, required VoidCallback onTap, Color color = AppTheme.ink}) {
     return Tooltip(
       message: tooltip,
@@ -143,7 +181,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         child: InkWell(
           customBorder: const CircleBorder(),
           onTap: onTap,
-          child: SizedBox(width: 44, height: 44, child: Icon(icon, color: color, size: 22)),
+          child: SizedBox(width: kMinTouchTarget, height: kMinTouchTarget, child: Icon(icon, color: color, size: 22)),
         ),
       ),
     );
@@ -189,7 +227,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         ),
         SafeArea(
           child: Padding(
-            padding: const EdgeInsets.all(10),
+            padding: const EdgeInsets.all(MSpace.sm),
             child: _circleButton(
               icon: Icons.arrow_back_rounded,
               tooltip: MaterialLocalizations.of(context).backButtonTooltip,
@@ -201,111 +239,143 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     );
   }
 
+  bool _isCosmetic(Map<String, dynamic> p) {
+    final t = '${p['template'] ?? ''}';
+    return t.startsWith('COSMETIC') || t == 'FRAGRANCE';
+  }
+
   List<Widget> _details(Map<String, dynamic> p) {
+    final c = context.mColors;
     final store = (p['store'] as Map?)?.cast<String, dynamic>();
-    final text = AppTheme.primaryText(context);
-    final muted = AppTheme.secondaryText(context);
-    final dark = AppTheme.isDarkMode(context);
-    // Each fact gets its own soft colour: condition lilac, second hand butter, eco mint, handmade peach
-    final chips = <(String, Color, Color)>[
-      (_conditionLabel(p['condition']), AppTheme.lilac, AppTheme.primary),
-      if (p['isSecondHand'] == true) (tr(context, 'Second hand', 'Käytetty'), AppTheme.sunshineLight, MPalette.amberInk),
-      if (p['isEcoFriendly'] == true) (tr(context, 'Eco-friendly', 'Ympäristöystävällinen'), AppTheme.mint, MPalette.greenDark),
-      if (p['isHandmade'] == true) (tr(context, 'Handmade', 'Käsintehty'), AppTheme.peach, AppTheme.lingon),
-    ].where((c) => c.$1.isNotEmpty).toList();
+    final variants = productVariants(p);
+    final chosen = _selected;
+    final path = ((p['categoryPath'] as List?) ?? const []).whereType<Map>().toList();
+    // One soft chip per fact: condition, second hand, handmade
+    final chips = <(String, MBadgeTone)>[
+      if (_conditionLabel(p['condition']).isNotEmpty && !_isCosmetic(p)) (_conditionLabel(p['condition']), MBadgeTone.brand),
+      if (p['isSecondHand'] == true) (tr(context, 'Second-hand', 'Käytetty'), MBadgeTone.sunshine),
+      if (p['isHandmade'] == true) (tr(context, 'Handmade', 'Käsintehty'), MBadgeTone.neutral),
+    ];
 
     return [
-      Text(p['name'] ?? '', style: AppTheme.display(context, size: 27)),
-      const SizedBox(height: MSpace.sm),
-      MPrice.fromPricing(p['pricing'] as Map<String, dynamic>?, size: MPriceSize.lg, showReferenceLabel: true),
-      const SizedBox(height: MSpace.xs),
-      Text(tr(context, 'Price includes VAT where the seller is VAT-registered', 'Hinta sisältää ALV:n, jos myyjä on arvonlisäverovelvollinen'), style: TextStyle(fontSize: MTextSize.caption, color: muted)),
-      if (chips.isNotEmpty) ...[
-        const SizedBox(height: 14),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: chips
-              .map((c) => Container(
-                    padding: const EdgeInsets.symmetric(horizontal: MSpace.md, vertical: 7),
-                    decoration: BoxDecoration(color: AppTheme.pastel(context, c.$2, c.$3), borderRadius: BorderRadius.circular(MRadius.md)),
-                    child: Text(c.$1, style: TextStyle(fontSize: MTextSize.label, fontWeight: FontWeight.w700, color: dark ? Color.lerp(c.$3, MPalette.white, 0.5) : c.$3)),
-                  ))
-              .toList(),
+      RecallBanner(product: p),
+      if (path.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(bottom: MSpace.xs),
+          child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, children: [
+            for (var i = 0; i < path.length; i++) ...[
+              if (i > 0) Icon(Icons.chevron_right_rounded, size: 16, color: c.onSurfaceVariant),
+              InkWell(
+                borderRadius: MRadius.brXs,
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => CategoryScreen(slug: '${path[i]['slug']}'))),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: kMinTouchTarget),
+                  child: Align(
+                    widthFactor: 1,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: MSpace.xs),
+                      child: Text(catalogName(context, path[i]['name']), style: MType.label.copyWith(color: c.primary)),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ]),
         ),
+      Text(p['name'] ?? '', style: MType.displayM.copyWith(color: c.onSurface)),
+      if ('${p['attributes']?['brand'] ?? ''}'.trim().isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: MSpace.xs),
+          child: Text('${p['attributes']['brand']}', style: MType.bodyM.copyWith(color: c.onSurfaceVariant, fontWeight: FontWeight.w700)),
+        ),
+      const SizedBox(height: MSpace.sm),
+      productPrice(p, chosen, size: MPriceSize.lg, showReferenceLabel: true),
+      const SizedBox(height: MSpace.xs),
+      Text(tr(context, 'Price includes VAT where the seller is VAT-registered', 'Hinta sisältää ALV:n, jos myyjä on arvonlisäverovelvollinen'),
+          style: MType.caption.copyWith(color: c.onSurfaceVariant)),
+      if (chips.isNotEmpty) ...[
+        const SizedBox(height: MSpace.md),
+        Wrap(spacing: MSpace.sm, runSpacing: MSpace.sm, children: [for (final ch in chips) MBadge(ch.$1, tone: ch.$2)]),
       ],
-      if ((p['description'] ?? '').toString().isNotEmpty) ...[
-        const SizedBox(height: 18),
-        Text(p['description'], style: TextStyle(fontSize: MTextSize.bodyL, height: 1.5, color: text)),
+      if (variants.isNotEmpty) ...[
+        const SizedBox(height: MSpace.xl),
+        optionPicker(
+          context,
+          variants: variants,
+          selectedId: _variantId,
+          onChanged: (id) => setState(() => _variantId = id),
+          onSizeGuide: hasSizeGuide(p) ? () => showSizeGuideSheet(context, p) : null,
+        ),
+        if (isShadeProduct(variants))
+          Padding(
+            padding: const EdgeInsets.only(top: MSpace.xs),
+            child: Text(tr(context, 'Colours vary by screen.', 'Näytön värit voivat poiketa.'), style: MType.caption.copyWith(color: c.onSurfaceVariant)),
+          ),
+      ] else if (hasSizeGuide(p))
+        MListTile(title: tr(context, 'Size guide', 'Kokotaulukko'), icon: Icons.straighten_rounded, onTap: () => showSizeGuideSheet(context, p)),
+      if (p['hygieneSealed'] == true) ...[
+        const SizedBox(height: MSpace.lg),
+        HygieneSealNotice(product: p),
       ],
-      const SizedBox(height: 18),
-      // The body-measurement chart is for clothes; shoes, bags, jewellery, beauty and home items skip it
-      if (_isClothing(p)) _row(Icons.straighten_rounded, tr(context, 'Size guide', 'Kokotaulukko'), () => _showSizeGuide()),
+      if ('${p['description'] ?? ''}'.isNotEmpty) ...[
+        const SizedBox(height: MSpace.lg),
+        Text(p['description'], style: MType.bodyL.copyWith(color: c.onSurface)),
+      ],
+      ProductMaterialsSection(product: p),
+      if (_isCosmetic(p)) CosmeticsSection(product: p, variant: chosen),
+      CertificateChips(product: p),
+      const SizedBox(height: MSpace.lg),
+      ProductSafetyRow(product: p),
       if (store != null) ...[
-        const SizedBox(height: 14),
+        const SizedBox(height: MSpace.sm),
         InkWell(
-          borderRadius: BorderRadius.circular(AppTheme.radiusMd + 2),
+          borderRadius: MRadius.brMd,
           onTap: () {
             Haptics.selection();
             Navigator.push(context, MaterialPageRoute(builder: (_) => StoreDetailScreen(store: store)));
           },
           child: Ink(
             padding: const EdgeInsets.all(MSpace.md),
-            decoration: BoxDecoration(
-              color: AppTheme.cardBackground(context),
-              borderRadius: BorderRadius.circular(AppTheme.radiusMd + 2),
-              border: Border.all(color: AppTheme.cardBorder(context)),
-            ),
+            decoration: BoxDecoration(color: c.surface, borderRadius: MRadius.brMd, border: Border.all(color: c.outline)),
             child: Row(
               children: [
                 CircleAvatar(
                   radius: 22,
-                  backgroundColor: AppTheme.primaryLight,
+                  backgroundColor: c.primarySoft,
                   backgroundImage: store['logoUrl'] != null ? sizedImageProvider(context, store['logoUrl'], 44) : null,
-                  child: store['logoUrl'] == null ? const Icon(Icons.storefront_rounded, color: AppTheme.primary) : null,
+                  child: store['logoUrl'] == null ? Icon(Icons.storefront_rounded, color: c.onPrimarySoft) : null,
                 ),
                 const SizedBox(width: MSpace.md),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(store['name'] ?? '', style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyL, color: text)),
+                      Text(store['name'] ?? '', style: MType.bodyL.copyWith(fontWeight: FontWeight.w700, color: c.onSurface)),
                       Text(
                         [
                           store['sellerType'] == 'PRIVATE' ? tr(context, 'Private seller', 'Yksityinen myyjä') : tr(context, 'Business seller', 'Yritysmyyjä'),
                           if ((asInt(store['totalReviews']) ?? 0) > 0) '★ ${store['rating']} (${store['totalReviews']})',
                         ].join(' · '),
-                        style: TextStyle(fontSize: MTextSize.caption, color: muted),
+                        style: MType.caption.copyWith(color: c.onSurfaceVariant),
                       ),
                     ],
                   ),
                 ),
-                Icon(Icons.chevron_right_rounded, color: muted),
+                Icon(Icons.chevron_right_rounded, color: c.onSurfaceVariant),
               ],
             ),
           ),
         ),
         const SizedBox(height: MSpace.sm),
-        _row(Icons.info_outline_rounded, tr(context, 'Seller information', 'Myyjän tiedot'), () => _showTraderInfo(store)),
+        MListTile(title: tr(context, 'Seller information', 'Myyjän tiedot'), icon: Icons.info_outline_rounded, onTap: () => _showTraderInfo(store)),
       ],
+      MListTile(
+        title: tr(context, 'Report this product', 'Ilmoita tuotteesta'),
+        icon: Icons.flag_outlined,
+        onTap: () => showReportProductSheet(context, widget.productId),
+      ),
     ];
   }
-
-  Widget _row(IconData icon, String label, VoidCallback onTap) => InkWell(
-        onTap: () {
-          Haptics.selection();
-          onTap();
-        },
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Row(children: [
-            Icon(icon, size: 20, color: AppTheme.primaryText(context)),
-            const SizedBox(width: MSpace.md),
-            Expanded(child: Text(label, style: TextStyle(fontSize: MTextSize.bodyL, color: AppTheme.primaryText(context)))),
-            Icon(Icons.chevron_right_rounded, color: AppTheme.secondaryText(context)),
-          ]),
-        ),
-      );
 
   String _conditionLabel(dynamic c) {
     switch (c) {
@@ -326,17 +396,17 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   /// Seller identity shown to shoppers (DSA Art. 30 trader traceability).
   void _showTraderInfo(Map<String, dynamic> store) {
     final isPrivate = store['sellerType'] == 'PRIVATE';
-    showMSheet(context, builder: (_) => Padding(
-        padding: const EdgeInsets.fromLTRB(MSpace.xxl, MSpace.xxl, MSpace.xxl, MSpace.x3l),
+    showMSheet(context, builder: (ctx) {
+      final c = ctx.mColors;
+      return MSheet(
+        title: tr(context, 'Seller information', 'Myyjän tiedot'),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(tr(context, 'Seller information', 'Myyjän tiedot'), style: AppTheme.display(context, size: 21)),
-            const SizedBox(height: 14),
-            Text(store['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
-            if (!isPrivate && store['businessId'] != null) Text('Y-tunnus ${store['businessId']}'),
-            if (!isPrivate && store['address'] != null) Text(store['address']),
+            Text(store['name'] ?? '', style: MType.bodyL.copyWith(fontWeight: FontWeight.w600, color: c.onSurface)),
+            if (!isPrivate && store['businessId'] != null) Text('Y-tunnus ${store['businessId']}', style: MType.bodyM.copyWith(color: c.onSurface)),
+            if (!isPrivate && store['address'] != null) Text(store['address'], style: MType.bodyM.copyWith(color: c.onSurface)),
             const SizedBox(height: MSpace.md),
             Text(
               isPrivate
@@ -346,84 +416,60 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                       'Myyjä on ilmoittanut Malvoyalle olevansa yksityishenkilö, joka myy omia tavaroitaan. EU:n kuluttajansuoja, kuten 14 päivän peruuttamisoikeus, ei koske ostoja yksityisiltä myyjiltä.')
                   : tr(context, 'This seller is a business. Consumer protection law applies, including the 14-day right of withdrawal from delivery.',
                       'Myyjä on yritys. Ostoon sovelletaan kuluttajansuojalakia, mukaan lukien 14 päivän peruuttamisoikeus toimituksesta.'),
-              style: TextStyle(color: AppTheme.secondaryText(context), height: 1.4),
+              style: MType.bodyM.copyWith(color: c.onSurfaceVariant),
             ),
           ],
         ),
-      ), isScrollControlled: false, useSafeArea: false);
+      );
+    });
   }
-
-  void _showSizeGuide() {
-    const rows = [
-      ['XS', '32–34', '80–84', '62–66'],
-      ['S', '36–38', '84–90', '66–72'],
-      ['M', '40–42', '90–98', '72–80'],
-      ['L', '44–46', '98–106', '80–88'],
-      ['XL', '48–50', '106–114', '88–96'],
-      ['XXL', '52–54', '114–122', '96–104'],
-    ];
-    showMSheet(context, builder: (_) => Padding(
-        padding: const EdgeInsets.fromLTRB(MSpace.xxl, MSpace.xxl, MSpace.xxl, MSpace.x3l),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(tr(context, 'Size guide (EU)', 'Kokotaulukko (EU)'), style: AppTheme.display(context, size: 21)),
-            const SizedBox(height: MSpace.xs),
-            Text(
-                tr(context, 'Body measurements in cm. Brands vary — check the description for the store\'s own sizing.',
-                    'Vartalon mitat senttimetreinä. Merkkien koot vaihtelevat — katso kaupan oma mitoitus kuvauksesta.'),
-                style: TextStyle(fontSize: MTextSize.caption, color: AppTheme.secondaryText(context))),
-            const SizedBox(height: 14),
-            Table(
-              children: [
-                TableRow(children: [
-                  for (final h in [tr(context, 'Size', 'Koko'), 'EU', tr(context, 'Chest', 'Rinta'), tr(context, 'Waist', 'Vyötärö')])
-                    Padding(padding: const EdgeInsets.only(bottom: MSpace.sm), child: Text(h, style: const TextStyle(fontWeight: FontWeight.w700))),
-                ]),
-                for (final r in rows) TableRow(children: [for (final c in r) Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Text(c))]),
-              ],
-            ),
-          ],
-        ),
-      ), isScrollControlled: false, useSafeArea: false);
-  }
-
-  /// Stores type the category freely ("Dress", "Lipstick"), so anything clearly not worn as
-  /// clothing is recognised by its words, in English and Finnish.
-  static final _notClothing = RegExp(
-    r'shoe|sneaker|\bboots?\b|sandal|kenk|saapa|tennari|\bbags?\b|handbag|laukku|reppu|jewel|koru|sormus|earring|necklace|bracelet|'
-    r'\bwatch|kello|beauty|kauneus|lipstick|huulipuna|make-?up|meikki|cosmetic|kosmetiikka|perfume|hajuvesi|skincare|'
-    r'\bhome\b|koti|sisustus|decor|candle|kynttil|sunglass|aurinkolasi|wallet|lompakko',
-    caseSensitive: false,
-  );
-
-  bool _isClothing(Map<String, dynamic> p) => !_notClothing.hasMatch('${p['category'] ?? ''}');
 
   Widget _buyBar(Map<String, dynamic> p) {
-    final inStock = p['inStock'] != false;
+    final c = context.mColors;
+    final variants = productVariants(p);
+    final chosen = _selected;
+    final recalled = p['recall'] != null;
+    final inStock = !recalled && p['inStock'] != false;
+    final needsChoice = variants.isNotEmpty && chosen == null;
+    final shades = isShadeProduct(variants);
     return Container(
-      padding: EdgeInsets.fromLTRB(20, 14, 16, 14 + MediaQuery.of(context).viewPadding.bottom),
+      padding: EdgeInsets.fromLTRB(MSpace.xl, MSpace.md, MSpace.lg, MSpace.md + MediaQuery.of(context).viewPadding.bottom),
       decoration: BoxDecoration(
-        color: AppTheme.cardBackground(context),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
-        boxShadow: [BoxShadow(color: MPalette.night.withValues(alpha: 0.06), blurRadius: 20, offset: const Offset(0, -4))],
+        color: c.surface,
+        borderRadius: MRadius.sheetTop,
+        boxShadow: context.mTokens.shadow(MElevation.e2),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(child: MPrice.fromPricing(p['pricing'] as Map<String, dynamic>?, size: MPriceSize.lg)),
-          SizedBox(
-            height: 54,
-            child: FilledButton.icon(
-              onPressed: inStock
-                  ? () async {
-                      final added = await showAddToBagSheet(context, p);
-                      if (added && context.mounted) showAddedToBag(context);
-                    }
-                  : null,
-              icon: const Icon(Icons.shopping_bag_outlined),
-              label: Text(inStock ? tr(context, 'Add to bag', 'Lisää kassiin') : tr(context, 'Sold out', 'Loppuunmyyty')),
-            ),
+          // The seal notice right before the product goes in the bag
+          if (p['hygieneSealed'] == true && inStock) ...[HygieneSealNotice(product: p, compact: true), const SizedBox(height: MSpace.sm)],
+          Row(
+            children: [
+              Expanded(child: productPrice(p, chosen, size: MPriceSize.lg)),
+              const SizedBox(width: MSpace.sm),
+              MButton(
+                icon: Icons.shopping_bag_outlined,
+                size: MButtonSize.md,
+                onPressed: !inStock
+                    ? null
+                    : () async {
+                        final added = needsChoice || variants.isEmpty
+                            ? (needsChoice ? await showAddToBagSheet(context, p) : await addProductToBag(context, p))
+                            : await addProductToBag(context, p, variant: chosen);
+                        if (added && context.mounted) showAddedToBag(context);
+                      },
+                label: recalled
+                    ? tr(context, 'Not for sale', 'Ei myynnissä')
+                    : !inStock
+                        ? tr(context, 'Sold out', 'Loppuunmyyty')
+                        : needsChoice
+                            ? (shades ? tr(context, 'Choose a shade', 'Valitse sävy') : tr(context, 'Choose', 'Valitse'))
+                            : chosen != null && chosen['inStock'] != true
+                                ? tr(context, 'Sold out', 'Loppuunmyyty')
+                                : tr(context, 'Add to bag', 'Lisää kassiin'),
+              ),
+            ],
           ),
         ],
       ),

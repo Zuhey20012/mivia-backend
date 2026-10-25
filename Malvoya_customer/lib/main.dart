@@ -60,9 +60,12 @@ void main() async {
     debugPrint('Stripe init skipped: $e');
   }
 
-  // Firebase
+  // Firebase. On iOS it needs GoogleService-Info.plist (added on the Mac, never committed);
+  // without it the app runs without push, phone and Apple sign-in.
+  await SignInSetup.loadIos();
   try {
-    await Firebase.initializeApp();
+    final app = await Firebase.initializeApp();
+    SignInSetup.firebaseInitialised(appId: app.options.appId, iosClientId: app.options.iosClientId);
   } catch (e) {
     debugPrint('Firebase init error: $e');
   }

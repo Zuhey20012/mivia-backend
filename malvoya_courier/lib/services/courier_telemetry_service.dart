@@ -31,41 +31,83 @@ class CourierTelemetryService extends ChangeNotifier {
   /// itself: the dashboard asks only right after the location disclosure (`LocationDisclosure`).
   Future<bool> start({required String accessToken, int? orderId}) async {
     _token = accessToken;
+    final wasDelivering = _orderId != null;
     _orderId = orderId;
-    if (_positions != null) return true;
+    if (_positions != null) {
+      if (defaultTargetPlatform == TargetPlatform.iOS && wasDelivering != (orderId != null)) {
+        unawaited(_restartForBackgroundMode());
+      }
+      return true;
+    }
     if (!await Geolocator.isLocationServiceEnabled()) return false;
     final permission = await Geolocator.checkPermission();
     if (permission != LocationPermission.whileInUse && permission != LocationPermission.always) return false;
 
-    // Android: a visible foreground service keeps the position flowing while the phone is in a
-    // pocket, and shows the courier at all times that their location is being shared.
-    final settings = defaultTargetPlatform == TargetPlatform.android
-        ? AndroidSettings(
-            accuracy: LocationAccuracy.high,
-            distanceFilter: 10,
-            intervalDuration: const Duration(seconds: 5),
-            // In the app language at the moment sharing starts
-            foregroundNotificationConfig: ForegroundNotificationConfig(
-              notificationTitle: AppLanguage.pick('Malvoya Courier is online', 'Malvoya Courier on linjoilla'),
-              notificationText: AppLanguage.pick('Your location is shared while you are online. Go offline to stop.',
-                  'Sijaintisi jaetaan, kun olet linjoilla. Lopeta poistumalla linjoilta.'),
-              notificationIcon: const AndroidResource(name: 'ic_stat_malvoya', defType: 'drawable'),
-              enableWakeLock: true,
-              setOngoing: true,
-            ),
-          )
-        : const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 10);
-    _positions = Geolocator.getPositionStream(locationSettings: settings)
-        .listen(_onPosition, onError: (e) => debugPrint('GPS error: $e'));
+    _positions = _listen();
     _httpTimer = Timer.periodic(const Duration(seconds: 10), (_) => _sendHttp());
     notifyListeners();
     return true;
   }
 
+  StreamSubscription<Position> _listen() => Geolocator.getPositionStream(locationSettings: _settings())
+      .listen(_onPosition, onError: (e) => debugPrint('GPS error: $e'));
+
+  LocationSettings _settings() {
+    // Android: a visible foreground service keeps the position flowing while the phone is in a
+    // pocket, and shows the courier at all times that their location is being shared.
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return AndroidSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 10,
+        intervalDuration: const Duration(seconds: 5),
+        // In the app language at the moment sharing starts
+        foregroundNotificationConfig: ForegroundNotificationConfig(
+          notificationTitle: AppLanguage.pick('Malvoya Courier is online', 'Malvoya Courier on linjoilla'),
+          notificationText: AppLanguage.pick('Your location is shared while you are online. Go offline to stop.',
+              'Sijaintisi jaetaan, kun olet linjoilla. Lopeta poistumalla linjoilta.'),
+          notificationIcon: const AndroidResource(name: 'ic_stat_malvoya', defType: 'drawable'),
+          enableWakeLock: true,
+          setOngoing: true,
+        ),
+      );
+    }
+    // iOS: positions keep coming with the app in the background or the screen locked only while an
+    // order is being carried (UIBackgroundModes location, When In Use permission). iOS then shows
+    // the blue location indicator, its version of Android's notification. Between jobs the app
+    // shares its position only while it is open.
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      final delivering = _orderId != null;
+      return AppleSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 10,
+        activityType: ActivityType.otherNavigation,
+        pauseLocationUpdatesAutomatically: false,
+        allowBackgroundLocationUpdates: delivering,
+        showBackgroundLocationIndicator: delivering,
+      );
+    }
+    return const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 10);
+  }
+
+  /// iOS: a delivery started or ended, so background updates switch on or off. The stream is
+  /// restarted with the new settings (geolocator applies settings when listening starts).
+  Future<void> _restartForBackgroundMode() async {
+    final old = _positions;
+    if (old == null) return;
+    await old.cancel();
+    // Went offline meanwhile (stop() clears it), or another restart already replaced it
+    if (!identical(_positions, old)) return;
+    _positions = _listen();
+  }
+
   /// The order being carried right now (null between jobs).
   void setActiveOrder(int? orderId) {
     if (_orderId == orderId) return;
+    final wasDelivering = _orderId != null;
     _orderId = orderId;
+    if (defaultTargetPlatform == TargetPlatform.iOS && wasDelivering != (orderId != null)) {
+      unawaited(_restartForBackgroundMode());
+    }
     if (orderId != null) {
       CourierSocketService().trackOrder(orderId);
       if (_last != null) _onPosition(_last!);

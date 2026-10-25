@@ -108,6 +108,7 @@ class ProductTile extends StatelessWidget {
             Text(store, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: MTextSize.caption, color: AppTheme.secondaryText(context))),
           const SizedBox(height: 2),
           MPrice.fromPricing(product['pricing'] as Map<String, dynamic>?, size: MPriceSize.sm),
+          if (UnitPrice.fromJson(product['unitPrice']) != null) MUnitPrice(UnitPrice.fromJson(product['unitPrice'])!),
         ],
       ),
     );

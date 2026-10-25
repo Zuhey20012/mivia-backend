@@ -4,20 +4,88 @@ import 'package:malvoya_core/malvoya_core.dart';
 import 'package:malvoya_ui/malvoya_ui.dart';
 import '../cart.dart';
 import '../checkout.dart';
-import '../config/theme.dart';
 import '../models.dart';
 import 'app_image.dart';
+import 'product_info.dart';
 
-String variantLabel(Map v) => [v['size'], v['color']].where((x) => x != null && '$x'.isNotEmpty).join(' · ');
+String _amount(dynamic n) => n is num ? (n == n.roundToDouble() ? '${n.toInt()}' : '$n') : '';
 
-/// Choose a size/colour and add the product to the bag. Returns true when something was added.
-/// A product without sizes or colours is added straight away (no sheet).
+/// "M · Black", "02 Sand", "50 ml": the option as the customer chose it (also on the bag line).
+String variantLabel(Map v) {
+  final unit = v['contentUnit'];
+  final content = v['contentAmount'] is num && (unit == 'ml' || unit == 'g') ? '${_amount(v['contentAmount'])} $unit' : null;
+  return <String>{
+    for (final x in [v['size'], v['color'], v['shadeName'], content])
+      if (x != null && '$x'.trim().isNotEmpty) '$x'.trim(),
+  }.join(' · ');
+}
+
+List<Map<String, dynamic>> productVariants(Map<String, dynamic> product) =>
+    ((product['variants'] as List?) ?? const []).whereType<Map>().map((v) => Map<String, dynamic>.from(v)).toList();
+
+/// Shade products: every option has a swatch colour (API 2.12 `shadeHex`).
+bool isShadeProduct(List<Map<String, dynamic>> variants) => variants.isNotEmpty && variants.every((v) => MSwatchOption.fromVariant(v) != null);
+
+/// The option picker: swatches for shades ([MSwatchPicker]), size tiles otherwise ([MSizeSelector])
+/// with sold-out options crossed out and an optional "Size guide" link.
+Widget optionPicker(
+  BuildContext context, {
+  required List<Map<String, dynamic>> variants,
+  required int? selectedId,
+  required ValueChanged<int> onChanged,
+  VoidCallback? onSizeGuide,
+}) {
+  if (isShadeProduct(variants)) {
+    return MSwatchPicker(
+      options: [for (final v in variants) MSwatchOption.fromVariant(v)!],
+      selectedId: selectedId?.toString(),
+      onChanged: (id) => onChanged(int.parse(id)),
+    );
+  }
+  final onlySizes = variants.every((v) => '${v['size'] ?? ''}'.isNotEmpty && '${v['color'] ?? ''}'.isEmpty && '${v['shadeName'] ?? ''}'.isEmpty);
+  final onlyColours = variants.every((v) => '${v['color'] ?? ''}'.isNotEmpty && '${v['size'] ?? ''}'.isEmpty);
+  final onlyContent = variants.every((v) => v['contentAmount'] is num && '${v['size'] ?? ''}'.isEmpty && '${v['color'] ?? ''}'.isEmpty);
+  return MSizeSelector(
+    label: onlySizes || onlyContent ? tr(context, 'Size', 'Koko') : (onlyColours ? tr(context, 'Colour', 'Väri') : tr(context, 'Option', 'Vaihtoehto')),
+    options: [
+      for (final v in variants)
+        if (asInt(v['id']) != null) MSizeOption(id: '${asInt(v['id'])}', label: variantLabel(v), soldOut: v['inStock'] != true),
+    ],
+    selectedId: selectedId?.toString(),
+    onChanged: (id) => onChanged(int.parse(id)),
+    onSizeGuide: onSizeGuide,
+  );
+}
+
+/// The price of the product or the chosen option, with the unit price of that option. The
+/// Omnibus reference price belongs to the product's own price, so it is shown only when the
+/// option costs the same.
+Widget productPrice(Map<String, dynamic> product, Map<String, dynamic>? variant, {MPriceSize size = MPriceSize.md, bool showReferenceLabel = false}) {
+  final pricing = product['pricing'] is Map ? Map<String, dynamic>.from(product['pricing']) : const <String, dynamic>{};
+  final base = asInt(pricing['priceCents']);
+  final chosen = asInt(variant?['priceCents']);
+  final cents = chosen ?? base;
+  if (cents == null) return const SizedBox.shrink();
+  final same = chosen == null || chosen == base;
+  return MPrice(
+    cents: cents,
+    previousCents: same ? asInt(pricing['previousPriceCents']) : null,
+    discountPct: same ? asInt(pricing['discountPct']) : null,
+    size: size,
+    showReferenceLabel: showReferenceLabel,
+    unitPrice: UnitPrice.fromJson(variant != null ? variant['unitPrice'] : product['unitPrice']),
+  );
+}
+
+/// Choose a size/colour/shade and add the product to the bag. Returns true when something was
+/// added. A product without options is added straight away (no sheet) unless it is hygiene-sealed,
+/// which always shows the seal notice first.
 Future<bool> showAddToBagSheet(BuildContext context, Map<String, dynamic> product, {Map<String, dynamic>? store}) async {
   Haptics.selection();
   final shop = store ?? (product['store'] as Map?)?.cast<String, dynamic>();
   final variants = product['variants'];
   // Only when the payload says so: a product sent without its options still gets the sheet
-  if (variants is List && variants.isEmpty && product['inStock'] != false && asInt(product['id']) != null) {
+  if (variants is List && variants.isEmpty && product['inStock'] != false && product['hygieneSealed'] != true && product['recall'] == null && asInt(product['id']) != null) {
     return addProductToBag(context, product, store: shop);
   }
   final added = await showMSheet<bool>(context, builder: (_) => _AddToBagSheet(product: product, store: shop), transparent: true, isScrollControlled: true, useSafeArea: false);
@@ -73,17 +141,14 @@ Future<bool> addProductToBag(BuildContext context, Map<String, dynamic> product,
 
 /// "Added to your bag" with a shortcut to the bag.
 void showAddedToBag(BuildContext context) {
-  final messenger = ScaffoldMessenger.of(context);
   final navigator = Navigator.of(context);
-  messenger.hideCurrentSnackBar();
-  messenger.showSnackBar(SnackBar(
-    content: Text(tr(context, 'Added to your bag', 'Lisätty ostoskassiin')),
-    behavior: SnackBarBehavior.floating,
-    action: SnackBarAction(
-      label: tr(context, 'View bag', 'Näytä ostoskassi'),
-      onPressed: () => navigator.push(MaterialPageRoute(builder: (_) => const CheckoutPage())),
-    ),
-  ));
+  MSnack.show(
+    context,
+    tr(context, 'Added to your bag', 'Lisätty ostoskassiin'),
+    kind: MSnackKind.success,
+    actionLabel: tr(context, 'View bag', 'Näytä ostoskassi'),
+    onAction: () => navigator.push(MaterialPageRoute(builder: (_) => const CheckoutPage())),
+  );
 }
 
 class _AddToBagSheet extends StatefulWidget {
@@ -98,15 +163,9 @@ class _AddToBagSheet extends StatefulWidget {
 class _AddToBagSheetState extends State<_AddToBagSheet> {
   int? _variantId;
 
-  List<Map<String, dynamic>> get _variants =>
-      ((widget.product['variants'] as List?) ?? []).map((v) => Map<String, dynamic>.from(v)).toList();
+  List<Map<String, dynamic>> get _variants => productVariants(widget.product);
 
-  Map<String, dynamic>? get _selected {
-    for (final v in _variants) {
-      if (asInt(v['id']) == _variantId) return v;
-    }
-    return null;
-  }
+  Map<String, dynamic>? get _selected => _variants.where((v) => asInt(v['id']) == _variantId).firstOrNull;
 
   @override
   void initState() {
@@ -122,54 +181,60 @@ class _AddToBagSheetState extends State<_AddToBagSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.mColors;
     final p = widget.product;
     final images = (p['images'] as List?)?.cast<String>() ?? const [];
     final variants = _variants;
     final needsChoice = variants.isNotEmpty;
     final chosen = _selected;
-    final inStock = p['inStock'] != false && (!needsChoice || variants.any((v) => v['inStock'] == true));
+    final recalled = p['recall'] != null;
+    final inStock = !recalled && p['inStock'] != false && (!needsChoice || variants.any((v) => v['inStock'] == true));
     final canAdd = inStock && (!needsChoice || (chosen != null && chosen['inStock'] == true));
     final isPrivate = (widget.store?['sellerType'] ?? p['store']?['sellerType']) == 'PRIVATE';
+    final shades = isShadeProduct(variants);
 
-    return Container(
-      padding: EdgeInsets.fromLTRB(20, 12, 20, 20 + MediaQuery.of(context).viewPadding.bottom),
-      decoration: BoxDecoration(
-        color: AppTheme.cardBackground(context),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-      ),
+    return MSheet(
+      handle: true,
+      padding: EdgeInsets.fromLTRB(MSpace.xl, 0, MSpace.xl, MSpace.xl + MediaQuery.of(context).viewPadding.bottom),
+      actions: [
+        MButton(
+          expand: true,
+          size: MButtonSize.lg,
+          icon: Icons.shopping_bag_outlined,
+          onPressed: canAdd ? _add : null,
+          label: !inStock
+              ? tr(context, 'Sold out', 'Loppuunmyyty')
+              : (needsChoice && chosen == null)
+                  ? (shades ? tr(context, 'Choose a shade', 'Valitse sävy') : tr(context, 'Choose an option', 'Valitse vaihtoehto'))
+                  : tr(context, 'Add to bag', 'Lisää kassiin'),
+        ),
+      ],
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Center(
-            child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppTheme.cardBorder(context), borderRadius: BorderRadius.circular(2))),
-          ),
-          const SizedBox(height: MSpace.lg),
+          const SizedBox(height: MSpace.sm),
           Row(
             children: [
               ClipRRect(
-                borderRadius: BorderRadius.circular(MRadius.md),
+                borderRadius: MRadius.brMd,
                 child: SizedBox(
                   width: 64,
                   height: 80,
                   child: images.isEmpty
-                      ? Container(
-                          color: AppTheme.pastel(context, AppTheme.clay, AppTheme.clayInk),
-                          child: const Icon(Icons.checkroom_outlined, color: AppTheme.clayInk),
-                        )
+                      ? Container(color: context.mPastels.clay, child: Icon(Icons.checkroom_outlined, color: context.mPastels.clayInk))
                       : AppImage(images.first),
                 ),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: MSpace.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(p['name'] ?? '', style: AppTheme.display(context, size: 19)),
-                    if (widget.store?['name'] != null)
-                      Text(widget.store!['name'], style: TextStyle(fontSize: MTextSize.label, color: AppTheme.secondaryText(context))),
+                    Text(p['name'] ?? '', style: MType.title.copyWith(color: c.onSurface)),
+                    if (widget.store?['name'] != null) Text(widget.store!['name'], style: MType.label.copyWith(color: c.onSurfaceVariant, fontWeight: FontWeight.w500)),
                     const SizedBox(height: MSpace.xs),
-                    MPrice.fromPricing(p['pricing'] as Map<String, dynamic>?, overrideCents: asInt(chosen?['priceCents']), size: MPriceSize.md),
+                    productPrice(p, chosen),
                   ],
                 ),
               ),
@@ -177,95 +242,41 @@ class _AddToBagSheetState extends State<_AddToBagSheet> {
           ),
           if (needsChoice) ...[
             const SizedBox(height: MSpace.xl),
-            Text(tr(context, 'Choose size / colour', 'Valitse koko / väri'),
-                style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: variants.map((v) {
-                final id = asInt(v['id']);
-                final available = v['inStock'] == true;
-                final selected = id == _variantId;
-                final dark = AppTheme.isDarkMode(context);
-                final brand = dark ? MPalette.malvaOnDark : AppTheme.primary;
-                return Semantics(
-                  button: true,
-                  selected: selected,
-                  enabled: available,
-                  label: available ? variantLabel(v) : '${variantLabel(v)}, ${tr(context, 'sold out', 'loppu')}',
-                  excludeSemantics: true,
-                  child: GestureDetector(
-                    onTap: available
-                        ? () {
-                            Haptics.selection();
-                            setState(() => _variantId = id);
-                          }
-                        : null,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      constraints: const BoxConstraints(minWidth: 60, minHeight: 48),
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      decoration: BoxDecoration(
-                        color: selected
-                            ? AppTheme.pastel(context, AppTheme.lilac, AppTheme.primary)
-                            : (available ? AppTheme.cardBackground(context) : AppTheme.inputBackground(context)),
-                        borderRadius: BorderRadius.circular(MRadius.md),
-                        border: Border.all(color: selected ? brand : AppTheme.cardBorder(context), width: selected ? 2 : 1.5),
-                      ),
-                      // widthFactor/heightFactor keep the tile as small as its label (min 60 × 48)
-                      child: Center(
-                       widthFactor: 1,
-                       heightFactor: 1,
-                       child: Text(
-                        variantLabel(v),
-                        style: TextStyle(
-                          fontSize: MTextSize.bodyL,
-                          fontWeight: FontWeight.w800,
-                          color: selected ? brand : (available ? AppTheme.primaryText(context) : AppTheme.secondaryText(context)),
-                          decoration: available ? null : TextDecoration.lineThrough,
-                        ),
-                       ),
-                      ),
-                    ),
-                  ),
-                );
-              }).toList(),
+            optionPicker(
+              context,
+              variants: variants,
+              selectedId: _variantId,
+              onChanged: (id) => setState(() => _variantId = id),
+              onSizeGuide: hasSizeGuide(p) ? () => showSizeGuideSheet(context, p) : null,
             ),
+            if (shades)
+              Padding(
+                padding: const EdgeInsets.only(top: MSpace.xs),
+                child: Text(tr(context, 'Colours vary by screen.', 'Näytön värit voivat poiketa.'), style: MType.caption.copyWith(color: c.onSurfaceVariant)),
+              ),
+          ],
+          if (p['hygieneSealed'] == true) ...[
+            const SizedBox(height: MSpace.lg),
+            HygieneSealNotice(product: p),
           ],
           const SizedBox(height: MSpace.lg),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(isPrivate ? Icons.person_outline_rounded : Icons.verified_outlined, size: 18, color: AppTheme.secondaryText(context)),
+              Icon(isPrivate ? Icons.person_outline_rounded : Icons.verified_outlined, size: 18, color: c.onSurfaceVariant),
               const SizedBox(width: MSpace.sm),
               Expanded(
                 child: Text(
                   isPrivate
                       ? tr(context, 'Sold by a private person. The 14-day consumer right of withdrawal applies to purchases from businesses only.',
                           'Myyjä on yksityishenkilö. Kuluttajan 14 päivän peruuttamisoikeus koskee vain yrityksiltä ostettuja tuotteita.')
-                      : tr(context, 'Sold by a business. You can return it within 14 days of delivery.',
-                          'Myyjä on yritys. Voit palauttaa tuotteen 14 päivän kuluessa toimituksesta.'),
-                  style: TextStyle(fontSize: MTextSize.caption, height: 1.35, color: AppTheme.secondaryText(context)),
+                      : p['hygieneSealed'] == true
+                          ? tr(context, 'Sold by a business. Unopened, you can return it within 14 days of delivery.', 'Myyjä on yritys. Avaamattoman tuotteen voit palauttaa 14 päivän kuluessa toimituksesta.')
+                          : tr(context, 'Sold by a business. You can return it within 14 days of delivery.', 'Myyjä on yritys. Voit palauttaa tuotteen 14 päivän kuluessa toimituksesta.'),
+                  style: MType.caption.copyWith(color: c.onSurfaceVariant),
                 ),
               ),
             ],
-          ),
-          const SizedBox(height: 18),
-          SizedBox(
-            width: double.infinity,
-            height: 56,
-            child: FilledButton(
-              onPressed: canAdd ? _add : null,
-              child: Text(
-                !inStock
-                    ? tr(context, 'Sold out', 'Loppuunmyyty')
-                    : (needsChoice && chosen == null)
-                        ? tr(context, 'Choose a size', 'Valitse koko')
-                        : tr(context, 'Add to bag', 'Lisää kassiin'),
-                style: const TextStyle(fontSize: MTextSize.bodyL, fontWeight: FontWeight.w700),
-              ),
-            ),
           ),
         ],
       ),

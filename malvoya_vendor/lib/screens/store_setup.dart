@@ -55,7 +55,6 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
     'ACCESSORIES': ['Accessories, bags & jewellery', 'Asusteet, laukut ja korut'],
     'COSMETICS': ['Beauty & skincare', 'Kauneus ja ihonhoito'],
     'HANDMADE': ['Handmade', 'Käsintehty'],
-    'ECO_FRIENDLY': ['Eco-friendly', 'Ekologinen'],
     'HOME_DECOR': ['Home', 'Koti'],
     'OTHER': ['Other', 'Muu'],
   };

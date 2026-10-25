@@ -5,6 +5,7 @@ import 'package:malvoya_ui/malvoya_ui.dart';
 import '../cart.dart';
 import '../config/theme.dart';
 import '../core/deep_links.dart';
+import '../core/drops_badge.dart';
 import 'home.dart';
 import 'drops_feed.dart';
 import 'search.dart';
@@ -61,6 +62,8 @@ class _MainNavigationState extends State<MainNavigation> with RouteAware {
     // Links to a drop, store or invite open once the main screen is up
     DeepLinks.instance.attach();
     _tabRequest.addListener(_onTabRequest);
+    // The dot on the Drops tab: anything new since the last visit?
+    DropsBadge.instance.check();
   }
 
   void _onTabRequest() {
@@ -79,6 +82,7 @@ class _MainNavigationState extends State<MainNavigation> with RouteAware {
   @override
   void didPopNext() {
     if (_index == _homeTab) _homeVisible.value++;
+    if (_index != _dropsTab) DropsBadge.instance.check();
   }
 
   @override
@@ -98,6 +102,11 @@ class _MainNavigationState extends State<MainNavigation> with RouteAware {
       _opened.add(index);
     });
     if (index == _homeTab) _homeVisible.value++;
+    if (index == _dropsTab) {
+      DropsBadge.instance.markSeen();
+    } else {
+      DropsBadge.instance.check();
+    }
   }
 
   Widget _screen(int i) {
@@ -155,7 +164,11 @@ class _MainNavigationState extends State<MainNavigation> with RouteAware {
                 children: [
                   _tab(0, Icons.home_outlined, Icons.home_rounded, l10n.translate('home')),
                   _tab(1, Icons.search_rounded, Icons.search_rounded, l10n.translate('search')),
-                  _tab(2, Icons.play_circle_outline_rounded, Icons.play_circle_rounded, tr(context, 'Drops', 'Dropit')),
+                  ListenableBuilder(
+                    listenable: DropsBadge.instance,
+                    builder: (context, _) => _tab(2, Icons.play_circle_outline_rounded, Icons.play_circle_rounded, tr(context, 'Drops', 'Dropit'),
+                        dot: DropsBadge.instance.hasNew && _index != _dropsTab),
+                  ),
                   _tab(3, Icons.receipt_long_outlined, Icons.receipt_long_rounded, l10n.translate('orders')),
                   _tab(4, Icons.person_outline_rounded, Icons.person_rounded, l10n.translate('profile')),
                 ],
@@ -168,20 +181,21 @@ class _MainNavigationState extends State<MainNavigation> with RouteAware {
   }
 
   /// The selected tab grows into a sunny pill with its name; the others show just an icon.
-  Widget _tab(int index, IconData icon, IconData activeIcon, String label) {
+  Widget _tab(int index, IconData icon, IconData activeIcon, String label, {bool dot = false}) {
     final selected = _index == index;
+    final iconWidget = Icon(selected ? activeIcon : icon, size: 23, color: selected ? AppTheme.ink : AppTheme.onBrand.withValues(alpha: 0.72));
     return Expanded(
       flex: selected ? 7 : 3,
       child: Semantics(
         button: true,
         selected: selected,
-        label: label,
+        label: dot ? '$label, ${tr(context, 'new drops', 'uusia droppeja')}' : label,
         excludeSemantics: true,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () => _go(index),
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 260),
+            duration: MMotion.of(context, MMotion.base),
             curve: Curves.easeOutCubic,
             height: 54,
             padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -192,7 +206,25 @@ class _MainNavigationState extends State<MainNavigation> with RouteAware {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(selected ? activeIcon : icon, size: 23, color: selected ? AppTheme.ink : AppTheme.onBrand.withValues(alpha: 0.72)),
+                if (dot)
+                  Stack(clipBehavior: Clip.none, children: [
+                    iconWidget,
+                    Positioned(
+                      right: -3,
+                      top: -2,
+                      child: Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: AppTheme.sunshine,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: AppTheme.isDarkMode(context) ? MPalette.nightSurfaceVariant : AppTheme.night, width: 1.5),
+                        ),
+                      ),
+                    ),
+                  ])
+                else
+                  iconWidget,
                 if (selected) ...[
                   const SizedBox(width: 6),
                   Flexible(

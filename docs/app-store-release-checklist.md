@@ -4,31 +4,33 @@ For the three Flutter apps: **Malvoya** (customer), **Malvoya Store** (vendor) a
 
 None of the apps has been built for iOS yet. The `ios/` folders are the Flutter template with Malvoya's names, launch screen, icons and purpose strings. Several things below **block** an App Store upload or review; they are marked **Blocker**.
 
+**Update 2026-10-25 (iOS preparation round):** the projects are now set up to build and run on the iPhone simulator on a Mac. Step-by-step guide: [`docs/ios/MAC-SETUP.md`](ios/MAC-SETUP.md). Done in the code: G1, G2, G3, G5 (placeholders), G6 (placeholder), G7, G8 (customer: Sign in with Apple; store/courier: no Google on iPhone), G9, G11 (app side), G12, G13. Still open: G4 (add `GoogleService-Info.plist` on the Mac), G10, G14, G15, and the backend work listed in sections 6 and 10. The status column below says which.
+
 ---
 
 ## 0. Gaps found in the iOS projects
 
-| # | Gap | Where | Apps | Severity |
-|---|---|---|---|---|
-| G1 | Bundle ID is `com.example.miviaApp` (same in all three; RunnerTests `com.example.miviaApp.RunnerTests`). Apple refuses `com.example` IDs, and three apps cannot share one ID. Set `com.malvoya.customer`, `com.malvoya.vendor`, `com.malvoya.courier` (same as Android) | `ios/Runner.xcodeproj/project.pbxproj`, `PRODUCT_BUNDLE_IDENTIFIER` (lines 375, 554, 576 and the RunnerTests lines 391, 408, 423) | all | **Blocker** |
-| G2 | `CFBundleName` is `mivia_app` (old name). Change to `Malvoya`, `Malvoya Store`, `Malvoya Courier` (max 15 characters is the guidance; `Malvoya Courier` is 15) | `ios/Runner/Info.plist` | all | Fix |
-| G3 | iPad is enabled (`TARGETED_DEVICE_FAMILY = "1,2"`). Apple then requires 13" iPad screenshots and reviews the iPad layout. Unless you want iPad, set `TARGETED_DEVICE_FAMILY = 1` (iPhone only) | `project.pbxproj` (3 build configurations) | all | Strongly recommended |
-| G4 | No `GoogleService-Info.plist`: Firebase is not set up for iOS. Push (FCM), phone sign-in and Apple sign-in through Firebase do not work without it. `Firebase.initializeApp()` is wrapped in `try`, so the apps start but these features fail | `ios/Runner/` | all | **Blocker** for sign-in and push |
-| G5 | Google sign-in needs the iOS OAuth client: `GIDClientID` and a URL type with the reversed client ID in `Info.plist`. Missing, so tapping "Continue with Google" fails on iOS | `ios/Runner/Info.plist` | all | **Blocker** (if Google stays on iOS) |
-| G6 | Firebase phone sign-in on iOS needs APNs (silent push) or the reCAPTCHA fallback, which needs a URL type with the encoded app ID from `GoogleService-Info.plist` | `Info.plist`, Firebase console | all | **Blocker** for phone sign-in |
-| G7 | No entitlements file: no Push Notifications (`aps-environment`), no Sign in with Apple, no Associated Domains | `ios/Runner/Runner.entitlements` (add in Xcode/Codemagic as capabilities) | all | **Blocker** for push |
-| G8 | Sign in with Apple / Guideline 4.8: the apps offer Google sign-in but no equivalent option on iOS | see section 6 | all | **Blocker** (review) |
-| G9 | Courier location stops in the background on iOS: the position stream uses plain `LocationSettings` on iOS (no `AppleSettings`, no `allowBackgroundLocationUpdates`), and `UIBackgroundModes` has no `location` | `malvoya_courier/lib/services/courier_telemetry_service.dart` line ~57, `Info.plist` | courier | **Blocker** (the product does not work) |
-| G10 | Customer app: drop comments are user-generated content, but users cannot **block** another user (report and auto-hide exist). Guideline 1.2 asks for filtering, reporting, blocking and contact info | customer app + backend `modules/drops/social.ts` | customer | Likely rejection |
-| G11 | Universal Links: the API publishes `/.well-known/assetlinks.json` (Android) but no `/.well-known/apple-app-site-association` | `backend/src/modules/share/share.routes.ts` | customer | Needed for `/s/`, `/r/`, `/d/` links |
-| G12 | `ITSAppUsesNonExemptEncryption` not set: App Store Connect asks the export questions for every build | `Info.plist` | all | Fix (section 12) |
-| G13 | No `Podfile` yet. Flutter creates it on the first iOS build (`platform :ios, '13.0'`). Commit it after the first CI build | `ios/Podfile` | all | Normal |
-| G14 | No app privacy manifest (`PrivacyInfo.xcprivacy`) for the Runner target. The plugins ship their own; add one for the app itself declaring no tracking (section 11) | `ios/Runner/` | all | Recommended |
-| G15 | Store notifications on iOS: the insistent new-order alarm (Android `FLAG_INSISTENT`, the `new_orders` channel) has no iOS equivalent; iOS plays the push sound once. Time-sensitive notifications (entitlement `com.apple.developer.usernotifications.time-sensitive`) are the closest | store app | store | Product gap |
+| # | Gap | Where | Apps | Severity | Status (2026-10-25) |
+|---|---|---|---|---|---|
+| G1 | Bundle ID is `com.example.miviaApp` (same in all three; RunnerTests `com.example.miviaApp.RunnerTests`). Apple refuses `com.example` IDs, and three apps cannot share one ID. Set `com.malvoya.customer`, `com.malvoya.vendor`, `com.malvoya.courier` (same as Android) | `ios/Runner.xcodeproj/project.pbxproj`, `PRODUCT_BUNDLE_IDENTIFIER` (lines 375, 554, 576 and the RunnerTests lines 391, 408, 423) | all | **Blocker** | **Done**: `com.malvoya.customer/vendor/courier` (+ `.RunnerTests`) in all build configurations |
+| G2 | `CFBundleName` is `mivia_app` (old name). Change to `Malvoya`, `Malvoya Store`, `Malvoya Courier` (max 15 characters is the guidance; `Malvoya Courier` is 15) | `ios/Runner/Info.plist` | all | Fix | **Done**: `CFBundleName` = `CFBundleDisplayName` = Malvoya / Malvoya Store / Malvoya Courier |
+| G3 | iPad is enabled (`TARGETED_DEVICE_FAMILY = "1,2"`). Apple then requires 13" iPad screenshots and reviews the iPad layout. Unless you want iPad, set `TARGETED_DEVICE_FAMILY = 1` (iPhone only) | `project.pbxproj` (3 build configurations) | all | Strongly recommended | **Done**: `TARGETED_DEVICE_FAMILY = 1` in all configurations (no plugin needs iPad) |
+| G4 | No `GoogleService-Info.plist`: Firebase is not set up for iOS. Push (FCM), phone sign-in and Apple sign-in through Firebase do not work without it. `Firebase.initializeApp()` is wrapped in `try`, so the apps start but these features fail | `ios/Runner/` | all | **Blocker** for sign-in and push | Open: the owner adds the plist on the Mac (MAC-SETUP section 9); it is git-ignored. Without it the apps start, hide Google/Apple/Firebase phone sign-in and run without push (`SignInSetup` in `malvoya_core`; `AppDelegate.swift` stops iOS handing pushes to the firebase_auth plugin, which would crash without Firebase) |
+| G5 | Google sign-in needs the iOS OAuth client: `GIDClientID` and a URL type with the reversed client ID in `Info.plist`. Missing, so tapping "Continue with Google" fails on iOS | `ios/Runner/Info.plist` | all | **Blocker** (if Google stays on iOS) | **Done (placeholders)**: `GIDClientID`, `GIDServerClientID` and the reversed-client-ID URL scheme come from `ios/Flutter/Malvoya.xcconfig` (customer). The Google button is hidden on iPhone until they are filled. Store/courier: no Google on iPhone |
+| G6 | Firebase phone sign-in on iOS needs APNs (silent push) or the reCAPTCHA fallback, which needs a URL type with the encoded app ID from `GoogleService-Info.plist` | `Info.plist`, Firebase console | all | **Blocker** for phone sign-in | **Done (placeholder)**: `FIREBASE_ENCODED_APP_ID` URL scheme in `Malvoya.xcconfig` (all apps). Until filled: customer falls back to the server's SMS code, store/courier hide phone sign-in on iPhone |
+| G7 | No entitlements file: no Push Notifications (`aps-environment`), no Sign in with Apple, no Associated Domains | `ios/Runner/Runner.entitlements` (add in Xcode/Codemagic as capabilities) | all | **Blocker** for push | **Done**: `ios/Runner/Runner.entitlements` (aps-environment development; customer also Sign in with Apple and `applinks:malvoya-api-eu.onrender.com`), set by `CODE_SIGN_ENTITLEMENTS` in `Malvoya.xcconfig`; `RunnerPersonalTeam.entitlements` (empty) for free-account device tests. `UIBackgroundModes` remote-notification in all apps |
+| G8 | Sign in with Apple / Guideline 4.8: the apps offer Google sign-in but no equivalent option on iOS | see section 6 | all | **Blocker** (review) | **Done**: customer shows Sign in with Apple on iPhone (Option A); store and courier hide Google on iPhone (Option B). Backend `appleSub` still to do (section 6) |
+| G9 | Courier location stops in the background on iOS: the position stream uses plain `LocationSettings` on iOS (no `AppleSettings`, no `allowBackgroundLocationUpdates`), and `UIBackgroundModes` has no `location` | `malvoya_courier/lib/services/courier_telemetry_service.dart` line ~57, `Info.plist` | courier | **Blocker** (the product does not work) | **Done**: `UIBackgroundModes` location and `AppleSettings` with background updates and the blue indicator **only while an order is being carried** (between jobs: app open only). Android unchanged |
+| G10 | Customer app: drop comments are user-generated content, but users cannot **block** another user (report and auto-hide exist). Guideline 1.2 asks for filtering, reporting, blocking and contact info | customer app + backend `modules/drops/social.ts` | customer | Likely rejection | Open |
+| G11 | Universal Links: the API publishes `/.well-known/assetlinks.json` (Android) but no `/.well-known/apple-app-site-association` | `backend/src/modules/share/share.routes.ts` | customer | Needed for `/s/`, `/r/`, `/d/` links | App side **done** (Associated Domains entitlement, `FlutterDeepLinkingEnabled` false as on Android). Backend route still to do (section 10) |
+| G12 | `ITSAppUsesNonExemptEncryption` not set: App Store Connect asks the export questions for every build | `Info.plist` | all | Fix (section 12) | **Done** in all three `Info.plist` |
+| G13 | No `Podfile` yet. Flutter creates it on the first iOS build (`platform :ios, '13.0'`). Commit it after the first CI build | `ios/Podfile` | all | Normal | **Done**: `ios/Podfile` committed (`platform :ios, '15.0'`; post_install sets every pod to 15.0). Commit `Podfile.lock` after the first `pod install` on the Mac |
+| G14 | No app privacy manifest (`PrivacyInfo.xcprivacy`) for the Runner target. The plugins ship their own; add one for the app itself declaring no tracking (section 11) | `ios/Runner/` | all | Recommended | Open |
+| G15 | Store notifications on iOS: the insistent new-order alarm (Android `FLAG_INSISTENT`, the `new_orders` channel) has no iOS equivalent; iOS plays the push sound once. Time-sensitive notifications (entitlement `com.apple.developer.usernotifications.time-sensitive`) are the closest | store app | store | Product gap | Open |
 
 Already fine:
 
-- Deployment target **iOS 13.0** (`IPHONEOS_DEPLOYMENT_TARGET`), which meets Apple's minimum (iOS 13 from 2026-09-09). Firebase iOS SDK 11 (firebase_core 3.x, used now) supports it; moving to firebase_core 4.x (Firebase iOS SDK 12) needs iOS 15.
+- Deployment target: raised to **iOS 15.0** (2026-10-25) in `project.pbxproj` and the Podfile. The plugins need at most iOS 14 today (`file_picker_darwin` 2.2.0); firebase_core 3.15 (Firebase iOS SDK 11), stripe_ios 10.2 (Stripe iOS 23.27), video_player_avfoundation, app_links, url_launcher_ios and image_picker_ios need 13, google_sign_in_ios 12, geolocator_apple 11. iOS 15 also covers firebase_core 4.x (Firebase iOS SDK 12 needs iOS 15).
 - Purpose strings: done in this change, English in `Info.plist` and English + Finnish in `ios/Runner/{en,fi}.lproj/InfoPlist.strings`, registered in the Xcode project (section 8).
 - Launch screen and app icons in brand colours (no white flash): done in this change.
 - In-app account deletion exists in all three apps (section 7).
@@ -101,7 +103,7 @@ Steps:
    ```
 
    Copy it for `malvoya_vendor` (`com.malvoya.vendor`) and `malvoya_courier` (`com.malvoya.courier`). `APP_STORE_APPLE_ID` is the numeric Apple ID of each app in App Store Connect (App Information).
-7. Run the workflow. The first run creates `ios/Podfile` and `Podfile.lock` (G13); download them from the build artefacts or let the build commit them, so later builds are reproducible.
+7. Run the workflow. `ios/Podfile` is committed (G13); the first run creates `Podfile.lock`: download it from the build artefacts or let the build commit it, so later builds are reproducible. Fill `ios/Flutter/Malvoya.xcconfig` (Firebase encoded app ID, Google client IDs) for the build, see `docs/ios/MAC-SETUP.md` section 14.
 8. iOS build numbers are independent of Android's. The app gate (`MIN_BUILD_*`) compares Android build numbers; check how `core/app_gate.dart` behaves with iOS build numbers before you set a minimum.
 
 Alternatives: **Xcode Cloud** (Apple, 25 compute hours a month included with the membership, but you still need Xcode on a Mac to set it up), GitHub Actions macOS runners, or a rented cloud Mac (MacinCloud and similar) if you prefer clicking through Xcode.
@@ -117,7 +119,7 @@ For each app (one Firebase iOS app per bundle ID):
 3. Firebase console → Project settings → **Cloud Messaging → Apple app configuration → APNs authentication key → Upload** (the `.p8`, Key ID, Team ID). Do it for each of the three iOS apps.
 4. Capabilities on each App ID and in the build: **Push Notifications**, and **Background Modes → Remote notifications** (`UIBackgroundModes` `remote-notification`) so FCM data messages and phone-auth silent pushes arrive. The courier also needs **Location updates** (section 8).
 5. Phone sign-in: with APNs set up, Firebase verifies the device silently. Also add the reCAPTCHA fallback URL type: in `Info.plist` → `CFBundleURLTypes`, the **Encoded App ID** shown in the Firebase console for the iOS app (`app-1-…-ios-…`).
-6. Google sign-in (if kept on iOS, see section 6): create an iOS OAuth client in Google Cloud (or take `CLIENT_ID` / `REVERSED_CLIENT_ID` from `GoogleService-Info.plist`), add `GIDClientID` = client ID and a `CFBundleURLTypes` entry with the reversed client ID to `Info.plist`. The backend verifies Google tokens against `env.googleClientId`; Google ID tokens from the iOS client have the **iOS client ID** as audience, so the backend must accept a list of client IDs (Android/web + iOS). This is a backend change.
+6. Google sign-in (if kept on iOS, see section 6): create an iOS OAuth client in Google Cloud (or take `CLIENT_ID` / `REVERSED_CLIENT_ID` from `GoogleService-Info.plist`), add `GIDClientID` = client ID and a `CFBundleURLTypes` entry with the reversed client ID to `Info.plist`. The backend verifies Google tokens against `env.googleClientId`; Google ID tokens from the iOS client have the **iOS client ID** as audience, so the backend must accept a list of client IDs (Android/web + iOS). This is a backend change. (2026-10-25: the customer app passes `GOOGLE_SERVER_CLIENT_ID` from `ios/Flutter/Malvoya.xcconfig` as `serverClientId`; with it Google's iOS SDK asks for an ID token addressed to that web client ID, which the API already accepts. Check once on the Mac; if the token still carries the iOS client ID, add it to the backend's accepted audiences.)
 
 ## 4. Signing, certificates, TestFlight
 
@@ -159,8 +161,8 @@ Sign in with Apple meets all three (Hide My Email). Apple no longer insists on S
 | Google sign-in button | yes (`screens/login.dart`) | yes | yes |
 | "Google account" link tile (settings) | yes | yes | yes |
 | `sign_in_with_apple` package | in pubspec | in pubspec | in pubspec |
-| Apple sign-in method | `AuthService.loginWithApple()` exists (Apple credential → Firebase `OAuthProvider('apple.com')` → `POST /auth/apple`) | none | none |
-| Apple button in the UI | **no** | no | no |
+| Apple sign-in method | `AuthService.loginWithApple()` now uses `signInWithProvider(AppleAuthProvider()..addScope('email')..addScope('name'))` (Firebase handles the nonce) → `POST /auth/apple {idToken: <Firebase ID token>, role: "CUSTOMER", name?}`; `name` is the name Apple gave on the first sign-in, which Firebase keeps as the display name | none | none |
+| Apple button in the UI | **yes, iPhone only** (2026-10-25, `screens/login.dart`: above Google, Apple's black/white style, 54 pt like Google; shown once Firebase is set up) | no (Google hidden on iPhone) | no (Google hidden on iPhone) |
 | Backend | `POST /auth/apple` (`social.service.ts#loginWithApple`): verifies a **Firebase** ID token, finds the user **by email only**, creates new accounts with the given `role` | same route | same route |
 
 **Two ways to pass review. Choose per app.**
@@ -246,7 +248,7 @@ Do not add the `location` background mode without the code change: Guideline 2.5
 
 **Review notes for the courier app** (paste into App Review Information → Notes):
 
-> Malvoya Courier is used by independent couriers who deliver orders from local shops. A courier taps "Go online" to receive delivery offers. While online, the app uses location in the background (UIBackgroundModes: location, When In Use permission, blue indicator shown) so that (1) offers go to the nearest couriers, (2) the server can check the courier is at the shop before pickup and calculate the pay for the ride, and (3) the customer and the shop can follow the delivery. Location sharing stops when the courier taps "Go offline" or signs out. Location is never used for advertising. Demo account: … (approved courier, test mode).
+> Malvoya Courier is used by independent couriers who deliver orders from local shops. A courier taps "Go online" to receive delivery offers. While online with the app open, it uses location so that (1) offers go to the nearest couriers and (2) the server can check the courier is at the shop before pickup and calculate the pay for the ride. While an order is being delivered, the app keeps using location in the background (UIBackgroundModes: location, When In Use permission, blue indicator shown) so that (3) the customer and the shop can follow the delivery. Background use ends with the delivery; all sharing stops when the courier taps "Go offline" or signs out. Location is never used for advertising. Demo account: … (approved courier, test mode).
 
 ## 9. Push notifications
 
@@ -278,7 +280,7 @@ The share pages `/s/:storeId`, `/r/:code` and `/d/:id` open the Android app via 
      }
      ```
    - Empty `details` when `APPLE_TEAM_ID` is not set, like the Android fingerprints.
-2. **App:** Associated Domains capability with `applinks:malvoya-api-eu.onrender.com` (and your own domain later). The `app_links` package already receives the links.
+2. **App:** Associated Domains capability with `applinks:malvoya-api-eu.onrender.com` (and your own domain later). **Done 2026-10-25** in `Malvoya_customer/ios/Runner/Runner.entitlements`; `FlutterDeepLinkingEnabled` is false so only `app_links` handles the links (as on Android). The JSON above is also in `docs/ios/apple-app-site-association.example.json`. Universal Links need the paid account (the capability on the App ID).
 3. Apple fetches the file through its CDN, so changes take time. For testing add `?mode=developer` to the entitlement domain (remove before release).
 4. If the API moves to your own domain later, both files must be served there.
 

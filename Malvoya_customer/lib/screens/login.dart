@@ -9,6 +9,7 @@ import 'register.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 import 'package:malvoya_core/malvoya_core.dart';
 import 'package:malvoya_ui/malvoya_ui.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart' show SignInWithAppleButton, SignInWithAppleButtonStyle;
 import '../realtime_notification_service.dart';
 import '../widgets/forgot_password_sheet.dart';
 
@@ -136,6 +137,18 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<void> _handleApple() async {
+    setState(() { _loading = true; _error = null; });
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final err = await auth.loginWithApple();
+    if (!mounted) return;
+    // Closing Apple's sheet returns no error and leaves the screen as it was
+    setState(() { _error = err == null ? null : localizeServerMessage(context, err); _loading = false; });
+    if (err == null && auth.isAuthenticated) {
+      MSnack.show(context, tr(context, 'Signed in with Apple', 'Kirjauduttu Applella'), kind: MSnackKind.success);
+    }
+  }
+
   void _showPhoneDialog() {
     final l10n = AppLocalizations.of(context);
     final phoneCtrl = TextEditingController();
@@ -248,6 +261,8 @@ class _LoginScreenState extends State<LoginScreen> {
                         if (!destination.contains('@')) {
                           // Real Firebase Phone Auth SMS
                           try {
+                            // Not set up on this iPhone build (Firebase would stop the app): the server's SMS code instead
+                            if (!SignInSetup.firebasePhone) throw StateError('Firebase phone sign-in is not set up');
                             await fb_auth.FirebaseAuth.instance.verifyPhoneNumber(
                               phoneNumber: destination,
                               timeout: const Duration(seconds: 60),
@@ -895,7 +910,21 @@ class _LoginScreenState extends State<LoginScreen> {
 
               const SizedBox(height: MSpace.xl),
 
-              // Google Sign-In button
+              // Sign in with Apple (iOS only, App Review 4.8): first and as large as Google, in Apple's
+              // own black/white style
+              if (SignInSetup.apple) ...[
+                SignInWithAppleButton(
+                  onPressed: _loading ? null : _handleApple,
+                  text: tr(context, 'Sign in with Apple', 'Kirjaudu Applella'),
+                  height: 54,
+                  style: Theme.of(context).brightness == Brightness.dark ? SignInWithAppleButtonStyle.white : SignInWithAppleButtonStyle.black,
+                  borderRadius: const BorderRadius.all(Radius.circular(27)),
+                ),
+                const SizedBox(height: MSpace.md),
+              ],
+
+              // Google Sign-In button (on iOS only when the build has Google's client ID and URL scheme)
+              if (SignInSetup.google) ...[
               OutlinedButton(
                 onPressed: _handleGoogle,
                 style: OutlinedButton.styleFrom(
@@ -916,6 +945,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
 
               const SizedBox(height: MSpace.md),
+              ],
 
               // Phone Sign-In button
               OutlinedButton(

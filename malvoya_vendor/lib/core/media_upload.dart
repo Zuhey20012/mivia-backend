@@ -90,6 +90,53 @@ class MediaUpload {
     );
   }
 
+  /// Uploads a file picked as bytes (a certificate PDF or photo from the file picker, which may not
+  /// give a path) and returns its URL after the API has checked it. [kind] e.g. `certificate_evidence`.
+  static Future<String> uploadBytes({
+    required ApiClient api,
+    required String kind,
+    required List<int> bytes,
+    required String filename,
+    void Function(double progress)? onProgress,
+  }) async {
+    if (bytes.length > maxImageBytes) throw UploadException('This file is too large.');
+    final sign = await api.post('/media/sign', {'kind': kind});
+    if (!sign.ok) throw UploadException(sign.errorMessage);
+    final params = Map<String, dynamic>.from(sign.data['params']);
+    final req = http.MultipartRequest('POST', Uri.parse(sign.data['uploadUrl']));
+    params.forEach((k, v) => req.fields[k] = '$v');
+    req.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    onProgress?.call(0.1);
+    late http.StreamedResponse res;
+    try {
+      res = await req.send().timeout(const Duration(minutes: 2));
+    } on TimeoutException {
+      throw UploadException('The upload took too long. Check your connection and try again.');
+    } catch (_) {
+      throw UploadException('Upload failed. Check your connection and try again.');
+    }
+    final body = await res.stream.bytesToString();
+    Map<String, dynamic> json = {};
+    try {
+      json = Map<String, dynamic>.from(jsonDecode(body));
+    } catch (_) {}
+    if (res.statusCode != 200) {
+      final message = json['error']?['message']?.toString();
+      throw UploadException(message != null && message.contains('format')
+          ? 'This file type is not supported.'
+          : 'Upload failed (${res.statusCode}). Please try again.');
+    }
+    onProgress?.call(1);
+    final confirm = await api.post('/media/confirm', {
+      'kind': kind,
+      'publicId': json['public_id'],
+      'version': json['version'],
+      'signature': json['signature'],
+    });
+    if (!confirm.ok) throw UploadException(confirm.errorMessage);
+    return confirm.data['media']['url'] as String;
+  }
+
   /// Uploads a product or store photo and returns its URL.
   static Future<String> uploadImage({required ApiClient api, required String kind, required File file, void Function(double)? onProgress}) async {
     final media = await upload(api: api, kind: kind, file: file, onProgress: onProgress);

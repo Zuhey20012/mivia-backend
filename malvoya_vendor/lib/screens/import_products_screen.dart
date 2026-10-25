@@ -8,7 +8,9 @@ import 'package:malvoya_core/malvoya_core.dart';
 import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
+import '../catalog/catalog.dart';
 import '../core/agreements.dart';
+import 'product_editor.dart';
 
 enum _Source { shopify, csv }
 
@@ -55,6 +57,9 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
 
   bool _publishing = false;
   final Map<String, int> _published = {}; // job id → products published from this screen
+  /// job id → drafts the publish skipped because required information is missing (API 2.12)
+  final Map<String, List<Map<String, dynamic>>> _incomplete = {};
+  int? _opening; // product id being opened in the editor
 
   ApiClient get _api => ApiClient(Provider.of<AuthService>(context, listen: false));
 
@@ -295,7 +300,64 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
       return;
     }
     HapticFeedback.mediumImpact();
-    setState(() => _published[_id(job)] = asInt(res.data['published']) ?? 0);
+    setState(() {
+      _published[_id(job)] = asInt(res.data['published']) ?? 0;
+      _incomplete[_id(job)] = ((res.data['incomplete'] as List?) ?? const []).whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList();
+    });
+  }
+
+  /// Opens an incomplete draft in the editor at its first missing field.
+  Future<void> _openDraft(Map<String, dynamic> job, Map<String, dynamic> item) async {
+    final id = asInt(item['productId']);
+    if (id == null || _opening != null) return;
+    setState(() => _opening = id);
+    final res = await _api.get('/products/$id');
+    if (!mounted) return;
+    setState(() => _opening = null);
+    if (!res.ok || res.data['product'] is! Map) {
+      MSnack.error(context, res.errorMessage);
+      return;
+    }
+    final missing = FieldIssue.parse(item['missing']);
+    final saved = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ProductEditorScreen(
+          product: Map<String, dynamic>.from(res.data['product']),
+          initialIssues: missing,
+          focusField: missing.firstOrNull?.field,
+        ),
+      ),
+    );
+    if (saved == true && mounted) {
+      setState(() => _incomplete[_id(job)]?.removeWhere((x) => asInt(x['productId']) == id));
+    }
+  }
+
+  // ── CSV template ─────────────────────────────────────────────────────────
+
+  static const _templateCsv = 'name;description;category_slug;audience;brand;price;size;colour;shade;shade_hex;content_ml;content_g;stock;image_urls;condition;gtin;external_id\n'
+      'Linen shirt;Relaxed fit;clothing-shirts-blouses;women;Myrsky;"49,90";M;White;;;;;3;https://example.com/shirt.jpg;NEW;;SH-01\n'
+      'Linen shirt;Relaxed fit;clothing-shirts-blouses;women;Myrsky;"49,90";L;White;;;;;2;;NEW;;SH-01\n'
+      'Lipstick;Satin finish;makeup-lips;unisex;Kaunis;"19,90";;;01 Rose;#C2414B;;4;5;;NEW;;LIP-01\n';
+
+  Future<void> _downloadTemplate() async {
+    try {
+      final uri = await FilePicker.saveFile(
+        fileName: 'malvoya-products-template.csv',
+        bytes: Uint8List.fromList(utf8.encode(_templateCsv)),
+        mimeType: 'text/csv',
+        type: FileType.custom,
+        allowedExtensions: const ['csv'],
+      );
+      if (!mounted || uri == null) return;
+      MSnack.success(context, tr(context, 'Template saved. Open it in Excel or Google Sheets, fill it in and save it as CSV UTF-8.',
+          'Malli tallennettu. Avaa se Excelissä tai Google Sheetsissä, täytä ja tallenna muodossa CSV UTF-8.'));
+    } catch (_) {
+      if (!mounted) return;
+      await Clipboard.setData(const ClipboardData(text: _templateCsv));
+      if (mounted) MSnack.show(context, tr(context, 'Could not save the file, so the template was copied: paste it into a spreadsheet.', 'Tiedostoa ei voitu tallentaa, joten malli kopioitiin: liitä se taulukkoon.'));
+    }
   }
 
   // ── UI ───────────────────────────────────────────────────────────────────
@@ -470,10 +532,17 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
     final columns = [
       ('name', tr(context, 'Product name (required)', 'Tuotteen nimi (pakollinen)')),
       ('description', tr(context, 'Description, materials, fit', 'Kuvaus, materiaalit, istuvuus')),
-      ('category', tr(context, 'e.g. Clothing, Shoes, Bags', 'esim. Clothing, Shoes, Bags')),
+      ('category_slug', tr(context, 'Malvoya category, e.g. clothing-dresses or makeup-lips (best)', 'Malvoyan kategoria, esim. clothing-dresses tai makeup-lips (paras)')),
+      ('category', tr(context, 'Or your own category name; Malvoya suggests the closest', 'Tai oma kategorianimesi; Malvoya ehdottaa lähintä')),
+      ('audience', tr(context, 'women, men, kids or unisex', 'women, men, kids tai unisex (naiset, miehet, lapset)')),
+      ('brand', tr(context, 'Brand as on the label', 'Merkki kuten merkinnöissä')),
       ('price', tr(context, 'In euros, VAT included, e.g. 49.90', 'Euroina, sis. ALV, esim. 49.90')),
       ('size', tr(context, 'e.g. M or 38', 'esim. M tai 38')),
       ('colour', tr(context, 'e.g. Black', 'esim. Musta')),
+      ('shade', tr(context, 'Make-up shade name, e.g. 02 Sand (one row per shade)', 'Meikin sävyn nimi, esim. 02 Sand (yksi rivi sävyä kohden)')),
+      ('shade_hex', tr(context, 'Swatch colour, e.g. #C2414B', 'Sävynäytteen väri, esim. #C2414B')),
+      ('content_ml', tr(context, 'Content in ml, e.g. 50 (gives the price per litre)', 'Sisältö millilitroina, esim. 50 (litrahintaa varten)')),
+      ('content_g', tr(context, 'Content in g, e.g. 4 (gives the price per kilo)', 'Sisältö grammoina, esim. 4 (kilohintaa varten)')),
       ('stock', tr(context, 'How many you have', 'Montako kappaletta sinulla on')),
       ('image_urls', tr(context, 'Photo web addresses, several separated by |', 'Kuvien verkko-osoitteet, useampi erotettuna merkillä |')),
       ('condition', 'NEW, LIKE_NEW, GOOD, FAIR, POOR'),
@@ -505,9 +574,17 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
         const SizedBox(height: 6),
         Text(
           tr(context,
-              'One row per size or colour: rows with the same external_id (or the same name) become one product with several sizes and colours. Products without a photo or a price are kept as drafts you can finish in the app.',
-              'Yksi rivi kokoa tai väriä kohden: rivit, joilla on sama external_id (tai sama nimi), yhdistetään yhdeksi tuotteeksi, jolla on useita kokoja ja värejä. Tuotteet ilman kuvaa tai hintaa jäävät luonnoksiksi, jotka voit viimeistellä sovelluksessa.'),
+              'One row per size, colour, shade or content: rows with the same external_id (or the same name) become one product with several options. Materials, ingredients, the manufacturer and warnings are not in the file: after the import, the app lists what each draft still needs and opens it at the missing field.',
+              'Yksi rivi kokoa, väriä, sävyä tai sisältöä kohden: rivit, joilla on sama external_id (tai sama nimi), yhdistetään yhdeksi tuotteeksi, jolla on useita vaihtoehtoja. Materiaalit, ainesosat, valmistaja ja varoitukset eivät ole tiedostossa: tuonnin jälkeen sovellus näyttää, mitä kustakin luonnoksesta vielä puuttuu, ja avaa sen puuttuvan tiedon kohdalta.'),
           style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary, height: 1.4),
+        ),
+        const SizedBox(height: 10),
+        MButton(
+          label: tr(context, 'Download the template', 'Lataa mallitiedosto'),
+          icon: Icons.download_rounded,
+          variant: MButtonVariant.outline,
+          size: MButtonSize.sm,
+          onPressed: _downloadTemplate,
         ),
         const SizedBox(height: 10),
         Container(
@@ -517,9 +594,9 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
           child: const SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Text(
-              'name,price,size,colour,stock,image_urls,external_id\n'
-              'Linen shirt,49.90,M,White,3,https://example.com/shirt.jpg,SH-01\n'
-              'Linen shirt,49.90,L,White,2,,SH-01',
+              'name;category_slug;audience;brand;price;size;colour;stock;external_id\n'
+              'Linen shirt;clothing-shirts-blouses;women;Myrsky;49,90;M;White;3;SH-01\n'
+              'Linen shirt;clothing-shirts-blouses;women;Myrsky;49,90;L;White;2;SH-01',
               style: TextStyle(fontFamily: 'monospace', fontSize: MTextSize.caption, height: 1.5, color: AppTheme.textPrimary),
             ),
           ),
@@ -678,13 +755,16 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
                     : tr(context, '$published products are now published.', '$published tuotetta on nyt julkaistu.'),
                 if (!widget.storeApproved)
                   tr(context, 'Shoppers see them once your store has been approved.', 'Asiakkaat näkevät ne, kun kauppasi on hyväksytty.'),
-                if (published < toPublish)
+                if (published < toPublish && (_incomplete[_id(job)]?.isEmpty ?? true))
                   tr(context, 'The rest stay hidden drafts until they have a photo and a price: find them in Products.',
                       'Loput jäävät piilotetuiksi luonnoksiksi, kunnes niillä on kuva ja hinta: löydät ne Tuotteet-välilehdeltä.'),
               ].join(' '),
               AppTheme.primaryLight,
               AppTheme.primaryDark,
-            )
+            ),
+          if (published != null && (_incomplete[_id(job)]?.isNotEmpty ?? false)) _incompleteList(job),
+          if (published != null)
+            const SizedBox.shrink()
           else if (publishedBefore)
             _notice(
               Icons.check_circle_rounded,
@@ -697,8 +777,8 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
           else if (toPublish > 0) ...[
             Text(
               tr(context,
-                  'Publishing shows the products that have at least one photo and a price. Anything you don\'t publish stays a hidden draft that you can edit first in Products.',
-                  'Julkaisu näyttää tuotteet, joilla on vähintään yksi kuva ja hinta. Julkaisemattomat jäävät piilotetuiksi luonnoksiksi, joita voit muokata ensin Tuotteet-välilehdellä.'),
+                  'Publishing shows the products that have a photo, a price and the information the law asks for (materials, ingredients, manufacturer…). The others stay hidden drafts, listed here with what is missing.',
+                  'Julkaisu näyttää tuotteet, joilla on kuva, hinta ja lain edellyttämät tiedot (materiaalit, ainesosat, valmistaja…). Muut jäävät piilotetuiksi luonnoksiksi, ja ne luetellaan tässä puuttuvine tietoineen.'),
               style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary, height: 1.4),
             ),
             const SizedBox(height: MSpace.md),
@@ -721,6 +801,44 @@ class _ImportProductsScreenState extends State<ImportProductsScreen> {
             ),
           ],
         ],
+      ]),
+    );
+  }
+
+  /// Drafts the publish skipped, each with what is missing; tapping one opens it at the first gap.
+  Widget _incompleteList(Map<String, dynamic> job) {
+    final c = context.mColors;
+    final items = _incomplete[_id(job)]!;
+    return Padding(
+      padding: const EdgeInsets.only(top: MSpace.md),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text(
+          items.length == 1
+              ? tr(context, '1 draft needs more information', '1 luonnoksesta puuttuu tietoja')
+              : tr(context, '${items.length} drafts need more information', '${items.length} luonnoksesta puuttuu tietoja'),
+          style: MType.title,
+        ),
+        const SizedBox(height: MSpace.xs),
+        Text(tr(context, 'Tap one to open it at the missing field. It is published when you publish it in the editor.', 'Napauta luonnosta avataksesi sen puuttuvan tiedon kohdalta. Se julkaistaan, kun julkaiset sen muokkaimessa.'),
+            style: MType.caption.copyWith(color: c.onSurfaceVariant)),
+        const SizedBox(height: MSpace.sm),
+        for (final item in items.take(100))
+          Container(
+            margin: const EdgeInsets.only(bottom: MSpace.sm),
+            decoration: BoxDecoration(color: c.sunshineSoft, borderRadius: MRadius.brSm),
+            child: MListTile(
+              icon: Icons.edit_note_rounded,
+              title: '${item['name'] ?? ''}',
+              subtitle: FieldIssue.parse(item['missing']).take(3).map((i) => i.text(context)).join('\n'),
+              trailing: _opening == asInt(item['productId'])
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  : null,
+              onTap: () => _openDraft(job, item),
+            ),
+          ),
+        if (items.length > 100)
+          Text(tr(context, '…and ${items.length - 100} more in Products → Needs info', '…ja ${items.length - 100} muuta kohdassa Tuotteet → Tietoja puuttuu'),
+              style: MType.caption.copyWith(color: c.onSurfaceVariant)),
       ]),
     );
   }

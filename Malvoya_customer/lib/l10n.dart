@@ -485,10 +485,6 @@ class AppLocalizations {
         case 'palautus':
         case 'palautukset':
           return 'Palautus';
-        case 'eco-friendly':
-        case 'eco friendly':
-        case 'ekoystävällinen':
-          return 'Ekoystävällinen';
         case 'swipe to swap':
         case 'swap':
         case 'vaihto':
@@ -517,10 +513,6 @@ class AppLocalizations {
         case 'returns':
         case 'palautus':
           return 'Returns';
-        case 'eco-friendly':
-        case 'eco friendly':
-        case 'ekoystävällinen':
-          return 'Eco-Friendly';
         case 'swipe to swap':
         case 'swap':
           return 'Swipe to Swap';

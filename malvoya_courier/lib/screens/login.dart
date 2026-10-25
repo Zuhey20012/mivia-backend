@@ -410,7 +410,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
               const SizedBox(height: MSpace.xxl),
 
-              // Divider
+              // "or" and the other sign-in options; on an iPhone build without Firebase there are none
+              if (!SignInSetup.isIOS || SignInSetup.firebasePhone) ...[
               Row(
                 children: [
                   Expanded(child: Divider(color: AppTheme.divider)),
@@ -423,8 +424,11 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
 
               const SizedBox(height: MSpace.xl),
+              ],
 
-              // Google Sign-In button
+              // Google Sign-In button. Not on iPhone: App Review 4.8 would then require Sign in with
+              // Apple too, so the iOS app offers Malvoya's own sign-in (email, phone code) only.
+              if (!SignInSetup.isIOS) ...[
               OutlinedButton(
                 onPressed: _handleGoogle,
                 style: OutlinedButton.styleFrom(
@@ -445,8 +449,11 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
 
               const SizedBox(height: MSpace.md),
+              ],
 
-              // Phone Sign-In button
+              // Phone Sign-In button (on iPhone only once GoogleService-Info.plist and Firebase's URL
+              // scheme are in the build: Firebase would otherwise stop the app)
+              if (SignInSetup.firebasePhone)
               OutlinedButton(
                 onPressed: _showPhoneDialog,
                 style: OutlinedButton.styleFrom(

@@ -125,7 +125,7 @@ class OnboardingChecklist extends StatelessWidget {
 
   /// Actions that open something in the app (`wait` and `none` do not).
   static const actionable = {
-    'edit_store', 'create_store', 'set_location', 'set_hours', 'connect_payouts', 'add_product', 'tax_info', 'accept_agreement', 'edit_business_id',
+    'edit_store', 'create_store', 'set_location', 'set_hours', 'connect_payouts', 'add_product', 'tax_info', 'accept_agreement', 'edit_business_id', 'safety_pledge',
   };
 
   String _title(BuildContext context, Map step) {
@@ -145,6 +145,7 @@ class OnboardingChecklist extends StatelessWidget {
         'first_product' => (tr(context, 'Photos, price and sizes', 'Kuvat, hinta ja koot'), Icons.checkroom_rounded),
         'tax_info' => (tr(context, 'Required from every seller by EU law (DAC7)', 'EU-laki (DAC7) edellyttää jokaiselta myyjältä'), Icons.receipt_long_outlined),
         'agreement' => (tr(context, 'Read and accept them to take orders', 'Lue ja hyväksy ne, jotta voit ottaa vastaan tilauksia'), Icons.gavel_rounded),
+        'safety_pledge' => (tr(context, 'Confirm once that your products comply with EU law, before your first publish', 'Vahvista kerran ennen ensimmäistä julkaisua, että tuotteesi ovat EU-lainsäädännön mukaisia'), Icons.verified_user_outlined),
         'business_check' => (null, Icons.fact_check_outlined),
         _ => (null, Icons.radio_button_unchecked_rounded),
       };

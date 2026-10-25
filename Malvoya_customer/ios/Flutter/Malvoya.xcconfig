@@ -1,0 +1,28 @@
+// Malvoya build settings for Malvoya, included by Debug.xcconfig and Release.xcconfig
+// (Release.xcconfig is also used for Profile). See docs/ios/MAC-SETUP.md.
+// Nothing here is secret: these values end up inside the app anyway.
+// In this file "//" starts a comment, so values must not contain "//".
+
+// Capabilities: push notifications (development), Sign in with Apple, Universal Links.
+// A free Apple account ("Personal Team") cannot sign these for a real iPhone. Simulator builds
+// do not need that signing. To install on your own iPhone with a free account, change the line to
+//   CODE_SIGN_ENTITLEMENTS = Runner/RunnerPersonalTeam.entitlements
+// (no push, no Sign in with Apple, no Universal Links) and change it back before an App Store build.
+CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements
+
+// Firebase phone sign-in on iOS needs its callback URL scheme. Paste the "Encoded App ID" shown in
+// Firebase console -> Project settings -> Your apps -> the iOS app com.malvoya.customer (it looks like
+// app-1-123456789012-ios-abc123def456). While it says "not-set" (or GoogleService-Info.plist is
+// missing) the customer app sends sign-in codes through the Malvoya server instead, and the store
+// and courier apps hide "Continue with phone number" on iPhone.
+FIREBASE_ENCODED_APP_ID = com.malvoya.customer.firebase-not-set
+
+// Google sign-in on iOS, from GoogleService-Info.plist of the iOS app com.malvoya.customer:
+//   GOOGLE_IOS_CLIENT_ID      = the CLIENT_ID value          (123-abc.apps.googleusercontent.com)
+//   GOOGLE_REVERSED_CLIENT_ID = the REVERSED_CLIENT_ID value (com.googleusercontent.apps.123-abc)
+//   GOOGLE_SERVER_CLIENT_ID   = the Web client ID the API checks (the server's GOOGLE_CLIENT_ID,
+//                               also "default_web_client_id" in Android's google-services.json)
+// While these are empty or "not-set" the Google button is hidden on iPhone.
+GOOGLE_IOS_CLIENT_ID =
+GOOGLE_SERVER_CLIENT_ID =
+GOOGLE_REVERSED_CLIENT_ID = com.malvoya.customer.google-not-set

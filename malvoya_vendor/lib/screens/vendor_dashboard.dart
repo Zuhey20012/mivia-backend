@@ -7,6 +7,7 @@ import 'package:malvoya_core/malvoya_core.dart';
 import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
+import '../catalog/catalog.dart';
 import '../core/agreements.dart';
 import '../core/connectivity.dart';
 import '../core/images.dart';
@@ -27,6 +28,8 @@ import 'pickup_code_sheet.dart';
 import 'product_editor.dart';
 import 'product_quick_edit.dart';
 import 'returns_manager.dart';
+import 'safety/product_safety_screen.dart';
+import 'safety/safety_pledge_screen.dart';
 import 'statements_screen.dart';
 import 'store_setup.dart';
 import 'opening_hours_screen.dart';
@@ -235,6 +238,9 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
         await _openTaxInfo();
       case 'accept_agreement':
         await _acceptSellerTerms();
+      case 'safety_pledge':
+        await Navigator.push(context, MaterialPageRoute(builder: (_) => const SafetyPledgeScreen()));
+        if (mounted) _load();
     }
   }
 
@@ -867,8 +873,11 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     messenger.showSnackBar(SnackBar(content: Text(res.errorMessage)));
   }
 
-  Future<void> _editProduct([Map<String, dynamic>? p]) async {
-    final saved = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => ProductEditorScreen(product: p)));
+  Future<void> _editProduct([Map<String, dynamic>? p, List<FieldIssue>? issues]) async {
+    final saved = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => ProductEditorScreen(product: p, store: _store, initialIssues: issues, focusField: issues?.firstOrNull?.field)),
+    );
     if (saved == true) _load();
   }
 
@@ -1510,14 +1519,31 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     final res = value ? await withAgreement(context, api, send, announce: false) : await send();
     if (!mounted) return;
     if (res.notice != null) _loadAgreements();
+    final code = '${res.data['code'] ?? ''}';
     setState(() {
       _savingProducts.remove(id);
       if (!res.ok) {
         for (final t in targets) {
           t['isAvailable'] = before;
+          // Recalled or removed by Malvoya: it can never be shown again
+          if (code == 'PRODUCT_LOCKED') t['lockedAt'] ??= DateTime.now().toIso8601String();
         }
       }
     });
+    if (code == 'PUBLISH_REQUIREMENTS') {
+      // Information the law or Malvoya needs is missing: open the editor at the first missing field
+      Haptics.warning();
+      final issues = FieldIssue.parse(res.data['fields']);
+      MSnack.show(
+        context,
+        tr(context, '${p['name']} can\'t be shown yet: ${issues.length} ${issues.length == 1 ? 'thing' : 'things'} to add.',
+            '${p['name']} ei voi vielä näkyä: lisättävää ${issues.length} kohdassa.'),
+        kind: MSnackKind.error,
+        actionLabel: tr(context, 'Fix', 'Korjaa'),
+        onAction: () => _editProduct(p, issues),
+      );
+      return;
+    }
     final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
     if (!res.ok) Haptics.warning();
     final message = !res.ok
@@ -1567,6 +1593,9 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
   bool? _paged;
   final List<Map<String, dynamic>> _pageItems = [];
   int _pageTotal = 0;
+
+  /// Products read from the server so far (with "Needs info" more than the ones listed).
+  int _pageRaw = 0;
   int _page = 0;
   bool _pageLoading = false;
   bool _pageHasMore = false;
@@ -1586,10 +1615,11 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     final q = _productSearch.text.trim();
     final key = _pageQueryKey;
     setState(() => _pageLoading = true);
+    final needsInfo = _productFilter == 'needsinfo';
     final res = await _api.get('/stores/my/products', query: {
       'page': '$page',
-      'limit': '$_pageSize',
-      'filter': _productFilter,
+      'limit': needsInfo ? '100' : '$_pageSize',
+      'filter': needsInfo ? 'all' : _productFilter,
       if (q.isNotEmpty) 'q': q,
     });
     // A newer search or filter has started meanwhile
@@ -1615,19 +1645,28 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       });
       return;
     }
-    final items = (res.data['products'] as List).whereType<Map>().map((p) => Map<String, dynamic>.from(p)).toList();
+    final all = (res.data['products'] as List).whereType<Map>().map((p) => Map<String, dynamic>.from(p)).toList();
+    // "Needs info" is worked out here from each product's publishCheck: the server lists all products
+    final items = needsInfo ? all.where(_needsInfo).toList() : all;
     setState(() {
       _paged = true;
-      if (reset) _pageItems.clear();
+      if (reset) {
+        _pageItems.clear();
+        _pageRaw = 0;
+      }
       final seen = _pageItems.map((p) => p['id']).toSet();
       _pageItems.addAll(items.where((p) => seen.add(p['id'])));
+      _pageRaw += all.length;
       _page = page;
-      _pageTotal = asInt(res.data['total']) ?? _pageItems.length;
-      _pageHasMore = items.isNotEmpty && _pageItems.length < _pageTotal;
+      final total = asInt(res.data['total']) ?? _pageItems.length;
+      _pageHasMore = all.isNotEmpty && (needsInfo ? _pageRaw < total : _pageItems.length < total);
+      _pageTotal = needsInfo ? _pageItems.length : total;
       _pageLoading = false;
       _pageError = null;
       _pageItemsKey = key;
     });
+    // Few incomplete products on this page: look further at once
+    if (needsInfo && _pageHasMore && _pageItems.length < 10 && mounted) _loadProductPage();
   }
 
   void _retryProductPage() {
@@ -1659,6 +1698,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     final q = _productSearch.text.trim().toLowerCase();
     if (q.isNotEmpty && !'${p['name'] ?? ''}'.toLowerCase().contains(q)) return false;
     return switch (_productFilter) {
+      'needsinfo' => _needsInfo(p),
       'visible' => p['isAvailable'] != false,
       'drafts' => _isDraft(p),
       'soldout' => !_isDraft(p) && (p['isAvailable'] == false || _stockOf(p) == 0),
@@ -1666,11 +1706,15 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     };
   }
 
+  /// The server's completeness check (API 2.12): something the law or Malvoya needs is missing.
+  bool _needsInfo(Map p) => p['publishCheck'] is Map && (p['publishCheck'] as Map)['ready'] == false && p['lockedAt'] == null;
+
   Widget _productFilters(String? countText) {
     final filters = {
       'all': tr(context, 'All', 'Kaikki'),
       'visible': tr(context, 'Visible', 'Näkyvillä'),
       'drafts': tr(context, 'Drafts', 'Luonnokset'),
+      'needsinfo': tr(context, 'Needs info', 'Tietoja puuttuu'),
       'soldout': tr(context, 'Sold out', 'Loppuneet'),
     };
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -1812,10 +1856,13 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     final draft = _isDraft(p);
     final noPrice = p['salePriceCents'] == null;
     final saving = _savingProducts.contains(p['id']);
+    final locked = p['lockedAt'] != null;
+    final needsInfo = _needsInfo(p);
+    final missing = needsInfo ? FieldIssue.parse((p['publishCheck'] as Map)['missing']) : const <FieldIssue>[];
     return InkWell(
       // Tap: price, stock and visibility in a sheet. Long press: the full editor.
-      onTap: () => _quickEdit(p),
-      onLongPress: () => _editProduct(p),
+      onTap: () => locked || needsInfo ? _editProduct(p, missing.isEmpty ? null : missing) : _quickEdit(p),
+      onLongPress: () => _editProduct(p, missing.isEmpty ? null : missing),
       borderRadius: BorderRadius.circular(MRadius.md),
       child: Container(
         padding: const EdgeInsets.all(10),
@@ -1837,7 +1884,28 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           const SizedBox(width: MSpace.md),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              if (draft)
+              if (locked)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: MSpace.xs),
+                  child: MBadge(
+                    p['lockedReason'] == 'RECALL' || p['recall'] != null
+                        ? tr(context, 'Locked: safety recall', 'Lukittu: takaisinveto')
+                        : tr(context, 'Locked by Malvoya', 'Malvoyan lukitsema'),
+                    tone: MBadgeTone.danger,
+                    icon: Icons.lock_rounded,
+                    strong: true,
+                  ),
+                )
+              else if (needsInfo)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: MSpace.xs),
+                  child: MBadge(
+                    tr(context, 'Needs info: ${missing.length} missing', 'Tietoja puuttuu: ${missing.length}'),
+                    tone: MBadgeTone.warning,
+                    icon: Icons.error_outline_rounded,
+                  ),
+                ),
+              if (draft && !locked)
                 Container(
                   margin: const EdgeInsets.only(bottom: MSpace.xs),
                   padding: const EdgeInsets.symmetric(horizontal: MSpace.sm, vertical: 2),
@@ -1863,7 +1931,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           Column(mainAxisSize: MainAxisSize.min, children: [
             Semantics(
               label: tr(context, 'Available to shoppers', 'Saatavilla asiakkaille'),
-              child: Switch(value: available, onChanged: saving ? null : (v) => _setProductAvailable(p, v)),
+              child: Switch(value: available, onChanged: saving || (locked && !available) ? null : (v) => _setProductAvailable(p, v)),
             ),
             Text(
               available
@@ -1952,13 +2020,29 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
               if (saved == true) _load();
             }),
             const Divider(height: 1),
+            tile(
+              Icons.health_and_safety_outlined,
+              tr(context, 'Product safety', 'Tuoteturvallisuus'),
+              (_store?['safetyPledge'] as Map?)?['accepted'] == false
+                  ? tr(context, 'Pledge needed before your first publish', 'Sitoumus tarvitaan ennen ensimmäistä julkaisua')
+                  : tr(context, 'Manufacturers, certificates and the pledge', 'Valmistajat, sertifikaatit ja sitoumus'),
+              () async {
+                await Navigator.push(context, MaterialPageRoute(builder: (_) => const ProductSafetyScreen()));
+                if (mounted) _load();
+              },
+              badge: (_store?['safetyPledge'] as Map?)?['accepted'] == false ? const CircleAvatar(radius: 5, backgroundColor: AppTheme.sunshine) : null,
+            ),
+            const Divider(height: 1),
             tile(Icons.storefront_outlined, tr(context, 'Store details', 'Kaupan tiedot'), tr(context, 'Name, address, pictures, seller type', 'Nimi, osoite, kuvat, myyjätyyppi'), _openStoreSetup),
             const Divider(height: 1),
             tile(Icons.language_rounded, tr(context, 'Language', 'Kieli'),
                 tr(context, 'English — also for your notifications and emails', 'Suomi — myös ilmoituksissa ja sähköposteissa'), () => showLanguageSheet(context)),
             const Divider(height: 1),
-            GoogleLinkTile(account: Provider.of<AuthService>(context, listen: false), leading: const CircleAvatar(backgroundColor: AppTheme.primaryLight, child: Icon(Icons.link_rounded, color: AppTheme.primary))),
-            const Divider(height: 1),
+            // No Google sign-in on iPhone (App Review 4.8: the store app uses Malvoya's own sign-in there)
+            if (!SignInSetup.isIOS) ...[
+              GoogleLinkTile(account: Provider.of<AuthService>(context, listen: false), leading: const CircleAvatar(backgroundColor: AppTheme.primaryLight, child: Icon(Icons.link_rounded, color: AppTheme.primary))),
+              const Divider(height: 1),
+            ],
             tile(Icons.help_outline_rounded, tr(context, 'Help', 'Apua'), tr(context, 'Answers for sellers', 'Vastauksia myyjille'),
                 () => Navigator.push(context, MaterialPageRoute(builder: (_) => ChatbotScreen(commissionRate: _store?['commissionRate'] as num?)))),
             const Divider(height: 1),

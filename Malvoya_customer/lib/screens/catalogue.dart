@@ -4,7 +4,8 @@ import 'package:provider/provider.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/delivery_location.dart';
-import '../l10n.dart';
+import '../core/catalog.dart';
+import 'category_detail.dart';
 import '../widgets/product_tile.dart';
 import 'store_detail.dart';
 import '../widgets/app_image.dart';
@@ -20,9 +21,8 @@ class CatalogueScreen extends StatefulWidget {
   final String? initialQuery;
   final String? category;
   final bool secondHand;
-  final bool eco;
 
-  const CatalogueScreen({super.key, this.isTab = false, this.title, this.initialQuery, this.category, this.secondHand = false, this.eco = false});
+  const CatalogueScreen({super.key, this.isTab = false, this.title, this.initialQuery, this.category, this.secondHand = false});
 
   @override
   State<CatalogueScreen> createState() => _CatalogueScreenState();
@@ -39,7 +39,12 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
   String? _condition;
   late bool _secondHand = widget.secondHand;
   late String? _category = widget.category;
-  late bool _eco = widget.eco;
+
+  /// Categories the query names ("huulipuna" → Makeup › Lips), from the search answer.
+  List<Map<String, dynamic>> _matched = [];
+
+  /// Top-level categories from `GET /categories`, as quick starting points.
+  List<Map<String, dynamic>> _tops = [];
 
   /// Numbers every search, so an older, slower answer never replaces a newer one.
   int _request = 0;
@@ -58,9 +63,6 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
   List<String> _recent = [];
   static const _recentKey = 'recent_searches';
 
-  /// Quick starting points under an empty search box (the same groups as on Home).
-  static const _quickCategories = ['Clothing', 'Shoes', 'Bags', 'Accessories', 'Jewelry', 'Vintage', 'Beauty', 'Home'];
-
   // The API has no list of sizes in use, so the common clothing and shoe sizes are offered
   static const _sizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', 'One Size'];
 
@@ -72,6 +74,18 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
     });
     _search();
     _loadRecent();
+    _loadTops();
+  }
+
+  Future<void> _loadTops() async {
+    await DeliveryLocation.instance.load();
+    if (!mounted) return;
+    final place = {...DeliveryLocation.instance.query, ...homeAudience.value.query};
+    final api = ApiClient(Provider.of<AuthService>(context, listen: false));
+    var res = await api.get('/categories', query: place);
+    if (res.ok && ((res.data['categories'] as List?) ?? const []).isEmpty) res = await api.get('/categories', query: {...place, 'includeEmpty': '1'});
+    if (!mounted || !res.ok) return;
+    setState(() => _tops = ((res.data['categories'] as List?) ?? const []).whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList());
   }
 
   Future<void> _loadRecent() async {
@@ -113,15 +127,16 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
     _remember();
   }
 
-  void _useCategory(String name) {
+  /// Opens a category from the API (its own screen with subcategories and filters).
+  void _openCategory(String slug) {
     Haptics.selection();
     FocusScope.of(context).unfocus();
-    setState(() => _category = name);
-    _search();
+    _remember();
+    Navigator.push(context, MaterialPageRoute(builder: (_) => CategoryScreen(slug: slug, audience: homeAudience.value)));
   }
 
   bool get _hasFilters =>
-      _category != null || _size != null || _condition != null || _secondHand || _eco || _minPrice != null || _maxPrice != null;
+      _category != null || _size != null || _condition != null || _secondHand || _minPrice != null || _maxPrice != null;
 
   void _clearFilters() {
     Haptics.selection();
@@ -130,7 +145,6 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
       _size = null;
       _condition = null;
       _secondHand = false;
-      _eco = false;
       _minPrice = null;
       _maxPrice = null;
       _sort = 'relevance';
@@ -152,7 +166,6 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
         if (_size != null) 'size': _size!,
         if (_condition != null) 'condition': _condition!,
         if (_secondHand) 'secondHand': 'true',
-        if (_eco) 'eco': 'true',
         if (_minPrice != null) 'minPrice': '$_minPrice',
         if (_maxPrice != null) 'maxPrice': '$_maxPrice',
         'sort': _sort,
@@ -190,7 +203,9 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
       if (res.ok) {
         _items.addAll(((res.data['products'] as List?) ?? []).map((p) => Map<String, dynamic>.from(p)));
         _total = asInt(res.data['total']) ?? _items.length;
+        _matched = ((res.data['categories'] as List?) ?? const []).whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList();
       } else {
+        _matched = [];
         _error = res.errorText(context);
       }
     });
@@ -226,7 +241,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
         titleSpacing: widget.isTab ? 16 : 0,
         title: TextField(
           controller: _query,
-          autofocus: !widget.isTab && widget.category == null && !widget.secondHand && !widget.eco,
+          autofocus: !widget.isTab && widget.category == null && !widget.secondHand,
           onChanged: _onQuery,
           textInputAction: TextInputAction.search,
           onSubmitted: (_) {
@@ -235,7 +250,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
             _remember();
           },
           decoration: InputDecoration(
-            hintText: (_category != null || (widget.secondHand && _secondHand) || (widget.eco && _eco)) && widget.title != null
+            hintText: (_category != null || (widget.secondHand && _secondHand)) && widget.title != null
                 ? widget.title
                 : tr(context, 'Search items and stores', 'Hae tuotteita ja kauppoja'),
             prefixIcon: const Icon(Icons.search_rounded),
@@ -326,8 +341,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
       padding: const EdgeInsets.fromLTRB(MSpace.lg, 6, MSpace.lg, 6),
       children: [
         if (_category != null)
-          chip(AppLocalizations.of(context).translateCategory(_category!), true, () => _clear(() => _category = null), onRemove: () => _category = null),
-        if (_eco) chip(tr(context, 'Eco-friendly', 'Ekologinen'), true, () => _clear(() => _eco = false), onRemove: () => _eco = false),
+          chip(widget.title ?? _category!, true, () => _clear(() => _category = null), onRemove: () => _category = null),
         chip(sortLabel[_sort]!, _sort != 'relevance', () => _pick(sortLabel.keys.toList(), sortLabel, _sort, (v) => _sort = v ?? 'relevance', allowClear: false),
             onRemove: () => _sort = 'relevance'),
         chip(_size == null ? tr(context, 'Size', 'Koko') : '${tr(context, 'Size', 'Koko')} $_size', _size != null,
@@ -433,6 +447,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
         cacheExtent: 800,
         slivers: [
           if (idle && (_recent.isNotEmpty || _items.isNotEmpty)) SliverToBoxAdapter(child: _startPoints()),
+          if (!idle && _matched.isNotEmpty) SliverToBoxAdapter(child: _matchedCategories()),
           if (_items.isEmpty)
             SliverToBoxAdapter(child: _noResults())
           else
@@ -461,9 +476,29 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
         ]),
       );
 
+  /// Categories the query names, above the products ("huulipuna" → Makeup › Lips).
+  Widget _matchedCategories() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionLabel(tr(context, 'Categories', 'Kategoriat')),
+        for (final m in _matched)
+          MListTile(
+            icon: catalogIcon(m['icon'] as String?),
+            title: ((m['path'] as List?) ?? [m]).whereType<Map>().map((x) => catalogName(context, x['name'])).join(' › '),
+            onTap: () => _openCategory('${m['slug']}'),
+          ),
+      ],
+    );
+  }
+
+  List<Widget> _topChips(int max) => [
+        for (final c in _tops.take(max))
+          MChip(label: catalogName(context, c['name']), icon: catalogIcon(c['icon'] as String?), onSelected: (_) => _openCategory('${c['slug']}')),
+      ];
+
   /// Under an empty search box: recent searches and quick categories.
   Widget _startPoints() {
-    final l10n = AppLocalizations.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -488,28 +523,22 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
             ),
           ),
         ],
-        _sectionLabel(tr(context, 'Browse by category', 'Selaa kategorioittain')),
-        SizedBox(
-          height: 48,
-          child: ListView(
+        if (_tops.isNotEmpty) ...[
+          _sectionLabel(tr(context, 'Browse by category', 'Selaa kategorioittain')),
+          SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: MSpace.lg),
-            children: [
-              for (final c in _quickCategories)
-                Padding(
-                  padding: const EdgeInsets.only(right: MSpace.sm),
-                  child: ActionChip(label: Text(l10n.translateCategory(c)), onPressed: () => _useCategory(c)),
-                ),
-            ],
+            child: Row(children: [
+              for (final chip in _topChips(_tops.length)) Padding(padding: const EdgeInsets.only(right: MSpace.sm), child: chip),
+            ]),
           ),
-        ),
+        ],
       ],
     );
   }
 
   /// Nothing matched: say so kindly and offer ways forward.
   Widget _noResults() {
-    final l10n = AppLocalizations.of(context);
     final muted = AppTheme.secondaryText(context);
     final suggestions = _recent.where((r) => r.toLowerCase() != _query.text.trim().toLowerCase()).take(4).toList();
     return Padding(
@@ -545,9 +574,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
             children: [
               for (final r in suggestions)
                 ActionChip(avatar: const Icon(Icons.history_rounded, size: 18), label: Text(r), onPressed: () => _useQuery(r)),
-              if (!_hasFilters)
-                for (final c in _quickCategories.take(suggestions.isEmpty ? 6 : 3))
-                  ActionChip(label: Text(l10n.translateCategory(c)), onPressed: () => _useCategory(c)),
+              if (!_hasFilters && _matched.isEmpty) ..._topChips(suggestions.isEmpty ? 6 : 3),
             ],
           ),
         ],

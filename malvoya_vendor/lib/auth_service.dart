@@ -263,6 +263,8 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
   // ── Google ────────────────────────────────────────────────────────────────
 
   Future<String?> loginWithGoogle() async {
+    // Not offered on iPhone (App Review 4.8, see screens/login.dart); the iOS build has no Google setup
+    if (SignInSetup.isIOS) return 'Google sign-in is not available on iPhone.';
     try {
       final googleUser = await GoogleSignIn().signIn();
       if (googleUser == null) return 'Google sign-in cancelled';
@@ -287,6 +289,7 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
   /// Links a Google account to this account, so "Sign in with Google" opens it from now on.
   @override
   Future<String?> linkGoogle() async {
+    if (SignInSetup.isIOS) return 'Google sign-in is not available on iPhone.';
     try {
       final google = GoogleSignIn();
       // Show the account picker even if Google was used before, so the right account gets linked
@@ -337,6 +340,11 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
     required Function(String error) onError,
     Function()? onAutoVerified,
   }) async {
+    // On iOS Firebase stops the app if GoogleService-Info.plist or its callback URL scheme is missing
+    if (!SignInSetup.firebasePhone) {
+      onError('Phone sign-in is not available in this version of the app.');
+      return;
+    }
     try {
       await _firebaseAuth.verifyPhoneNumber(
         phoneNumber: phoneNumber,
@@ -420,7 +428,9 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
             .timeout(const Duration(seconds: 5));
       } catch (_) {}
     }
-    try { await GoogleSignIn().signOut(); } catch (_) {}
+    if (!SignInSetup.isIOS) {
+      try { await GoogleSignIn().signOut(); } catch (_) {}
+    }
     try { await _firebaseAuth.signOut(); } catch (_) {}
     await _clearSession();
   }

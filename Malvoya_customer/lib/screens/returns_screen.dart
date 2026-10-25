@@ -5,6 +5,7 @@ import 'package:malvoya_core/malvoya_core.dart';
 import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
+import '../core/sign_in.dart';
 
 /// Returns. Purchases from business sellers have the 14-day right of withdrawal (Kuluttajansuojalaki
 /// 6 luku); purchases from private sellers do not, but a request can still be sent to the seller.
@@ -27,6 +28,10 @@ Map<String, String> _reasons(BuildContext context) => {
       'OTHER': tr(context, 'Other', 'Muu syy'),
     };
 
+/// Reasons that use the 14-day right of withdrawal (the API's WITHDRAWAL_REASONS); faults are
+/// always returnable, also with an opened hygiene seal.
+const _withdrawal = {'CHANGED_MIND', 'OTHER'};
+
 Map<String, String> _statusLabels(BuildContext context) => {
       'REQUESTED': tr(context, 'Requested', 'Pyydetty'),
       'APPROVED': tr(context, 'Approved', 'Hyväksytty'),
@@ -45,6 +50,9 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
   bool _loading = true;
   String? _error;
 
+  /// Whether the last load was signed in (signing in from this screen loads the returns).
+  bool? _loadedSignedIn;
+
   @override
   void initState() {
     super.initState();
@@ -59,10 +67,11 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
 
   Future<void> _load() async {
     final auth = Provider.of<AuthService>(context, listen: false);
+    _loadedSignedIn = auth.isAuthenticated;
     if (!auth.isAuthenticated) {
       setState(() {
         _loading = false;
-        _error = tr(context, 'Sign in to see your returns.', 'Kirjaudu sisään nähdäksesi palautukset.');
+        _returns = [];
       });
       return;
     }
@@ -204,6 +213,10 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
     final noteCtrl = TextEditingController();
     var submitting = false;
     String? sheetError;
+    // Hygiene seal (API 2.12): the answer, lines the server says are sealed, and its refusal text
+    bool? sealIntact;
+    final sealedFromServer = <int>{};
+    String? sealRefusal;
 
     await showMSheet(context, builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) {
@@ -230,6 +243,11 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
           final est = _estimate(order, picked);
           final everything = est.completes;
           final muted = AppTheme.secondaryText(context);
+          final sealedNames = [
+            for (final i in items)
+              if ((picked[i['_key']] ?? 0) > 0 && (i['hygieneSealed'] == true || sealedFromServer.contains(i['_key']))) _itemName(i),
+          ];
+          final sealAsked = _withdrawal.contains(reason) && sealedNames.isNotEmpty;
 
           Widget stepper(int id, int max) {
             final q = picked[id] ?? 0;
@@ -374,8 +392,27 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                       initialValue: reason,
                       decoration: InputDecoration(labelText: tr(context, 'Reason', 'Syy')),
                       items: _reasons(context).entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
-                      onChanged: (v) => setSheet(() => reason = v ?? reason),
+                      onChanged: (v) => setSheet(() {
+                        reason = v ?? reason;
+                        sealRefusal = null;
+                      }),
                     ),
+                    // Sealed items returned under the right of withdrawal: is the seal unbroken?
+                    if (sealAsked) ...[
+                      const SizedBox(height: MSpace.md),
+                      _sealQuestion(
+                        names: sealedNames,
+                        value: sealIntact,
+                        onChanged: (v) => setSheet(() {
+                          sealIntact = v;
+                          sealRefusal = null;
+                        }),
+                      ),
+                    ],
+                    if (sealRefusal != null) ...[
+                      const SizedBox(height: MSpace.md),
+                      _sealRefusalBox(sealRefusal!),
+                    ],
                     const SizedBox(height: MSpace.md),
                     TextField(
                       controller: noteCtrl,
@@ -401,7 +438,7 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                       child: MButton(label: everything
                                 ? tr(context, 'Return everything', 'Palauta kaikki')
                                 : tr(context, 'Return $pickedQty ${pickedQty == 1 ? 'item' : 'items'}',
-                                    'Palauta $pickedQty ${pickedQty == 1 ? 'tuote' : 'tuotetta'}'), loading: submitting, onPressed: submitting || pickedQty == 0
+                                    'Palauta $pickedQty ${pickedQty == 1 ? 'tuote' : 'tuotetta'}'), loading: submitting, onPressed: submitting || pickedQty == 0 || (sealAsked && sealIntact == null)
                             ? null
                             : () async {
                                 Haptics.medium();
@@ -419,12 +456,28 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                                   'reason': reason,
                                   if (noteCtrl.text.trim().isNotEmpty) 'conditionNote': noteCtrl.text.trim(),
                                   if (perItem && !everything) 'items': lines,
+                                  if (sealAsked && sealIntact != null) 'sealIntact': sealIntact,
                                 });
                                 if (!mounted) return;
                                 if (res.ok) {
                                   if (ctx.mounted) Navigator.pop(ctx);
                                   _load();
-                                  MSnack.show(context, tr(context, 'Return request sent to the store.', 'Palautuspyyntö lähetetty kaupalle.'));
+                                  MSnack.success(context, tr(context, 'Return request sent to the store.', 'Palautuspyyntö lähetetty kaupalle.'));
+                                } else if (res.data['code'] == 'SEAL_STATUS_REQUIRED') {
+                                  // The server knows these lines are sealed: ask the question
+                                  setSheet(() {
+                                    submitting = false;
+                                    sealedFromServer.addAll(((res.data['items'] as List?) ?? const []).map(asInt).whereType<int>());
+                                    sealIntact = null;
+                                    sheetError = localized(context, res.data['question']) ??
+                                        tr(context, 'Please answer: is the hygiene seal unbroken?', 'Vastaa ensin: onko hygieniasinetti ehjä?');
+                                  });
+                                } else if (res.data['code'] == 'HYGIENE_SEAL_OPENED') {
+                                  setSheet(() {
+                                    submitting = false;
+                                    sheetError = null;
+                                    sealRefusal = localized(context, res.data['reason']) ?? res.errorText(context);
+                                  });
                                 } else {
                                   setSheet(() {
                                     submitting = false;
@@ -443,46 +496,156 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
     noteCtrl.dispose();
   }
 
+  // ── Hygiene seal ────────────────────────────────────────────────────────
+
+  Widget _sealQuestion({required List<String> names, required bool? value, required ValueChanged<bool> onChanged}) {
+    final c = context.mColors;
+    return Container(
+      padding: const EdgeInsets.all(MSpace.md),
+      decoration: BoxDecoration(color: c.sunshineSoft, borderRadius: MRadius.brMd),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(Icons.lock_outline_rounded, size: 20, color: c.onSunshineSoft),
+          const SizedBox(width: MSpace.sm),
+          Expanded(child: Text(tr(context, 'Is the hygiene seal unbroken?', 'Onko hygieniasinetti ehjä?'), style: MType.bodyL.copyWith(fontWeight: FontWeight.w800, color: c.onSunshineSoft))),
+        ]),
+        const SizedBox(height: MSpace.xs),
+        Text(
+          tr(context, 'Sold hygiene-sealed: ${names.join(', ')}. Unopened, you can return it within 14 days.', 'Myyty hygieniasinetöitynä: ${names.join(', ')}. Avaamattoman tuotteen voit palauttaa 14 päivän kuluessa.'),
+          style: MType.bodyM.copyWith(color: c.onSunshineSoft),
+        ),
+        RadioGroup<bool>(
+          groupValue: value,
+          onChanged: (v) {
+            if (v != null) onChanged(v);
+          },
+          child: Column(children: [
+            RadioListTile<bool>(value: true, contentPadding: EdgeInsets.zero, title: Text(tr(context, 'Yes, the seal is unbroken', 'Kyllä, sinetti on ehjä'))),
+            RadioListTile<bool>(value: false, contentPadding: EdgeInsets.zero, title: Text(tr(context, 'No, it has been opened', 'Ei, se on avattu'))),
+          ]),
+        ),
+        if (value == false)
+          Text(
+            tr(context, 'An opened item cannot be returned under the 14-day right of withdrawal. If it is faulty, wrong or not as described, choose that reason: faulty items can always be returned.',
+                'Avattua tuotetta ei voi palauttaa 14 päivän peruuttamisoikeudella. Jos tuote on virheellinen, väärä tai ei vastaa kuvausta, valitse se syyksi: virheellisen tuotteen voi aina palauttaa.'),
+            style: MType.caption.copyWith(color: c.onSunshineSoft),
+          ),
+      ]),
+    );
+  }
+
+  /// The server's HYGIENE_SEAL_OPENED answer, in the app language.
+  Widget _sealRefusalBox(String text) {
+    final c = context.mColors;
+    return Semantics(
+      liveRegion: true,
+      child: Container(
+        padding: const EdgeInsets.all(MSpace.md),
+        decoration: BoxDecoration(color: c.dangerSoft, borderRadius: MRadius.brMd, border: Border.all(color: c.danger)),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(Icons.block_rounded, size: 20, color: c.onDangerSoft),
+          const SizedBox(width: MSpace.sm),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(tr(context, 'This item cannot be returned', 'Tätä tuotetta ei voi palauttaa'), style: MType.bodyM.copyWith(fontWeight: FontWeight.w800, color: c.onDangerSoft)),
+              const SizedBox(height: 2),
+              Text(text, style: MType.bodyM.copyWith(color: c.onDangerSoft)),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+
   // ── UI ──────────────────────────────────────────────────────────────────
+
+  Widget _rules() {
+    final c = context.mColors;
+    Widget rule(IconData icon, String title, String body) => Padding(
+          padding: const EdgeInsets.only(bottom: MSpace.md),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(color: c.primarySoft, shape: BoxShape.circle),
+              child: Icon(icon, size: 18, color: c.onPrimarySoft),
+            ),
+            const SizedBox(width: MSpace.md),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(title, style: MType.bodyM.copyWith(fontWeight: FontWeight.w700, color: c.onSurface)),
+                Text(body, style: MType.bodyM.copyWith(color: c.onSurfaceVariant)),
+              ]),
+            ),
+          ]),
+        );
+    return Container(
+      padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.lg, MSpace.lg, MSpace.xs),
+      decoration: BoxDecoration(color: c.surface, borderRadius: MRadius.brMd, border: Border.all(color: c.outline)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Semantics(header: true, child: Text(tr(context, 'Return rules', 'Palautussäännöt'), style: MType.title.copyWith(color: c.onSurface))),
+        const SizedBox(height: MSpace.md),
+        rule(Icons.event_available_outlined, tr(context, '14 days from delivery', '14 päivää toimituksesta'),
+            tr(context, 'Bought from a business seller? You can withdraw within 14 days of receiving the order, without giving a reason (Consumer Protection Act, chapter 6). You can return the whole order or only some items.',
+                'Ostitko yritysmyyjältä? Voit perua oston 14 päivän kuluessa tilauksen vastaanottamisesta syytä kertomatta (kuluttajansuojalaki, 6 luku). Voit palauttaa koko tilauksen tai vain osan tuotteista.')),
+        rule(Icons.lock_outline_rounded, tr(context, 'Hygiene seal', 'Hygieniasinetti'),
+            tr(context, 'Items sold hygiene-sealed (for example cosmetics, perfume and earrings) can be returned only while the seal is unbroken. The product page says when an item is sealed.',
+                'Hygieniasinetöityinä myydyt tuotteet (esimerkiksi kosmetiikka, hajuvedet ja korvakorut) voi palauttaa vain, jos sinetti on ehjä. Tuotesivulla kerrotaan, onko tuote sinetöity.')),
+        rule(Icons.build_circle_outlined, tr(context, 'Faulty items are always returnable', 'Virheellisen tuotteen voi aina palauttaa'),
+            tr(context, 'Wrong, damaged or not as described? Choose that reason. This also applies to opened sealed items. Faults are covered by the seller’s liability for defects; after 14 days, contact Help.',
+                'Väärä, vaurioitunut tai ei vastaa kuvausta? Valitse se syyksi. Tämä koskee myös avattuja sinetöityjä tuotteita. Virheistä myyjä vastaa virhevastuun perusteella; 14 päivän jälkeen ota yhteyttä tukeen.')),
+        rule(Icons.person_outline_rounded, tr(context, 'Private sellers', 'Yksityiset myyjät'),
+            tr(context, 'The legal right of withdrawal does not apply, but you can still send a return request and the seller decides.',
+                'Lakisääteinen peruuttamisoikeus ei koske ostoa, mutta voit silti lähettää palautuspyynnön ja myyjä päättää.')),
+        rule(Icons.payments_outlined, tr(context, 'Refund', 'Hyvitys'),
+            tr(context, 'The refund goes to your original payment method once the shop has the items back. Unless the seller has agreed otherwise, you pay the cost of sending items back.',
+                'Hyvitys maksetaan alkuperäiselle maksutavalle, kun kauppa on saanut tuotteet takaisin. Ellei myyjä ole toisin sopinut, maksat palautuskulut.')),
+      ]),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final cardColor = AppTheme.cardBackground(context);
     final secondary = AppTheme.secondaryText(context);
+    final signedIn = Provider.of<AuthService>(context).isAuthenticated;
+    if (_loadedSignedIn != null && _loadedSignedIn != signedIn && !_loading) {
+      _loadedSignedIn = signedIn;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _load();
+      });
+    }
 
     return Scaffold(
-      appBar: AppBar(title: Text(tr(context, 'Returns', 'Palautukset'))),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _startReturn(),
-        backgroundColor: AppTheme.primary,
-        foregroundColor: AppTheme.onBrand,
-        icon: const Icon(Icons.undo_rounded),
-        label: Text(tr(context, 'Start a return', 'Aloita palautus')),
-      ),
+      appBar: AppBar(title: Text(tr(context, 'Returns & refunds', 'Palautukset ja hyvitykset'))),
+      floatingActionButton: !signedIn
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: () => _startReturn(),
+              backgroundColor: AppTheme.primary,
+              foregroundColor: AppTheme.onBrand,
+              icon: const Icon(Icons.undo_rounded),
+              label: Text(tr(context, 'Start a return', 'Aloita palautus')),
+            ),
       body: RefreshIndicator.adaptive(
         onRefresh: _load,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.lg, MSpace.lg, 96),
           children: [
-            Container(
-              padding: const EdgeInsets.all(MSpace.lg),
-              decoration: BoxDecoration(
-                  color: cardColor, borderRadius: BorderRadius.circular(AppTheme.radiusMd), border: Border.all(color: AppTheme.cardBorder(context))),
-              child: Text(
-                tr(
-                    context,
-                    'Bought from a business seller? You can withdraw from the purchase within 14 days of receiving it, without giving a reason (Consumer Protection Act, chapter 6). A faulty item is also covered by the seller\'s liability for defects. You can return the whole order or only some items.\n\n'
-                        'Bought from a private seller? The legal right of withdrawal does not apply, but you can still send a return request and the seller decides. Each store page says which kind of seller it is.\n\n'
-                        'Unless the seller has agreed otherwise, you pay the cost of sending the item back.',
-                    'Ostitko yritysmyyjältä? Voit perua oston 14 päivän kuluessa tuotteen vastaanottamisesta syytä kertomatta (kuluttajansuojalaki, 6 luku). Viallisesta tuotteesta myyjä vastaa lisäksi virhevastuun perusteella. Voit palauttaa koko tilauksen tai vain osan tuotteista.\n\n'
-                        'Ostitko yksityismyyjältä? Lakisääteinen peruuttamisoikeus ei koske ostoa, mutta voit silti lähettää palautuspyynnön ja myyjä päättää. Jokaisella kauppasivulla kerrotaan, millainen myyjä on kyseessä.\n\n'
-                        'Ellei myyjä ole toisin sopinut, maksat tuotteen palautuskulut.'),
-                style: TextStyle(fontSize: MTextSize.bodyM, height: 1.4, color: secondary),
+            if (!signedIn) ...[
+              SignInCard(
+                title: tr(context, 'Sign in to return an item', 'Kirjaudu palauttaaksesi tuotteen'),
+                message: tr(context, 'Your orders and returns are kept in your account.', 'Tilauksesi ja palautuksesi ovat tililläsi.'),
               ),
-            ),
+              const SizedBox(height: MSpace.lg),
+            ],
+            _rules(),
             const SizedBox(height: MSpace.lg),
-            if (_loading)
+            if (signedIn) MSectionHeader(tr(context, 'Your returns', 'Palautuksesi'), padding: const EdgeInsets.only(bottom: MSpace.sm)),
+            if (!signedIn)
+              const SizedBox.shrink()
+            else if (_loading)
               const SizedBox(height: 360, child: MSkeletonList(thumbnail: true, count: 3, thumbHeight: 40, padding: EdgeInsets.zero))
             else if (_error != null)
               SizedBox(height: 380, child: MStateMessage.error(message: _error!, onRetry: _load, top: 40))
@@ -569,6 +732,46 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
     );
   }
 
+  /// Where the return is: requested → approved → on its way back → received → refunded.
+  Widget _progress(String status) {
+    final c = context.mColors;
+    if (status == 'REJECTED') {
+      return Row(children: [
+        Icon(Icons.cancel_outlined, size: 18, color: c.danger),
+        const SizedBox(width: MSpace.xs),
+        Expanded(child: Text(tr(context, 'The shop rejected this return. No refund.', 'Kauppa hylkäsi palautuksen. Ei hyvitystä.'), style: MType.caption.copyWith(color: c.onSurface))),
+      ]);
+    }
+    const steps = ['REQUESTED', 'APPROVED', 'IN_TRANSIT', 'RECEIVED', 'REFUNDED'];
+    final at = steps.indexOf(status).clamp(0, steps.length - 1);
+    final labels = _statusLabels(context);
+    return Semantics(
+      label: tr(context, 'Step ${at + 1} of ${steps.length}: ${labels[status] ?? status}', 'Vaihe ${at + 1}/${steps.length}: ${labels[status] ?? status}'),
+      excludeSemantics: true,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          for (var i = 0; i < steps.length; i++) ...[
+            if (i > 0) const SizedBox(width: MSpace.xs),
+            Expanded(
+              child: Container(height: 6, decoration: BoxDecoration(color: i <= at ? c.primary : c.outline, borderRadius: MRadius.pillRadius)),
+            ),
+          ],
+        ]),
+        const SizedBox(height: MSpace.xs),
+        Text(
+          switch (status) {
+            'REQUESTED' => tr(context, 'Waiting for the shop to answer.', 'Odottaa kaupan vastausta.'),
+            'APPROVED' => tr(context, 'Approved: send or bring the items back.', 'Hyväksytty: lähetä tai tuo tuotteet takaisin.'),
+            'IN_TRANSIT' => tr(context, 'On its way back to the shop.', 'Matkalla takaisin kauppaan.'),
+            'RECEIVED' => tr(context, 'The shop has the items. The refund is next.', 'Kauppa sai tuotteet. Seuraavaksi hyvitys.'),
+            _ => tr(context, 'Refunded to your payment method.', 'Hyvitetty maksutavallesi.'),
+          },
+          style: MType.caption.copyWith(color: c.onSurfaceVariant),
+        ),
+      ]),
+    );
+  }
+
   Widget _returnCard(Map<String, dynamic> r, Color cardColor, Color secondary) {
     final status = r['status']?.toString() ?? 'REQUESTED';
     final refunded = asInt(r['refundCents']);
@@ -604,6 +807,13 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
           ),
           const SizedBox(height: 6),
           Text(_reasons(context)[r['reason']] ?? '${r['reason'] ?? ''}', style: TextStyle(color: secondary, fontSize: MTextSize.label)),
+          const SizedBox(height: MSpace.sm),
+          _progress(status),
+          if (r['sealIntact'] == true)
+            Padding(
+              padding: const EdgeInsets.only(top: MSpace.xs),
+              child: Text(tr(context, 'You said the hygiene seal is unbroken.', 'Kerroit, että hygieniasinetti on ehjä.'), style: MType.caption.copyWith(color: secondary)),
+            ),
           // Newer servers keep the store's words in storeNote and the customer's own in conditionNote;
           // on older ones conditionNote may hold either, so it is shown as a plain note.
           if ('${r['conditionNote'] ?? ''}'.trim().isNotEmpty)
