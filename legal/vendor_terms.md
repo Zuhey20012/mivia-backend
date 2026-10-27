@@ -94,7 +94,7 @@ Stores are listed by distance to the customer (when location is shared) and by r
 ## 8. Suspension and ending the agreement
 
 - Malvoya gives 30 days' notice before ending the agreement, and immediate suspension only for serious breach or unlawful content.
-- Reasons are always given in writing, and the Seller can use the internal complaint process at [sellers@malvoya.com].
+- Reasons are always given in writing, and the Seller can use the internal complaint process through the contact form at https://malvoya-api-eu.onrender.com/contact (topic "Seller complaint") or Support in the store app.
 - Mediation is available through [MEDIATOR].
 
 ## 9. Law

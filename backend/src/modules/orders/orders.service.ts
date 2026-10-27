@@ -149,6 +149,9 @@ function priceCheckout(
     return { pricing, distanceKm: null, courierPay: null, fullFeeCents: 0 };
   }
   const distanceKm = deliveryDistanceKm(store, input.deliveryLat, input.deliveryLng);
+  if (distanceKm !== null && distanceKm > env.deliveryMaxKm) {
+    throw new OrderError(`This address is too far from the store for delivery (at most ${env.deliveryMaxKm} km). Choose Reserve & collect or a store nearer to you.`, 409);
+  }
   const fullFeeCents = deliveryFeeForDistance(distanceKm);
   // A scheduled slot may carry a platform discount on the delivery fee (never below 0)
   const deliveryFeeCents = slot ? scheduledFee(fullFeeCents) : fullFeeCents;
@@ -370,11 +373,21 @@ export async function markOrderPaid(orderId: number, paymentIntentId: string, am
   // A promo code counts as used only once the order is paid (released again if it is cancelled before delivery).
   // The same goes for an invite code (one referral per new customer). Pickup orders get their handover code now.
   const pickup = order.fulfilment === "PICKUP";
+  // Only an order that is still open becomes paid: the watchdog may cancel it between the read above and now
+  const marked = await prisma.order.updateMany({
+    where: { id: orderId, status: { not: "CANCELLED" }, paymentStatus: { not: "SUCCEEDED" } },
+    data: { paymentStatus: "SUCCEEDED", paidAt: new Date(), ...(pickup ? { pickupCode: newPickupCode() } : {}) },
+  });
+  if (marked.count !== 1) {
+    const now = await prisma.order.findUnique({ where: { id: orderId }, select: { status: true, paymentStatus: true } });
+    if (now?.status === "CANCELLED" && now.paymentStatus !== "SUCCEEDED" && now.paymentStatus !== "REFUNDED") {
+      // Cancelled meanwhile: the money that just arrived goes back
+      await getStripe().refunds.create({ payment_intent: paymentIntentId }, { idempotencyKey: `late-refund-${orderId}` });
+      await prisma.order.update({ where: { id: orderId }, data: { paymentStatus: "REFUNDED", refundedCents: order.totalCents } });
+    }
+    return;
+  }
   await prisma.$transaction([
-    prisma.order.update({
-      where: { id: orderId },
-      data: { paymentStatus: "SUCCEEDED", paidAt: new Date(), ...(pickup ? { pickupCode: newPickupCode() } : {}) },
-    }),
     ...(order.referrerId
       ? [prisma.referral.createMany({ data: [{ referrerId: order.referrerId, refereeId: order.userId, orderId }], skipDuplicates: true })]
       : []),
@@ -489,8 +502,10 @@ export async function cancelOrderInternal(
 
   if (order.stripePaymentIntentId) {
     try {
-      if (order.paymentStatus === "SUCCEEDED") {
-        const refundable = order.totalCents - order.refundedCents;
+      // Decide on the state read after cancelling: the payment may have been marked meanwhile. A payment that
+      // arrives after this is refunded by markOrderPaid (it never marks a cancelled order paid).
+      if (updated.paymentStatus === "SUCCEEDED") {
+        const refundable = updated.totalCents - updated.refundedCents;
         if (refundable > 0) {
           await getStripe().refunds.create(
             { payment_intent: order.stripePaymentIntentId, amount: refundable },
@@ -511,7 +526,7 @@ export async function cancelOrderInternal(
   emitToStore(order.storeId, "order:status", { orderId, status: "CANCELLED" });
   if (order.fulfilment === "DELIVERY" && !order.courierId) emitToAllCouriers("courier:offer_closed", { orderId, reason: "cancelled" });
   if (opts.notifyCustomer !== false) {
-    const money = order.paymentStatus === "SUCCEEDED"
+    const money = updated.paymentStatus === "SUCCEEDED" || updated.paymentStatus === "REFUNDED"
       ? t("Your money is on its way back to you.", "Rahasi palautetaan sinulle.")
       : t("You have not been charged.", "Sinua ei veloitettu.");
     pushToUser(order.userId, {
@@ -801,17 +816,19 @@ export async function collectOrder(orderId: number, userId: number, code: string
     throw new PickupCodeError(`Too many wrong codes. Try again in ${min} min.`, 0, order.pickupLockedUntil);
   }
 
+  // Use up one attempt before comparing, so parallel requests cannot each get a free guess (a lock that has run out
+  // left the count at 0, which starts a fresh round)
+  const reserved = await prisma.order.updateMany({
+    where: { id: orderId, pickupFailedAttempts: { lt: PICKUP_MAX_ATTEMPTS }, OR: [{ pickupLockedUntil: null }, { pickupLockedUntil: { lte: now } }] },
+    data: { pickupFailedAttempts: { increment: 1 } },
+  });
+  if (reserved.count !== 1) throw new PickupCodeError("Too many wrong codes. Try again in a few minutes.", 0, order.pickupLockedUntil ?? undefined);
+
   const given = Buffer.from(code.trim());
   const expected = Buffer.from(order.pickupCode);
   const match = given.length === expected.length && crypto.timingSafeEqual(given, expected);
   if (!match) {
-    // A lock that has run out starts a fresh round of attempts
-    const fresh = order.pickupLockedUntil !== null;
-    const updated = await prisma.order.update({
-      where: { id: orderId },
-      data: fresh ? { pickupFailedAttempts: 1, pickupLockedUntil: null } : { pickupFailedAttempts: { increment: 1 } },
-      select: { pickupFailedAttempts: true },
-    });
+    const updated = await prisma.order.findUniqueOrThrow({ where: { id: orderId }, select: { pickupFailedAttempts: true } });
     const attemptsLeft = Math.max(0, PICKUP_MAX_ATTEMPTS - updated.pickupFailedAttempts);
     if (attemptsLeft === 0) {
       const lockedUntil = new Date(Date.now() + PICKUP_LOCK_MINUTES * 60_000);
@@ -1374,6 +1391,11 @@ export async function updateReturnStatus(id: number, actor: Actor, data: {
   if (!ret || !ret.order) throw new OrderError("Return not found", 404);
   if (actor.role !== "ADMIN" && ret.order.store.ownerId !== actor.id) throw new OrderError("Forbidden", 403);
   if (ret.status === "REFUNDED") throw new OrderError("This return has already been refunded", 409);
+  // A rejected return is closed for the store: once rejected it no longer holds the store's payout, so reopening it
+  // (and refunding after the store was paid) is for Malvoya support only
+  if (ret.status === "REJECTED" && actor.role !== "ADMIN") {
+    throw new OrderError("This return was rejected. Contact Malvoya support if it needs to be reopened.", 409);
+  }
   const storeNote = data.storeNote?.trim() || undefined;
   if (data.status === "REJECTED" && !storeNote) throw new OrderError("Tell the customer why the return is rejected (storeNote)", 400);
 
@@ -1408,11 +1430,23 @@ export async function updateReturnStatus(id: number, actor: Actor, data: {
   const refundable = order.totalCents - order.refundedCents;
   if (refundCents <= 0 || refundCents > refundable) throw new OrderError(`Refund must be between 0.01 and ${(refundable / 100).toFixed(2)} €`);
   if (!order.stripePaymentIntentId || order.paymentStatus !== "SUCCEEDED") throw new OrderError("Order has no captured payment to refund", 409);
+  // After the store's payout has gone out, a refund would come out of Malvoya's balance: only support decides that
+  if (actor.role !== "ADMIN" && (await prisma.payout.count({ where: { orderId: order.id, party: "STORE", status: "PAID" } })) > 0) {
+    throw new OrderError("You have already been paid for this order, so Malvoya support handles this refund. Contact support.", 409);
+  }
 
-  await getStripe().refunds.create(
-    { payment_intent: order.stripePaymentIntentId, amount: refundCents, metadata: { returnId: String(id) } },
-    { idempotencyKey: `return-refund-${id}` }
-  );
+  // Claim the return first, so two refund requests at once cannot both pay out, restock and reduce the payout
+  const claimed = await prisma.return.updateMany({ where: { id, status: ret.status }, data: { status: "REFUNDED" } });
+  if (claimed.count !== 1) throw new OrderError("This return was just changed. Reload and try again.", 409);
+  try {
+    await getStripe().refunds.create(
+      { payment_intent: order.stripePaymentIntentId, amount: refundCents, metadata: { returnId: String(id) } },
+      { idempotencyKey: `return-refund-${id}` }
+    );
+  } catch (e) {
+    await prisma.return.update({ where: { id }, data: { status: ret.status } }); // the refund failed: give it back
+    throw e;
+  }
 
   const byId = new Map(order.items.map((i) => [i.id, i]));
   const returned = plan.lines.map((l) => ({ item: byId.get(l.orderItemId)!, quantity: l.quantity })).filter((r) => r.item);

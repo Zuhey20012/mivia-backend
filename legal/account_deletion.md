@@ -16,7 +16,7 @@ The app asks you to confirm. If you have an order that is still in progress (not
 
 ## If you cannot open the app
 
-Write to us at [support@malvoya.com] from the email address of your account (or tell us the phone number you sign in with) and ask us to delete your account. To protect your account we may ask you to confirm the request from that address or number. We delete the account within one month, usually much sooner, and confirm by email.
+Write to us through the contact form at https://malvoya-api-eu.onrender.com/contact (topic "Privacy (GDPR) request"), giving the email address of your account (or tell us the phone number you sign in with) and ask us to delete your account. To protect your account we may ask you to confirm the request from that address or number. We delete the account within one month, usually much sooner, and confirm by email.
 
 ## What is deleted
 
@@ -36,4 +36,4 @@ Apart from short-lived security logs, nothing else is kept. See the [Privacy Pol
 
 ## Lyhyesti suomeksi
 
-Voit poistaa tilisi itse missä tahansa Malvoya-sovelluksessa: Malvoya (Profiili → Tietosuoja → Poista tili), Malvoya Store (tilivalikko → Poista tili) ja Malvoya Courier (tilivalikko → Poista tili). Jos et pääse sovellukseen, kirjoita osoitteeseen [support@malvoya.com] tilisi sähköpostiosoitteesta. Poistamme nimesi, yhteystietosi, salasanasi, suosikkisi, kommenttisi, viestisi ja kirjautumistietosi; kaupan kuvat ja videot poistetaan. Kirjanpitolaki velvoittaa säilyttämään tilaustiedot 6 vuotta anonymisoituina, ja myyjien verotiedot (DAC7) säilytetään 10 vuotta.
+Voit poistaa tilisi itse missä tahansa Malvoya-sovelluksessa: Malvoya (Profiili → Tietosuoja → Poista tili), Malvoya Store (tilivalikko → Poista tili) ja Malvoya Courier (tilivalikko → Poista tili). Jos et pääse sovellukseen, lähetä pyyntö yhteydenottolomakkeella https://malvoya-api-eu.onrender.com/contact?lang=fi (aihe "Tietosuojapyyntö (GDPR)") ja kerro tilisi sähköpostiosoite. Poistamme nimesi, yhteystietosi, salasanasi, suosikkisi, kommenttisi, viestisi ja kirjautumistietosi; kaupan kuvat ja videot poistetaan. Kirjanpitolaki velvoittaa säilyttämään tilaustiedot 6 vuotta anonymisoituina, ja myyjien verotiedot (DAC7) säilytetään 10 vuotta.

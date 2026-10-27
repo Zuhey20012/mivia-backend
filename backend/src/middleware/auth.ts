@@ -60,6 +60,13 @@ export function forgetSessionState(userId: number) {
 const SESSION_FORGET_CHANNEL = "session-forget";
 subscribe(SESSION_FORGET_CHANNEL, (message) => states.delete(Number(message)));
 
+/** The same session checks for a live (socket) connection: active account, not ended, two-step state respected. */
+export async function sessionAllows(payload: { id: number; iat: number; mfa?: boolean }) {
+  const state = await sessionState(payload.id);
+  if (!state) return true; // database hiccup: the signed token alone decides, as for HTTP
+  return state.active && payload.iat >= state.validAfterSec && !(state.twoStep && !payload.mfa);
+}
+
 /** The apps send Accept-Language on every request; the user's language is written only when it changes. */
 function rememberLocale(req: Request, userId: number, state: SessionState) {
   const locale = localeFromHeader(req.headers["accept-language"]);

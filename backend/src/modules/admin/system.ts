@@ -16,7 +16,7 @@ import { taxInfoComplete, taxRowSelect } from "../sellers/taxInfo";
 import { availableSlots } from "../../utils/deliverySlots";
 import { readyForApprovalList } from "../onboarding/onboarding";
 import { unpublishedLegalChanges } from "../legal/admin.legal";
-import { LEGAL_DOCS } from "../legal/legalDocs";
+import { LEGAL_DOCS, DOC_KEYS, legalState, versionText } from "../legal/legalDocs";
 
 const startedAt = new Date();
 
@@ -127,6 +127,16 @@ export async function getSystemStatus(_req: Request, res: Response) {
     if (!integrations.pushNotifications.configured) blockers.push("No push notifications: stores and couriers will not hear about new orders. Add FIREBASE_SERVICE_ACCOUNT.");
     if (!integrations.photosAndVideos.configured) blockers.push("Photo and video uploads are off: add the three CLOUDINARY_* settings.");
     if (process.env.MAINTENANCE_MESSAGE?.trim()) blockers.push("Maintenance message is on: the apps show it instead of letting people order. Remove MAINTENANCE_MESSAGE on Render to reopen.");
+    // Legal texts in force that still have [PLACEHOLDERS] (company name, Y-tunnus, address…): consumer law needs the
+    // trader's identity before real sales
+    const unfinishedLegal = (await Promise.all(DOC_KEYS.map(async (doc) => {
+      const cur = (await legalState(doc).catch(() => null))?.current;
+      const text = cur ? await versionText(doc, cur.version).catch(() => null) : null;
+      return text && /\[[A-Z][A-Z0-9 _/.,'-]{2,}\]/.test(text.textSnapshot) ? LEGAL_DOCS[doc].title.en : null;
+    }))).filter((x): x is string => !!x);
+    if (unfinishedLegal.length) {
+      blockers.push(`Legal texts in force still have unfilled [PLACEHOLDERS] (company name, Y-tunnus, address, dates): ${unfinishedLegal.join(", ")}. Fill them in legal/*.md and publish them on Legal.`);
+    }
     if (liveStores.length === 0) blockers.push("No approved stores yet.");
     if (approvedCouriers === 0) blockers.push("No approved couriers yet.");
 

@@ -175,7 +175,9 @@ export function calcCourierPay(input: {
 }): CourierPay {
   const cfg = input.config ?? env.courierPay;
   const tipCents = input.tipCents ?? 0;
-  const distanceKm = routeKm(input.straightKm, cfg);
+  // Never more than the farthest allowed delivery (checkout refuses farther addresses; this is the second guard)
+  const straightKm = input.straightKm === null ? null : Math.min(input.straightKm, env.deliveryMaxKm);
+  const distanceKm = routeKm(straightKm, cfg);
 
   if (cfg.mode === "fee_share") {
     return finish({

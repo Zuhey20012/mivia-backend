@@ -142,6 +142,11 @@ export async function confirmReturnReceived(req: AuthRequest, res: Response) {
 
 // ─── RENTALS ─────────────────────────────────────────────────────────────────
 export async function createRental(req: AuthRequest, res: Response) {
+  // Rentals take a payment, but stores are not told about them and there are no payouts, cancellations, deposit
+  // returns or rental returns yet. Until that exists nobody can start one (RENTALS_ENABLED=true is for the tests).
+  if (process.env.RENTALS_ENABLED !== "true") {
+    return res.status(410).json({ ok: false, code: "RENTALS_UNAVAILABLE", error: "Renting is not available yet." });
+  }
   const result = createRentalSchema.safeParse(req.body);
   if (!result.success) return res.status(400).json({ ok: false, errors: result.error.flatten() });
   try {

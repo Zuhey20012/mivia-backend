@@ -1437,11 +1437,12 @@ function ean13(d12) {
   check("the vendor list shows the rate; the history names the admin", listedRate === 0.15 && hist.body.history?.[0]?.admin?.email === `admin${uniq}@example.fi`, [listedRate, hist.body]);
   const newRateOrder = (await order({ ...quoteBody, tipCents: 0 }, otherCust.accessToken)).body.order;
   check("new orders use the new rate; existing orders keep theirs", newRateOrder?.commissionCents === 750 && newRateOrder.sellerPayoutCents === 4250 && sql(`select "commissionCents" from "Order" where id=${o0.body.order.id}`) === oldCommission && oldCommission === "0", [newRateOrder, oldCommission]);
-  // Rentals take each store's own rate (2.13; was a fixed 10 %)
+  // Rentals are off until they are complete (2.13)
   sql(`update "Product" set "canBeRented"=true, "rentalDayCents"=1000, "depositCents"=5000 where id=${productId}`);
   const rentStart = new Date(Date.now() + 2 * 864e5), rentEnd = new Date(Date.now() + 5 * 864e5);
-  const rental = await call("POST", "/rentals", { startDate: rentStart.toISOString(), endDate: rentEnd.toISOString(), deliveryAddress: "Aleksanterinkatu 5, Helsinki", items: [{ productId, quantity: 1 }] }, otherCust.accessToken);
-  check("a rental's commission uses the store's rate (15 % of 3 days × 10 €)", rental.status === 201 && rental.body.rental?.subtotalCents === 3000 && rental.body.rental.commissionCents === 450, rental.body);
+  const rentalBody = { startDate: rentStart.toISOString(), endDate: rentEnd.toISOString(), deliveryAddress: "Aleksanterinkatu 5, Helsinki", items: [{ productId, quantity: 1 }] };
+  const rentalOff = await call("POST", "/rentals", rentalBody, otherCust.accessToken);
+  check("renting is switched off until stores, payouts and deposits exist for it (410)", rentalOff.status === 410 && rentalOff.body.code === "RENTALS_UNAVAILABLE", rentalOff.body);
   sql(`update "Product" set "canBeRented"=false where id=${productId}`);
   check("Malvoya takes no commission: new stores start at 0 %", sql(`select column_default from information_schema.columns where table_name='Store' and column_name='commissionRate'`) === "0");
   // Back to 10 % for the rest of the run, so the commission maths (statements, DAC7, refunds, referrals) stays covered
@@ -1585,6 +1586,8 @@ function ean13(d12) {
   check("the customer's return says where to take the items (store name, address, phone)", myRet?.store?.name === `Vera Vintage ${uniq}` && myRet.store.address === "Mannerheimintie 1, Helsinki" && "phone" in myRet.store, myRet?.store);
   check("rejecting a return needs the store's reason (storeNote)", (await call("PATCH", `/returns/${rn1.body.return.id}/status`, { status: "REJECTED" }, vendor.accessToken)).status === 400);
   const rnRej = await call("PATCH", `/returns/${rn1.body.return.id}/status`, { status: "REJECTED", storeNote: "The tags were removed and it was worn" }, vendor.accessToken);
+  const refundRejected = await call("PATCH", `/returns/${rn1.body.return.id}/status`, { status: "REFUNDED" }, vendor.accessToken);
+  check("a rejected return is closed for the store: it cannot be refunded or reopened later (409)", refundRejected.status === 409 && (await call("PATCH", `/returns/${rn1.body.return.id}/status`, { status: "APPROVED" }, vendor.accessToken)).status === 409, refundRejected.body);
   check("the store rejects with a note; the customer's own note is kept separately", rnRej.status === 200 && rnRej.body.return?.status === "REJECTED" && rnRej.body.return.storeNote === "The tags were removed and it was worn" && rnRej.body.return.conditionNote === "Too big", rnRej.body);
   const rn2 = await call("POST", "/returns", { orderId: rnOrder, reason: "NOT_AS_DESCRIBED" }, otherCust.accessToken);
   const rnAppr = await call("PATCH", `/returns/${rn2.body.return?.id}/status`, { status: "APPROVED", storeNote: "Bring it to the counter" }, vendor.accessToken);
@@ -1630,6 +1633,8 @@ function ean13(d12) {
   check("the customer sends a message over HTTP; it is stored", msg1.status === 201 && msg1.body.message?.text === "I'll be at the door in 5 min" && msg1.body.message.senderRole === "CUSTOMER" && msg1.body.message.senderId === otherCust.user.id && msg1.body.message.orderId === dp.id, msg1.body);
   check("only the customer, the assigned courier and admins can read the chat", (await call("GET", `/orders/${dp.id}/messages`, null, vendor.accessToken)).status === 404 && (await call("GET", `/orders/${dp.id}/messages`, null, pirjo.accessToken)).status === 404 && (await call("GET", `/orders/${dp.id}/messages`, null, c2.accessToken)).status === 404 && (await call("GET", `/orders/${dp.id}/messages`, null, adminToken)).status === 200);
   check("an empty message is refused", (await call("POST", `/orders/${dp.id}/messages`, { text: "   " }, otherCust.accessToken)).status === 400 && (await call("POST", `/orders/${dp.id}/messages`, { text: "hi" }, vendor.accessToken)).status === 404);
+  const storeJoin = await ack(vendorSock, "chat:join", dp.id);
+  check("the store cannot join the customer–courier chat room over the socket", storeJoin?.ok === false, storeJoin);
   const c1Chat = await connect(c1.accessToken);
   const join2 = await ack(c1Chat, "chat:join", dp.id);
   const sent = await ack(c1Chat, "chat:send", { orderId: dp.id, text: "On my way" });
@@ -2309,8 +2314,10 @@ function ean13(d12) {
     await call("POST", "/courier/status", { isOnline: true, latitude: 60.17, longitude: 24.94 }, cOnline.accessToken);
     const sd1 = (await call("GET", "/delivery/today?lat=60.17&lng=24.94")).body;
     const nowH = hel();
-    const todaySlots = ["17:00", "19:00"].filter((st) => Number(st.slice(0, 2)) * 60 >= Number(nowH.time.slice(0, 2)) * 60 + Number(nowH.time.slice(3, 5)) + 60);
-    check("same-day delivery is possible near an open store with a courier online; slots are today's configured ones still bookable", sd1.possible === true && sd1.date === nowH.date && sd1.slots.map((x) => x.start).join() === todaySlots.join() && sd1.slots.every((x) => x.label?.en && x.label?.fi && x.end), [sd1, todaySlots]);
+    const bookable = (h) => ["17:00", "19:00"].filter((st) => Number(st.slice(0, 2)) * 60 >= Number(h.time.slice(0, 2)) * 60 + Number(h.time.slice(3, 5)) + 60).join();
+    // The run may cross the minute a slot stops being bookable (60 min before it starts): either side counts
+    const todaySlots = [bookable(nowH), bookable(hel(new Date(Date.now() + 2 * 60_000)))];
+    check("same-day delivery is possible near an open store with a courier online; slots are today's configured ones still bookable", sd1.possible === true && sd1.date === nowH.date && todaySlots.includes(sd1.slots.map((x) => x.start).join()) && sd1.slots.every((x) => x.label?.en && x.label?.fi && x.end), [sd1, todaySlots]);
     await call("POST", "/courier/status", { isOnline: false }, cOnline.accessToken);
     // Sign in with Apple (iOS): the Apple user id first, then the verified email; loaded from dist (no real Firebase token here)
     const social = require(path.join(__dirname, "..", "..", "dist", "modules", "auth", "social.service.js"));
@@ -2431,6 +2438,35 @@ function ean13(d12) {
     const off = await call("POST", "/me/mfa/disable", { password: "strong-pass-123", code: renew.body.recoveryCodes[1] }, viaRc.body.accessToken);
     check("turned off: password sign-in gives tokens again, everything cleared and audited", off.status === 200 && !!(await login()).body.accessToken && sql(`select ("totpSecret" is null and "totpEnabledAt" is null and cardinality("totpRecoveryCodes") = 0)::text from "User" where id=${a2.user.id}`) === "true" && sql(`select count(*) from "AdminAuditLog" where action='mfa.disable' and "entityId"=${a2.user.id}`) === "1", off.body);
   }
+
+  console.log("\n— Audit fixes (2.13): delivery reach, sockets after a ban");
+  const farCust = await register("Kaukonen"); // accepts the terms in force now
+  const farQ = await call("POST", "/orders/quote", { storeId, deliveryLat: 61.5, deliveryLng: 23.76, items: [{ productId, quantity: 1 }] }, farCust.accessToken);
+  const farO = await call("POST", "/orders", { storeId, deliveryAddress: "Hämeenkatu 1, Tampere", deliveryLat: 61.5, deliveryLng: 23.76, items: [{ productId, quantity: 1 }] }, farCust.accessToken);
+  check("an address beyond the delivery reach is refused at quote and checkout (409), so courier pay cannot be inflated", farQ.status === 409 && farO.status === 409 && /too far/.test(farO.body.error || ""), [farQ.body, farO.body]);
+  const banMe = await register("Bannu");
+  const banSock = await connect(banMe.accessToken);
+  check("socket: a signed-in user connects", !banSock.connectError);
+  await call("DELETE", `/admin/users/${banMe.user.id}`, null, adminToken);
+  await sleep(300);
+  const banSock2 = await connect(banMe.accessToken);
+  check("a ban ends the user's open live connection and refuses new ones", banSock.disconnected === true && !!banSock2.connectError, [banSock.disconnected, banSock2.connectError]);
+  banSock.close(); banSock2.close();
+
+  const contactGet = await fetch(`${BASE}/contact?lang=fi`);
+  const contactHtml = await contactGet.text();
+  check("public contact page (/contact): a form without scripts, strict CSP, in Finnish on request", contactGet.status === 200 && contactHtml.includes('lang="fi"') && contactHtml.includes('<form method="post" action="/contact">') && !/<script/i.test(contactHtml) && /form-action 'self'/.test(contactGet.headers.get("content-security-policy") || ""));
+  const contactPost = await fetch(`${BASE}/contact`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Forwarded-For": "10.77.0.1" },
+    body: new URLSearchParams({ topic: "privacy", email: `gdpr${uniq}@example.fi`, message: "Please send me a copy of my data <b>now</b>", orderId: "", lang: "en" }) });
+  const contactReply = await contactPost.text();
+  check("a contact message lands in the admin Support queue as app \"web\" with its topic; the reply page escapes input", contactPost.status === 201 && contactReply.includes("We received your message")
+    && sql(`select app || '|' || topic from "SupportRequest" where email='gdpr${uniq}@example.fi'`) === "web|Privacy (GDPR) request");
+  const contactBad = await fetch(`${BASE}/contact`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Forwarded-For": "10.77.0.2" },
+    body: new URLSearchParams({ topic: "nonsense", email: "not-an-email", message: "<script>x</script>" }) });
+  const badHtml = await contactBad.text();
+  check("an invalid contact form is shown again with an error (400) and the typed text escaped", contactBad.status === 400 && badHtml.includes("&lt;script&gt;x&lt;/script&gt;") && !badHtml.includes("<script>x"));
+  const sysLegal = (await call("GET", "/admin/system", null, adminToken)).body;
+  check("System blocks real orders while the legal texts in force still have [PLACEHOLDERS]", sysLegal.blockers?.some((b) => /unfilled \[PLACEHOLDERS\]/.test(b) && b.includes("Terms of Service")), sysLegal.blockers);
 
   console.log("\n— Background jobs and input hardening");
   const leaseSql = `INSERT INTO "JobLease" ("name","lockedUntil") VALUES ('t${uniq}', now() + interval '1 minute') ON CONFLICT ("name") DO UPDATE SET "lockedUntil" = now() + interval '1 minute' WHERE "JobLease"."lockedUntil" < now() RETURNING "name"`;

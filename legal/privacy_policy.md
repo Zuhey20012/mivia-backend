@@ -7,7 +7,7 @@
 ## 1. Controller
 
 [COMPANY LEGAL NAME], Business ID (Y-tunnus) [Y-TUNNUS], [STREET ADDRESS], [POSTCODE] [CITY], Finland.
-Contact for privacy matters: [privacy@malvoya.com]
+Contact for privacy matters: the contact form at https://malvoya-api-eu.onrender.com/contact (topic "Privacy (GDPR) request")
 
 Malvoya is a marketplace. Stores that sell through Malvoya are independent sellers. For the order data they need to fulfil your purchase, each store is a separate controller.
 
@@ -52,7 +52,7 @@ We do not sell personal data, and we do not use your data for advertising profil
 **Drops feed.** "For you" ranks drops by how new they are, how people respond to them (likes, shares, views watched to the end), the distance of the store from your delivery address when you share it, and the store's rating. We do not build a personal profile for it. "Latest" shows drops newest first, with no ranking. You can switch at any time (Digital Services Act Art. 27).
 
 
-Delivery jobs are offered to approved, online couriers within 7.5 km of the store, nearest first. Couriers choose which jobs to accept. No job is assigned automatically, and no decision with legal or similarly significant effects is made solely by automated means (GDPR Art. 22). Couriers can ask a person at [support@malvoya.com] to explain or review any decision.
+Delivery jobs are offered to approved, online couriers within 7.5 km of the store, nearest first. Couriers choose which jobs to accept. No job is assigned automatically, and no decision with legal or similarly significant effects is made solely by automated means (GDPR Art. 22). Couriers can ask a person, through Support in the courier app or the contact form at https://malvoya-api-eu.onrender.com/contact, to explain or review any decision.
 
 ## 5. Who receives your data
 
@@ -72,7 +72,7 @@ Delivery jobs are offered to approved, online couriers within 7.5 km of the stor
 
 ## 6. Transfers outside the EU/EEA
 
-Hosting is provided by Render. [STATE REGION: "in Frankfurt, Germany (EU)" once migrated. Until then: "in the United States under the EU Standard Contractual Clauses / EU–US Data Privacy Framework".] Some providers (Google, Twilio, Stripe) may process data in the United States under the EU–US Data Privacy Framework or Standard Contractual Clauses.
+Our servers and database are hosted by Render in Frankfurt, Germany (EU). Some providers (Google, Twilio, Stripe, Cloudinary) may process data in the United States under the EU–US Data Privacy Framework or Standard Contractual Clauses.
 
 ## 7. How long we keep data
 
@@ -105,7 +105,7 @@ You can:
 - **object** to processing based on legitimate interest;
 - **restrict** processing.
 
-Contact [privacy@malvoya.com]. We reply within one month.
+Use the contact form at https://malvoya-api-eu.onrender.com/contact (topic "Privacy (GDPR) request") or Support in the app. We reply within one month.
 
 You also have the right to lodge a complaint with the **Data Protection Ombudsman (Tietosuojavaltuutetun toimisto)**, tietosuoja.fi, PL 800, 00531 Helsinki.
 

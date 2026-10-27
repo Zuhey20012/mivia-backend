@@ -93,10 +93,18 @@ export async function resetPassword(address: string, code: string, password: str
     await prisma.otpCode.deleteMany({ where: { target } });
     throw new AuthError("Too many wrong codes. Request a new one.", 400);
   }
+  // Use up one attempt before comparing, so parallel requests cannot each get a free guess
+  const attempt = await prisma.otpCode.updateMany({
+    where: { target, codeHash: stored.codeHash, attempts: { lt: MAX_ATTEMPTS } },
+    data: { attempts: { increment: 1 } },
+  });
+  if (attempt.count !== 1) {
+    await prisma.otpCode.deleteMany({ where: { target, codeHash: stored.codeHash } });
+    throw new AuthError("Too many wrong codes. Request a new one.", 400);
+  }
   const expected = Buffer.from(stored.codeHash, "hex");
   const actual = Buffer.from(hashCode(target, code.trim()), "hex");
   if (!crypto.timingSafeEqual(expected, actual)) {
-    await prisma.otpCode.update({ where: { target }, data: { attempts: { increment: 1 } } });
     throw new AuthError(WRONG, 400);
   }
   // Single use: only the request that deletes the row continues

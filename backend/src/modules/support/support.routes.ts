@@ -56,10 +56,17 @@ router.post("/support", supportLimiter, optionalAuth, async (req: AuthRequest, r
 // ─── Admin ──────────────────────────────────────────────────────────────────
 
 router.get("/admin/support", auth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
-  const status = typeof req.query.status === "string" ? req.query.status : "OPEN";
+  const status = typeof req.query.status === "string" ? req.query.status.toUpperCase() : "OPEN";
+  if (!["OPEN", "ANSWERED", "CLOSED"].includes(status)) return res.status(400).json({ ok: false, error: "Unknown status" });
   try {
-    const requests = await prisma.supportRequest.findMany({ where: { status: status as any }, orderBy: { createdAt: "asc" }, take: 300 });
-    res.json({ ok: true, requests });
+    // Open requests are a queue (oldest first); answered and closed ones are history (newest first). `total` tells the
+    // panel when more exist than the 300 shown.
+    const where = { status: status as "OPEN" | "ANSWERED" | "CLOSED" };
+    const [requests, total] = await Promise.all([
+      prisma.supportRequest.findMany({ where, orderBy: { createdAt: status === "OPEN" ? "asc" : "desc" }, take: 300 }),
+      prisma.supportRequest.count({ where }),
+    ]);
+    res.json({ ok: true, requests, total });
   } catch (e) { sendError(res, e); }
 });
 

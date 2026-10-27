@@ -218,6 +218,9 @@ model User {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Case-insensitive email lookups on every sign-in path (pg_trgm, docs/scaling/indexes.md (3))
+  @@index([email(ops: raw("gin_trgm_ops"))], type: Gin)
 }
 
 model RefreshToken {
@@ -310,6 +313,7 @@ model Store {
   // Query-path indexes (Postgres does not index foreign keys automatically)
   @@index([isVerified, rating])
   @@index([isVerified, readyForApprovalAt])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin) // product search matches shop names (pg_trgm)
 }
 
 // Seller identity and tax data the platform must collect and report to Vero once a year (DAC7, Council
@@ -439,6 +443,11 @@ model Product {
   @@index([manufacturerId])
   @@index([responsiblePersonId])
   @@index([gtin])
+  // Product search `ILIKE '%term%'` (pg_trgm, docs/scaling/indexes.md (2))
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([description(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([category(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([tags], type: Gin)
 }
 
 // Every sale price a product has had. A "was" price may only be shown when it is the lowest
@@ -619,6 +628,9 @@ model Order {
   @@index([scheduledStart])
   @@index([deliveryProblemAt])
   @@index([cancelledAt])
+  // Order watchdog every minute (docs/scaling/indexes.md (1)): paid orders waiting for the store, unpaid checkouts
+  @@index([status, paymentStatus, paidAt])
+  @@index([status, paymentStatus, createdAt])
 }
 
 model OrderItem {

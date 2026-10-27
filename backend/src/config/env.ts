@@ -178,6 +178,12 @@ export const env = {
   deliveryFeeCents:  299, // €2.99, VAT included: flat fee when the distance is unknown
   // Customer delivery fee by distance (DELIVERY_FEE_* env vars); see deliveryFeeConfig above
   deliveryFee:       deliveryFeeConfig(),
+  // Farthest delivery from the store (straight line, km); farther addresses are refused at quote and checkout, so
+  // courier pay (which grows per km) can never be inflated with a far-away pin. Default = the catalogue reach (10 km).
+  deliveryMaxKm: (() => {
+    const v = Number(process.env.DELIVERY_MAX_KM || process.env.CATALOG_REACH_KM);
+    return Number.isFinite(v) && v > 0 && v <= 200 ? v : 10;
+  })(),
   returnWindowDays:  14,  // statutory withdrawal period, counted from delivery
   // Courier pay per job (formula or the old share of the delivery fee); see courierPayConfig above
   courierPay:        courierPayConfig(),

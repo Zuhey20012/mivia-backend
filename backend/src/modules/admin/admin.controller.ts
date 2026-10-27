@@ -8,6 +8,7 @@ import { platformRevenue } from "./revenue";
 import { taxInfoComplete, taxRowSelect } from "../sellers/taxInfo";
 import { forgetSessionState } from "../../middleware/auth";
 import { pushToUser } from "../../lib/push";
+import { disconnectUser, leaveCourierRooms } from "../../lib/socket";
 import { localeOfUser, t } from "../../lib/i18n";
 import { sendApprovalEmail } from "../../services/notificationDeliveryService";
 import { businessCheckOf, runBusinessCheck } from "../stores/businessCheck";
@@ -106,6 +107,7 @@ export async function banUser(req: Request, res: Response) {
   await prisma.store.updateMany({ where: { ownerId: id }, data: { isVerified: false } });
   await revokeAllSessions(id);
   forgetSessionState(id);
+  disconnectUser(id); // open app connections end too (no more offers, chat or tracking)
   res.json({ ok: true, message: "User deactivated" });
 }
 
@@ -237,6 +239,7 @@ export async function getCouriers(req: Request, res: Response) {
       _count: { select: { orders: true } },
     },
     orderBy: { createdAt: "desc" },
+    take: 500, // bounded like the user and vendor lists
   });
   res.json({ ok: true, couriers });
 }
@@ -259,6 +262,7 @@ export async function suspendCourier(req: Request, res: Response) {
     data: { isApproved: false, isActive: false, latitude: null, longitude: null },
   }).catch(() => null);
   if (!courier) return res.status(404).json({ ok: false, error: "Courier not found" });
+  if (courier.userId) leaveCourierRooms(courier.userId, courier.id);
   res.json({ ok: true, courier });
 }
 

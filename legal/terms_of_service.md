@@ -6,7 +6,7 @@
 
 ## 1. Who we are
 
-The Malvoya marketplace is operated by [COMPANY LEGAL NAME] (Y-tunnus [Y-TUNNUS]), [ADDRESS], Finland. Contact: [support@malvoya.com], [PHONE].
+The Malvoya marketplace is operated by [COMPANY LEGAL NAME] (Y-tunnus [Y-TUNNUS]), [ADDRESS], Finland. Contact: the contact form at https://malvoya-api-eu.onrender.com/contact or Support in the app, [PHONE].
 
 ## 2. What Malvoya is
 
@@ -72,7 +72,7 @@ A checkout you did not pay for is cancelled automatically after 30 minutes, or a
 ## 7. Right of withdrawal (14 days) — business sellers
 
 - You may withdraw from a purchase within **14 days of receiving the item**, without giving a reason (Consumer Protection Act, chapter 6).
-- Start the return in the app (Profile → Returns) or send an unambiguous statement to [support@malvoya.com].
+- Start the return in the app (Profile → Returns) or send an unambiguous statement through the contact form at https://malvoya-api-eu.onrender.com/contact (topic "Withdrawal or return of an order").
 - We refund the price and the original standard delivery fee (and any service or small-order fee, less a promo discount) within 14 days of receiving your withdrawal. The refund goes to your original payment method.
 - You can also return only some of the items. Then we refund the price of those items, less the matching share of any promo discount. The delivery fee and any service or small-order fee are refunded when the whole order has been returned.
 - A refund may be delayed until the item has been received back.
@@ -113,11 +113,16 @@ Nothing in these terms limits liability that cannot be limited under mandatory l
 
 ## 12. Complaints and disputes
 
-1. Contact us first at [support@malvoya.com].
+1. Contact us first through Support in the app or the contact form at https://malvoya-api-eu.onrender.com/contact.
 2. If we cannot resolve the matter, you can take the dispute to the **Consumer Disputes Board (Kuluttajariitalautakunta)**, kuluttajariita.fi. Consumer advice is available from the **Consumer Advisory Services**, kkv.fi.
 3. EU residents can also use the EU ODR platform.
 
 Finnish law applies. As a consumer you may also bring a claim in the district court of your home municipality.
+
+## 12a. Points of contact (Digital Services Act)
+
+- **Users:** Support in the app or the contact form at https://malvoya-api-eu.onrender.com/contact (choose "Report illegal content or an unsafe product" for notices about content or products). You can write in Finnish or English, and you will get a reply from a person.
+- **Authorities, the European Commission and the European Board for Digital Services:** the contact form at https://malvoya-api-eu.onrender.com/contact (topic "Authority contact (Digital Services Act)"), in Finnish or English.
 
 ## 13. Changes
 

@@ -35,6 +35,7 @@ import mediaRoutes    from "./modules/media/media.routes";
 import dropsRoutes, { shareRouter } from "./modules/drops/drops.routes";
 import meRoutes       from "./modules/me/me.routes";
 import { mfaAuthRoutes, mfaMeRoutes } from "./modules/auth/mfa";
+import { contactRoutes } from "./modules/support/contactPage";
 import { launchAlertRoutes } from "./modules/me/launchAlerts";
 import { safetyRoutes } from "./modules/me/safety";
 import referralRoutes from "./modules/referrals/referrals.routes";
@@ -122,6 +123,7 @@ app.use("/api/v1/admin",  adminRoutes);
 app.use(shareRouter); // public share pages: /d/:id
 app.use(shareRoutes); // /s/:storeId, /r/:code and /.well-known/assetlinks.json
 app.use(legalRoutes); // public legal pages: /legal/privacy, /legal/terms, …
+app.use(contactRoutes); // public contact form /contact (2.13): privacy, withdrawal, complaints, DSA point of contact
 app.use(recallPageRoutes); // public product safety recalls: /recalls, /recalls/:id
 
 app.use(notFound);

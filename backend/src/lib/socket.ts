@@ -1,7 +1,7 @@
 import { Server as HttpServer } from "http";
 import { Server as SocketServer, Socket } from "socket.io";
 import { verifyAccessToken } from "../utils/jwt";
-import { adminNeedsMfa } from "../middleware/auth";
+import { adminNeedsMfa, sessionAllows } from "../middleware/auth";
 import { prisma } from "./prisma";
 import { env } from "../config/env";
 import { getOrderRelation, getRentalRelation, getCourierForUser } from "../modules/orders/access";
@@ -42,13 +42,14 @@ export function initSocket(httpServer: HttpServer): SocketServer {
     io.adapter(createAdapter(createRedisClient("socket-pub"), createRedisClient("socket-sub", { blocking: true }), { key: SOCKET_KEY }));
   }
 
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     try {
       const token = socket.handshake.auth?.token || socket.handshake.headers.authorization?.split(" ")[1];
       if (!token) return next(new Error("Authentication error"));
       const user = verifyAccessToken(token);
-      // An admin who has not passed two-step sign-in while it is required gets nothing live either
-      if (adminNeedsMfa(user)) return next(new Error("Authentication error"));
+      // An admin who has not passed two-step sign-in while it is required gets nothing live either; nor does a
+      // banned or deleted account, or a session a password reset ended (the same checks as HTTP requests)
+      if (adminNeedsMfa(user) || !(await sessionAllows(user))) return next(new Error("Authentication error"));
       socket.data.user = user as SocketUser;
       next();
     } catch {
@@ -170,10 +171,11 @@ export function initSocket(httpServer: HttpServer): SocketServer {
       const reply = typeof ack === "function" ? (ack as (r: unknown) => void) : null;
       const relation = id ? await getOrderRelation(id, user).catch(() => null) : null;
       if (!id || !relation) return reply?.({ ok: false, error: "Order not found" });
+      // Only the chat's members join the room that carries chat:message live (the store is not one of them)
+      if (!(await canReadChat(id, user).catch(() => false))) return reply?.({ ok: false, error: "This chat is between the customer and the courier" });
       socket.join(`chat:${id}`);
       if (!reply) return;
-      const readable = await canReadChat(id, user).catch(() => false);
-      reply({ ok: true, messages: readable ? await chatHistory(id).catch(() => []) : [] });
+      reply({ ok: true, messages: await chatHistory(id).catch(() => []) });
     });
 
     socket.on("chat:send", async (data: any, ack?: unknown) => {
@@ -191,6 +193,16 @@ export function initSocket(httpServer: HttpServer): SocketServer {
   });
 
   return io;
+}
+
+/** Ends a user's live connections at once (ban, account deletion); with Redis on every instance. */
+export function disconnectUser(userId: number) {
+  io?.in(`user:${userId}`).disconnectSockets(true);
+}
+
+/** A suspended courier stops receiving job offers at once. */
+export function leaveCourierRooms(userId: number, courierId: number) {
+  io?.in(`user:${userId}`).socketsLeave(["couriers", `courier:${courierId}`]);
 }
 
 export function getIo(): SocketServer | null {

@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: malvoya-api
+    name: malvoya-api-eu
     runtime: node
     plan: starter
     # EU region keeps personal data inside the EEA (GDPR Chapter V). Live as malvoya-api-eu with the
@@ -10,7 +10,10 @@ services:
     # --include=dev: NODE_ENV=production would otherwise skip TypeScript and the Prisma CLI
     buildCommand: npm ci --include=dev && npx prisma generate && npx prisma migrate deploy && npm run build
     startCommand: npm start
-    healthCheckPath: /health
+    # Readiness (database reachable, not draining), so a deploy only goes live once the new version can serve
+    healthCheckPath: /health/ready
+    # Deploy a commit only after GitHub CI (e2e suite, migration drift check) has passed on it
+    autoDeployTrigger: checksPass
     envVars:
       - key: DATABASE_URL
         sync: false
@@ -54,6 +57,22 @@ services:
       # they are only in the admin panel. Mail is sent as SMTP_FROM or the SMTP_USER mailbox.
       - key: SUPPORT_EMAIL
         sync: false
+      # Where security researchers report problems (/.well-known/security.txt); an address you read
+      - key: SECURITY_CONTACT
+        sync: false
+      # 32 random bytes, base64 (openssl rand -base64 32): encrypts sellers' tax IDs (DAC7). Keep a copy elsewhere.
+      - key: DATA_ENCRYPTION_KEY
+        sync: false
+      # Optional error reports (personal data scrubbed)
+      - key: SENTRY_DSN
+        sync: false
+      # App links: the Play App Signing SHA-256 of the customer app, and the Apple Developer Team ID
+      - key: ANDROID_APP_SHA256
+        sync: false
+      - key: APPLE_TEAM_ID
+        sync: false
+      # Optional: farthest delivery from a store in km (default 10, the catalogue reach)
+      # DELIVERY_MAX_KM
       # Optional order-watchdog timers in minutes (defaults shown in the admin panel → System):
       # CHECKOUT_HOLD_MINUTES, STORE_REMINDER_MINUTES, STORE_ACCEPT_MINUTES,
       # COURIER_REOFFER_MINUTES, COURIER_DELAY_NOTICE_MINUTES, COURIER_SEARCH_MINUTES

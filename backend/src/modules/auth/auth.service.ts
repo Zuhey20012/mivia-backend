@@ -9,6 +9,7 @@ import { mainDocForRole } from "../legal/legalDocs";
 import { forgetSessionState } from "../../middleware/auth";
 import { deleteFirebaseUser, deleteStoreMedia } from "./accountCleanup";
 import { TWO_STEP_OFF } from "./twoStepFields";
+import { disconnectUser } from "../../lib/socket";
 
 export class AuthError extends Error {
   constructor(message: string, public status: number) {
@@ -289,6 +290,7 @@ export async function deleteUserAccount(userId: number) {
 
   await revokeAllSessions(userId);
   forgetSessionState(userId);
+  disconnectUser(userId);
   // Outside the database (best effort, logged on failure, never blocks the deletion): the Firebase sign-in user
   // and, for a store, its photos, videos and drops on Cloudinary
   if (before) {
