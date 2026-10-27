@@ -1,4 +1,4 @@
-// End-to-end test for API v2.12 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
+// End-to-end test for API v2.13 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
 const { execSync, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -51,7 +51,8 @@ async function startFeeApi(extraEnv) {
   }
   feeApi = spawn(process.execPath, ["dist/index.js"], {
     cwd: path.join(__dirname, "..", ".."),
-    env: { ...process.env, ...testEnv, PORT: "4556", PUBLIC_API_URL: FEE_BASE, DISABLE_SCHEDULER: "true", ...extraEnv },
+    // ADMIN_MFA_REQUIRED=false: some runs use NODE_ENV=production, where admins would otherwise need two-step sign-in first
+    env: { ...process.env, ...testEnv, PORT: "4556", PUBLIC_API_URL: FEE_BASE, DISABLE_SCHEDULER: "true", ADMIN_MFA_REQUIRED: "false", ...extraEnv },
     stdio: "ignore",
   });
   // Up to 90 s: a cold start on a busy machine can take over 20 s
@@ -817,7 +818,7 @@ function ean13(d12) {
   }));
 
   const sysDefault = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.12.0", sysDefault.pricing);
+  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.13.0", sysDefault.pricing);
   const stockBeforeQuote = stockOf(productId);
   const ordersBeforeQuote = sql(`select count(*) from "Order" where "userId"=${otherCust.user.id}`);
   const q0 = await quote(quoteBody, otherCust.accessToken);
@@ -1877,7 +1878,7 @@ function ean13(d12) {
   cob = (await call("GET", "/courier/me/onboarding", null, onni.accessToken)).body;
   check("courier ready for approval when everything but approval is done", cob.readyForApproval === true && cob.approved === false && cob.percent === 83 && sql(`select "readyForApprovalAt" is not null from "Courier" where "userId"=${onni.user.id}`) === "t", cob);
   const sys211 = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("System lists them as ready for approval", sys211.version === "2.12.0" && sys211.attention.some((a) => a.includes(`(#${pekkaStore.id}) is ready for approval`)) && sys211.attention.some((a) => a.includes("Courier \"Onni\"") && a.includes("ready for approval")) && sys211.readyForApproval?.stores?.some((s) => s.id === pekkaStore.id), sys211.attention);
+  check("System lists them as ready for approval", sys211.version === "2.13.0" && sys211.attention.some((a) => a.includes(`(#${pekkaStore.id}) is ready for approval`)) && sys211.attention.some((a) => a.includes("Courier \"Onni\"") && a.includes("ready for approval")) && sys211.readyForApproval?.stores?.some((s) => s.id === pekkaStore.id), sys211.attention);
   check("admin courier list shows vehicle, disclosure and readiness", (await call("GET", "/admin/couriers", null, adminToken)).body.couriers?.find((c) => c.user?.id === onni.user.id)?.vehicleType === "ebike");
 
   // Publishing changes (second instance reading a copy of the legal texts, same database)
@@ -2327,6 +2328,94 @@ function ean13(d12) {
     check("System lists open product reports and pending certificates", sys212.attention?.some((a) => /certificate\(s\) waiting/.test(a)) && sys212.attention.some((a) => /product report\(s\)/.test(a)), sys212.attention);
   }
 
+  { // 2.13: two-step sign-in (authenticator app) for admins
+    console.log("\n— Two-step sign-in for admins");
+    // Independent RFC 6238 implementation (not the API's), so the test proves the codes an authenticator app shows work
+    const b32dec = (t) => { let bits = 0, v = 0; const out = []; for (const ch of t) { v = (v << 5) | "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".indexOf(ch); bits += 5; if (bits >= 8) { out.push((v >>> (bits - 8)) & 255); bits -= 8; } } return Buffer.from(out); };
+    const totp = (secretB32, step) => {
+      const c = Buffer.alloc(8); c.writeBigUInt64BE(BigInt(step));
+      const h = crypto.createHmac("sha1", b32dec(secretB32)).update(c).digest(); const o = h[19] & 15;
+      return String((((h[o] & 127) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3]) % 1e6).padStart(6, "0");
+    };
+    const stepNow = () => Math.floor(Date.now() / 30000);
+    const jwtBody = (tok) => JSON.parse(Buffer.from(tok.split(".")[1], "base64url").toString());
+    const a2Email = `admin2fa${uniq}@example.fi`;
+    const a2 = (await call("POST", "/auth/register", { name: "Admin Kaksi", email: a2Email, password: "strong-pass-123" })).body;
+    sql(`update "User" set role='ADMIN' where id=${a2.user.id}`);
+    const login = () => call("POST", "/auth/login", { email: a2Email, password: "strong-pass-123" });
+    let a2Token = (await login()).body.accessToken;
+
+    const st0 = await call("GET", "/me/mfa", null, a2Token);
+    check("GET /me/mfa: off, not required outside production", st0.status === 200 && st0.body.enabled === false && st0.body.required === false && st0.body.needsPassword === true, st0.body);
+    check("two-step set-up is for admin accounts only (403)", (await call("GET", "/me/mfa", null, otherCust.accessToken)).status === 403 && (await call("POST", "/me/mfa/setup", { password: "strong-pass-123" }, otherCust.accessToken)).status === 403);
+    check("set-up asks for the password again (400 without / wrong)", (await call("POST", "/me/mfa/setup", {}, a2Token)).status === 400 && (await call("POST", "/me/mfa/setup", { password: "wrong-pass-999" }, a2Token)).status === 400);
+    check("enable before set-up → 409", (await call("POST", "/me/mfa/enable", { code: "123456" }, a2Token)).status === 409);
+    const setup = (await call("POST", "/me/mfa/setup", { password: "strong-pass-123" }, a2Token)).body;
+    const secret = setup.secret;
+    check("set-up returns a 160-bit base32 secret and an otpauth:// link for the authenticator app", /^[A-Z2-7]{32}$/.test(secret || "") && setup.otpauthUrl === `otpauth://totp/Malvoya%3A${encodeURIComponent(a2Email)}?secret=${secret}&issuer=Malvoya&algorithm=SHA1&digits=6&period=30`, setup);
+    const storedSecret = sql(`select "totpSecret" from "User" where id=${a2.user.id}`);
+    check("the secret is stored encrypted, never in the clear", storedSecret.startsWith("t1:") && !storedSecret.includes(secret));
+    check("the secret and recovery codes are never part of an account payload", !JSON.stringify((await call("GET", "/me", null, a2Token)).body).includes("totp"));
+    check("a pending set-up does not change sign-in yet", !!(await login()).body.accessToken && (await call("GET", "/me/mfa", null, a2Token)).body.pending === true);
+    const wrongEnable = await call("POST", "/me/mfa/enable", { code: totp(secret, stepNow() + 5) }, a2Token);
+    check("a wrong code does not turn it on (400, attempts left)", wrongEnable.status === 400 && wrongEnable.body.attemptsLeft === 4, wrongEnable.body);
+    const s0 = stepNow();
+    const enabled = await call("POST", "/me/mfa/enable", { code: totp(secret, s0) }, a2Token);
+    const rc = enabled.body.recoveryCodes || [];
+    check("the first code turns it on: 10 one-time recovery codes (shown once) and a fresh verified session", enabled.status === 200 && rc.length === 10 && rc.every((c) => /^[a-z2-9]{5}-[a-z2-9]{5}$/.test(c)) && !!enabled.body.accessToken && jwtBody(enabled.body.accessToken).mfa === true, enabled.body);
+    check("recovery codes are stored hashed", sql(`select array_length("totpRecoveryCodes", 1) || '|' || ("totpRecoveryCodes"::text like '%${rc[0]}%')::text from "User" where id=${a2.user.id}`) === "10|false");
+    check("turning it on ends every earlier session (old access token 401)", (await call("GET", "/me/mfa", null, a2Token)).status === 401);
+    a2Token = enabled.body.accessToken;
+    check("…and is audited", sql(`select count(*) from "AdminAuditLog" where action='mfa.enable' and "entityId"=${a2.user.id}`) === "1");
+
+    const first = await login();
+    check("password sign-in now returns a 5-minute challenge instead of tokens", first.status === 200 && first.body.mfaRequired === true && !!first.body.mfaToken && !first.body.accessToken && !first.body.refreshToken, first.body);
+    check("the challenge token is not an access token", (await call("GET", "/me", null, first.body.mfaToken)).status === 401);
+    check("second step: a bad or missing challenge → 401/400", (await call("POST", "/auth/login/mfa", { mfaToken: "x".repeat(20), code: "123456" })).status === 401 && (await call("POST", "/auth/login/mfa", { code: "123456" })).status === 400);
+    check("the code already used to turn it on is not accepted again (replay)", (await call("POST", "/auth/login/mfa", { mfaToken: first.body.mfaToken, code: totp(secret, s0) })).status === 400);
+    const second = await call("POST", "/auth/login/mfa", { mfaToken: first.body.mfaToken, code: totp(secret, s0 + 1) });
+    check("challenge + the next authenticator code → a verified session", second.status === 200 && !!second.body.accessToken && !!second.body.refreshToken && jwtBody(second.body.accessToken).mfa === true && second.body.user?.role === "ADMIN", second.body);
+    const again = await login();
+    check("the same code never opens a second session", (await call("POST", "/auth/login/mfa", { mfaToken: again.body.mfaToken, code: totp(secret, s0 + 1) })).status === 400);
+    const refreshed = await call("POST", "/auth/refresh", { refreshToken: second.body.refreshToken });
+    check("refreshing a verified session keeps it verified", refreshed.status === 200 && jwtBody(refreshed.body.accessToken).mfa === true && (await call("GET", "/admin/system", null, refreshed.body.accessToken)).status === 200, refreshed.body);
+    const viaRc = await call("POST", "/auth/login/mfa", { mfaToken: again.body.mfaToken, code: rc[0].toUpperCase().replace("-", " ") });
+    check("a recovery code works once instead of the app (any case, spaces), and says how many are left", viaRc.status === 200 && viaRc.body.recoveryCodesLeft === 9 && !!viaRc.body.accessToken, viaRc.body);
+    check("…the same recovery code is refused next time", (await call("POST", "/auth/login/mfa", { mfaToken: (await login()).body.mfaToken, code: rc[0] })).status === 400);
+    check("using a recovery code is audited", sql(`select count(*) from "AdminAuditLog" where action='mfa.recovery_code_used' and "entityId"=${a2.user.id}`) === "1");
+    sql(`update "User" set "totpFailures"=0 where id=${a2.user.id}`);
+    const ch = (await login()).body.mfaToken;
+    let lastWrong = null;
+    for (let i = 0; i < 5; i++) lastWrong = await call("POST", "/auth/login/mfa", { mfaToken: ch, code: "000000" === totp(secret, stepNow()) ? "111111" : "000000" });
+    check("five wrong codes in a row lock the second step (429)", lastWrong.status === 429, lastWrong.body);
+    check("…even the right code waits out the lock", (await call("POST", "/auth/login/mfa", { mfaToken: ch, code: rc[1] })).status === 429);
+    sql(`update "User" set "totpLockedUntil"=null, "totpLastStep"=null where id=${a2.user.id}`);
+    const renew = await call("POST", "/me/mfa/recovery-codes", { code: totp(secret, stepNow()) }, viaRc.body.accessToken);
+    check("new recovery codes (with a current code): the old ones stop working", renew.status === 200 && renew.body.recoveryCodes?.length === 10 && (await call("POST", "/auth/login/mfa", { mfaToken: (await login()).body.mfaToken, code: rc[2] })).status === 400, renew.body);
+    const st1 = (await call("GET", "/me/mfa", null, viaRc.body.accessToken)).body;
+    check("status: on, 10 recovery codes left, this session verified", st1.enabled === true && st1.recoveryCodesLeft === 10 && st1.sessionVerified === true, st1);
+    const sysSec = (await call("GET", "/admin/system", null, viaRc.body.accessToken)).body.security;
+    check("System reports admins with and without two-step sign-in", sysSec?.adminTwoStepRequired === false && sysSec.admins >= 2 && sysSec.adminsWithTwoStep >= 1 && sysSec.admins > sysSec.adminsWithTwoStep, sysSec);
+
+    // Required (the production default): an admin session without the second step opens only the set-up
+    check("API with ADMIN_MFA_REQUIRED=true started", await startFeeApi({ ADMIN_MFA_REQUIRED: "true" }));
+    const plainAdmin = (await callAt(FEE_API, "POST", "/auth/login", { email: `admin${uniq}@example.fi`, password: "strong-pass-123" })).body.accessToken;
+    const gated = await callAt(FEE_API, "GET", "/admin/system", null, plainAdmin);
+    check("required: an admin without two-step sign-in gets 403 MFA_SETUP_REQUIRED on admin tools", gated.status === 403 && gated.body.code === "MFA_SETUP_REQUIRED", gated.body);
+    check("…on admin access through other routes too (orders)", (await callAt(FEE_API, "GET", "/admin/orders", null, plainAdmin)).status === 403);
+    const gatedSt = await callAt(FEE_API, "GET", "/me/mfa", null, plainAdmin);
+    check("…but can open its account and the set-up", gatedSt.status === 200 && gatedSt.body.required === true && gatedSt.body.sessionVerified === false && (await callAt(FEE_API, "GET", "/me", null, plainAdmin)).status === 200, gatedSt.body);
+    check("required: other roles are not affected", (await callAt(FEE_API, "GET", "/me/favorites", null, otherCust.accessToken)).status === 200);
+    const reqFirst = await callAt(FEE_API, "POST", "/auth/login", { email: a2Email, password: "strong-pass-123" });
+    const reqSecond = await callAt(FEE_API, "POST", "/auth/login/mfa", { mfaToken: reqFirst.body.mfaToken, code: renew.body.recoveryCodes[0] });
+    check("required: an admin who passed the second step uses the admin tools", (await callAt(FEE_API, "GET", "/admin/system", null, reqSecond.body.accessToken)).status === 200, reqSecond.body);
+    feeApi.kill(); feeApi = null;
+
+    check("turning it off takes the password and a code", (await call("POST", "/me/mfa/disable", { code: renew.body.recoveryCodes[1] }, viaRc.body.accessToken)).status === 400 && (await call("POST", "/me/mfa/disable", { password: "wrong-pass-999", code: renew.body.recoveryCodes[1] }, viaRc.body.accessToken)).status === 400);
+    const off = await call("POST", "/me/mfa/disable", { password: "strong-pass-123", code: renew.body.recoveryCodes[1] }, viaRc.body.accessToken);
+    check("turned off: password sign-in gives tokens again, everything cleared and audited", off.status === 200 && !!(await login()).body.accessToken && sql(`select ("totpSecret" is null and "totpEnabledAt" is null and cardinality("totpRecoveryCodes") = 0)::text from "User" where id=${a2.user.id}`) === "true" && sql(`select count(*) from "AdminAuditLog" where action='mfa.disable' and "entityId"=${a2.user.id}`) === "1", off.body);
+  }
+
   console.log("\n— Background jobs and input hardening");
   const leaseSql = `INSERT INTO "JobLease" ("name","lockedUntil") VALUES ('t${uniq}', now() + interval '1 minute') ON CONFLICT ("name") DO UPDATE SET "lockedUntil" = now() + interval '1 minute' WHERE "JobLease"."lockedUntil" < now() RETURNING "name"`;
   const firstLine = (q) => sql(q).split(/\r?\n/)[0];
@@ -2337,7 +2426,7 @@ function ean13(d12) {
   check("huge search input rejected", (await call("GET", `/products/search?q=${"a".repeat(200)}`)).status === 400);
   const cors = await fetch(`${API}/stores`, { headers: { Origin: "https://evil.example" } });
   check("CORS does not allow unknown origins", !cors.headers.get("access-control-allow-origin"));
-  check("health reports v2.12.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.12.0");
+  check("health reports v2.13.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.13.0");
 
   [vendorSock, custSock, otherSock, c1Sock, c2Sock].forEach((s) => s.close());
   console.log(`\n${pass} passed, ${fail} failed`);

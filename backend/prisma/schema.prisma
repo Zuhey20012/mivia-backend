@@ -207,6 +207,15 @@ model User {
   // Known or likely under 18 (since 2.12.0): never gets profiling-based recommendations (DSA Art. 28)
   isMinor              Boolean               @default(false)
 
+  // Two-step sign-in with an authenticator app (since 2.13.0; admins). The secret is AES-256-GCM encrypted (key derived
+  // from JWT_SECRET); it is set by setup and counts only once totpEnabledAt is set. Never returned by any query by default.
+  totpSecret        String?
+  totpEnabledAt     DateTime?
+  totpLastStep      Int? // last accepted 30-second step: the same code is never accepted twice
+  totpRecoveryCodes String[]  @default([]) // SHA-256 of the unused one-time recovery codes
+  totpFailures      Int       @default(0) // wrong codes in a row; 5 lock the second step for 15 minutes
+  totpLockedUntil   DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

@@ -34,6 +34,7 @@ import paymentsRoutes from "./modules/payments/payments.routes";
 import mediaRoutes    from "./modules/media/media.routes";
 import dropsRoutes, { shareRouter } from "./modules/drops/drops.routes";
 import meRoutes       from "./modules/me/me.routes";
+import { mfaAuthRoutes, mfaMeRoutes } from "./modules/auth/mfa";
 import { launchAlertRoutes } from "./modules/me/launchAlerts";
 import { safetyRoutes } from "./modules/me/safety";
 import referralRoutes from "./modules/referrals/referrals.routes";
@@ -100,6 +101,7 @@ app.use(publicCacheRoutes);
 
 // API routes. Courier routes come before orders so /orders/available etc. are matched first.
 app.use("/api/v1/auth",   authRoutes);
+app.use("/api/v1/auth",   mfaAuthRoutes); // /auth/login/mfa: the second step of two-step sign-in (2.13)
 app.use("/api/v1/stores", storesRoutes);
 app.use("/api/v1/stores", sellerRoutes); // /stores/my/tax-info, /stores/my/statements
 app.use("/api/v1",        importRoutes); // /products/import/* (before /products/:id routes)
@@ -109,6 +111,7 @@ app.use("/api/v1",        courierRoutes);
 app.use("/api/v1",        ordersRoutes);
 app.use("/api/v1",        dropsRoutes);
 app.use("/api/v1",        meRoutes);
+app.use("/api/v1",        mfaMeRoutes); // /me/mfa: authenticator set-up for admins (2.13)
 app.use("/api/v1",        launchAlertRoutes);
 app.use("/api/v1",        safetyRoutes); // /me/blocks, /reviews/:id/report, /admin/reviews/reported (before /admin)
 app.use("/api/v1",        referralRoutes); // /me/referral

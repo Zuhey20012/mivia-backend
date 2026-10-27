@@ -27,7 +27,8 @@ export const prisma = new PrismaClient({
   // the customer is nobody else's business, and the courier's pay breakdown (ride km, waiting minutes, rates) is
   // for the courier, admins and payouts. Queries that need them ask with `omit: { …: false }` or `select`
   // (orders.service.ts: customer views, the store's code check, courier views; referrals; dispatch; admin).
-  omit: { order: { pickupCode: true, referrerId: true, courierPay: true } },
+  // The authenticator secret and recovery-code hashes (two-step sign-in) are read only by auth/mfa.ts, with `select`.
+  omit: { order: { pickupCode: true, referrerId: true, courierPay: true }, user: { totpSecret: true, totpRecoveryCodes: true } },
 });
 
 /** Pool usage for metrics: open connections, idle ones, and queries waiting for a connection. */

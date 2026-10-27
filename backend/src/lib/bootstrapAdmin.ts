@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import pino from "pino";
 import { prisma } from "./prisma";
 import { env } from "../config/env";
+import { TWO_STEP_OFF } from "../modules/auth/twoStepFields";
 
 const logger = pino({ name: "admin-bootstrap" });
 
@@ -39,8 +40,10 @@ export async function bootstrapAdmin() {
   const user = await prisma.$transaction(async (tx) => {
     const u = await tx.user.upsert({
       where: { email },
-      // A reset: sessions issued before now stop working
-      update: { role: "ADMIN", passwordHash, isActive: true, tokensValidAfter: new Date() },
+      // A reset: sessions issued before now stop working, and two-step sign-in starts over (the way back in for an
+      // owner who lost both the authenticator and the recovery codes: whoever can change these settings controls
+      // the service anyway)
+      update: { role: "ADMIN", passwordHash, isActive: true, tokensValidAfter: new Date(), ...TWO_STEP_OFF },
       create: { name: "Malvoya Admin", email, passwordHash, role: "ADMIN" },
       select: { id: true },
     });

@@ -3,11 +3,13 @@ import { verifyAccessToken } from "../utils/jwt";
 import { prisma } from "../lib/prisma";
 import { localeFromHeader } from "../lib/i18n";
 import { publish, subscribe } from "../lib/redis";
+import { env } from "../config/env";
 
 export type Role = "CUSTOMER" | "VENDOR" | "COURIER" | "ADMIN";
 
 export interface AuthRequest extends Request {
-  user?: { id: number; role: Role; email: string };
+  /** mfa: this session passed two-step sign-in (authenticator code) */
+  user?: { id: number; role: Role; email: string; mfa?: boolean };
 }
 
 function readBearer(req: Request): string | null {
@@ -64,8 +66,22 @@ function rememberLocale(req: Request, userId: number, state: SessionState) {
   prisma.user.updateMany({ where: { id: userId, OR: [{ locale: null }, { locale: { not: locale } }] }, data: { locale } }).catch(() => {});
 }
 
+/**
+ * While ADMIN_MFA_REQUIRED is on (the production default), an admin session that has not passed two-step sign-in
+ * opens only what it needs to turn it on: its own account (GET /me) and /me/mfa. Everything else answers
+ * 403 MFA_SETUP_REQUIRED, so the admin panel can send the admin to the set-up page.
+ */
+const MFA_SETUP_PATHS = /^\/api\/v1\/me(\/mfa(\/[a-z-]+)?)?\/?$/;
+export function adminNeedsMfa(user: { role: string; mfa?: boolean }) {
+  return env.adminMfaRequired && user.role === "ADMIN" && !user.mfa;
+}
+const MFA_SETUP_REQUIRED = {
+  status: 403, code: "MFA_SETUP_REQUIRED",
+  error: "Turn on two-step sign-in (an authenticator app) before using the admin tools.",
+};
+
 /** The signed-in user, or null (no token, bad token, ended session or inactive account). */
-async function authenticate(req: Request): Promise<{ user: NonNullable<AuthRequest["user"]> } | { error: string } | null> {
+async function authenticate(req: Request): Promise<{ user: NonNullable<AuthRequest["user"]> } | { error: string; status?: number; code?: string } | null> {
   const token = readBearer(req);
   if (!token) return null;
   let payload: ReturnType<typeof verifyAccessToken>;
@@ -79,13 +95,15 @@ async function authenticate(req: Request): Promise<{ user: NonNullable<AuthReque
     if (!state.active || payload.iat < state.validAfterSec) return { error: "Your session has ended. Please sign in again." };
     rememberLocale(req, payload.id, state);
   }
-  return { user: { id: payload.id, role: payload.role as Role, email: payload.email } };
+  const user = { id: payload.id, role: payload.role as Role, email: payload.email, mfa: payload.mfa };
+  if (adminNeedsMfa(user) && !MFA_SETUP_PATHS.test(req.originalUrl.split("?")[0])) return MFA_SETUP_REQUIRED;
+  return { user };
 }
 
 export async function auth(req: AuthRequest, res: Response, next: NextFunction) {
   const result = await authenticate(req);
   if (!result) return res.status(401).json({ ok: false, error: "Unauthorized" });
-  if ("error" in result) return res.status(401).json({ ok: false, error: result.error });
+  if ("error" in result) return res.status(result.status ?? 401).json({ ok: false, error: result.error, ...(result.code ? { code: result.code } : {}) });
   req.user = result.user;
   next();
 }

@@ -145,7 +145,7 @@ export async function changePasswordHandler(req: AuthRequest, res: Response) {
     return res.status(400).json({ ok: false, error: body.error.issues[0]?.message ?? "Check the details", errors: body.error.flatten() });
   }
   try {
-    res.json({ ok: true, ...(await authService.changePassword(req.user!.id, body.data.currentPassword, body.data.newPassword)) });
+    res.json({ ok: true, ...(await authService.changePassword(req.user!.id, body.data.currentPassword, body.data.newPassword, req.user!.mfa)) });
   } catch (e) {
     sendError(res, e);
   }

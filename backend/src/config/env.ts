@@ -165,6 +165,13 @@ export const env = {
     ? []
     : (process.env.IMPORT_ALLOW_HOSTS || "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean),
 
+  // Admins must use two-step sign-in (authenticator app) before the admin API opens. On by default in production;
+  // ADMIN_MFA_REQUIRED=false switches the requirement off (admins who turned it on still get asked for a code).
+  adminMfaRequired: (() => {
+    const raw = (process.env.ADMIN_MFA_REQUIRED ?? "").trim().toLowerCase();
+    return raw === "" ? isProduction : !["false", "0", "off", "no"].includes(raw);
+  })(),
+
   // Push notifications: a Firebase service-account key (raw JSON or base64 of it)
   firebaseServiceAccount: process.env.FIREBASE_SERVICE_ACCOUNT || "",
 

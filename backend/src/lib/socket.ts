@@ -1,6 +1,7 @@
 import { Server as HttpServer } from "http";
 import { Server as SocketServer, Socket } from "socket.io";
 import { verifyAccessToken } from "../utils/jwt";
+import { adminNeedsMfa } from "../middleware/auth";
 import { prisma } from "./prisma";
 import { env } from "../config/env";
 import { getOrderRelation, getRentalRelation, getCourierForUser } from "../modules/orders/access";
@@ -45,7 +46,10 @@ export function initSocket(httpServer: HttpServer): SocketServer {
     try {
       const token = socket.handshake.auth?.token || socket.handshake.headers.authorization?.split(" ")[1];
       if (!token) return next(new Error("Authentication error"));
-      socket.data.user = verifyAccessToken(token) as SocketUser;
+      const user = verifyAccessToken(token);
+      // An admin who has not passed two-step sign-in while it is required gets nothing live either
+      if (adminNeedsMfa(user)) return next(new Error("Authentication error"));
+      socket.data.user = user as SocketUser;
       next();
     } catch {
       next(new Error("Authentication error"));

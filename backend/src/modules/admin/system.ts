@@ -160,16 +160,25 @@ export async function getSystemStatus(_req: Request, res: Response) {
     if (pendingCerts) attention.push(`${pendingCerts} certificate(s) waiting for verification (Certificates)`);
     if (uncategorised) attention.push(`${uncategorised} visible product(s) made before 2.12 have no category and miss the required product information; ask the stores to complete them`);
     if (overPaid) attention.push(`${overPaid} delivered order(s) pay the store and courier more than the customer paid; Malvoya's Stripe balance covers the difference`);
+    // Two-step sign-in for admins (2.13)
+    const [admins, adminsWithTwoStep] = await Promise.all([
+      prisma.user.count({ where: { role: "ADMIN", isActive: true } }),
+      prisma.user.count({ where: { role: "ADMIN", isActive: true, totpEnabledAt: { not: null } } }),
+    ]);
+    if (admins > adminsWithTwoStep) {
+      attention.push(`${admins - adminsWithTwoStep} admin account(s) without two-step sign-in${env.adminMfaRequired ? " (they can only set it up until they do: Security)" : ": turn it on under Security"}`);
+    }
 
     res.json({
       ok: true,
-      version: "2.12.0",
+      version: "2.13.0",
       region: "frankfurt",
       startedAt,
       readyForOrders: blockers.length === 0,
       blockers,
       attention,
       integrations,
+      security: { adminTwoStepRequired: env.adminMfaRequired, admins, adminsWithTwoStep },
       marketplace: {
         liveStores: liveStores.length, storesOpenNow, pendingStores,
         approvedCouriers, onlineCouriers, pendingCouriers,

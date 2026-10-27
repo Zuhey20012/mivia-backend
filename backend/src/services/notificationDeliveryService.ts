@@ -226,6 +226,27 @@ export async function sendNoPasswordNote(to: string, method: SignInMethod, local
 }
 
 /** An admin approved a store or courier account. */
+export type TwoStepEvent = "enabled" | "disabled" | "recovery_code_used" | "recovery_codes_renewed";
+
+/** Security notice to the account's own address when two-step sign-in changes or a recovery code is used. */
+export async function sendTwoStepNotice(to: string, event: TwoStepEvent, recoveryCodesLeft: number | null, locale: Locale): Promise<DeliveryResult> {
+  const texts: Record<TwoStepEvent, [Text, Text]> = {
+    enabled: [t("Two-step sign-in is on", "Kaksivaiheinen kirjautuminen on päällä"),
+      t("From now on, signing in also asks for a code from your authenticator app. Keep your recovery codes somewhere safe.",
+        "Kirjautuminen kysyy tästä lähtien myös todennussovelluksesi koodia. Säilytä varakoodit turvallisessa paikassa.")],
+    disabled: [t("Two-step sign-in was turned off", "Kaksivaiheinen kirjautuminen poistettiin käytöstä"),
+      t("Signing in no longer asks for an authenticator code.", "Kirjautuminen ei enää kysy todennussovelluksen koodia.")],
+    recovery_code_used: [t("A recovery code was used to sign in", "Kirjautumiseen käytettiin varakoodia"),
+      t(`Each recovery code works once. Codes left: ${recoveryCodesLeft ?? 0}.`, `Jokainen varakoodi toimii kerran. Koodeja jäljellä: ${recoveryCodesLeft ?? 0}.`)],
+    recovery_codes_renewed: [t("New recovery codes were made", "Uudet varakoodit luotiin"),
+      t("Your earlier recovery codes no longer work.", "Aiemmat varakoodisi eivät enää toimi.")],
+  };
+  const [heading, body] = texts[event];
+  return simpleEmail(to, locale, heading, heading, [body,
+    t("If this was not you, change your password at once and contact the Malvoya team.",
+      "Jos tämä et ollut sinä, vaihda salasanasi heti ja ota yhteyttä Malvoyan tiimiin.")]);
+}
+
 export async function sendApprovalEmail(to: string, kind: "store" | "courier", locale: Locale): Promise<DeliveryResult> {
   return kind === "store"
     ? simpleEmail(to, locale, t("your store is approved", "kauppasi on hyväksytty"), t("You're approved", "Sinut on hyväksytty"), [

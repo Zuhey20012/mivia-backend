@@ -3,11 +3,12 @@ import crypto from "crypto";
 import { prisma } from "../../lib/prisma";
 import { verifyRefreshToken } from "../../utils/jwt";
 import { RegisterInput, LoginInput } from "./auth.schema";
-import { issueSession, hashToken, revokeAllSessions } from "./session";
+import { issueSession, hashToken, revokeAllSessions, isMfaChallenge } from "./session";
 import { AcceptContext, recordAcceptances, registrationVersions } from "../legal/agreements";
 import { mainDocForRole } from "../legal/legalDocs";
 import { forgetSessionState } from "../../middleware/auth";
 import { deleteFirebaseUser, deleteStoreMedia } from "./accountCleanup";
+import { TWO_STEP_OFF } from "./twoStepFields";
 
 export class AuthError extends Error {
   constructor(message: string, public status: number) {
@@ -106,8 +107,9 @@ export async function loginUser(input: LoginInput) {
 }
 
 export async function refreshTokens(refreshToken: string) {
+  let mfa = false;
   try {
-    verifyRefreshToken(refreshToken);
+    mfa = verifyRefreshToken(refreshToken).mfa;
   } catch {
     throw new AuthError("Refresh token expired or invalid", 401);
   }
@@ -119,14 +121,17 @@ export async function refreshTokens(refreshToken: string) {
 
   // Rotation: each refresh token is single use
   await prisma.refreshToken.delete({ where: { token: tokenHash } });
-  return issueSession(stored.user);
+  const session = await issueSession(stored.user, { mfa });
+  // Turning two-step sign-in on ends every older session, so this only happens to a token from before that
+  if (isMfaChallenge(session)) throw new AuthError("Please sign in again", 401);
+  return session;
 }
 
 /**
  * Signed-in password change. Wrong current password → 400. Every other session ends (refresh tokens revoked, older
  * access tokens refused); the caller gets a fresh session in the same shape as login and stays signed in.
  */
-export async function changePassword(userId: number, currentPassword: string, newPassword: string) {
+export async function changePassword(userId: number, currentPassword: string, newPassword: string, mfa = false) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user || !user.isActive) throw new AuthError("Account not found", 404);
   if (!user.passwordHash.startsWith("$2")) {
@@ -137,7 +142,8 @@ export async function changePassword(userId: number, currentPassword: string, ne
   const updated = await prisma.user.update({ where: { id: userId }, data: { passwordHash, tokensValidAfter: new Date() } });
   await revokeAllSessions(userId);
   forgetSessionState(userId);
-  return issueSession(updated);
+  // The caller is signed in: the new session keeps whether theirs passed two-step sign-in
+  return issueSession(updated, { mfa });
 }
 
 export async function logoutUser(refreshToken: string) {
@@ -164,7 +170,7 @@ function exportUser(userId: number) {
     select: {
       id: true, email: true, name: true, phone: true, role: true, avatarUrl: true, googleSub: true,
       address: true, latitude: true, longitude: true, createdAt: true, updatedAt: true,
-      locale: true, termsAcceptedAt: true, termsVersion: true,
+      locale: true, termsAcceptedAt: true, termsVersion: true, totpEnabledAt: true,
       // Every agreement version accepted, with time, method, truncated address and app version (2.11)
       agreementAcceptances: { select: { doc: true, version: true, acceptedAt: true, method: true, ip: true, userAgent: true, appVersion: true } },
       blocks: { select: { blockedId: true, createdAt: true } },
@@ -274,6 +280,7 @@ export async function deleteUserAccount(userId: number) {
         appleSub: null,
         referralCode: null,
         locale: null,
+        ...TWO_STEP_OFF,
         isActive: false,
         deletedAt: new Date(),
       },

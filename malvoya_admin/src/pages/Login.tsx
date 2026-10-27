@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lock, Mail } from 'lucide-react';
+import { isAxiosError } from 'axios';
 import api from '../utils/api';
 
 export default function Login() {
@@ -9,6 +10,20 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // Two-step sign-in (2.13): the challenge from the password step, exchanged with an authenticator code
+  const [mfaToken, setMfaToken] = useState('');
+  const [code, setCode] = useState('');
+
+  /** Signed in: admins who still need to set up two-step sign-in go straight to Security. */
+  const finish = async (accessToken: string) => {
+    localStorage.setItem('token', accessToken);
+    try {
+      const st = (await api.get('/me/mfa')).data;
+      navigate(st.required && !st.enabled ? '/security' : '/');
+    } catch {
+      navigate('/');
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -16,14 +31,39 @@ export default function Login() {
     setLoading(true);
     try {
       const res = await api.post('/auth/login', { email, password });
-      if (res.data.ok && res.data.user.role === 'ADMIN') {
-        localStorage.setItem('token', res.data.accessToken);
-        navigate('/');
+      if (res.data.ok && res.data.mfaRequired) {
+        setMfaToken(res.data.mfaToken);
+      } else if (res.data.ok && res.data.user.role === 'ADMIN') {
+        await finish(res.data.accessToken);
       } else {
         setError('Access denied. Only Admins can access this dashboard.');
       }
     } catch (err: any) {
       setError(err.response?.data?.error || 'Login failed. Check your credentials.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      const res = await api.post('/auth/login/mfa', { mfaToken, code });
+      if (res.data.user?.role !== 'ADMIN') {
+        setError('Access denied. Only Admins can access this dashboard.');
+        return;
+      }
+      if (typeof res.data.recoveryCodesLeft === 'number') {
+        window.alert(`You signed in with a recovery code. Codes left: ${res.data.recoveryCodesLeft}. Make new ones under Security if you are running low.`);
+      }
+      await finish(res.data.accessToken);
+    } catch (err) {
+      const r = isAxiosError(err) ? err.response : undefined;
+      // An expired challenge (5 minutes) starts over from the password
+      if (r?.status === 401) { setMfaToken(''); setCode(''); }
+      setError(r?.data?.error || 'Sign-in failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -62,7 +102,33 @@ export default function Login() {
             </div>
           )}
 
-          {/* Email/Password Form */}
+          {mfaToken ? (
+            <form onSubmit={handleCode} style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+              <p style={{ fontSize: '0.875rem', color: '#636366', textAlign: 'center', margin: 0 }}>
+                Enter the 6-digit code from your authenticator app, or one of your recovery codes.
+              </p>
+              <input
+                id="admin-code"
+                className="apple-input"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="123 456"
+                autoFocus
+                style={{ textAlign: 'center', letterSpacing: '0.3em', fontFamily: 'ui-monospace, Menlo, monospace' }}
+                value={code}
+                onChange={e => setCode(e.target.value)}
+                required
+              />
+              <button type="submit" className="apple-btn-primary" disabled={loading}
+                style={{ width: '100%', justifyContent: 'center', padding: '0.875rem', fontSize: '0.9375rem' }}>
+                {loading ? 'Checking...' : 'Verify'}
+              </button>
+              <button type="button" className="apple-btn-secondary" onClick={() => { setMfaToken(''); setCode(''); setError(''); }}
+                style={{ width: '100%', justifyContent: 'center' }}>
+                Back
+              </button>
+            </form>
+          ) : (
           <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
             <div style={{ position: 'relative' }}>
               <Mail style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', width: '16px', height: '16px', color: '#8E8E93' }} />
@@ -100,6 +166,7 @@ export default function Login() {
               {loading ? 'Signing in...' : 'Sign In'}
             </button>
           </form>
+          )}
 
           {/* Divider */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', margin: '1.5rem 0' }}>

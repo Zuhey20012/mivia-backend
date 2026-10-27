@@ -22,6 +22,10 @@ api.interceptors.response.use(
       localStorage.removeItem('token');
       window.location.hash = '#/login';
     }
+    // Two-step sign-in is required and not set up yet: only Security opens (2.13)
+    if (error.response?.status === 403 && error.response?.data?.code === 'MFA_SETUP_REQUIRED' && !window.location.hash.startsWith('#/security')) {
+      window.location.hash = '#/security';
+    }
     return Promise.reject(error);
   },
 );

@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, ShoppingBag, Users, Truck,
-  Store, CheckSquare, LogOut, Settings, Flag, Banknote, LifeBuoy, Activity, Ticket, BarChart3, FileText, ScrollText, FolderTree, BadgeCheck, ShieldAlert, Siren
+  Store, CheckSquare, LogOut, Settings, Flag, Banknote, LifeBuoy, Activity, Ticket, BarChart3, FileText, ScrollText, FolderTree, BadgeCheck, ShieldAlert, Siren, ShieldCheck
 } from 'lucide-react';
 
 const nav = [
@@ -23,6 +23,7 @@ const nav = [
   { to: '/legal',    icon: ScrollText,      label: 'Legal'      },
   { to: '/support',  icon: LifeBuoy,        label: 'Support'    },
   { to: '/system',   icon: Activity,        label: 'System'     },
+  { to: '/security', icon: ShieldCheck,     label: 'Security'   },
 ];
 
 export default function Sidebar() {
@@ -32,7 +33,7 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="w-60 min-h-screen bg-white border-r border-gray-100 flex flex-col py-6 px-3 fixed top-0 left-0 z-40">
+    <aside className="w-60 h-screen overflow-y-auto bg-white border-r border-gray-100 flex flex-col py-6 px-3 fixed top-0 left-0 z-40">
       {/* Logo */}
       <div className="flex items-center gap-3 px-3 mb-8">
         <div className="w-9 h-9 bg-black rounded-xl flex items-center justify-center text-white font-bold text-lg shadow">M</div>
