@@ -9,6 +9,7 @@ import {
 import moderationRoutes from "./moderation.routes";
 import promoRoutes from "../promos/promos.routes";
 import { getSystemStatus } from "./system";
+import { postConnectionCheck } from "./connectionCheck";
 import { launchDemand } from "../me/launchAlerts";
 import { getAnalytics } from "./analytics";
 import { adminDac7, adminDac7Csv, adminStoreStatement } from "../sellers/admin.sellers";
@@ -22,6 +23,7 @@ router.use(auth, requireRole("ADMIN"));
 
 router.get("/stats",                  getStats);
 router.get("/system",                 getSystemStatus);
+router.post("/system/check",          postConnectionCheck);
 router.get("/launch-demand",          launchDemand);
 router.get("/users",                  getUsers);
 router.delete("/users/:id",           banUser);

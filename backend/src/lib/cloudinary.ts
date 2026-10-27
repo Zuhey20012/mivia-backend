@@ -134,6 +134,16 @@ export function isOwnImageUrl(url: string, folderPrefix: string) {
 
 // ─── Admin API ──────────────────────────────────────────────────────────────
 
+/** Cloudinary's Admin API ping: true when the account name, key and secret are accepted. Null when not set up. */
+export async function pingCloudinary(): Promise<boolean | null> {
+  if (!mediaConfigured()) return null;
+  const res = await fetch(`${API_BASE}/v1_1/${cloudName}/ping`, { headers: { Authorization: adminAuthHeader() }, signal: AbortSignal.timeout(8_000) });
+  if (res.status === 401 || res.status === 403) throw Object.assign(new Error("Cloudinary refused the API key or secret"), { safe: true });
+  if (res.status === 404) throw Object.assign(new Error("No Cloudinary account with that cloud name"), { safe: true });
+  if (!res.ok) throw Object.assign(new Error(`Cloudinary answered ${res.status}`), { safe: true });
+  return true;
+}
+
 function adminAuthHeader() {
   return "Basic " + Buffer.from(`${apiKey}:${apiSecret}`).toString("base64");
 }

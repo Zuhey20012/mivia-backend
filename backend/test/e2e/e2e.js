@@ -1526,6 +1526,14 @@ function ean13(d12) {
   check("a store far away notifies nobody", (await call("PATCH", `/admin/vendors/${storeId}/approve`, null, adminToken)).body.launchAlertsSent === 0);
   const status = await call("GET", "/admin/system", null, adminToken);
   check("system status says what is switched on, without secrets", status.status === 200 && status.body.integrations?.payments?.mode === "test" && status.body.marketplace?.liveStores >= 2 && !JSON.stringify(status.body).includes("sk_test_123") && !JSON.stringify(status.body).includes("cld_test_secret"), status.body);
+  const conn = await call("POST", "/admin/system/check", null, adminToken);
+  const cc = conn.body?.checks ?? {};
+  check("connection test: Stripe accepts the key and reports test mode", conn.status === 200 && cc.payments?.ok === true && /test mode/.test(cc.payments.detail), cc.payments);
+  check("connection test: a Stripe webhook that does not point at this server is reported", cc.paymentWebhook?.ok === false && cc.paymentWebhook.detail.includes("/api/v1/payments/webhook"), cc.paymentWebhook);
+  check("connection test: Cloudinary accepts the account and key", cc.photosAndVideos?.ok === true, cc.photosAndVideos);
+  check("connection test: services that are not set up say so instead of failing", cc.email?.ok === null && cc.sms?.ok === null && cc.pushNotifications?.ok === null && cc.googleSignIn?.ok === null && /Not set up/.test(cc.email.detail), cc);
+  check("connection test never returns keys or secrets", !JSON.stringify(conn.body).includes("sk_test_123") && !JSON.stringify(conn.body).includes(CLD_SECRET) && !JSON.stringify(conn.body).includes(WHSEC));
+  check("only admins can run the connection test", (await call("POST", "/admin/system/check", null, vendor.accessToken)).status === 403 && (await call("POST", "/admin/system/check")).status === 401);
   check("system status lists the background jobs", status.body.backgroundJobs?.some((j) => j.name === "order-watchdog" && j.lastRunAt), status.body.backgroundJobs);
   check("system status is admin-only", (await call("GET", "/admin/system", null, otherCust.accessToken)).status === 403);
   check("leaving the waitlist works", (await call("DELETE", "/me/launch-alert", null, otherCust.accessToken)).status === 200 && (await call("GET", "/me/launch-alert", null, otherCust.accessToken)).body.alert === null);

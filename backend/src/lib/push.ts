@@ -1,4 +1,4 @@
-import { initializeApp, cert } from "firebase-admin/app";
+import { App, initializeApp, cert } from "firebase-admin/app";
 import { getMessaging as firebaseMessaging, Messaging } from "firebase-admin/messaging";
 import pino from "pino";
 import { env } from "../config/env";
@@ -14,6 +14,7 @@ const logger = pino({ name: "push" });
  * Only service messages are sent (order, delivery, payout) — never marketing.
  */
 let messaging: Messaging | null | undefined;
+let pushApp: App | null = null;
 
 function pushClient(): Messaging | null {
   if (messaging !== undefined) return messaging;
@@ -23,8 +24,8 @@ function pushClient(): Messaging | null {
     const raw = env.firebaseServiceAccount.trim().startsWith("{")
       ? env.firebaseServiceAccount
       : Buffer.from(env.firebaseServiceAccount, "base64").toString("utf8");
-    const app = initializeApp({ credential: cert(JSON.parse(raw)) }, "push");
-    messaging = firebaseMessaging(app);
+    pushApp = initializeApp({ credential: cert(JSON.parse(raw)) }, "push");
+    messaging = firebaseMessaging(pushApp);
   } catch (err: any) {
     logger.error({ err: err?.message }, "FIREBASE_SERVICE_ACCOUNT is invalid; push disabled");
   }
@@ -33,6 +34,13 @@ function pushClient(): Messaging | null {
 
 export function pushConfigured() {
   return !!pushClient();
+}
+
+/** Google issues an access token for the service account only if the key is real and enabled. Sends nothing. */
+export async function verifyPushCredentials(): Promise<boolean | null> {
+  if (!pushClient() || !pushApp) return env.firebaseServiceAccount ? false : null;
+  await pushApp.options.credential!.getAccessToken();
+  return true;
 }
 
 export type PushMessage = {

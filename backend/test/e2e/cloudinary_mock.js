@@ -18,6 +18,11 @@ http.createServer((req, res) => {
       return send(200, { ok: true });
     }
     if (req.url === "/__destroyed") return send(200, destroyed);
+    // Admin API ping (System → Test connections): basic auth with the test key and secret
+    if (/^\/v1_1\/[^/]+\/ping$/.test(req.url) && req.method === "GET") {
+      const ok = req.headers.authorization === "Basic " + Buffer.from(`123456789:${SECRET}`).toString("base64");
+      return ok ? send(200, { status: "ok" }) : send(401, { error: { message: "Invalid credentials" } });
+    }
     if (req.url === "/__uploads") return send(200, uploads);
     // Signed upload of a remote file: signature = sha1(sorted params without file/api_key/signature + secret)
     if (/^\/v1_1\/[^/]+\/image\/upload$/.test(req.url) && req.method === "POST") {

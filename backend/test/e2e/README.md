@@ -14,7 +14,7 @@ links, 428 enforcement, publishing with notice periods, the PRH/YTJ business che
 per-template publishing rules (422 with field-level FI/EN messages), unit prices per litre/kg and the under-50 ml/g
 exemption, removal of the eco claim, certificates and their admin verification, product reports, recalls with direct buyer
 notices and the public recalls page, the hygiene-seal return rules, import category mapping, collections, admin categories,
-payout onboarding before approval and the empty DELIVERY_SLOTS default (817 checks; one slot check only runs when a
+payout onboarding before approval, the empty DELIVERY_SLOTS default and the System connection test (823 checks; one slot check only runs when a
 today slot starts within the next hour or has passed, so the count can be one lower). The chat-purge and DAC7-reminder checks load
 `dist/modules/orders/chat.js` and `dist/modules/sellers/taxReminders.js` directly (same database); the referral instance
 on port 4556 runs with `NODE_ENV=production` and no SMTP, for the "password reset by email is not available" (503) check.

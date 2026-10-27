@@ -51,6 +51,14 @@ function getTransporter() {
   return transporter;
 }
 
+/** Logs in to the SMTP server and logs out again: no email is sent. Null when SMTP is not set up. */
+export async function verifyEmailConnection(): Promise<boolean | null> {
+  const transport = getTransporter();
+  if (!transport) return null;
+  await transport.verify();
+  return true;
+}
+
 /** Email can be sent: SMTP is set up, or (outside production) messages are logged instead of sent. */
 export function emailAvailable() {
   return !!getTransporter() || !env.isProduction;

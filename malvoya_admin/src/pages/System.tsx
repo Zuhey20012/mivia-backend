@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, XCircle, AlertTriangle, RefreshCw, MapPin } from 'lucide-react';
+import { CheckCircle2, XCircle, AlertTriangle, RefreshCw, MapPin, PlugZap, MinusCircle } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../utils/api';
 
 type Integration = { configured: boolean; mode?: 'live' | 'test' | 'off' };
+// Result of "Test connections": ok null = not set up, false = set up but failing
+type ConnectionCheck = { ok: boolean | null; detail: string };
 type Status = {
   version: string;
   region: string;
@@ -59,6 +61,7 @@ const LABELS: Record<string, string> = {
   pushNotifications: 'Push notifications',
   photosAndVideos: 'Photos and videos (Cloudinary)',
   googleSignIn: 'Google sign-in',
+  phoneSignIn: 'Phone sign-in (Firebase)',
 };
 const MARKET: Record<string, string> = {
   liveStores: 'Live stores', storesOpenNow: 'Open right now', pendingStores: 'Stores waiting for approval',
@@ -89,6 +92,23 @@ export default function System() {
   const [status, setStatus] = useState<Status | null>(null);
   const [demand, setDemand] = useState<Demand | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [checks, setChecks] = useState<Record<string, ConnectionCheck> | null>(null);
+  const [checkedAt, setCheckedAt] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  /** Logs in to each outside service for real; nothing is sent and no money moves. */
+  async function testConnections() {
+    setChecking(true);
+    try {
+      const r = await api.post('/admin/system/check');
+      setChecks(r.data.checks);
+      setCheckedAt(r.data.checkedAt);
+    } catch {
+      setError('The connection test did not finish. Try again in a moment.');
+    } finally {
+      setChecking(false);
+    }
+  }
 
   async function load() {
     try {
@@ -153,17 +173,44 @@ export default function System() {
 
           <div className="grid md:grid-cols-2 gap-6">
             <div className="apple-card">
-              <p className="font-semibold mb-3">Connections</p>
+              <div className="flex items-center justify-between mb-1">
+                <p className="font-semibold">Connections</p>
+                <button className="apple-btn-secondary text-xs px-3 py-1.5 flex items-center gap-1" onClick={testConnections} disabled={checking}>
+                  <PlugZap className={`w-3.5 h-3.5 ${checking ? 'animate-pulse' : ''}`} /> {checking ? 'Testing…' : 'Test connections'}
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 mb-3">
+                {checkedAt
+                  ? `Tested ${new Date(checkedAt).toLocaleString('fi-FI')}: each service was asked for real; nothing was sent and no money moved.`
+                  : 'Shows which settings exist. "Test connections" logs in to each service to prove the keys work (no email, SMS, push or payment is sent).'}
+              </p>
               <div className="space-y-2">
-                {Object.entries(status.integrations).map(([k, v]) => (
-                  <div key={k} className="flex items-center justify-between text-sm">
-                    <span>{LABELS[k] ?? k}</span>
-                    <span className="flex items-center gap-1">
-                      {v.configured ? <CheckCircle2 className="w-4 h-4 text-green-600" /> : <XCircle className="w-4 h-4 text-gray-300" />}
-                      {v.mode ? <span className={v.mode === 'live' ? 'text-green-600 font-medium' : 'text-amber-600 font-medium'}>{v.mode}</span> : (v.configured ? 'on' : 'off')}
-                    </span>
-                  </div>
-                ))}
+                {[...Object.keys(status.integrations), ...(checks ? Object.keys(checks).filter(k => !(k in status.integrations)) : [])].map(k => {
+                  const v = status.integrations[k];
+                  const c = checks?.[k];
+                  return (
+                    <div key={k} className="text-sm">
+                      <div className="flex items-center justify-between">
+                        <span>{LABELS[k] ?? k}</span>
+                        <span className="flex items-center gap-1">
+                          {c
+                            ? c.ok === true
+                              ? <><CheckCircle2 className="w-4 h-4 text-green-600" /><span className="text-green-600 font-medium">works</span></>
+                              : c.ok === false
+                                ? <><XCircle className="w-4 h-4 text-red-500" /><span className="text-red-500 font-medium">failed</span></>
+                                : <><MinusCircle className="w-4 h-4 text-gray-300" /><span className="text-gray-400">not set up</span></>
+                            : v
+                              ? <>
+                                  {v.configured ? <CheckCircle2 className="w-4 h-4 text-green-600" /> : <XCircle className="w-4 h-4 text-gray-300" />}
+                                  {v.mode ? <span className={v.mode === 'live' ? 'text-green-600 font-medium' : 'text-amber-600 font-medium'}>{v.mode}</span> : (v.configured ? 'on' : 'off')}
+                                </>
+                              : null}
+                        </span>
+                      </div>
+                      {c && <p className={`text-xs mt-0.5 ${c.ok === false ? 'text-red-500' : 'text-gray-500'}`}>{c.detail}</p>}
+                    </div>
+                  );
+                })}
               </div>
             </div>
             <div className="apple-card">
