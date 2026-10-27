@@ -75,10 +75,12 @@ abstract final class SignInSetup {
   /// "Sign in with Google" can be offered. On iOS it needs the iOS OAuth client ID (Info.plist
   /// `GIDClientID`, or `CLIENT_ID` from `GoogleService-Info.plist`) and its reversed form as a URL
   /// scheme; without them the Google SDK stops the app.
+  /// App Store guideline 4.8: on iPhone, Google is offered only together with Sign in with Apple, so a build
+  /// that has the Google settings but no Firebase (no Apple sign-in) shows neither.
   static bool get google {
     if (!isIOS) return true;
     final client = googleIosClientId;
-    return client != null && _hasScheme(reversedClientId(client));
+    return apple && client != null && _hasScheme(reversedClientId(client));
   }
 
   /// The iOS OAuth client ID to pass to `GoogleSignIn(clientId:)` (null on Android).
