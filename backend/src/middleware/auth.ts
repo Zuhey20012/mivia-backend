@@ -22,7 +22,8 @@ function readBearer(req: Request): string | null {
  * password reset has ended (User.tokensValidAfter), and the stored language. Read from the database at most every
  * 30 seconds per user and instance, so a reset or ban reaches every instance within 30 s (at once on this one).
  */
-type SessionState = { active: boolean; validAfterSec: number; locale: string | null; at: number };
+// twoStep: two-step sign-in is on, so only sessions that passed it (mfa claim) count
+type SessionState = { active: boolean; validAfterSec: number; locale: string | null; twoStep: boolean; at: number };
 const STATE_TTL_MS = 30_000;
 const MAX_STATES = 20_000;
 const states = new Map<number, SessionState>();
@@ -31,11 +32,12 @@ async function sessionState(userId: number): Promise<SessionState | null> {
   const hit = states.get(userId);
   if (hit && Date.now() - hit.at < STATE_TTL_MS) return hit;
   try {
-    const u = await prisma.user.findUnique({ where: { id: userId }, select: { isActive: true, tokensValidAfter: true, locale: true } });
+    const u = await prisma.user.findUnique({ where: { id: userId }, select: { isActive: true, tokensValidAfter: true, locale: true, totpEnabledAt: true } });
     const state: SessionState = {
       active: !!u?.isActive,
       validAfterSec: u?.tokensValidAfter ? Math.floor(u.tokensValidAfter.getTime() / 1000) : 0,
       locale: u?.locale ?? null,
+      twoStep: !!u?.totpEnabledAt,
       at: Date.now(),
     };
     if (states.size >= MAX_STATES) states.delete(states.keys().next().value!);
@@ -92,7 +94,10 @@ async function authenticate(req: Request): Promise<{ user: NonNullable<AuthReque
   }
   const state = await sessionState(payload.id);
   if (state) {
-    if (!state.active || payload.iat < state.validAfterSec) return { error: "Your session has ended. Please sign in again." };
+    // A token from before two-step sign-in was turned on lacks the mfa claim: ended too, even if issued in the same second
+    if (!state.active || payload.iat < state.validAfterSec || (state.twoStep && !payload.mfa)) {
+      return { error: "Your session has ended. Please sign in again." };
+    }
     rememberLocale(req, payload.id, state);
   }
   const user = { id: payload.id, role: payload.role as Role, email: payload.email, mfa: payload.mfa };

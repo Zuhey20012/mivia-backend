@@ -328,6 +328,7 @@ mfaMeRoutes.post("/me/mfa/disable", authLimiter, auth, async (req: AuthRequest, 
     await requirePassword(u, body.data.password);
     await checkCode(u, body.data.code, true);
     await prisma.user.update({ where: { id: u.id }, data: TWO_STEP_OFF });
+    forgetSessionState(u.id); // sessions without the mfa claim count again at once
     await audit(u.id, "mfa.disable");
     void notify(u, "disabled");
     res.json({ ok: true, enabled: false, required: env.adminMfaRequired });
