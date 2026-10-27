@@ -8,7 +8,7 @@ import '../core/strings.dart';
 
 /// Help for sellers: straight answers, the seller terms, and a way to reach the Malvoya team.
 class ChatbotScreen extends StatefulWidget {
-  /// The store's commission (fraction of the item price); null = default 10 %.
+  /// The store's commission (fraction of the item price); null or 0 = no commission (the case for every store).
   final num? commissionRate;
   const ChatbotScreen({super.key, this.commissionRate});
 
@@ -73,8 +73,11 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
       (tr(context, 'When am I paid?', 'Milloin saan rahat?'),
           tr(context, '15 days after delivery, when the 14-day return window has passed, to your Stripe account (Store → Payouts). Stripe then pays it into your bank account.', '15 päivää toimituksen jälkeen, kun 14 päivän palautusaika on päättynyt, Stripe-tilillesi (Kauppa → Tilitykset). Stripe maksaa sen sitten pankkitilillesi.')),
       (tr(context, 'What does Malvoya charge?', 'Mitä Malvoya veloittaa?'),
-          tr(context, 'A commission of $commission of the item price on each delivered sale; the delivery fee and tips are not part of it. There is no monthly fee. If an item is refunded before you are paid, your payout is reduced and the commission on it is not charged.',
-              'Provision, $commission tuotteiden hinnasta, jokaisesta toimitetusta myynnistä; toimitusmaksu ja tipit eivät kuulu siihen. Kuukausimaksua ei ole. Jos tuote hyvitetään ennen tilitystä, tilitys pienenee eikä siitä veloiteta provisiota.')),
+          hasCommission(widget.commissionRate)
+              ? tr(context, 'A commission of $commission of the item price on each delivered sale; the delivery fee and tips are not part of it. There is no monthly fee. If an item is refunded before you are paid, your payout is reduced and the commission on it is not charged.',
+                  'Provision, $commission tuotteiden hinnasta, jokaisesta toimitetusta myynnistä; toimitusmaksu ja tipit eivät kuulu siihen. Kuukausimaksua ei ole. Jos tuote hyvitetään ennen tilitystä, tilitys pienenee eikä siitä veloiteta provisiota.')
+              : tr(context, 'Nothing. There is no commission and no monthly fee: you receive the full item price of each delivered sale. Customers pay the delivery fee to Malvoya. If an item is refunded before you are paid, your payout is reduced by it.',
+                  'Ei mitään. Provisiota tai kuukausimaksua ei ole: saat jokaisesta toimitetusta myynnistä tuotteiden koko hinnan. Asiakkaat maksavat toimitusmaksun Malvoyalle. Jos tuote hyvitetään ennen tilitystä, tilitys pienenee sen verran.')),
       (tr(context, 'How many shoppers does Malvoya have?', 'Kuinka paljon Malvoyalla on asiakkaita?'),
           tr(context, 'Malvoya is just starting in Finland and has very few shoppers and couriers so far. We cannot promise a number of orders yet. We will tell you honestly how it grows.',
               'Malvoya on vasta aloittamassa Suomessa, ja asiakkaita ja kuriireja on toistaiseksi hyvin vähän. Emme voi vielä luvata tiettyä määrää tilauksia. Kerromme rehellisesti, miten palvelu kasvaa.')),

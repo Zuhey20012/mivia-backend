@@ -71,7 +71,11 @@ export default function Vendors() {
     }
     const old = Math.round(v.commissionRate * 100);
     if (pct === old) { setEditing(null); return; }
-    if (!confirm(`Change the commission of "${v.name}" from ${old} % to ${pct} %?\n\nIt applies to new orders only; existing orders keep their commission.`)) return;
+    // The seller terms promise no commission (2.13): charging one needs new terms published on Legal first
+    const termsNote = old === 0 && pct > 0
+      ? '\n\nThe seller terms say Malvoya takes no commission. Publish updated seller terms on Legal (at least 15 days\' notice) before charging one.'
+      : '';
+    if (!confirm(`Change the commission of "${v.name}" from ${old} % to ${pct} %?\n\nIt applies to new orders only; existing orders keep their commission.${termsNote}`)) return;
     setActionId(v.id);
     try {
       await api.patch(`/admin/vendors/${v.id}/commission`, { commissionRate: pct / 100 });

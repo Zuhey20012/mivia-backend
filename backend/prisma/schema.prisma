@@ -255,7 +255,7 @@ model Store {
   email     String?
 
   // Business settings
-  commissionRate Float      @default(0.10) // platform commission (fraction of item subtotal)
+  commissionRate Float      @default(0) // platform commission (fraction of item subtotal); none since 2.13.0 (0 for every store)
   sellerType     SellerType @default(BUSINESS)
   businessId     String? // Y-tunnus for business sellers (checked during review)
   prepMinutes    Int        @default(10) // time to get an order ready for pickup, used for ETAs

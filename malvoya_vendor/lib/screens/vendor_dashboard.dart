@@ -1983,7 +1983,9 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
           decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppTheme.divider)),
           child: Column(children: [
             tile(Icons.account_balance_outlined, tr(context, 'Payouts', 'Tilitykset'),
-                tr(context, 'Through Stripe · commission ${commissionText(_store?['commissionRate'] as num?)}', 'Stripen kautta · provisio ${commissionText(_store?['commissionRate'] as num?)}'),
+                hasCommission(_store?['commissionRate'] as num?)
+                    ? tr(context, 'Through Stripe · commission ${commissionText(_store?['commissionRate'] as num?)}', 'Stripen kautta · provisio ${commissionText(_store?['commissionRate'] as num?)}')
+                    : tr(context, 'Through Stripe · no commission', 'Stripen kautta · ei provisiota'),
                 () => Navigator.push(context, MaterialPageRoute(builder: (_) => PayoutsScreen(commissionRate: _store?['commissionRate'] as num?)))),
             const Divider(height: 1),
             tile(
@@ -1997,7 +1999,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             ),
             const Divider(height: 1),
             tile(Icons.calendar_month_outlined, tr(context, 'Monthly statements', 'Kuukausiraportit'),
-                tr(context, 'Sales, commission, refunds and payouts per month', 'Myynti, provisio, hyvitykset ja tilitykset kuukausittain'),
+                tr(context, 'Sales, refunds and payouts per month', 'Myynti, hyvitykset ja tilitykset kuukausittain'),
                 () => Navigator.push(context, MaterialPageRoute(builder: (_) => const StatementsScreen()))),
             const Divider(height: 1),
             tile(

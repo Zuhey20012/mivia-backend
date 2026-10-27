@@ -1086,6 +1086,7 @@ export async function createRental(userId: number, input: {
 
   let totalSubCents = 0;
   let totalDepositCents = 0;
+  let totalCommissionCents = 0;
   const itemsData: Prisma.RentalItemCreateManyRentalInput[] = [];
 
   for (const item of input.items) {
@@ -1104,12 +1105,14 @@ export async function createRental(userId: number, input: {
     if (conflict) throw new OrderError(`${product.name} is already rented for those dates`, 409);
 
     const pricing = calcRentalPricing(product.rentalDayCents, item.quantity, days, product.depositCents);
+    // Each item at its own store's commission rate (0 for every store since 2.13.0)
+    totalCommissionCents += pricing.subtotalCents * product.store.commissionRate;
     totalSubCents     += pricing.subtotalCents;
     totalDepositCents += pricing.depositCents;
     itemsData.push({ productId: item.productId, variantId: item.variantId, quantity: item.quantity, dailyCents: product.rentalDayCents });
   }
 
-  const commissionCents  = Math.round(totalSubCents * 0.10);
+  const commissionCents  = Math.round(totalCommissionCents);
   const deliveryFeeCents = env.deliveryFeeCents;
   const totalCents       = totalSubCents + totalDepositCents + deliveryFeeCents;
 

@@ -797,7 +797,7 @@ function ean13(d12) {
   console.log("\n— Tips and app updates");
   const tipped = await call("POST", "/orders", { ...orderBody, tipCents: 200 }, otherCust.accessToken);
   const to = tipped.body.order;
-  check("a tip is added to the total and paid to the courier in full", tipped.status === 201 && to.tipCents === 200 && to.totalCents === 5000 + to.deliveryFeeCents + 200 && to.courierFeeCents === 650 + 200 && sql(`select ("courierPay"->>'tipCents')::int from "Order" where id=${to?.id}`) === "200" && to.commissionCents === 500 && !("courierPay" in to), to);
+  check("a tip is added to the total and paid to the courier in full", tipped.status === 201 && to.tipCents === 200 && to.totalCents === 5000 + to.deliveryFeeCents + 200 && to.courierFeeCents === 650 + 200 && sql(`select ("courierPay"->>'tipCents')::int from "Order" where id=${to?.id}`) === "200" && to.commissionCents === 0 && !("courierPay" in to), to);
   check("tips are capped at 20 €", (await call("POST", "/orders", { ...orderBody, tipCents: 5000 }, otherCust.accessToken)).status === 400);
   const cfg = await call("GET", "/app-config?app=customer&build=5");
   check("apps learn whether their build is still supported", cfg.status === 200 && cfg.body.updateRequired === false && cfg.body.maintenance?.active === false && cfg.body.storeUrl.includes("com.malvoya.customer"), cfg.body);
@@ -851,7 +851,7 @@ function ean13(d12) {
   const oTen = await order({ ...quoteBody, promoCode: `TEN-${uniq}` }, pirjo.accessToken);
   const ot = oTen.body.order;
   check("an order with a code charges the quoted price", oTen.status === 201 && sameMoney(qTen, ot) && ot.promoCodeId === ten.body.promoCode.id && ot.promoCode?.code === `TEN-${uniq}`, oTen.body);
-  check("Malvoya pays the discount: store and courier pay are not reduced", ot?.commissionCents === 500 && ot?.sellerPayoutCents === 4500 && ot?.courierFeeCents === 650 + 150, ot);
+  check("Malvoya pays the discount: store and courier pay are not reduced", ot?.commissionCents === 0 && ot?.sellerPayoutCents === 5000 && ot?.courierFeeCents === 650 + 150, ot);
   check("an unpaid order does not use the code up", sql(`select count(*) from "PromoRedemption" where "promoCodeId"=${ten.body.promoCode.id}`) === "0");
   check("an unknown code is reported, the quote still works", (await quote({ ...quoteBody, promoCode: "NOPE-NOPE" }, pirjo.accessToken)).body.quote?.promoError?.includes("not valid"));
 
@@ -930,7 +930,7 @@ function ean13(d12) {
   check("a delivery order still needs an address", (await call("POST", "/orders", { storeId, items: [{ productId, quantity: 1 }] }, otherCust.accessToken)).status === 400);
   const poRes = await call("POST", "/orders", { ...pickupBody, notes: "I'll come at five" }, otherCust.accessToken);
   const po = poRes.body.order;
-  check("pickup order without an address: no delivery fee, no courier pay, same commission", poRes.status === 201 && po.fulfilment === "PICKUP" && po.deliveryFeeCents === 0 && po.courierFeeCents === 0 && po.deliveryAddress === null && po.totalCents === 5000 && po.commissionCents === 500 && sql(`select "courierPay" is null from "Order" where id=${po.id}`) === "t", poRes.body);
+  check("pickup order without an address: no delivery fee, no courier pay, no commission", poRes.status === 201 && po.fulfilment === "PICKUP" && po.deliveryFeeCents === 0 && po.courierFeeCents === 0 && po.deliveryAddress === null && po.totalCents === 5000 && po.commissionCents === 0 && sql(`select "courierPay" is null from "Order" where id=${po.id}`) === "t", poRes.body);
   check("no pickup code before payment", !po.pickupCode && sql(`select "pickupCode" is null from "Order" where id=${po.id}`) === "t");
   await payNow(po);
   check("payment creates a 6-digit pickup code", sql(`select "pickupCode" ~ '^[0-9]{6}$' from "Order" where id=${po.id}`) === "t");
@@ -964,7 +964,7 @@ function ean13(d12) {
   const collected = await call("POST", `/orders/${po.id}/collect`, { code: ` ${pkCode} ` }, vendor.accessToken);
   check("the right code hands the order over: DELIVERED, handover PICKUP, withdrawal period starts", collected.status === 200 && collected.body.order?.status === "DELIVERED" && collected.body.order.handoverMethod === "PICKUP" && !!collected.body.order.deliveredAt && !("pickupCode" in collected.body.order), collected.body);
   await sleep(700);
-  check("collection schedules the store payout after the return window; no courier payout", sql(`select status || '|' || "amountCents" || '|' || ("releaseAt" > now() + interval '14 days') from "Payout" where "orderId"=${po.id} and party='STORE'`) === "SCHEDULED|4500|true" && sql(`select count(*) from "Payout" where "orderId"=${po.id} and party='COURIER'`) === "0");
+  check("collection schedules the store payout after the return window; no courier payout", sql(`select status || '|' || "amountCents" || '|' || ("releaseAt" > now() + interval '14 days') from "Payout" where "orderId"=${po.id} and party='STORE'`) === "SCHEDULED|5000|true" && sql(`select count(*) from "Payout" where "orderId"=${po.id} and party='COURIER'`) === "0");
   check("after collection the customer no longer gets the code", (await call("GET", `/orders/${po.id}`, null, otherCust.accessToken)).body.order?.pickupCode === null);
   check("a collected order cannot be collected again", (await call("POST", `/orders/${po.id}/collect`, { code: pkCode }, vendor.accessToken)).status === 409);
 
@@ -1390,7 +1390,7 @@ function ean13(d12) {
   const qF = (await quote({ ...quoteBody, tipCents: 0 }, otherCust.accessToken, FEE_API)).body.quote;
   check("service fee (5 %) and small-order fee are added below the threshold", qF?.serviceFeeCents === 250 && qF.smallOrderFeeCents === 150 && qF.smallOrderThresholdCents === 6000 && qF.totalCents === 5000 + fee + 250 + 150, qF);
   const oF = await order({ ...quoteBody, tipCents: 0 }, otherCust.accessToken, FEE_API);
-  check("the order with fees charges exactly the quoted price; fees are Malvoya's, not the store's", oF.status === 201 && sameMoney(qF, oF.body.order) && oF.body.order.commissionCents === 500 && oF.body.order.sellerPayoutCents === 4500, oF.body);
+  check("the order with fees charges exactly the quoted price; fees are Malvoya's, not the store's", oF.status === 201 && sameMoney(qF, oF.body.order) && oF.body.order.commissionCents === 0 && oF.body.order.sellerPayoutCents === 5000, oF.body);
   check("fee_share mode still works: the courier gets the delivery fee (plus tip), with a breakdown", oF.body.order?.courierFeeCents === fee && sql(`select ("courierPay"->>'mode') || '|' || ("courierPay"->>'baseCents') from "Order" where id=${oF.body.order?.id}`) === `fee_share|${fee}`, oF.body.order);
   const qF2 = (await quote({ ...quoteBody, tipCents: 0, items: [{ productId, quantity: 2 }] }, otherCust.accessToken, FEE_API)).body.quote;
   check("service fee is capped at its maximum; no small-order fee above the threshold", qF2?.serviceFeeCents === 300 && qF2.smallOrderFeeCents === 0, qF2);
@@ -1431,12 +1431,21 @@ function ean13(d12) {
   check("unknown store is 404", (await call("PATCH", "/admin/vendors/999999/commission", { commissionRate: 0.1 }, adminToken)).status === 404);
   const oldCommission = sql(`select "commissionCents" from "Order" where id=${o0.body.order.id}`);
   const rateRes = await setRate(0.15);
-  check("admin sets a store's commission to 15 %; the change is logged with who and the old value", rateRes.status === 200 && rateRes.body.store?.commissionRate === 0.15 && rateRes.body.change?.adminId === adminUser.user.id && rateRes.body.change?.oldValue?.commissionRate === 0.1 && rateRes.body.change?.newValue?.commissionRate === 0.15, rateRes.body);
+  check("admin sets a store's commission to 15 %; the change is logged with who and the old value", rateRes.status === 200 && rateRes.body.store?.commissionRate === 0.15 && rateRes.body.change?.adminId === adminUser.user.id && rateRes.body.change?.oldValue?.commissionRate === 0 && rateRes.body.change?.newValue?.commissionRate === 0.15, rateRes.body);
   const listedRate = (await call("GET", "/admin/vendors", null, adminToken)).body.stores?.find((s) => s.id === storeId)?.commissionRate;
   const hist = await call("GET", `/admin/vendors/${storeId}/commission-history`, null, adminToken);
   check("the vendor list shows the rate; the history names the admin", listedRate === 0.15 && hist.body.history?.[0]?.admin?.email === `admin${uniq}@example.fi`, [listedRate, hist.body]);
   const newRateOrder = (await order({ ...quoteBody, tipCents: 0 }, otherCust.accessToken)).body.order;
-  check("new orders use the new rate; existing orders keep theirs", newRateOrder?.commissionCents === 750 && newRateOrder.sellerPayoutCents === 4250 && sql(`select "commissionCents" from "Order" where id=${o0.body.order.id}`) === oldCommission && oldCommission === "500", [newRateOrder, oldCommission]);
+  check("new orders use the new rate; existing orders keep theirs", newRateOrder?.commissionCents === 750 && newRateOrder.sellerPayoutCents === 4250 && sql(`select "commissionCents" from "Order" where id=${o0.body.order.id}`) === oldCommission && oldCommission === "0", [newRateOrder, oldCommission]);
+  // Rentals take each store's own rate (2.13; was a fixed 10 %)
+  sql(`update "Product" set "canBeRented"=true, "rentalDayCents"=1000, "depositCents"=5000 where id=${productId}`);
+  const rentStart = new Date(Date.now() + 2 * 864e5), rentEnd = new Date(Date.now() + 5 * 864e5);
+  const rental = await call("POST", "/rentals", { startDate: rentStart.toISOString(), endDate: rentEnd.toISOString(), deliveryAddress: "Aleksanterinkatu 5, Helsinki", items: [{ productId, quantity: 1 }] }, otherCust.accessToken);
+  check("a rental's commission uses the store's rate (15 % of 3 days × 10 €)", rental.status === 201 && rental.body.rental?.subtotalCents === 3000 && rental.body.rental.commissionCents === 450, rental.body);
+  sql(`update "Product" set "canBeRented"=false where id=${productId}`);
+  check("Malvoya takes no commission: new stores start at 0 %", sql(`select column_default from information_schema.columns where table_name='Store' and column_name='commissionRate'`) === "0");
+  // Back to 10 % for the rest of the run, so the commission maths (statements, DAC7, refunds, referrals) stays covered
+  // for any store that is ever given a rate again
   await setRate(0.1);
 
   console.log("\n— Referrals (off by default; on in a second API instance)");

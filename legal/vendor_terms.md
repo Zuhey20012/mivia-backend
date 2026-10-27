@@ -71,9 +71,9 @@ Business sellers must honour the customer's 14-day right of withdrawal and defec
 
 ## 6. Fees and payouts
 
-- Commission: [X] % of the item price (excluding the delivery fee), unless agreed otherwise in writing.
-- Payouts are made through Stripe Connect to the Seller's own Stripe account, 15 days after delivery (after the 14-day return window), with refunds and commission deducted. Stripe verifies the Seller's identity and bank account on its own pages.
-- Malvoya provides a monthly statement in the store app listing each order delivered or collected in the month with its sales, refunds, commission and payout, and the month's totals (it can be printed). The statement is a summary for the Seller's records, not a VAT invoice. Discounts from Malvoya's promo and invite codes are paid by Malvoya and do not reduce the Seller's sales or payout.
+- Commission: none. Malvoya charges the Seller no commission and no monthly fee; the Seller receives the full item price of each sale. Malvoya's income is the fees customers pay (such as the delivery fee). If Malvoya ever wants to charge Sellers, it will announce the change at least 15 days in advance, and the Seller may end this agreement before it takes effect.
+- Payouts are made through Stripe Connect to the Seller's own Stripe account, 15 days after delivery (after the 14-day return window), with refunds deducted. Stripe verifies the Seller's identity and bank account on its own pages.
+- Malvoya provides a monthly statement in the store app listing each order delivered or collected in the month with its sales, refunds and payout (and commission, for orders placed before commission ended), and the month's totals (it can be printed). The statement is a summary for the Seller's records, not a VAT invoice. Discounts from Malvoya's promo and invite codes are paid by Malvoya and do not reduce the Seller's sales or payout.
 
 ## 6a. Drops, photos and videos
 

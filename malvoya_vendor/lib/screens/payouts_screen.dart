@@ -12,7 +12,7 @@ import '../widgets/error_banner.dart';
 /// Payouts through Stripe. Stripe collects identity and bank details on its own pages, so
 /// none of it passes through this app.
 class PayoutsScreen extends StatefulWidget {
-  /// The store's commission (fraction of the item price) from /stores/my; null = default 10 %.
+  /// The store's commission (fraction of the item price) from /stores/my; null or 0 = none (every store today).
   final num? commissionRate;
   const PayoutsScreen({super.key, this.commissionRate});
 
@@ -124,8 +124,8 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
                             Text(
                               tr(
                                   context,
-                                  'Malvoya sends each sale to your Stripe account 15 days after delivery, when the 14-day return window has passed, and Stripe pays it into your bank account. Malvoya keeps a commission of ${commissionText(widget.commissionRate)} of the item price (not of the delivery fee); refunds are deducted. Stripe checks your identity (EU anti-money-laundering rules).',
-                                  'Malvoya siirtää jokaisen myynnin Stripe-tilillesi 15 päivää toimituksen jälkeen, kun 14 päivän palautusaika on päättynyt, ja Stripe maksaa sen pankkitilillesi. Malvoya pidättää provisiona ${commissionText(widget.commissionRate)} tuotteiden hinnasta (ei toimitusmaksusta); hyvitykset vähennetään. Stripe tarkistaa henkilöllisyytesi (EU:n rahanpesulainsäädäntö).'),
+                                  'Malvoya sends each sale to your Stripe account 15 days after delivery, when the 14-day return window has passed, and Stripe pays it into your bank account. ${hasCommission(widget.commissionRate) ? 'Malvoya keeps a commission of ${commissionText(widget.commissionRate)} of the item price (not of the delivery fee); refunds are deducted.' : 'Malvoya takes no commission: you receive the full item price; refunds are deducted.'} Stripe checks your identity (EU anti-money-laundering rules).',
+                                  'Malvoya siirtää jokaisen myynnin Stripe-tilillesi 15 päivää toimituksen jälkeen, kun 14 päivän palautusaika on päättynyt, ja Stripe maksaa sen pankkitilillesi. ${hasCommission(widget.commissionRate) ? 'Malvoya pidättää provisiona ${commissionText(widget.commissionRate)} tuotteiden hinnasta (ei toimitusmaksusta); hyvitykset vähennetään.' : 'Malvoya ei peri provisiota: saat tuotteiden koko hinnan; hyvitykset vähennetään.'} Stripe tarkistaa henkilöllisyytesi (EU:n rahanpesulainsäädäntö).'),
                               style: const TextStyle(color: AppTheme.textSecondary, fontSize: MTextSize.label, height: 1.4),
                             ),
                             if (!enabled && (asInt(_status?['requirementsDue']) ?? 0) > 0)

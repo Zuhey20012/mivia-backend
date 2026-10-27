@@ -158,7 +158,9 @@ class _StatementsScreenState extends State<StatementsScreen> {
         child: Column(children: [
           _line(tr(context, 'Sales', 'Myynti'), euro(context, totals['salesCents'])),
           _line(tr(context, 'Refunds (returned goods)', 'Hyvitykset (palautetut tuotteet)'), '−${euro(context, totals['refundsCents'])}'),
-          _line(tr(context, 'Malvoya commission', 'Malvoyan provisio'), '−${euro(context, totals['commissionCents'])}'),
+          // Shown only when there is any (Malvoya takes none since 2.13; older orders may still carry some)
+          if ((asInt(totals['commissionCents']) ?? 0) > 0)
+            _line(tr(context, 'Malvoya commission', 'Malvoyan provisio'), '−${euro(context, totals['commissionCents'])}'),
           const Divider(height: 20),
           _line(tr(context, 'Payouts', 'Tilitykset'), euro(context, sent + pending), bold: true),
           _line(tr(context, '· sent to Stripe', '· siirretty Stripeen'), euro(context, sent)),
@@ -245,7 +247,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
               [
                 '${tr(context, 'Sales', 'Myynti')} ${euro(context, o['itemsCents'])}',
                 if (refunds > 0) '${tr(context, 'refunds', 'hyvitykset')} −${euro(context, refunds)}',
-                '${tr(context, 'commission', 'provisio')} −${euro(context, o['commissionCents'])}',
+                if ((asInt(o['commissionCents']) ?? 0) > 0) '${tr(context, 'commission', 'provisio')} −${euro(context, o['commissionCents'])}',
               ].join(' · '),
               style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary),
             ),

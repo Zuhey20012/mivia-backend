@@ -65,8 +65,10 @@ export default function Settings() {
             </div>
           </div>
           <p className="text-sm text-gray-600">
-            Commission is set per store. Change it on <Link to="/vendors" className="text-blue-600 hover:underline">Vendors</Link>;
-            a change applies to new orders only (each order keeps the rate it was placed with) and is recorded in the store's commission history.
+            Every store starts at 0 %: stores keep 100 % of their item sales (paid out through Stripe 15 days after delivery,
+            less refunds). When you want to charge one, set its rate on <Link to="/vendors" className="text-blue-600 hover:underline">Vendors</Link>.
+            A rate applies to new orders only, is recorded in the store's commission history, and needs the seller terms
+            updated on Legal at least 15 days before (they say there is no commission).
           </p>
         </div>
 
