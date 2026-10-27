@@ -43,6 +43,7 @@ import { integrationStatus } from "./modules/admin/system";
 import payoutsRoutes  from "./modules/payouts/payouts.routes";
 import legalRoutes    from "./modules/legal/legal.routes";
 import { ensureLegalVersions } from "./modules/legal/legalDocs";
+import { bootstrapAdmin } from "./lib/bootstrapAdmin";
 import { catalogRoutes, initCatalog } from "./modules/catalog/routes";
 import { recallPageRoutes } from "./modules/catalog/recalls";
 import supportRoutes  from "./modules/support/support.routes";
@@ -142,6 +143,8 @@ server.listen(env.port, () => {
   ensureLegalVersions().catch((e) => logger.error({ err: e?.message }, "Legal versions not recorded"));
   // Category tree (seeded from catalog/taxonomy.ts) and the one-off mapping of products made before 2.12.0
   initCatalog().catch((e) => logger.error({ err: e?.message }, "Categories not seeded"));
+  // First admin (or a password reset) from SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD when Render's Shell is not usable
+  bootstrapAdmin().catch((e) => logger.error({ err: e?.message }, "Admin bootstrap failed"));
 });
 
 // Zero-downtime deploys: stop taking new work, let in-flight requests finish, close sockets, queue, Redis and DB.

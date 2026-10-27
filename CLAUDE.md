@@ -35,6 +35,8 @@ npx prisma generate
 npx prisma migrate dev --name <change>
 npx prisma migrate deploy
 SEED_ADMIN_EMAIL=… SEED_ADMIN_PASSWORD=… npx prisma db seed   # creates the first admin; nothing is hardcoded
+# Without a shell (e.g. Render's Shell will not connect): set the same two env vars on the service and restart;
+# lib/bootstrapAdmin.ts creates or resets that admin at start-up (no-op while the password matches). Remove them afterwards.
 docker compose up db         # local Postgres 16 (backend/docker-compose.yml; the root compose file includes it)
 ```
 The backend **refuses to start** without `JWT_SECRET` and `JWT_REFRESH_SECRET`: each needs ≥32 characters and they must differ. In production it also refuses `ALLOWED_ORIGINS=*`. All env vars are listed in `backend/.env.example`.
