@@ -15,7 +15,7 @@ per-template publishing rules (422 with field-level FI/EN messages), unit prices
 exemption, removal of the eco claim, certificates and their admin verification, product reports, recalls with direct buyer
 notices and the public recalls page, the hygiene-seal return rules, import category mapping, collections, admin categories,
 payout onboarding before approval, the empty DELIVERY_SLOTS default and the System connection test, and (2.13) admin two-step
-sign-in: set-up, encrypted secret, one-time codes and recovery codes, lockout, and the `ADMIN_MFA_REQUIRED` gate on the second instance (859 checks; one slot check only runs when a
+sign-in: set-up, encrypted secret, one-time codes and recovery codes, lockout, the `ADMIN_MFA_REQUIRED` gate on the second instance and security.txt (861 checks; one slot check only runs when a
 today slot starts within the next hour or has passed, so the count can be one lower). The chat-purge and DAC7-reminder checks load
 `dist/modules/orders/chat.js` and `dist/modules/sellers/taxReminders.js` directly (same database); the referral instance
 on port 4556 runs with `NODE_ENV=production` and no SMTP, for the "password reset by email is not available" (503) check.

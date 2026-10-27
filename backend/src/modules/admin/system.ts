@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { prisma } from "../../lib/prisma";
+import { securityContacts } from "../ops/ops.routes";
 import { env } from "../../config/env";
 import { mediaConfigured } from "../../lib/cloudinary";
 import { pushConfigured } from "../../lib/push";
@@ -160,6 +161,7 @@ export async function getSystemStatus(_req: Request, res: Response) {
     if (pendingCerts) attention.push(`${pendingCerts} certificate(s) waiting for verification (Certificates)`);
     if (uncategorised) attention.push(`${uncategorised} visible product(s) made before 2.12 have no category and miss the required product information; ask the stores to complete them`);
     if (overPaid) attention.push(`${overPaid} delivered order(s) pay the store and courier more than the customer paid; Malvoya's Stripe balance covers the difference`);
+    if (!securityContacts().length) attention.push("No security contact: set SECURITY_CONTACT (an email address you read) on Render, so /.well-known/security.txt tells researchers where to report a vulnerability.");
     // Two-step sign-in for admins (2.13)
     const [admins, adminsWithTwoStep] = await Promise.all([
       prisma.user.count({ where: { role: "ADMIN", isActive: true } }),

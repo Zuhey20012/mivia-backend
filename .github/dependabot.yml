@@ -1,0 +1,36 @@
+# Weekly dependency updates (free on GitHub). Minor and patch versions arrive grouped in one pull request per
+# ecosystem, so there is little to review; major versions come one by one. Every pull request runs CI first.
+# Security fixes come separately and at once when "Dependabot security updates" is on in the repository settings.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directories: ["/backend", "/malvoya_admin"]
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Helsinki
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: pub
+    directories: ["/Malvoya_customer", "/malvoya_vendor", "/malvoya_courier", "/packages/malvoya_core", "/packages/malvoya_ui"]
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Helsinki
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]

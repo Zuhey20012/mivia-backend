@@ -1,0 +1,40 @@
+# CodeQL code scanning for the API and the admin panel (JavaScript/TypeScript; Dart is not supported).
+# Free for public repositories. A private repository needs GitHub Advanced Security for it, so the job skips
+# itself there instead of failing. Findings appear under Security → Code scanning.
+name: CodeQL
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    - cron: "23 4 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  analyze:
+    name: Analyze (javascript-typescript)
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          build-mode: none
+          queries: security-extended
+          config: |
+            paths:
+              - backend/src
+              - malvoya_admin/src
+            paths-ignore:
+              - "**/dist"
+              - "**/node_modules"
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"

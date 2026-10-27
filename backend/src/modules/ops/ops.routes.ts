@@ -8,12 +8,14 @@ import { queueStats } from "../../lib/queue";
 import { sentryEnabled } from "../../lib/sentry";
 import { scale } from "../../config/scale";
 import { auth, requireRole } from "../../middleware/auth";
+import { env } from "../../config/env";
 
 /**
  * Operations endpoints: liveness, readiness and metrics.
  *  GET /health          liveness: the process is up (Render's health check)
  *  GET /health/ready    readiness: the database (and Redis, when configured) answer; 503 while shutting down
  *  GET /api/v1/admin/metrics  this instance's numbers, for admins or `Authorization: Bearer <METRICS_TOKEN>`
+ *  GET /.well-known/security.txt  where to report a vulnerability (RFC 9116)
  */
 export const opsRoutes = Router();
 const VERSION = "2.13.0";
@@ -23,6 +25,37 @@ let draining = false;
 export function markDraining() {
   draining = true;
 }
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Where security researchers report problems: SECURITY_CONTACT (comma-separated; an email address, mailto: or
+ * https: link), otherwise SUPPORT_EMAIL. Empty when neither is set (security.txt then answers 404 and System says so).
+ */
+export function securityContacts(): string[] {
+  const given = (process.env.SECURITY_CONTACT || "").split(",").map((c) => c.trim()).filter(Boolean)
+    .map((c) => (EMAIL_RE.test(c) ? `mailto:${c}` : c))
+    .filter((c) => (c.startsWith("mailto:") && EMAIL_RE.test(c.slice(7))) || /^https:\/\/[^\s]+$/.test(c));
+  if (given.length) return given;
+  const support = (process.env.SUPPORT_EMAIL || "").trim();
+  return EMAIL_RE.test(support) ? [`mailto:${support}`] : [];
+}
+
+/** RFC 9116 security.txt. Expires rolls forward (180 days, whole days so caches agree). */
+opsRoutes.get("/.well-known/security.txt", (_req, res) => {
+  const contacts = securityContacts();
+  if (!contacts.length) return res.status(404).type("text/plain").send("Not found\n");
+  const day = 24 * 60 * 60 * 1000;
+  const expires = new Date(Math.floor(Date.now() / day) * day + 180 * day).toISOString().replace(".000Z", "Z");
+  res.set("Cache-Control", "public, max-age=86400");
+  res.type("text/plain; charset=utf-8").send([
+    ...contacts.map((c) => `Contact: ${c}`),
+    `Expires: ${expires}`,
+    "Preferred-Languages: en, fi",
+    `Canonical: ${env.publicApiUrl}/.well-known/security.txt`,
+    "",
+  ].join("\n"));
+});
 
 opsRoutes.get("/health", (_req, res) => res.json({ ok: true, status: "healthy", version: VERSION }));
 

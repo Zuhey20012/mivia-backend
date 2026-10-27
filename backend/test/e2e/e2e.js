@@ -2395,10 +2395,17 @@ function ean13(d12) {
     const st1 = (await call("GET", "/me/mfa", null, viaRc.body.accessToken)).body;
     check("status: on, 10 recovery codes left, this session verified", st1.enabled === true && st1.recoveryCodesLeft === 10 && st1.sessionVerified === true, st1);
     const sysSec = (await call("GET", "/admin/system", null, viaRc.body.accessToken)).body.security;
+    check("no security contact: security.txt is 404 and System says how to set one", (await fetch(`${BASE}/.well-known/security.txt`)).status === 404 && (await call("GET", "/admin/system", null, viaRc.body.accessToken)).body.attention.some((a) => a.includes("SECURITY_CONTACT")));
     check("System reports admins with and without two-step sign-in", sysSec?.adminTwoStepRequired === false && sysSec.admins >= 2 && sysSec.adminsWithTwoStep >= 1 && sysSec.admins > sysSec.adminsWithTwoStep, sysSec);
 
     // Required (the production default): an admin session without the second step opens only the set-up
-    check("API with ADMIN_MFA_REQUIRED=true started", await startFeeApi({ ADMIN_MFA_REQUIRED: "true" }));
+    check("API with ADMIN_MFA_REQUIRED=true started", await startFeeApi({ ADMIN_MFA_REQUIRED: "true", SECURITY_CONTACT: "security@example.fi, https://example.fi/report, not-a-contact" }));
+    const stxt = await fetch(`${FEE_BASE}/.well-known/security.txt`);
+    const stxtBody = await stxt.text();
+    const exp = /^Expires: (\S+)$/m.exec(stxtBody)?.[1];
+    check("security.txt (RFC 9116): contacts from SECURITY_CONTACT (invalid ones dropped), Expires within a year, canonical URL", stxt.status === 200 && /^text\/plain/.test(stxt.headers.get("content-type") || "")
+      && stxtBody.includes("Contact: mailto:security@example.fi\nContact: https://example.fi/report\n") && !stxtBody.includes("not-a-contact")
+      && Date.parse(exp) > Date.now() + 100 * 864e5 && Date.parse(exp) < Date.now() + 365 * 864e5 && stxtBody.includes(`Canonical: ${FEE_BASE}/.well-known/security.txt`), stxtBody);
     const plainAdmin = (await callAt(FEE_API, "POST", "/auth/login", { email: `admin${uniq}@example.fi`, password: "strong-pass-123" })).body.accessToken;
     const gated = await callAt(FEE_API, "GET", "/admin/system", null, plainAdmin);
     check("required: an admin without two-step sign-in gets 403 MFA_SETUP_REQUIRED on admin tools", gated.status === 403 && gated.body.code === "MFA_SETUP_REQUIRED", gated.body);
