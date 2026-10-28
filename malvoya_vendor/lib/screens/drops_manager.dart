@@ -158,6 +158,22 @@ class DropsManagerState extends State<DropsManager> {
                 Text(d['product']?['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w700)),
                 if ((d['caption'] ?? '').toString().isNotEmpty)
                   Text(d['caption'], maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
+                // What the drop is made of: a video, or photos (how many) and whether it has sound
+                if (d['kind'] != 'VIDEO')
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Row(children: [
+                      const Icon(Icons.photo_library_outlined, size: 14, color: AppTheme.textSecondary),
+                      const SizedBox(width: 4),
+                      Text(tr(context, '${(d['media']?['images'] as List?)?.length ?? 1} photo(s)', '${(d['media']?['images'] as List?)?.length ?? 1} kuva(a)'),
+                          style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
+                      if (d['media']?['audio'] != null) ...[
+                        const SizedBox(width: MSpace.sm),
+                        const Icon(Icons.music_note_rounded, size: 14, color: AppTheme.textSecondary),
+                        Text(tr(context, 'with sound', 'äänellä'), style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
+                      ],
+                    ]),
+                  ),
                 const SizedBox(height: 6),
                 Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: MTextSize.caption)),
                 if (status == 'REMOVED' && d['removedReason'] != null && d['removedReason'] != 'Deleted by store')

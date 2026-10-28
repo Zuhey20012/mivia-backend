@@ -93,6 +93,11 @@ export function videoMp4Url(publicId: string) {
   return `${base()}/video/upload/${VIDEO_MP4_TRANSFORMATION}/${publicId}.mp4`;
 }
 
+/** A sound track (uploaded as Cloudinary audio, i.e. resource type video), delivered as MP3 for every phone. */
+export function audioMp3Url(publicId: string) {
+  return `${base()}/video/upload/${publicId}.mp3`;
+}
+
 export function videoPosterUrl(publicId: string, width = 720) {
   // f_auto: WebP/AVIF where the client accepts it, JPEG otherwise (the .jpg name keeps old clients happy)
   return `${base()}/video/upload/so_0,c_limit,w_${width},q_auto,f_auto/${publicId}.jpg`;

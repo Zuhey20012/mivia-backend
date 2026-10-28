@@ -4,7 +4,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { ApiError } from "../../lib/errors";
 import { env } from "../../config/env";
-import { destroyResource, getResource, hlsReady, imageUrl, videoHlsUrl, videoMp4Url, videoPosterUrl } from "../../lib/cloudinary";
+import { audioMp3Url, destroyResource, getResource, hlsReady, imageUrl, videoHlsUrl, videoMp4Url, videoPosterUrl } from "../../lib/cloudinary";
 import { pushToUser, pushToUsers } from "../../lib/push";
 import { sendDropRemovedEmail } from "../../services/notificationDeliveryService";
 import { localeOfUser, t } from "../../lib/i18n";
@@ -18,6 +18,8 @@ const logger = pino({ name: "drops" });
 type Viewer = { id: number; role: string } | undefined;
 
 const MAX_VIDEO_SECONDS = 90;
+const MAX_PHOTOS = 10; // photos in one photo drop (slideshow)
+const MAX_AUDIO_SECONDS = 90; // sound track of a photo drop
 const MAX_DROPS_PER_DAY = 20;
 const FEED_WINDOW_DAYS = 60;
 const AUTO_HIDE_REPORTS = 3;
@@ -35,12 +37,22 @@ const dropInclude = {
 
 type DropRow = Prisma.DropGetPayload<{ include: typeof dropInclude }>;
 
-function media(drop: { mediaKind: string; mediaPublicId: string }) {
+function media(drop: { mediaKind: string; mediaPublicId: string; extraImagePublicIds?: string[]; audioPublicId?: string | null; audioDurationSec?: number | null }) {
   if (drop.mediaKind === "VIDEO") {
-    return { hls: videoHlsUrl(drop.mediaPublicId), mp4: videoMp4Url(drop.mediaPublicId), poster: videoPosterUrl(drop.mediaPublicId), image: null };
+    // A video plays with its own sound
+    return { hls: videoHlsUrl(drop.mediaPublicId), mp4: videoMp4Url(drop.mediaPublicId), poster: videoPosterUrl(drop.mediaPublicId), image: null, images: [], audio: null };
   }
-  const url = imageUrl(drop.mediaPublicId, "c_limit,w_1080,q_auto,f_auto");
-  return { hls: null, mp4: null, poster: url, image: url };
+  // A photo drop: one or more photos (a slideshow, in the store's order) and an optional sound track
+  const images = [drop.mediaPublicId, ...(drop.extraImagePublicIds ?? [])].map((id) => imageUrl(id, "c_limit,w_1080,q_auto,f_auto"));
+  const audio = drop.audioPublicId ? { url: audioMp3Url(drop.audioPublicId), durationSec: drop.audioDurationSec ?? null } : null;
+  return { hls: null, mp4: null, poster: images[0], image: images[0], images, audio };
+}
+
+/** Every Cloudinary file of a drop (taken down when the store deletes it). */
+function destroyDropMedia(drop: { mediaKind: string; mediaPublicId: string; extraImagePublicIds: string[]; audioPublicId: string | null }) {
+  destroyResource(drop.mediaPublicId, drop.mediaKind === "VIDEO" ? "video" : "image").catch(() => {});
+  for (const id of drop.extraImagePublicIds) destroyResource(id, "image").catch(() => {});
+  if (drop.audioPublicId) destroyResource(drop.audioPublicId, "video").catch(() => {});
 }
 
 async function presentDrops(rows: DropRow[], viewer: Viewer, loc: { lat: number | null; lng: number | null }, reasons?: Map<number, string>) {
@@ -311,6 +323,8 @@ async function ownedStore(ownerId: number) {
 
 export async function createDrop(actor: { id: number; role: string }, input: {
   productId: number; caption?: string; kind: "VIDEO" | "IMAGE"; upload: UploadProof; rightsConfirmed: true;
+  /** Photo drops: more photos after the first (in order) and an optional sound track */
+  images?: UploadProof[]; audio?: UploadProof;
 }) {
   const store = await ownedStore(actor.id);
   const product = await prisma.product.findUnique({ where: { id: input.productId }, select: { storeId: true, isAvailable: true, canBeSold: true } });
@@ -329,6 +343,28 @@ export async function createDrop(actor: { id: number; role: string }, input: {
     throw new ApiError(`Videos can be up to ${MAX_VIDEO_SECONDS} seconds`, 400);
   }
 
+  // Photo drops: the extra photos and the sound track must be the store's own verified uploads
+  const extra = input.images ?? [];
+  if (input.kind === "VIDEO" && (extra.length || input.audio)) throw new ApiError("A video drop plays its own sound; photos and a sound track are for photo drops", 400);
+  if (1 + extra.length > MAX_PHOTOS) throw new ApiError(`A photo drop can have up to ${MAX_PHOTOS} photos`, 400);
+  const extraIds = extra.map((u) => u.publicId);
+  if (new Set([input.upload.publicId, ...extraIds]).size !== 1 + extraIds.length) throw new ApiError("The same photo is in the drop twice", 400);
+  for (const u of extra) {
+    await verifyOwnedUpload("drop_image", actor, u);
+    if (!(await getResource(u.publicId, "image"))) throw new ApiError("A photo upload was not found. Please try again.", 400);
+  }
+  let audioDurationSec: number | null = null;
+  if (input.audio) {
+    await verifyOwnedUpload("drop_audio", actor, input.audio);
+    const sound = await getResource(input.audio.publicId, "video");
+    if (!sound) throw new ApiError("The sound upload was not found. Please try again.", 400);
+    if ((sound.duration ?? 0) > MAX_AUDIO_SECONDS) {
+      destroyResource(input.audio.publicId, "video").catch(() => {});
+      throw new ApiError(`A sound track can be up to ${MAX_AUDIO_SECONDS} seconds`, 400);
+    }
+    audioDurationSec = sound.duration ?? null;
+  }
+
   const ready = input.kind === "IMAGE" || hlsReady(resource.derived);
   try {
     const drop = await prisma.drop.create({
@@ -344,6 +380,9 @@ export async function createDrop(actor: { id: number; role: string }, input: {
         status: ready ? "READY" : "PROCESSING",
         publishedAt: ready ? new Date() : null,
         rightsConfirmedAt: new Date(),
+        extraImagePublicIds: extraIds,
+        audioPublicId: input.audio?.publicId ?? null,
+        audioDurationSec,
       },
       include: dropInclude,
     });
@@ -378,7 +417,7 @@ export async function deleteMine(ownerId: number, dropId: number) {
   const drop = await prisma.drop.findUnique({ where: { id: dropId } });
   if (!drop || drop.storeId !== store.id) throw new ApiError("Drop not found", 404);
   await prisma.drop.update({ where: { id: dropId }, data: { status: "REMOVED", removedReason: "Deleted by store" } });
-  destroyResource(drop.mediaPublicId, drop.mediaKind === "VIDEO" ? "video" : "image").catch(() => {});
+  destroyDropMedia(drop);
 }
 
 // ─── Processing ─────────────────────────────────────────────────────────────

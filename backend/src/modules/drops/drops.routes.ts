@@ -54,17 +54,22 @@ router.get("/drops/:id(\\d+)", optionalAuth, async (req: AuthRequest, res: Respo
   } catch (e) { sendError(res, e); }
 });
 
+const uploadProof = z.object({
+  publicId: z.string().min(5).max(200),
+  version: z.union([z.string().max(20), z.number().int()]),
+  signature: z.string().length(40),
+});
+
 const createSchema = z.object({
   productId: z.number().int().positive(),
   caption: z.string().max(300).optional(),
   kind: z.enum(["VIDEO", "IMAGE"]),
   // Required: the store confirms it holds the rights to the music, logos and people shown
   rightsConfirmed: z.literal(true, { errorMap: () => ({ message: "Confirm that you have the rights to everything in the drop" }) }),
-  upload: z.object({
-    publicId: z.string().min(5).max(200),
-    version: z.union([z.string().max(20), z.number().int()]),
-    signature: z.string().length(40),
-  }),
+  upload: uploadProof,
+  // Photo drops (2.13): more photos after the first, in order (up to 10 in all), and an optional sound track
+  images: z.array(uploadProof).max(9).optional(),
+  audio: uploadProof.optional(),
 });
 
 router.post("/drops", auth, requireRole("VENDOR"), async (req: AuthRequest, res: Response) => {

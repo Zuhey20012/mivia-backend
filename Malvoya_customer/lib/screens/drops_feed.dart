@@ -234,14 +234,26 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
 
   int _id(int index) => asInt(_drops[index]['id'])!;
 
-  /// Keeps the current, previous and next videos ready; frees the rest.
+  /// The sound track of a photo drop (null for videos, which play their own sound, and for silent photos).
+  String? _soundUrl(Map<String, dynamic> drop) =>
+      drop['kind'] == 'VIDEO' ? null : ((drop['media'] as Map?)?['audio'] as Map?)?['url'] as String?;
+
+  /// The photos of a photo drop in order (older API versions sent only one, as `image`).
+  List<String> _photosOf(Map<String, dynamic> drop) {
+    final media = (drop['media'] as Map?) ?? {};
+    final list = (media['images'] as List?)?.whereType<String>().toList() ?? const <String>[];
+    if (list.isNotEmpty) return list;
+    return [if (media['image'] is String) media['image'] as String];
+  }
+
+  /// Keeps the current, previous and next videos (and photo-drop sound tracks) ready; frees the rest.
   void _prepareAround(int index) {
     if (_drops.isEmpty) return;
     final keep = <int>{};
     for (final i in [index, index + 1, index - 1]) {
       if (i < 0 || i >= _drops.length) continue;
       final d = _drops[i];
-      if (d['kind'] != 'VIDEO') continue;
+      if (d['kind'] != 'VIDEO' && _soundUrl(d) == null) continue;
       final id = _id(i);
       keep.add(id);
       if (!_videos.containsKey(id)) _createController(id, d);
@@ -263,11 +275,13 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
 
   void _createController(int id, Map<String, dynamic> drop, {bool fallback = false}) {
     final media = (drop['media'] as Map?) ?? {};
-    final url = fallback ? media['mp4'] : (media['hls'] ?? media['mp4']);
+    final sound = _soundUrl(drop);
+    final url = sound ?? (fallback ? media['mp4'] : (media['hls'] ?? media['mp4']));
     if (url == null) return;
     final c = VideoPlayerController.networkUrl(
       Uri.parse(url),
-      formatHint: fallback ? null : VideoFormat.hls,
+      // A photo drop's sound track is a plain MP3; videos stream as HLS with an MP4 fallback
+      formatHint: sound != null || fallback ? null : VideoFormat.hls,
       videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
     );
     _videos[id] = c;
@@ -282,7 +296,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
       if (!mounted || _videos[id] != c) return;
       c.dispose();
       _videos.remove(id);
-      if (!fallback) _createController(id, drop, fallback: true);
+      if (!fallback && _soundUrl(drop) == null) _createController(id, drop, fallback: true);
     });
   }
 
@@ -671,14 +685,19 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     final id = asInt(drop['id'])!;
     final media = (drop['media'] as Map?) ?? {};
     final controller = _videos[id];
+    final isVideo = drop['kind'] == 'VIDEO';
     final ready = controller != null && controller.value.isInitialized;
+    final photos = isVideo ? const <String>[] : _photosOf(drop);
+    // Something that plays: a video, a photo drop with sound, or a slideshow of several photos
+    final playable = isVideo || _soundUrl(drop) != null || photos.length > 1;
     // Inside the tab bar the navigation bar covers the bottom; opened on its own it does not
     final safeBottom = MediaQuery.of(context).viewPadding.bottom;
     final double bottomInset = widget.standalone ? 24.0 + safeBottom : 66.0 + math.max(12.0, safeBottom) + 16;
 
     return GestureDetector(
       onTap: () {
-        if (drop['kind'] != 'VIDEO') return;
+        // Tap pauses a video, a photo drop's sound and its slideshow; a single silent photo has nothing to pause
+        if (!playable) return;
         setState(() => _paused = !_paused);
         _syncPlayback();
       },
@@ -696,9 +715,12 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (media['poster'] != null)
+          if (isVideo && media['poster'] != null)
             CachedNetworkImage(imageUrl: media['poster'], fit: BoxFit.cover, fadeInDuration: Duration.zero),
-          if (ready)
+          // A photo drop: its photos as a slideshow (swipe sideways, or they move on by themselves while it plays)
+          if (!isVideo && photos.isNotEmpty)
+            _PhotoSlideshow(key: ValueKey('photos-$id'), photos: photos, playing: isCurrent && _shouldPlay),
+          if (ready && isVideo)
             FittedBox(
               fit: BoxFit.cover,
               clipBehavior: Clip.hardEdge,
@@ -715,7 +737,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
               ),
             ),
           ),
-          if (isCurrent && _paused && drop['kind'] == 'VIDEO')
+          if (isCurrent && _paused && playable)
             Center(child: Icon(Icons.play_arrow_rounded, size: 84, color: AppTheme.onMedia.withValues(alpha: 0.7))),
           if (isCurrent && _burstAt != null)
             Positioned(
@@ -730,7 +752,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
             ),
           Positioned(right: 10, bottom: bottomInset + 20, child: _rail(drop)),
           Positioned(left: 16, right: 84, bottom: bottomInset, child: _info(drop)),
-          if (ready)
+          if (ready && isVideo)
             Positioned(
               left: 0,
               right: 0,
@@ -919,6 +941,26 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
             ),
           ],
         ),
+        if (_soundUrl(drop) != null)
+          Padding(
+            padding: const EdgeInsets.only(top: MSpace.xs),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.music_note_rounded, size: 16, color: AppTheme.onMedia, shadows: shadow),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    _muted
+                        ? tr(context, 'Sound by ${store['name'] ?? 'the store'} · tap the speaker to listen', 'Ääni: ${store['name'] ?? 'kauppa'} · napauta kaiutinta kuunnellaksesi')
+                        : tr(context, 'Sound by ${store['name'] ?? 'the store'}', 'Ääni: ${store['name'] ?? 'kauppa'}'),
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: AppTheme.onMedia, fontSize: MTextSize.caption, fontWeight: FontWeight.w600, shadows: shadow),
+                  ),
+                ),
+              ],
+            ),
+          ),
         if ((drop['caption'] ?? '').toString().isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 6),
@@ -1027,4 +1069,102 @@ class _HeartBurstState extends State<_HeartBurst> with SingleTickerProviderState
           ),
         ),
       );
+}
+
+/// The photos of a photo drop: full screen, one after another. While the drop plays, the next photo comes every
+/// 3.5 seconds (looping); the viewer can also swipe sideways. Dots show where you are when there are several.
+class _PhotoSlideshow extends StatefulWidget {
+  final List<String> photos;
+  final bool playing;
+  const _PhotoSlideshow({super.key, required this.photos, required this.playing});
+
+  @override
+  State<_PhotoSlideshow> createState() => _PhotoSlideshowState();
+}
+
+class _PhotoSlideshowState extends State<_PhotoSlideshow> {
+  static const _interval = Duration(milliseconds: 3500);
+  final _pages = PageController();
+  Timer? _timer;
+  int _index = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(covariant _PhotoSlideshow old) {
+    super.didUpdateWidget(old);
+    if (old.playing != widget.playing) _sync();
+  }
+
+  void _sync() {
+    _timer?.cancel();
+    _timer = null;
+    if (!widget.playing || widget.photos.length < 2) return;
+    _timer = Timer.periodic(_interval, (_) {
+      if (!mounted || !_pages.hasClients) return;
+      final next = (_index + 1) % widget.photos.length;
+      if (next == 0 || reduceMotion(context)) {
+        _pages.jumpToPage(next);
+      } else {
+        _pages.animateToPage(next, duration: const Duration(milliseconds: 380), curve: Curves.easeOutCubic);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _pages.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final photos = widget.photos;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        PageView.builder(
+          controller: _pages,
+          itemCount: photos.length,
+          onPageChanged: (i) {
+            setState(() => _index = i);
+            _sync(); // a swipe restarts the timer, so the photo the viewer chose stays on screen
+          },
+          itemBuilder: (_, i) => CachedNetworkImage(imageUrl: photos[i], fit: BoxFit.cover, fadeInDuration: Duration.zero),
+        ),
+        if (photos.length > 1)
+          Positioned(
+            top: MediaQuery.of(context).viewPadding.top + 64,
+            left: 0,
+            right: 0,
+            child: IgnorePointer(
+              child: Semantics(
+                label: tr(context, 'Photo ${_index + 1} of ${photos.length}', 'Kuva ${_index + 1}/${photos.length}'),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    for (var i = 0; i < photos.length; i++)
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        width: i == _index ? 18 : 6,
+                        height: 6,
+                        margin: const EdgeInsets.symmetric(horizontal: 2),
+                        decoration: BoxDecoration(
+                          color: AppTheme.onMedia.withValues(alpha: i == _index ? 0.95 : 0.5),
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
 }

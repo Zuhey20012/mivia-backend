@@ -552,6 +552,39 @@ function ean13(d12) {
   await seedResource(imgSlot.publicId, { width: 1080, height: 1350 });
   const imgDrop = await call("POST", "/drops", { productId: p3.id, kind: "IMAGE", rightsConfirmed: true, upload: { publicId: imgSlot.publicId, version: 2, signature: uploadSig(imgSlot.publicId, 2) } }, vendor.accessToken);
   check("photo drops go live immediately", imgDrop.status === 201 && imgDrop.body.drop.status === "READY", imgDrop.body);
+
+  // Photo drops with sound (2.13): up to 10 photos as a slideshow and a sound track the store uploads
+  const proofOf = (sl, v = 4) => ({ publicId: sl.publicId, version: v, signature: uploadSig(sl.publicId, v) });
+  const photoSlot = async () => { const sl = (await call("POST", "/media/sign", { kind: "drop_image" }, vendor.accessToken)).body; await seedResource(sl.publicId, { width: 1080, height: 1350 }); return sl; };
+  const audioSlot = async (duration) => { const sl = (await call("POST", "/media/sign", { kind: "drop_audio" }, vendor.accessToken)).body; await seedResource(sl.publicId, { duration, format: "mp3" }); return sl; };
+  const aSlot = await audioSlot(28.5);
+  check("sound uploads are signed as Cloudinary audio in the store's drop folder, audio formats only", aSlot.resourceType === "video" && aSlot.publicId?.startsWith(`malvoya/drops/s${storeId}/`) && /mp3/.test(aSlot.params?.allowed_formats || "") && !/mp4/.test(aSlot.params?.allowed_formats || "") && !aSlot.params?.eager, aSlot);
+  const ph = [await photoSlot(), await photoSlot(), await photoSlot()];
+  const withSound = await call("POST", "/drops", { productId: p3.id, kind: "IMAGE", rightsConfirmed: true, caption: "Uusi mallisto", upload: proofOf(ph[0]), images: [proofOf(ph[1]), proofOf(ph[2])], audio: proofOf(aSlot) }, vendor.accessToken);
+  const wsm = withSound.body.drop?.media;
+  check("a photo drop with 3 photos and a sound track goes live: photos in order, sound as MP3 with its length", withSound.status === 201 && withSound.body.drop.status === "READY" && wsm?.images?.length === 3
+    && ph.every((p, i) => wsm.images[i].endsWith(p.publicId)) && wsm.image === wsm.images[0] && wsm.audio?.url.endsWith(`/video/upload/${aSlot.publicId}.mp3`) && wsm.audio.durationSec === 28.5, withSound.body);
+  const fetched = (await call("GET", `/drops/${withSound.body.drop?.id}`)).body.drop;
+  check("the feed item carries the photos and the sound; a video drop has neither", fetched?.media?.images?.length === 3 && !!fetched.media.audio && (await call("GET", `/drops/${d1}`)).body.drop?.media?.audio === null);
+  const longSound = await audioSlot(120);
+  const tooLong = await call("POST", "/drops", { productId: p3.id, kind: "IMAGE", rightsConfirmed: true, upload: proofOf(await photoSlot()), audio: proofOf(longSound) }, vendor.accessToken);
+  check("a sound track over 90 s is refused (400) and erased", tooLong.status === 400 && (await (await fetch("http://localhost:12222/__destroyed")).json()).includes(longSound.publicId), tooLong.body);
+  const vidSound = await call("POST", "/drops", { productId: p3.id, kind: "VIDEO", rightsConfirmed: true, upload: proofOf(await photoSlot()), audio: proofOf(await audioSlot(10)) }, vendor.accessToken);
+  check("a video drop keeps its own sound: adding a sound track or photos is refused (400)", vidSound.status === 400, vidSound.body);
+  const many = []; for (let i = 0; i < 10; i++) many.push(proofOf(await photoSlot()));
+  check("at most 10 photos in one drop (400)", (await call("POST", "/drops", { productId: p3.id, kind: "IMAGE", rightsConfirmed: true, upload: proofOf(await photoSlot()), images: many }, vendor.accessToken)).status === 400);
+  const dup = await photoSlot();
+  check("the same photo twice is refused (400)", (await call("POST", "/drops", { productId: p3.id, kind: "IMAGE", rightsConfirmed: true, upload: proofOf(dup), images: [proofOf(dup)] }, vendor.accessToken)).status === 400);
+  const foreignSound = (await call("POST", "/media/sign", { kind: "drop_audio" }, otherVendor.accessToken)).body;
+  await seedResource(foreignSound.publicId, { duration: 12 });
+  check("another store's photo or sound cannot be used (403); a forged signature is refused (400)",
+    (await call("POST", "/drops", { productId: p3.id, kind: "IMAGE", rightsConfirmed: true, upload: proofOf(await photoSlot()), audio: proofOf(foreignSound) }, vendor.accessToken)).status === 403
+    && (await call("POST", "/drops", { productId: p3.id, kind: "IMAGE", rightsConfirmed: true, upload: proofOf(await photoSlot()), audio: { ...proofOf(await audioSlot(5)), signature: "0".repeat(40) } }, vendor.accessToken)).status === 400);
+  check("customers cannot sign sound uploads (403)", (await call("POST", "/media/sign", { kind: "drop_audio" }, otherCust.accessToken)).status === 403);
+  const delSound = await call("DELETE", `/drops/${withSound.body.drop?.id}`, null, vendor.accessToken);
+  await sleep(200);
+  const goneNow = await (await fetch("http://localhost:12222/__destroyed")).json();
+  check("deleting a photo drop erases every photo and the sound track", delSound.status === 200 && [...ph.map((p) => p.publicId), aSlot.publicId].every((id) => goneNow.includes(id)), goneNow.slice(-6));
   for (let i = 0; i < 3; i++) {
     const sl = (await call("POST", "/media/sign", { kind: "drop_image" }, vendor.accessToken)).body;
     await seedResource(sl.publicId, { width: 1080, height: 1350 });

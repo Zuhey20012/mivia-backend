@@ -857,6 +857,12 @@ model Drop {
   // The store confirmed it owns or has permission for everything in the drop (music, logos, people)
   rightsConfirmedAt DateTime?
 
+  // Photo drops (since 2.13.0): up to 9 more photos after mediaPublicId, in order, shown as a slideshow, and an optional
+  // sound track the store uploaded (Cloudinary audio, delivered as MP3). Video drops keep their own sound.
+  extraImagePublicIds String[] @default([])
+  audioPublicId       String?
+  audioDurationSec    Float?
+
   // Engagement counters (denormalised; the source rows live in DropLike / DropView)
   likeCount     Int   @default(0)
   viewCount     Int   @default(0)
