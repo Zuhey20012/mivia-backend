@@ -177,6 +177,8 @@ model User {
   refreshTokens    RefreshToken[]
   favorites        Favorite[]
   dropLikes        DropLike[]
+  dropSaves        DropSave[] // drops the user saved (since 2.14.0)
+  dropHides        DropHide[] // drops the user marked "Not interested" (since 2.14.0)
   reviews          Review[]
   devices          DeviceToken[]
   dropComments     DropComment[]
@@ -863,6 +865,15 @@ model Drop {
   audioPublicId       String?
   audioDurationSec    Float?
 
+  // Reels (since 2.14.0): a sound from Malvoya's licensed library (instead of audioPublicId; the store's own sound or
+  // voice-over may now also go on a video), how it plays with the video's own sound ("MIX" | "REPLACE", videos with a
+  // sound only) and which part of the video plays (seconds; null = all of it; the file is not cut)
+  soundId      Int?
+  sound        Sound?  @relation(fields: [soundId], references: [id])
+  soundMode    String?
+  trimStartSec Float?
+  trimEndSec   Float?
+
   // Engagement counters (denormalised; the source rows live in DropLike / DropView)
   likeCount     Int   @default(0)
   viewCount     Int   @default(0)
@@ -870,11 +881,14 @@ model Drop {
   completeCount Int   @default(0) // views watched to (almost) the end
   watchSeconds  Float @default(0)
   commentCount  Int   @default(0) // visible comments
+  saveCount     Int   @default(0) // users who saved it (DropSave)
 
   likes    DropLike[]
   views    DropView[]
   reports  DropReport[]
   comments DropComment[]
+  saves    DropSave[]
+  hides    DropHide[]
 
   publishedAt DateTime?
   createdAt   DateTime  @default(now())
@@ -883,6 +897,52 @@ model Drop {
   @@index([status, publishedAt])
   @@index([storeId, createdAt])
   @@index([productId])
+  @@index([soundId, status, publishedAt])
+}
+
+// A viewer saved a drop to watch later (since 2.14.0). Newest first in GET /me/saved-drops (paged by id).
+model DropSave {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dropId    Int
+  drop      Drop     @relation(fields: [dropId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, dropId])
+  @@index([userId, id])
+  @@index([dropId])
+}
+
+// "Not interested" (since 2.14.0): the drop never shows in this user's feeds, store or sound lists again (until undone).
+model DropHide {
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dropId    Int
+  drop      Drop     @relation(fields: [dropId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, dropId])
+  @@index([dropId])
+}
+
+// Malvoya's sound library (since 2.14.0): tracks Malvoya holds a licence for (bought commercial licence, CC0, own
+// recordings), added by admins only and offered to every store. Stores' own uploads are never shared.
+model Sound {
+  id          Int      @id @default(autoincrement())
+  title       String
+  artist      String?
+  publicId    String   @unique // Cloudinary audio (resource type video) under malvoya/sounds/
+  durationSec Float
+  licence     String // what licence and from whom
+  licenceUrl  String?
+  active      Boolean  @default(true) // false = no longer offered to stores; drops using it keep playing
+  createdById Int // the admin who added it
+  drops       Drop[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([active, id])
 }
 
 model DropLike {

@@ -7,8 +7,8 @@ import {
   VIDEO_EAGER, ResourceType, DeliveryType,
 } from "../../lib/cloudinary";
 
-export type MediaKind = "product_image" | "product_video" | "store_image" | "drop_video" | "drop_image" | "drop_audio" | "delivery_proof" | "avatar" | "certificate_evidence";
-export const MEDIA_KINDS: MediaKind[] = ["product_image", "product_video", "store_image", "drop_video", "drop_image", "drop_audio", "delivery_proof", "avatar", "certificate_evidence"];
+export type MediaKind = "product_image" | "product_video" | "store_image" | "drop_video" | "drop_image" | "drop_audio" | "delivery_proof" | "avatar" | "certificate_evidence" | "library_sound";
+export const MEDIA_KINDS: MediaKind[] = ["product_image", "product_video", "store_image", "drop_video", "drop_image", "drop_audio", "delivery_proof", "avatar", "certificate_evidence", "library_sound"];
 
 type Actor = { id: number; role: string };
 
@@ -23,7 +23,7 @@ type Target = {
 
 const IMAGE_FORMATS = "jpg,jpeg,png,webp,heic,heif";
 const VIDEO_FORMATS = "mp4,mov,m4v,webm,3gp";
-// Sound tracks for photo drops; Cloudinary keeps audio under the "video" resource type
+// Sound tracks of drops and the sound library; Cloudinary keeps audio under the "video" resource type
 const AUDIO_FORMATS = "mp3,m4a,aac,wav,ogg,oga,opus,flac";
 
 async function storeIdFor(actor: Actor) {
@@ -68,6 +68,10 @@ export async function targetFor(kind: MediaKind, actor: Actor, orderId?: number)
     case "certificate_evidence":
       // The certificate file a store submits for verification (2.12): a photo or a PDF in the store's own folder
       return { prefix: `malvoya/certificates/s${await storeIdFor(actor)}/`, resourceType: "image", type: "upload", formats: `${IMAGE_FORMATS},pdf` };
+    case "library_sound":
+      // Malvoya's licensed sound library (2.14): only admins add tracks; stores pick from it and never upload here
+      if (actor.role !== "ADMIN") throw new ApiError("Only Malvoya admins can add sounds to the library", 403);
+      return { prefix: "malvoya/sounds/", resourceType: "video", type: "upload", formats: AUDIO_FORMATS };
     case "avatar":
       return { prefix: `malvoya/avatars/u${actor.id}/`, resourceType: "image", type: "upload", formats: IMAGE_FORMATS };
   }
@@ -109,6 +113,6 @@ export function describe(kind: MediaKind, publicId: string) {
     return { publicId, hls: videoHlsUrl(publicId), mp4: videoMp4Url(publicId), poster: videoPosterUrl(publicId) };
   }
   if (kind === "delivery_proof") return { publicId };
-  if (kind === "drop_audio") return { publicId, audio: audioMp3Url(publicId) };
+  if (kind === "drop_audio" || kind === "library_sound") return { publicId, audio: audioMp3Url(publicId) };
   return { publicId, url: imageUrl(publicId), thumb: imageUrl(publicId, "c_fill,w_400,h_500,q_auto,f_auto") };
 }

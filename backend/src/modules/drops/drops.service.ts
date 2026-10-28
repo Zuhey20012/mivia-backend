@@ -19,7 +19,8 @@ type Viewer = { id: number; role: string } | undefined;
 
 const MAX_VIDEO_SECONDS = 90;
 const MAX_PHOTOS = 10; // photos in one photo drop (slideshow)
-const MAX_AUDIO_SECONDS = 90; // sound track of a photo drop
+const MAX_AUDIO_SECONDS = 90; // the store's own sound track or voice-over
+const MIN_TRIM_SECONDS = 3; // the shortest part of a video a store may keep
 const MAX_DROPS_PER_DAY = 20;
 const FEED_WINDOW_DAYS = 60;
 const AUTO_HIDE_REPORTS = 3;
@@ -33,19 +34,45 @@ export const REPORT_REASONS = [
 const dropInclude = {
   store: { select: { id: true, name: true, logoUrl: true, rating: true, totalReviews: true, sellerType: true, latitude: true, longitude: true, prepMinutes: true, ownerId: true } },
   product: { include: productInclude },
+  // A sound from Malvoya's library (2.14); an inactive sound keeps playing on the drops that already use it
+  sound: { select: { id: true, title: true, artist: true, publicId: true, durationSec: true } },
 } satisfies Prisma.DropInclude;
 
 type DropRow = Prisma.DropGetPayload<{ include: typeof dropInclude }>;
 
-function media(drop: { mediaKind: string; mediaPublicId: string; extraImagePublicIds?: string[]; audioPublicId?: string | null; audioDurationSec?: number | null }) {
+type MediaFields = {
+  mediaKind: string; mediaPublicId: string; extraImagePublicIds?: string[]; audioPublicId?: string | null; audioDurationSec?: number | null;
+  sound?: { id: number; title: string; artist: string | null; publicId: string; durationSec: number } | null;
+  soundMode?: string | null; trimStartSec?: number | null; trimEndSec?: number | null;
+};
+
+/**
+ * The added sound of a drop: a library sound (clickable to its sound page in the app) or the store's own upload or
+ * voice-over. `mode` says how it plays with a video's own sound (MIX = the video's sound quietly under it, REPLACE =
+ * only the added sound); photos have no sound of their own, so it is null for them.
+ */
+function audioOf(drop: MediaFields) {
+  const mode = drop.mediaKind === "VIDEO" ? (drop.soundMode === "REPLACE" ? "REPLACE" : "MIX") : null;
+  if (drop.sound) {
+    return {
+      url: audioMp3Url(drop.sound.publicId), durationSec: drop.sound.durationSec,
+      sound: { id: drop.sound.id, title: drop.sound.title, artist: drop.sound.artist }, mode,
+    };
+  }
+  if (drop.audioPublicId) return { url: audioMp3Url(drop.audioPublicId), durationSec: drop.audioDurationSec ?? null, sound: null, mode };
+  return null;
+}
+
+function media(drop: MediaFields) {
+  const audio = audioOf(drop);
   if (drop.mediaKind === "VIDEO") {
-    // A video plays with its own sound
-    return { hls: videoHlsUrl(drop.mediaPublicId), mp4: videoMp4Url(drop.mediaPublicId), poster: videoPosterUrl(drop.mediaPublicId), image: null, images: [], audio: null };
+    // A video plays with its own sound, optionally with an added sound (mixed or replacing it) and trimmed
+    const trim = drop.trimStartSec != null && drop.trimEndSec != null ? { startSec: drop.trimStartSec, endSec: drop.trimEndSec } : null;
+    return { hls: videoHlsUrl(drop.mediaPublicId), mp4: videoMp4Url(drop.mediaPublicId), poster: videoPosterUrl(drop.mediaPublicId), image: null, images: [], audio, trim };
   }
   // A photo drop: one or more photos (a slideshow, in the store's order) and an optional sound track
   const images = [drop.mediaPublicId, ...(drop.extraImagePublicIds ?? [])].map((id) => imageUrl(id, "c_limit,w_1080,q_auto,f_auto"));
-  const audio = drop.audioPublicId ? { url: audioMp3Url(drop.audioPublicId), durationSec: drop.audioDurationSec ?? null } : null;
-  return { hls: null, mp4: null, poster: images[0], image: images[0], images, audio };
+  return { hls: null, mp4: null, poster: images[0], image: images[0], images, audio, trim: null };
 }
 
 /** Every Cloudinary file of a drop (taken down when the store deletes it). */
@@ -56,7 +83,7 @@ function destroyDropMedia(drop: { mediaKind: string; mediaPublicId: string; extr
 }
 
 async function presentDrops(rows: DropRow[], viewer: Viewer, loc: { lat: number | null; lng: number | null }, reasons?: Map<number, string>) {
-  const [liked, info, follows] = await Promise.all([
+  const [liked, info, follows, saved] = await Promise.all([
     viewer && rows.length
       ? prisma.dropLike.findMany({ where: { userId: viewer.id, dropId: { in: rows.map((r) => r.id) } }, select: { dropId: true } })
       : Promise.resolve([]),
@@ -64,8 +91,12 @@ async function presentDrops(rows: DropRow[], viewer: Viewer, loc: { lat: number 
     viewer && rows.length
       ? prisma.storeFollow.findMany({ where: { userId: viewer.id, storeId: { in: [...new Set(rows.map((r) => r.storeId))] } }, select: { storeId: true } })
       : Promise.resolve([]),
+    viewer && rows.length
+      ? prisma.dropSave.findMany({ where: { userId: viewer.id, dropId: { in: rows.map((r) => r.id) } }, select: { dropId: true } })
+      : Promise.resolve([]),
   ]);
   const likedSet = new Set(liked.map((l) => l.dropId));
+  const savedSet = new Set(saved.map((l) => l.dropId));
   const followedSet = new Set(follows.map((f) => f.storeId));
   return rows.map((d) => {
     const { ownerId, latitude, longitude, prepMinutes, ...store } = d.store;
@@ -83,6 +114,8 @@ async function presentDrops(rows: DropRow[], viewer: Viewer, loc: { lat: number 
       shareCount: d.shareCount,
       commentCount: d.commentCount,
       likedByMe: likedSet.has(d.id),
+      saveCount: d.saveCount,
+      savedByMe: savedSet.has(d.id),
       publishedAt: d.publishedAt,
       shareUrl: `${env.publicApiUrl}/d/${d.id}`,
       reason: reasons?.get(d.id) ?? null,
@@ -154,7 +187,7 @@ function decodeCursor(raw?: string): Cursor | null {
  * The ranking is computed against a snapshot time kept in the cursor, so paging through the
  * feed is stable: nothing jumps or repeats while you scroll.
  */
-export async function getFeed(opts: { mode: "foryou" | "latest" | "following"; cursor?: string; limit: number; lat: number | null; lng: number | null; storeId?: number }, viewer: Viewer) {
+export async function getFeed(opts: { mode: "foryou" | "latest" | "following"; cursor?: string; limit: number; lat: number | null; lng: number | null; storeId?: number; soundId?: number }, viewer: Viewer) {
   const snap = decodeCursor(opts.cursor) ?? { t: Date.now(), o: 0 };
   let followed: number[] | undefined;
   if (opts.mode === "following") {
@@ -164,11 +197,15 @@ export async function getFeed(opts: { mode: "foryou" | "latest" | "following"; c
   }
   const where: Prisma.DropWhereInput = {
     status: "READY",
-    publishedAt: { lte: new Date(snap.t), gte: new Date(snap.t - FEED_WINDOW_DAYS * 86_400_000) },
+    // A sound page lists every live drop using the sound; the feeds and store lists look back 60 days
+    publishedAt: { lte: new Date(snap.t), ...(opts.soundId ? {} : { gte: new Date(snap.t - FEED_WINDOW_DAYS * 86_400_000) }) },
     store: { isVerified: true },
     product: { isAvailable: true },
     ...(opts.storeId ? { storeId: opts.storeId } : {}),
     ...(followed ? { storeId: { in: followed } } : {}),
+    ...(opts.soundId ? { soundId: opts.soundId } : {}),
+    // "Not interested" (2.14): never shown to that viewer again in any feed, store or sound list
+    ...(viewer ? { hides: { none: { userId: viewer.id } } } : {}),
   };
   const candidates = await prisma.drop.findMany({
     where,
@@ -186,7 +223,7 @@ export async function getFeed(opts: { mode: "foryou" | "latest" | "following"; c
   void personalise;
   const reasons = new Map<number, string>();
   let ordered: number[];
-  if (opts.mode !== "foryou" || opts.storeId) {
+  if (opts.mode !== "foryou" || opts.storeId || opts.soundId) {
     ordered = candidates.map((c) => c.id);
   } else {
     const scored = candidates.map((c) => {
@@ -295,6 +332,64 @@ export async function share(dropId: number) {
   return { shareCount: d.shareCount, shareUrl: `${env.publicApiUrl}/d/${dropId}` };
 }
 
+// ─── Saves and "Not interested" (2.14) ──────────────────────────────────────
+
+export async function save(dropId: number, userId: number) {
+  await readyDrop(dropId);
+  try {
+    await prisma.$transaction([
+      prisma.dropSave.create({ data: { dropId, userId } }),
+      prisma.drop.update({ where: { id: dropId }, data: { saveCount: { increment: 1 } } }),
+    ]);
+  } catch (e: any) {
+    if (e?.code !== "P2002") throw e; // already saved
+  }
+  return saveState(dropId, true);
+}
+
+export async function unsave(dropId: number, userId: number) {
+  const removed = await prisma.dropSave.deleteMany({ where: { dropId, userId } });
+  if (removed.count) await prisma.drop.updateMany({ where: { id: dropId, saveCount: { gt: 0 } }, data: { saveCount: { decrement: 1 } } });
+  return saveState(dropId, false);
+}
+
+async function saveState(dropId: number, saved: boolean) {
+  const d = await prisma.drop.findUnique({ where: { id: dropId }, select: { saveCount: true } });
+  return { saved, saveCount: d?.saveCount ?? 0 };
+}
+
+/** The viewer's saved drops, newest save first; only drops that are still live. The cursor is the last save's id. */
+export async function savedDrops(viewer: { id: number; role: string }, opts: { cursor?: string; limit: number }) {
+  const before = opts.cursor && /^\d{1,10}$/.test(opts.cursor) ? Number(opts.cursor) : undefined;
+  const saves = await prisma.dropSave.findMany({
+    where: { userId: viewer.id, ...(before ? { id: { lt: before } } : {}), drop: { status: "READY", product: { isAvailable: true } } },
+    select: { id: true, dropId: true },
+    orderBy: { id: "desc" },
+    take: opts.limit + 1,
+  });
+  const page = saves.slice(0, opts.limit);
+  const rows = page.length ? await prisma.drop.findMany({ where: { id: { in: page.map((p) => p.dropId) } }, include: dropInclude }) : [];
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const ordered = page.map((p) => byId.get(p.dropId)).filter((r): r is DropRow => !!r);
+  return {
+    drops: await presentDrops(ordered, viewer, { lat: null, lng: null }),
+    nextCursor: saves.length > opts.limit ? String(page[page.length - 1].id) : null,
+  };
+}
+
+/** "Not interested": the drop disappears from this viewer's feeds, store pages and sound pages. */
+export async function hide(dropId: number, userId: number) {
+  const drop = await prisma.drop.findUnique({ where: { id: dropId }, select: { id: true } });
+  if (!drop) throw new ApiError("This drop is not available", 404);
+  await prisma.dropHide.upsert({ where: { userId_dropId: { userId, dropId } }, create: { userId, dropId }, update: {} });
+  return { hidden: true };
+}
+
+export async function unhide(dropId: number, userId: number) {
+  await prisma.dropHide.deleteMany({ where: { userId, dropId } });
+  return { hidden: false };
+}
+
 /** Notice-and-action (DSA Art. 16). Three independent reports hide the drop until a person reviews it. */
 export async function report(dropId: number, reporterId: number | null, reason: string, details?: string) {
   const drop = await prisma.drop.findUnique({ where: { id: dropId }, select: { id: true, status: true } });
@@ -323,8 +418,14 @@ async function ownedStore(ownerId: number) {
 
 export async function createDrop(actor: { id: number; role: string }, input: {
   productId: number; caption?: string; kind: "VIDEO" | "IMAGE"; upload: UploadProof; rightsConfirmed: true;
-  /** Photo drops: more photos after the first (in order) and an optional sound track */
-  images?: UploadProof[]; audio?: UploadProof;
+  /** Photo drops: more photos after the first (in order) */
+  images?: UploadProof[];
+  /** An added sound (photo or video drops, 2.14): the store's own upload or voice-over, or a library sound */
+  audio?: UploadProof; soundId?: number;
+  /** Video drops with an added sound: mixed under the video's own sound (default) or replacing it */
+  soundMode?: "MIX" | "REPLACE";
+  /** Video drops: the part that plays (seconds), at least 3 s */
+  trimStartSec?: number; trimEndSec?: number;
 }) {
   const store = await ownedStore(actor.id);
   const product = await prisma.product.findUnique({ where: { id: input.productId }, select: { storeId: true, isAvailable: true, canBeSold: true } });
@@ -334,18 +435,42 @@ export async function createDrop(actor: { id: number; role: string }, input: {
   const recent = await prisma.drop.count({ where: { storeId: store.id, createdAt: { gte: new Date(Date.now() - 86_400_000) } } });
   if (recent >= MAX_DROPS_PER_DAY) throw new ApiError(`You can post up to ${MAX_DROPS_PER_DAY} drops a day`, 429);
 
+  // Cheap checks first, before any upload is looked up
+  if (input.soundId !== undefined && input.audio) throw new ApiError("Choose either a sound from the library or your own sound, not both", 400);
+  const trimmed = input.trimStartSec !== undefined || input.trimEndSec !== undefined;
+  if (trimmed && input.kind !== "VIDEO") throw new ApiError("Only videos can be trimmed", 400);
+  if (input.kind === "VIDEO" && input.images?.length) throw new ApiError("Photos are for photo drops; a video drop is one video", 400);
+  let soundId: number | null = null;
+  if (input.soundId !== undefined) {
+    const sound = await prisma.sound.findUnique({ where: { id: input.soundId }, select: { id: true, active: true } });
+    if (!sound || !sound.active) throw new ApiError("That sound is no longer in the library. Choose another one.", 400);
+    soundId = sound.id;
+  }
+
   const kind = input.kind === "VIDEO" ? "drop_video" : "drop_image";
   await verifyOwnedUpload(kind, actor, input.upload);
   const resource = await getResource(input.upload.publicId, input.kind === "VIDEO" ? "video" : "image");
   if (!resource) throw new ApiError("The upload was not found. Please try again.", 400);
   if (input.kind === "VIDEO" && (resource.duration ?? 0) > MAX_VIDEO_SECONDS) {
-    destroyResource(input.upload.publicId, "video").catch(() => {});
+    await destroyResource(input.upload.publicId, "video").catch(() => {}); // erased before answering
     throw new ApiError(`Videos can be up to ${MAX_VIDEO_SECONDS} seconds`, 400);
+  }
+
+  // The part of the video that plays: 0 ≤ start < end ≤ length, at least 3 s (playback trims; the file is not cut)
+  let trimStartSec: number | null = null;
+  let trimEndSec: number | null = null;
+  if (trimmed) {
+    const length = resource.duration ?? MAX_VIDEO_SECONDS;
+    const start = Math.round((input.trimStartSec ?? 0) * 100) / 100;
+    const end = Math.round((input.trimEndSec ?? length) * 100) / 100;
+    if (start < 0 || end > length + 0.05 || start >= end) throw new ApiError("The trim must be within the video", 400);
+    if (end - start < MIN_TRIM_SECONDS) throw new ApiError(`Keep at least ${MIN_TRIM_SECONDS} seconds of the video`, 400);
+    trimStartSec = start;
+    trimEndSec = Math.min(end, length);
   }
 
   // Photo drops: the extra photos and the sound track must be the store's own verified uploads
   const extra = input.images ?? [];
-  if (input.kind === "VIDEO" && (extra.length || input.audio)) throw new ApiError("A video drop plays its own sound; photos and a sound track are for photo drops", 400);
   if (1 + extra.length > MAX_PHOTOS) throw new ApiError(`A photo drop can have up to ${MAX_PHOTOS} photos`, 400);
   const extraIds = extra.map((u) => u.publicId);
   if (new Set([input.upload.publicId, ...extraIds]).size !== 1 + extraIds.length) throw new ApiError("The same photo is in the drop twice", 400);
@@ -359,7 +484,7 @@ export async function createDrop(actor: { id: number; role: string }, input: {
     const sound = await getResource(input.audio.publicId, "video");
     if (!sound) throw new ApiError("The sound upload was not found. Please try again.", 400);
     if ((sound.duration ?? 0) > MAX_AUDIO_SECONDS) {
-      destroyResource(input.audio.publicId, "video").catch(() => {});
+      await destroyResource(input.audio.publicId, "video").catch(() => {}); // erased before answering
       throw new ApiError(`A sound track can be up to ${MAX_AUDIO_SECONDS} seconds`, 400);
     }
     audioDurationSec = sound.duration ?? null;
@@ -383,6 +508,11 @@ export async function createDrop(actor: { id: number; role: string }, input: {
         extraImagePublicIds: extraIds,
         audioPublicId: input.audio?.publicId ?? null,
         audioDurationSec,
+        soundId,
+        // How the added sound plays with the video's own sound; photos have none
+        soundMode: input.kind === "VIDEO" && (soundId || input.audio) ? (input.soundMode ?? "MIX") : null,
+        trimStartSec,
+        trimEndSec,
       },
       include: dropInclude,
     });

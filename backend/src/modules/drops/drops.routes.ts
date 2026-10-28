@@ -67,9 +67,17 @@ const createSchema = z.object({
   // Required: the store confirms it holds the rights to the music, logos and people shown
   rightsConfirmed: z.literal(true, { errorMap: () => ({ message: "Confirm that you have the rights to everything in the drop" }) }),
   upload: uploadProof,
-  // Photo drops (2.13): more photos after the first, in order (up to 10 in all), and an optional sound track
+  // Photo drops (2.13): more photos after the first, in order (up to 10 in all)
   images: z.array(uploadProof).max(9).optional(),
+  // An added sound, on photo and (since 2.14) video drops: the store's own upload or voice-over (kind drop_audio) or a
+  // sound from Malvoya's library (soundId), not both
   audio: uploadProof.optional(),
+  soundId: z.number().int().positive().optional(),
+  // Video drops with an added sound: MIX (the video's own sound quietly under it, default) or REPLACE; ignored for photos
+  soundMode: z.enum(["MIX", "REPLACE"]).optional(),
+  // Video drops: the part that plays, in seconds (checked against the video's length; at least 3 s)
+  trimStartSec: z.number().min(0).max(600).optional(),
+  trimEndSec: z.number().min(0).max(600).optional(),
 });
 
 router.post("/drops", auth, requireRole("VENDOR"), async (req: AuthRequest, res: Response) => {
@@ -96,6 +104,45 @@ router.post("/drops/:id(\\d+)/like", auth, async (req: AuthRequest, res: Respons
 router.delete("/drops/:id(\\d+)/like", auth, async (req: AuthRequest, res: Response) => {
   try {
     res.json({ ok: true, ...(await drops.unlike(Number(req.params.id), req.user!.id)) });
+  } catch (e) { sendError(res, e); }
+});
+
+// Saves (2.14): a bookmark for later; the count is public, who saved is not
+router.put("/drops/:id(\\d+)/save", auth, async (req: AuthRequest, res: Response) => {
+  try {
+    res.json({ ok: true, ...(await drops.save(Number(req.params.id), req.user!.id)) });
+  } catch (e) { sendError(res, e); }
+});
+
+router.delete("/drops/:id(\\d+)/save", auth, async (req: AuthRequest, res: Response) => {
+  try {
+    res.json({ ok: true, ...(await drops.unsave(Number(req.params.id), req.user!.id)) });
+  } catch (e) { sendError(res, e); }
+});
+
+const savedQuery = z.object({
+  cursor: z.string().max(20).optional(),
+  limit: z.coerce.number().int().min(1).max(30).default(18),
+});
+
+router.get("/me/saved-drops", auth, async (req: AuthRequest, res: Response) => {
+  const q = savedQuery.safeParse(req.query);
+  if (!q.success) return res.status(400).json({ ok: false, error: "Invalid request" });
+  try {
+    res.json({ ok: true, ...(await drops.savedDrops(req.user!, q.data)) });
+  } catch (e) { sendError(res, e); }
+});
+
+// "Not interested" (2.14): hides the drop from this user's feeds and lists; DELETE undoes it
+router.post("/drops/:id(\\d+)/not-interested", auth, async (req: AuthRequest, res: Response) => {
+  try {
+    res.json({ ok: true, ...(await drops.hide(Number(req.params.id), req.user!.id)) });
+  } catch (e) { sendError(res, e); }
+});
+
+router.delete("/drops/:id(\\d+)/not-interested", auth, async (req: AuthRequest, res: Response) => {
+  try {
+    res.json({ ok: true, ...(await drops.unhide(Number(req.params.id), req.user!.id)) });
   } catch (e) { sendError(res, e); }
 });
 

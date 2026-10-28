@@ -15,6 +15,7 @@ import 'terms_legal_screen.dart';
 import 'privacy_gdpr_screen.dart';
 import 'orders.dart';
 import 'favorites_screen.dart';
+import 'saved_drops_screen.dart';
 import 'invite_screen.dart';
 import 'blocked_users_screen.dart';
 import 'agreements_screen.dart';
@@ -610,6 +611,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
 
               const SizedBox(height: MSpace.lg),
+
+              _buildMenuGroup(
+                context: context,
+                title: tr(context, 'Drops', 'Dropit'),
+                children: [
+                  _buildTile(
+                    context: context,
+                    icon: Icons.bookmark_rounded,
+                    iconColor: MPalette.malva,
+                    title: tr(context, 'Saved drops', 'Tallennetut dropit'),
+                    subtitle: tr(context, 'Videos and photos you kept with the bookmark', 'Kirjanmerkillä talteen otetut videot ja kuvat'),
+                    onTap: () => _nav(context, const SavedDropsScreen()),
+                  ),
+                ],
+              ),
 
               if (_referral != null && auth.isAuthenticated)
                 _buildMenuGroup(

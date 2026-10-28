@@ -189,6 +189,9 @@ function exportUser(userId: number) {
       courier: { select: { id: true, name: true, phone: true, email: true, isApproved: true, createdAt: true, rating: true } },
       favorites: { select: { productId: true, createdAt: true } },
       dropLikes: { select: { dropId: true, createdAt: true } },
+      // Saved drops and "Not interested" marks (2.14)
+      dropSaves: { select: { dropId: true, createdAt: true }, orderBy: { id: "desc" }, take: 5000 },
+      dropHides: { select: { dropId: true, createdAt: true }, take: 5000 },
       reviews: { select: { orderId: true, storeRating: true, courierRating: true, comment: true, createdAt: true } },
       devices: { select: { platform: true, createdAt: true, updatedAt: true } },
       dropComments: { where: { status: { not: "REMOVED" } }, select: { dropId: true, body: true, status: true, createdAt: true } },
@@ -237,6 +240,13 @@ export async function deleteUserAccount(userId: number) {
 
     // Likes, favourites and push devices go; reviews stay (they carry store ratings) without their text
     await tx.dropLike.deleteMany({ where: { userId } });
+    // Saves and "Not interested" marks (2.14); each saved drop's count goes down by one
+    const saves = await tx.dropSave.findMany({ where: { userId }, select: { dropId: true } });
+    if (saves.length) {
+      await tx.drop.updateMany({ where: { id: { in: saves.map((v) => v.dropId) }, saveCount: { gt: 0 } }, data: { saveCount: { decrement: 1 } } });
+      await tx.dropSave.deleteMany({ where: { userId } });
+    }
+    await tx.dropHide.deleteMany({ where: { userId } });
     await tx.supportRequest.deleteMany({ where: { userId } });
     await tx.favorite.deleteMany({ where: { userId } });
     await tx.deviceToken.deleteMany({ where: { userId } });

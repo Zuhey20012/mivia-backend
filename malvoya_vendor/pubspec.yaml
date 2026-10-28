@@ -39,6 +39,7 @@ dependencies:
   file_picker: ^13.1.0
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
+  record: ^6.2.1 # 6.x: Android side builds with AGP 8 (7.x expects AGP 9)
 
 dev_dependencies:
   flutter_launcher_icons: ^0.14.4

@@ -1,4 +1,4 @@
-// End-to-end test for API v2.13 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
+// End-to-end test for API v2.14 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
 const { execSync, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -569,8 +569,8 @@ function ean13(d12) {
   const longSound = await audioSlot(120);
   const tooLong = await call("POST", "/drops", { productId: p3.id, kind: "IMAGE", rightsConfirmed: true, upload: proofOf(await photoSlot()), audio: proofOf(longSound) }, vendor.accessToken);
   check("a sound track over 90 s is refused (400) and erased", tooLong.status === 400 && (await (await fetch("http://localhost:12222/__destroyed")).json()).includes(longSound.publicId), tooLong.body);
-  const vidSound = await call("POST", "/drops", { productId: p3.id, kind: "VIDEO", rightsConfirmed: true, upload: proofOf(await photoSlot()), audio: proofOf(await audioSlot(10)) }, vendor.accessToken);
-  check("a video drop keeps its own sound: adding a sound track or photos is refused (400)", vidSound.status === 400, vidSound.body);
+  const vidSound = await call("POST", "/drops", { productId: p3.id, kind: "VIDEO", rightsConfirmed: true, upload: proofOf(await photoSlot()), images: [proofOf(await photoSlot())] }, vendor.accessToken);
+  check("a video drop is one video: adding photos is refused (400)", vidSound.status === 400, vidSound.body);
   const many = []; for (let i = 0; i < 10; i++) many.push(proofOf(await photoSlot()));
   check("at most 10 photos in one drop (400)", (await call("POST", "/drops", { productId: p3.id, kind: "IMAGE", rightsConfirmed: true, upload: proofOf(await photoSlot()), images: many }, vendor.accessToken)).status === 400);
   const dup = await photoSlot();
@@ -644,6 +644,127 @@ function ean13(d12) {
   check("the Following feed is empty when you follow nobody", (await call("GET", "/drops/feed?mode=following", null, commentStranger.accessToken)).body.drops?.length === 0);
   check("the Following feed needs a signed-in user", (await call("GET", "/drops/feed?mode=following")).status === 401);
   check("unfollow", (await call("DELETE", `/stores/${storeId}/follow`, null, otherCust.accessToken)).body.following === false);
+
+  console.log("\n— Reels: sound library, sound and trim on videos, saves, not interested (2.14)");
+  const libDestroyed = async () => (await (await fetch("http://localhost:12222/__destroyed")).json());
+  check("only admins can sign library sound uploads (403 for stores and customers)", (await call("POST", "/media/sign", { kind: "library_sound" }, vendor.accessToken)).status === 403 && (await call("POST", "/media/sign", { kind: "library_sound" }, otherCust.accessToken)).status === 403);
+  const libSlot = async (duration) => { const sl = (await call("POST", "/media/sign", { kind: "library_sound" }, adminToken)).body; await seedResource(sl.publicId, { duration, format: "mp3" }); return sl; };
+  const libS1 = await libSlot(32.4);
+  check("library sounds are signed as Cloudinary audio under malvoya/sounds/, audio formats only", libS1.resourceType === "video" && libS1.publicId?.startsWith("malvoya/sounds/") && /mp3/.test(libS1.params?.allowed_formats || "") && !/mp4/.test(libS1.params?.allowed_formats || "") && libS1.params?.signature?.length === 40, libS1);
+  const sndBody = { title: `Kesäilta ${uniq}`, artist: "Testi Orkesteri", licence: "CC0 1.0, own recording by Malvoya", licenceUrl: "https://creativecommons.org/publicdomain/zero/1.0/", rightsConfirmed: true, upload: proofOf(libS1) };
+  const { licence: _l, ...noLicence } = sndBody;
+  const { rightsConfirmed: _r, ...noRightsSnd } = sndBody;
+  check("adding a sound needs a licence text (≥ 5 chars), the licence confirmation and an https licence link (400); stores cannot add sounds (403)",
+    (await call("POST", "/admin/sounds", noLicence, adminToken)).status === 400 && (await call("POST", "/admin/sounds", noRightsSnd, adminToken)).status === 400
+    && (await call("POST", "/admin/sounds", { ...sndBody, licence: "CC0" }, adminToken)).status === 400 && (await call("POST", "/admin/sounds", { ...sndBody, licenceUrl: "http://example.com/licence" }, adminToken)).status === 400
+    && (await call("POST", "/admin/sounds", sndBody, vendor.accessToken)).status === 403);
+  const sndC1 = await call("POST", "/admin/sounds", sndBody, adminToken);
+  const snd1 = sndC1.body.sound;
+  check("admin adds a licensed sound (201): MP3 link, length, active, no uses yet; audited as sound.create", sndC1.status === 201 && snd1.url.endsWith(`/video/upload/${libS1.publicId}.mp3`) && snd1.durationSec === 32.4 && snd1.active === true && snd1.useCount === 0 && snd1.licence === sndBody.licence
+    && sql(`select count(*) from "AdminAuditLog" where action='sound.create' and entity='Sound' and "entityId"=${snd1.id}`) === "1", sndC1.body);
+  check("the same upload cannot be added twice (409)", (await call("POST", "/admin/sounds", sndBody, adminToken)).status === 409);
+  const lsLong = await libSlot(200);
+  const tooLongSnd = await call("POST", "/admin/sounds", { ...sndBody, upload: proofOf(lsLong) }, adminToken);
+  check("a library sound over 180 s is refused (400) and erased", tooLongSnd.status === 400 && (await libDestroyed()).includes(lsLong.publicId), tooLongSnd.body);
+  const libS2 = await libSlot(15);
+  const sndC2 = await call("POST", "/admin/sounds", { title: `Aamu ${uniq}`, licence: "Commercial licence from Testi Music, order 42", rightsConfirmed: true, upload: proofOf(libS2) }, adminToken);
+  const snd2 = sndC2.body.sound;
+  check("artist and licence link are optional", sndC2.status === 201 && snd2.artist === null && snd2.licenceUrl === null, sndC2.body);
+  const adminSounds = await call("GET", "/admin/sounds", null, adminToken);
+  check("admins list every sound with its licence, newest first; others cannot (403)", adminSounds.body.sounds?.[0]?.id === snd2.id && adminSounds.body.sounds.some((x) => x.id === snd1.id && x.licence === sndBody.licence && x.licenceUrl === sndBody.licenceUrl) && (await call("GET", "/admin/sounds", null, vendor.accessToken)).status === 403, adminSounds.body);
+  const cleared = await call("PATCH", `/admin/sounds/${snd1.id}`, { artist: null, licenceUrl: null }, adminToken);
+  check("PATCH with null clears the artist and the licence link; audited with old and new values", cleared.status === 200 && cleared.body.sound.artist === null && cleared.body.sound.licenceUrl === null && cleared.body.sound.title === sndBody.title
+    && sql(`select "oldValue"->>'artist' || '|' || ("newValue"->'artist' = 'null'::jsonb)::text from "AdminAuditLog" where action='sound.update' and "entityId"=${snd1.id}`) === "Testi Orkesteri|true", cleared.body);
+  const reArtist = await call("PATCH", `/admin/sounds/${snd1.id}`, { artist: "Testi Orkesteri", licenceUrl: "https://creativecommons.org/publicdomain/zero/1.0/" }, adminToken);
+  check("admin sets them again; a PATCH with nothing to change, a short licence or a non-https link is refused (400)", reArtist.body.sound?.artist === "Testi Orkesteri" && !!reArtist.body.sound?.licenceUrl
+    && (await call("PATCH", `/admin/sounds/${snd1.id}`, {}, adminToken)).status === 400 && (await call("PATCH", `/admin/sounds/${snd1.id}`, { licence: "x" }, adminToken)).status === 400
+    && (await call("PATCH", `/admin/sounds/${snd1.id}`, { licenceUrl: "ftp://x.example" }, adminToken)).status === 400 && (await call("PATCH", "/admin/sounds/999999", { title: "x" }, adminToken)).status === 404, reArtist.body);
+  const storeSounds = await call("GET", "/sounds", null, vendor.accessToken);
+  const listed1 = storeSounds.body.sounds?.find((x) => x.id === snd1.id);
+  check("stores list the library: id, title, artist, length, MP3 link and uses, never the licence or file id", !!listed1 && storeSounds.body.sounds.some((x) => x.id === snd2.id) && listed1.url === snd1.url && listed1.useCount === 0 && !("licence" in listed1) && !("publicId" in listed1), storeSounds.body);
+  const byArtist = (await call("GET", "/sounds?q=orkesteri", null, vendor.accessToken)).body.sounds;
+  const byTitle = (await call("GET", `/sounds?q=${encodeURIComponent(`aamu ${uniq}`)}`, null, vendor.accessToken)).body.sounds;
+  check("sounds are searched by artist or title", byArtist?.some((x) => x.id === snd1.id) && !byArtist.some((x) => x.id === snd2.id) && byTitle?.length === 1 && byTitle[0].id === snd2.id, [byArtist, byTitle]);
+  const sndP1 = await call("GET", "/sounds?limit=1", null, vendor.accessToken);
+  const sndP2 = await call("GET", `/sounds?limit=1&before=${sndP1.body.nextBefore}`, null, vendor.accessToken);
+  check("the library pages (limit, nextBefore) and needs a signed-in user (401); limit over 50 is refused (400)", sndP1.body.sounds?.length === 1 && sndP1.body.nextBefore === sndP1.body.sounds[0].id && sndP2.body.sounds?.[0]?.id < sndP1.body.sounds[0].id
+    && (await call("GET", "/sounds")).status === 401 && (await call("GET", "/sounds?limit=51", null, vendor.accessToken)).status === 400, [sndP1.body, sndP2.body]);
+
+  const videoSlot = async (duration) => { const sl = (await call("POST", "/media/sign", { kind: "drop_video" }, vendor.accessToken)).body; await seedResource(sl.publicId, { duration, width: 720, height: 1280, derived: [{ transformation: "sp_auto/m3u8" }] }); return sl; };
+  const vReel = await call("POST", "/drops", { productId: p3.id, kind: "VIDEO", rightsConfirmed: true, upload: proofOf(await videoSlot(20)), soundId: snd1.id, trimStartSec: 2, trimEndSec: 12.5 }, vendor.accessToken);
+  const reelM = vReel.body.drop?.media;
+  check("a video drop with a library sound: mixed with the video's sound by default, trimmed, the sound named", vReel.status === 201 && vReel.body.drop.status === "READY" && reelM?.audio?.sound?.id === snd1.id && reelM.audio.sound.title === sndBody.title && reelM.audio.sound.artist === "Testi Orkesteri"
+    && reelM.audio.url === snd1.url && reelM.audio.durationSec === 32.4 && reelM.audio.mode === "MIX" && reelM.trim?.startSec === 2 && reelM.trim?.endSec === 12.5 && /m3u8$/.test(reelM.hls), vReel.body);
+  const vReelId = vReel.body.drop?.id;
+  const pReel = await call("POST", "/drops", { productId: p3.id, kind: "IMAGE", rightsConfirmed: true, upload: proofOf(await photoSlot()), soundId: snd1.id, soundMode: "REPLACE" }, vendor.accessToken);
+  const photoM = pReel.body.drop?.media;
+  check("a photo drop with a library sound: no mode (photos have no sound of their own), no trim", pReel.status === 201 && photoM?.audio?.sound?.id === snd1.id && photoM.audio.mode === null && photoM.trim === null && sql(`select coalesce("soundMode", 'null') from "Drop" where id=${pReel.body.drop?.id}`) === "null", pReel.body);
+  const pReelId = pReel.body.drop?.id;
+  const voiceUp = await audioSlot(14);
+  const vVoice = await call("POST", "/drops", { productId: p3.id, kind: "VIDEO", rightsConfirmed: true, upload: proofOf(await videoSlot(30)), audio: proofOf(voiceUp), soundMode: "REPLACE" }, vendor.accessToken);
+  const voiceM = vVoice.body.drop?.media;
+  check("a video drop with the store's own sound or voice-over (drop_audio), replacing the video's sound; not a library sound, no trim", vVoice.status === 201 && voiceM?.audio?.url.endsWith(`/video/upload/${voiceUp.publicId}.mp3`) && voiceM.audio.sound === null && voiceM.audio.mode === "REPLACE" && voiceM.audio.durationSec === 14 && voiceM.trim === null, vVoice.body);
+  const plainVideo = (await call("GET", `/drops/${d1}`)).body.drop?.media;
+  check("a video without an added sound has audio null and trim null", plainVideo && plainVideo.audio === null && plainVideo.trim === null, plainVideo);
+  check("a library sound and an own sound together are refused (400); an unknown sound is refused (400)",
+    (await call("POST", "/drops", { productId: p3.id, kind: "IMAGE", rightsConfirmed: true, upload: proofOf(await photoSlot()), soundId: snd1.id, audio: proofOf(await audioSlot(5)) }, vendor.accessToken)).status === 400
+    && (await call("POST", "/drops", { productId: p3.id, kind: "IMAGE", rightsConfirmed: true, upload: proofOf(await photoSlot()), soundId: 999999 }, vendor.accessToken)).status === 400);
+  const trimTry = async (body, kind = "VIDEO") => (await call("POST", "/drops", { productId: p3.id, kind, rightsConfirmed: true, upload: proofOf(kind === "VIDEO" ? await videoSlot(20) : await photoSlot()), ...body }, vendor.accessToken)).status;
+  check("trims must be within the video, end after start, at least 3 s, and only on videos (400)",
+    (await trimTry({ trimStartSec: -1, trimEndSec: 5 })) === 400 && (await trimTry({ trimStartSec: 5, trimEndSec: 25 })) === 400 && (await trimTry({ trimStartSec: 2, trimEndSec: 4.5 })) === 400
+    && (await trimTry({ trimStartSec: 10, trimEndSec: 5 })) === 400 && (await trimTry({ trimStartSec: 1, trimEndSec: 8 }, "IMAGE")) === 400 && (await trimTry({ soundMode: "LOUD" })) === 400);
+  const soundPage = await call("GET", `/sounds/${snd1.id}`);
+  const soundDropsRes = await call("GET", `/sounds/${snd1.id}/drops`);
+  check("sound page: the sound with its use count, and the live drops using it, newest first, as feed items", soundPage.status === 200 && soundPage.body.sound?.useCount === 2 && !("licence" in soundPage.body.sound)
+    && JSON.stringify(soundDropsRes.body.drops?.map((d) => d.id)) === JSON.stringify([pReelId, vReelId]) && soundDropsRes.body.drops[0].media.audio.sound.id === snd1.id && soundDropsRes.body.nextCursor === null, [soundPage.body, soundDropsRes.body]);
+  check("the library shows how many drops use a sound", (await call("GET", "/sounds?q=orkesteri", null, vendor.accessToken)).body.sounds?.find((x) => x.id === snd1.id)?.useCount === 2);
+  await call("PATCH", `/admin/sounds/${snd1.id}`, { active: false }, adminToken);
+  check("an inactive sound is no longer offered to stores or accepted on new drops (400)", !(await call("GET", "/sounds?limit=50", null, vendor.accessToken)).body.sounds?.some((x) => x.id === snd1.id)
+    && (await call("POST", "/drops", { productId: p3.id, kind: "IMAGE", rightsConfirmed: true, upload: proofOf(await photoSlot()), soundId: snd1.id }, vendor.accessToken)).status === 400);
+  check("…but drops already using it keep playing it, and its sound page stays", (await call("GET", `/drops/${vReelId}`)).body.drop?.media?.audio?.sound?.id === snd1.id && (await call("GET", `/sounds/${snd1.id}`)).status === 200 && (await call("GET", `/sounds/${snd1.id}/drops`)).body.drops?.length === 2);
+  await call("PATCH", `/admin/sounds/${snd2.id}`, { active: false }, adminToken);
+  check("an inactive sound no drop uses has no page (404)", (await call("GET", `/sounds/${snd2.id}`)).status === 404 && (await call("GET", `/sounds/${snd2.id}/drops`)).status === 404 && (await call("GET", "/sounds/999999")).status === 404);
+  await call("PATCH", `/admin/sounds/${snd1.id}`, { active: true }, adminToken);
+
+  check("saving needs a signed-in user (401)", (await call("PUT", `/drops/${vReelId}/save`)).status === 401);
+  const sv1 = await call("PUT", `/drops/${vReelId}/save`, null, otherCust.accessToken);
+  const sv1b = await call("PUT", `/drops/${vReelId}/save`, null, otherCust.accessToken);
+  const sv2 = await call("PUT", `/drops/${vReelId}/save`, null, commentStranger.accessToken);
+  check("save a drop; saving twice counts once; another user's save counts", sv1.body.saved === true && sv1.body.saveCount === 1 && sv1b.body.saveCount === 1 && sv2.body.saveCount === 2, [sv1.body, sv1b.body, sv2.body]);
+  const asSaver = (await call("GET", `/drops/${vReelId}`, null, otherCust.accessToken)).body.drop;
+  const asOther = (await call("GET", `/drops/${vReelId}`, null, vendor.accessToken)).body.drop;
+  check("feed items carry saveCount and savedByMe", asSaver?.saveCount === 2 && asSaver.savedByMe === true && asOther?.savedByMe === false && (await call("GET", "/drops/feed?mode=latest&limit=20")).body.drops?.find((d) => d.id === vReelId)?.saveCount === 2, [asSaver?.savedByMe, asOther?.savedByMe]);
+  await call("PUT", `/drops/${pReelId}/save`, null, otherCust.accessToken);
+  const savedAll = await call("GET", "/me/saved-drops", null, otherCust.accessToken);
+  const savedP1 = await call("GET", "/me/saved-drops?limit=1", null, otherCust.accessToken);
+  const savedP2 = await call("GET", `/me/saved-drops?limit=1&cursor=${savedP1.body.nextCursor}`, null, otherCust.accessToken);
+  check("saved drops: newest save first, as feed items, paged with a cursor; signed in only (401)", JSON.stringify(savedAll.body.drops?.map((d) => d.id)) === JSON.stringify([pReelId, vReelId]) && savedAll.body.drops.every((d) => d.savedByMe === true) && savedAll.body.nextCursor === null
+    && savedP1.body.drops?.[0]?.id === pReelId && !!savedP1.body.nextCursor && savedP2.body.drops?.[0]?.id === vReelId && savedP2.body.nextCursor === null && (await call("GET", "/me/saved-drops")).status === 401, [savedAll.body, savedP1.body, savedP2.body]);
+  const unsave1 = await call("DELETE", `/drops/${vReelId}/save`, null, otherCust.accessToken);
+  const unsave2 = await call("DELETE", `/drops/${vReelId}/save`, null, otherCust.accessToken);
+  check("unsave; unsaving twice changes nothing; the saved list follows", unsave1.body.saved === false && unsave1.body.saveCount === 1 && unsave2.body.saveCount === 1 && JSON.stringify((await call("GET", "/me/saved-drops", null, otherCust.accessToken)).body.drops?.map((d) => d.id)) === JSON.stringify([pReelId]), [unsave1.body, unsave2.body]);
+  check("saving a missing drop is 404", (await call("PUT", "/drops/999999/save", null, otherCust.accessToken)).status === 404);
+
+  check("not interested needs a signed-in user (401)", (await call("POST", `/drops/${vReelId}/not-interested`)).status === 401);
+  const notInt = await call("POST", `/drops/${vReelId}/not-interested`, null, otherCust.accessToken);
+  const notInt2 = await call("POST", `/drops/${vReelId}/not-interested`, null, otherCust.accessToken);
+  const reelIn = async (path, token) => ((await call("GET", path, null, token)).body.drops ?? []).some((d) => d.id === vReelId);
+  const hiddenEverywhere = !(await reelIn("/drops/feed?limit=20", otherCust.accessToken)) && !(await reelIn("/drops/feed?mode=latest&limit=20", otherCust.accessToken))
+    && !(await reelIn(`/stores/${storeId}/drops?limit=20`, otherCust.accessToken)) && !(await reelIn(`/sounds/${snd1.id}/drops`, otherCust.accessToken));
+  check("Not interested hides the drop from that user's feeds, the store's list and the sound page (idempotent)", notInt.status === 200 && notInt.body.ok === true && notInt2.status === 200 && hiddenEverywhere);
+  check("…but not for anyone else", (await reelIn("/drops/feed?mode=latest&limit=20", commentStranger.accessToken)) && (await reelIn("/drops/feed?mode=latest&limit=20")) && (await reelIn(`/sounds/${snd1.id}/drops`)));
+  check("not interested in a missing drop is 404", (await call("POST", "/drops/999999/not-interested", null, otherCust.accessToken)).status === 404);
+  const undoHide = await call("DELETE", `/drops/${vReelId}/not-interested`, null, otherCust.accessToken);
+  check("undo brings it back", undoHide.status === 200 && (await reelIn("/drops/feed?mode=latest&limit=20", otherCust.accessToken)) && (await reelIn(`/sounds/${snd1.id}/drops`, otherCust.accessToken)));
+
+  const selma = await register("Selma");
+  await call("PUT", `/drops/${vReelId}/save`, null, selma.accessToken);
+  await call("POST", `/drops/${pReelId}/not-interested`, null, selma.accessToken);
+  const selmaData = (await call("GET", "/auth/me/data", null, selma.accessToken)).body.data;
+  check("data export includes saved drops and Not interested marks", selmaData?.dropSaves?.length === 1 && selmaData.dropSaves[0].dropId === vReelId && selmaData?.dropHides?.length === 1 && selmaData.dropHides[0].dropId === pReelId, { s: selmaData?.dropSaves, h: selmaData?.dropHides });
+  const beforeDel = Number(sql(`select "saveCount" from "Drop" where id=${vReelId}`));
+  check("account deletion removes saves and marks and lowers the save count", (await call("DELETE", "/auth/me", null, selma.accessToken)).status === 200
+    && sql(`select (select count(*) from "DropSave" where "userId"=${selma.user.id}) + (select count(*) from "DropHide" where "userId"=${selma.user.id})`) === "0" && Number(sql(`select "saveCount" from "Drop" where id=${vReelId}`)) === beforeDel - 1, beforeDel);
 
   console.log("\n— Reporting and moderation (DSA)");
   const reporters = [otherCust, await register("Pia"), await register("Rami")];
@@ -851,7 +972,7 @@ function ean13(d12) {
   }));
 
   const sysDefault = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.13.0", sysDefault.pricing);
+  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.14.0", sysDefault.pricing);
   const stockBeforeQuote = stockOf(productId);
   const ordersBeforeQuote = sql(`select count(*) from "Order" where "userId"=${otherCust.user.id}`);
   const q0 = await quote(quoteBody, otherCust.accessToken);
@@ -1925,7 +2046,7 @@ function ean13(d12) {
   cob = (await call("GET", "/courier/me/onboarding", null, onni.accessToken)).body;
   check("courier ready for approval when everything but approval is done", cob.readyForApproval === true && cob.approved === false && cob.percent === 83 && sql(`select "readyForApprovalAt" is not null from "Courier" where "userId"=${onni.user.id}`) === "t", cob);
   const sys211 = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("System lists them as ready for approval", sys211.version === "2.13.0" && sys211.attention.some((a) => a.includes(`(#${pekkaStore.id}) is ready for approval`)) && sys211.attention.some((a) => a.includes("Courier \"Onni\"") && a.includes("ready for approval")) && sys211.readyForApproval?.stores?.some((s) => s.id === pekkaStore.id), sys211.attention);
+  check("System lists them as ready for approval", sys211.version === "2.14.0" && sys211.attention.some((a) => a.includes(`(#${pekkaStore.id}) is ready for approval`)) && sys211.attention.some((a) => a.includes("Courier \"Onni\"") && a.includes("ready for approval")) && sys211.readyForApproval?.stores?.some((s) => s.id === pekkaStore.id), sys211.attention);
   check("admin courier list shows vehicle, disclosure and readiness", (await call("GET", "/admin/couriers", null, adminToken)).body.couriers?.find((c) => c.user?.id === onni.user.id)?.vehicleType === "ebike");
 
   // Publishing changes (second instance reading a copy of the legal texts, same database)
@@ -2511,7 +2632,7 @@ function ean13(d12) {
   check("huge search input rejected", (await call("GET", `/products/search?q=${"a".repeat(200)}`)).status === 400);
   const cors = await fetch(`${API}/stores`, { headers: { Origin: "https://evil.example" } });
   check("CORS does not allow unknown origins", !cors.headers.get("access-control-allow-origin"));
-  check("health reports v2.13.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.13.0");
+  check("health reports v2.14.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.14.0");
 
   [vendorSock, custSock, otherSock, c1Sock, c2Sock].forEach((s) => s.close());
   console.log(`\n${pass} passed, ${fail} failed`);

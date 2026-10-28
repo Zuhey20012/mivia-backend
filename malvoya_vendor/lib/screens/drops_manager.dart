@@ -122,6 +122,48 @@ class DropsManagerState extends State<DropsManager> {
     );
   }
 
+  /// "3 photos", the sound (a library track's title, or "Your sound") and for videos the trimmed length.
+  List<Widget> _mediaDetails(Map<String, dynamic> d) {
+    final media = d['media'] is Map ? Map<String, dynamic>.from(d['media']) : <String, dynamic>{};
+    final isVideo = d['kind'] == 'VIDEO';
+    final audio = media['audio'] is Map ? Map<String, dynamic>.from(media['audio']) : null;
+    final trim = media['trim'] is Map ? Map<String, dynamic>.from(media['trim']) : null;
+    const style = TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary);
+    String seconds(num v) {
+      final r = (v * 10).round() / 10;
+      return r == r.roundToDouble() ? '${r.round()}' : r.toStringAsFixed(1);
+    }
+
+    Widget line(IconData icon, String text) => Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Row(children: [
+            Icon(icon, size: 14, color: AppTheme.textSecondary),
+            const SizedBox(width: 4),
+            Expanded(child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: style)),
+          ]),
+        );
+
+    final lines = <Widget>[];
+    if (!isVideo) {
+      final count = (media['images'] as List?)?.length ?? 1;
+      lines.add(line(Icons.photo_library_outlined, tr(context, '$count photo(s)', '$count kuva(a)')));
+    }
+    if (audio != null) {
+      final sound = audio['sound'] is Map ? Map<String, dynamic>.from(audio['sound']) : null;
+      var text = sound != null
+          ? [sound['title'], if ((sound['artist'] ?? '').toString().isNotEmpty) sound['artist']].join(' · ')
+          : tr(context, 'Your sound', 'Oma äänesi');
+      if (isVideo && audio['mode'] == 'REPLACE') text += tr(context, ' (video muted)', ' (videon ääni mykistetty)');
+      lines.add(line(Icons.music_note_rounded, text));
+    }
+    final start = trim?['startSec'] as num?;
+    final end = trim?['endSec'] as num?;
+    if (isVideo && start != null && end != null && end > start) {
+      lines.add(line(Icons.content_cut_rounded, tr(context, 'Trimmed: plays ${seconds(end - start)} s', 'Rajattu: toistetaan ${seconds(end - start)} s')));
+    }
+    return lines;
+  }
+
   Widget _card(Map<String, dynamic> d) {
     final status = d['status'];
     final (label, color) = switch (status) {
@@ -158,22 +200,8 @@ class DropsManagerState extends State<DropsManager> {
                 Text(d['product']?['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w700)),
                 if ((d['caption'] ?? '').toString().isNotEmpty)
                   Text(d['caption'], maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
-                // What the drop is made of: a video, or photos (how many) and whether it has sound
-                if (d['kind'] != 'VIDEO')
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Row(children: [
-                      const Icon(Icons.photo_library_outlined, size: 14, color: AppTheme.textSecondary),
-                      const SizedBox(width: 4),
-                      Text(tr(context, '${(d['media']?['images'] as List?)?.length ?? 1} photo(s)', '${(d['media']?['images'] as List?)?.length ?? 1} kuva(a)'),
-                          style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
-                      if (d['media']?['audio'] != null) ...[
-                        const SizedBox(width: MSpace.sm),
-                        const Icon(Icons.music_note_rounded, size: 14, color: AppTheme.textSecondary),
-                        Text(tr(context, 'with sound', 'äänellä'), style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
-                      ],
-                    ]),
-                  ),
+                // What the drop is made of: photos (how many), the added sound and a video's trimmed length
+                ..._mediaDetails(d),
                 const SizedBox(height: 6),
                 Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: MTextSize.caption)),
                 if (status == 'REMOVED' && d['removedReason'] != null && d['removedReason'] != 'Deleted by store')

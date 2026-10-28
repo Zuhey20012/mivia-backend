@@ -21,6 +21,7 @@ import Categories from './pages/Categories';
 import Certificates from './pages/Certificates';
 import ProductReports from './pages/ProductReports';
 import Recalls from './pages/Recalls';
+import Sounds from './pages/Sounds';
 
 function RequireAuth({ children }: { children: React.ReactElement }) {
   const token = localStorage.getItem('token');
@@ -53,6 +54,7 @@ function App() {
         <Route path="/certificates" element={<RequireAuth><Certificates /></RequireAuth>} />
         <Route path="/product-reports" element={<RequireAuth><ProductReports /></RequireAuth>} />
         <Route path="/recalls" element={<RequireAuth><Recalls /></RequireAuth>} />
+        <Route path="/sounds"  element={<RequireAuth><Sounds /></RequireAuth>} />
         <Route path="*"         element={<Navigate to="/" replace />} />
       </Routes>
     </Router>

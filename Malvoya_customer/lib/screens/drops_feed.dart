@@ -19,6 +19,7 @@ import '../core/sign_in.dart';
 import '../widgets/add_to_bag_sheet.dart';
 import '../widgets/drop_comments_sheet.dart';
 import 'product_detail.dart';
+import 'sound_screen.dart';
 import 'store_detail.dart';
 import '../widgets/app_image.dart';
 
@@ -33,9 +34,34 @@ class DropsFeedScreen extends StatefulWidget {
   final String? storeName;
   final int? startDropId;
 
-  const DropsFeedScreen({super.key, this.isActive = true, this.storeId, this.storeName, this.startDropId});
+  /// When set, shows the drops that use this library sound (opened from the sound page) with a back button.
+  final int? soundId;
 
-  bool get standalone => storeId != null;
+  /// When true, shows the drops the signed-in customer saved (opened from Profile → Saved drops).
+  final bool saved;
+
+  /// The heading of a standalone list that is not a store's (a sound's title, "Saved drops").
+  final String? title;
+
+  /// Drops already loaded by the screen that opened this one (a grid), so the reel starts at once with the
+  /// same list; later pages continue from [initialCursor].
+  final List<Map<String, dynamic>>? initialDrops;
+  final String? initialCursor;
+
+  const DropsFeedScreen({
+    super.key,
+    this.isActive = true,
+    this.storeId,
+    this.storeName,
+    this.startDropId,
+    this.soundId,
+    this.saved = false,
+    this.title,
+    this.initialDrops,
+    this.initialCursor,
+  });
+
+  bool get standalone => storeId != null || soundId != null || saved;
 
   @override
   State<DropsFeedScreen> createState() => _DropsFeedScreenState();
@@ -45,7 +71,15 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   final _pages = PageController();
   final List<Map<String, dynamic>> _drops = [];
   final Map<int, VideoPlayerController> _videos = {};
+
+  /// The added sound (library track, the store's own file or a voice-over) of a video drop, played next to
+  /// its video by a second controller. Created, played, paused and freed together with the video.
+  final Map<int, VideoPlayerController> _sounds = {};
   final Set<int> _completed = {};
+
+  /// Saves being sent, so a quick second tap does not send a second request.
+  final Set<int> _saving = {};
+  bool _seedUsed = false;
 
   String _mode = 'foryou';
   String? _cursor;
@@ -60,6 +94,9 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   bool get _muted => !MediaSound.instance.on;
   bool _paused = false;
   bool _routeCovered = false;
+
+  /// A finger holds the drop down, or its options sheet is open: playback waits.
+  bool _holding = false;
   DateTime? _watchStart;
 
   /// Where the last double-tap landed: a heart pops there (one at a time, newest wins).
@@ -67,7 +104,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   int _burstId = 0;
   Offset _lastDoubleTap = Offset.zero;
 
-  bool get _shouldPlay => widget.isActive && !_paused && !_routeCovered && mounted;
+  bool get _shouldPlay => widget.isActive && !_paused && !_routeCovered && !_holding && mounted;
 
   @override
   void initState() {
@@ -79,8 +116,12 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   }
 
   void _onSoundChanged() {
-    for (final c in _videos.values) {
-      c.setVolume(_muted ? 0 : 1);
+    _videos.forEach((id, c) {
+      final d = _dropWithId(id);
+      if (c.value.isInitialized) c.setVolume(d == null ? (_muted ? 0 : 1) : _mainVolume(d));
+    });
+    for (final c in _sounds.values) {
+      if (c.value.isInitialized) c.setVolume(_muted ? 0 : 1);
     }
     if (mounted) setState(() {});
   }
@@ -121,6 +162,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       _flushView();
       _videos.values.forEach((c) => c.pause());
+      _sounds.values.forEach((c) => c.pause());
     } else if (state == AppLifecycleState.resumed) {
       _watchStart = DateTime.now();
       _syncPlayback();
@@ -133,11 +175,17 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     MediaSound.instance.removeListener(_onSoundChanged);
     NetworkStatus.instance.removeListener(_onNetwork);
     _flushView();
-    for (final c in _videos.values) {
+    for (final c in [..._videos.values, ..._sounds.values]) {
       c.dispose();
     }
     _pages.dispose();
     super.dispose();
+  }
+
+  /// Frees the video (or photo-drop sound) and the added sound of one drop.
+  void _release(int id) {
+    _videos.remove(id)?.dispose();
+    _sounds.remove(id)?.dispose();
   }
 
   // ── Data ────────────────────────────────────────────────────────────────
@@ -163,27 +211,46 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
       });
       return;
     }
-    final res = await ApiClient(auth).get(widget.standalone ? '/stores/${widget.storeId}/drops' : '/drops/feed', query: {
-      'mode': _mode,
-      'limit': '8',
-      if (!reset && _cursor != null) 'cursor': _cursor!,
-      ...DeliveryLocation.instance.query,
-    });
-    if (!mounted) return;
-
-    if (!res.ok) {
-      setState(() {
-        _loading = false;
-        _loadingMore = false;
-        if (reset && res.status == 401 && _mode == 'following') {
-          _needsSignIn = true;
-        } else if (reset) {
-          _error = res.errorText(context);
-        }
+    final List<Map<String, dynamic>> incoming;
+    final String? nextCursor;
+    final seed = reset && !_seedUsed ? widget.initialDrops : null;
+    if (seed != null && seed.isNotEmpty) {
+      // Opened from a grid: start with the drops it already shows
+      _seedUsed = true;
+      incoming = seed.map((d) => Map<String, dynamic>.from(d)).toList();
+      nextCursor = widget.initialCursor;
+    } else {
+      final feed = !widget.standalone;
+      final path = widget.storeId != null
+          ? '/stores/${widget.storeId}/drops'
+          : widget.soundId != null
+              ? '/sounds/${widget.soundId}/drops'
+              : widget.saved
+                  ? '/me/saved-drops'
+                  : '/drops/feed';
+      final res = await ApiClient(auth).get(path, query: {
+        if (feed || widget.storeId != null) 'mode': _mode,
+        'limit': '8',
+        if (!reset && _cursor != null) 'cursor': _cursor!,
+        ...DeliveryLocation.instance.query,
       });
-      return;
+      if (!mounted) return;
+
+      if (!res.ok) {
+        setState(() {
+          _loading = false;
+          _loadingMore = false;
+          if (reset && res.status == 401 && _mode == 'following' && feed) {
+            _needsSignIn = true;
+          } else if (reset) {
+            _error = res.errorText(context);
+          }
+        });
+        return;
+      }
+      incoming = ((res.data['drops'] as List?) ?? []).whereType<Map>().map((d) => Map<String, dynamic>.from(d)).toList();
+      nextCursor = res.data['nextCursor']?.toString();
     }
-    final incoming = ((res.data['drops'] as List?) ?? []).whereType<Map>().map((d) => Map<String, dynamic>.from(d)).toList();
     final startId = widget.startDropId;
     if (reset && startId != null && !incoming.any((d) => asInt(d['id']) == startId)) {
       // The drop that was tapped is not on the first page: fetch it and show it first
@@ -195,16 +262,17 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     if (!reset) incoming.removeWhere((d) => _drops.any((x) => asInt(x['id']) == asInt(d['id'])));
     setState(() {
       if (reset) {
-        for (final c in _videos.values) {
+        for (final c in [..._videos.values, ..._sounds.values]) {
           c.dispose();
         }
         _videos.clear();
+        _sounds.clear();
         _drops.clear();
         _index = 0;
         if (_pages.hasClients) _pages.jumpToPage(0);
       }
       _drops.addAll(incoming);
-      _cursor = res.data['nextCursor'];
+      _cursor = nextCursor;
       _hasMore = _cursor != null;
       _loading = false;
       _loadingMore = false;
@@ -234,9 +302,46 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
 
   int _id(int index) => asInt(_drops[index]['id'])!;
 
-  /// The sound track of a photo drop (null for videos, which play their own sound, and for silent photos).
-  String? _soundUrl(Map<String, dynamic> drop) =>
-      drop['kind'] == 'VIDEO' ? null : ((drop['media'] as Map?)?['audio'] as Map?)?['url'] as String?;
+  Map<String, dynamic>? _dropWithId(int id) {
+    for (final d in _drops) {
+      if (asInt(d['id']) == id) return d;
+    }
+    return null;
+  }
+
+  /// The added sound of a drop (`media.audio`), or null. Older API versions sent it for photo drops only.
+  Map<String, dynamic>? _audioOf(Map<String, dynamic> drop) {
+    final a = (drop['media'] as Map?)?['audio'];
+    if (a is! Map || a['url'] is! String) return null;
+    return a.cast<String, dynamic>();
+  }
+
+  /// The sound track of a photo drop (null for videos and for silent photos).
+  String? _soundUrl(Map<String, dynamic> drop) => drop['kind'] == 'VIDEO' ? null : _audioOf(drop)?['url'] as String?;
+
+  /// The sound added to a video drop, played by a second controller next to the video (null when none).
+  String? _addedSoundUrl(Map<String, dynamic> drop) => drop['kind'] == 'VIDEO' ? (_audioOf(drop)?['url'] as String?) : null;
+
+  /// The volume of a drop's main controller (its video, or a photo drop's sound) with the sound switch:
+  /// a video with an added sound plays its own sound quietly underneath (MIX) or not at all (REPLACE).
+  double _mainVolume(Map<String, dynamic> drop) {
+    if (_muted) return 0;
+    if (_addedSoundUrl(drop) == null) return 1;
+    return _audioOf(drop)?['mode'] == 'REPLACE' ? 0 : 0.3;
+  }
+
+  /// Which part of a video plays (`media.trim`), or null for the whole video.
+  ({Duration start, Duration end})? _trimOf(Map<String, dynamic> drop) {
+    if (drop['kind'] != 'VIDEO') return null;
+    final t = (drop['media'] as Map?)?['trim'];
+    if (t is! Map) return null;
+    final start = t['startSec'], end = t['endSec'];
+    if (start is! num || end is! num || end <= start) return null;
+    return (
+      start: Duration(milliseconds: (start * 1000).round()),
+      end: Duration(milliseconds: (end * 1000).round()),
+    );
+  }
 
   /// The photos of a photo drop in order (older API versions sent only one, as `image`).
   List<String> _photosOf(Map<String, dynamic> drop) {
@@ -246,7 +351,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     return [if (media['image'] is String) media['image'] as String];
   }
 
-  /// Keeps the current, previous and next videos (and photo-drop sound tracks) ready; frees the rest.
+  /// Keeps the current, previous and next videos (and their sounds, and photo-drop sound tracks) ready; frees the rest.
   void _prepareAround(int index) {
     if (_drops.isEmpty) return;
     final keep = <int>{};
@@ -257,9 +362,11 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
       final id = _id(i);
       keep.add(id);
       if (!_videos.containsKey(id)) _createController(id, d);
+      final added = _addedSoundUrl(d);
+      if (added != null && !_sounds.containsKey(id)) _createSound(id, added);
     }
-    for (final id in _videos.keys.where((k) => !keep.contains(k)).toList()) {
-      _videos.remove(id)?.dispose();
+    for (final id in {..._videos.keys, ..._sounds.keys}.where((k) => !keep.contains(k)).toList()) {
+      _release(id);
     }
     _syncPlayback();
   }
@@ -268,8 +375,8 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   void _releaseNeighbours() {
     if (_drops.isEmpty || _index >= _drops.length) return;
     final current = _id(_index);
-    for (final id in _videos.keys.where((k) => k != current).toList()) {
-      _videos.remove(id)?.dispose();
+    for (final id in {..._videos.keys, ..._sounds.keys}.where((k) => k != current).toList()) {
+      _release(id);
     }
   }
 
@@ -285,11 +392,15 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
       videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
     );
     _videos[id] = c;
-    c.initialize().then((_) {
+    c.initialize().then((_) async {
       if (!mounted || _videos[id] != c) return;
       c.setLooping(true);
-      c.setVolume(_muted ? 0 : 1);
-      c.addListener(() => _watchProgress(id, c));
+      c.setVolume(_mainVolume(drop));
+      // A trimmed video starts at the start of its window
+      final trim = _trimOf(drop);
+      if (trim != null && trim.start > Duration.zero && trim.start < c.value.duration) await c.seekTo(trim.start);
+      if (!mounted || _videos[id] != c) return;
+      c.addListener(() => _onVideoTick(id, c, drop));
       setState(() {});
       _syncPlayback();
     }).catchError((_) {
@@ -300,10 +411,71 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     });
   }
 
-  void _watchProgress(int id, VideoPlayerController c) {
+  /// The added sound of a video drop (MP3). It loops by itself when it is shorter than the video.
+  void _createSound(int id, String url) {
+    final c = VideoPlayerController.networkUrl(Uri.parse(url), videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true));
+    _sounds[id] = c;
+    c.initialize().then((_) {
+      if (!mounted || _sounds[id] != c) return;
+      c.setLooping(true);
+      c.setVolume(_muted ? 0 : 1);
+      _syncSound(id);
+    }).catchError((_) {
+      // Without its added sound the video still plays (with its own sound at the usual volume)
+      if (!mounted || _sounds[id] != c) return;
+      c.dispose();
+      _sounds.remove(id);
+    });
+  }
+
+  /// Keeps a trimmed video inside its window, notes a full view and keeps the added sound in step.
+  void _onVideoTick(int id, VideoPlayerController c, Map<String, dynamic> drop) {
     final v = c.value;
     if (!v.isInitialized || v.duration == Duration.zero) return;
-    if (v.position >= v.duration - const Duration(milliseconds: 450)) _completed.add(id);
+    final trim = _trimOf(drop);
+    final start = trim == null || trim.start >= v.duration ? Duration.zero : trim.start;
+    final end = trim == null || trim.end > v.duration ? v.duration : trim.end;
+    if (v.position >= end - const Duration(milliseconds: 450)) _completed.add(id);
+    if (trim != null && !_seekingToStart.contains(id)) {
+      // Past the end of the window (or before its start, e.g. after the video looped by itself): back to the start
+      final past = end < v.duration && v.position >= end;
+      final before = v.position < start - const Duration(milliseconds: 300);
+      if (past || before) {
+        _seekingToStart.add(id);
+        c.seekTo(start).whenComplete(() => _seekingToStart.remove(id));
+      }
+    }
+    _syncSound(id);
+  }
+
+  final Set<int> _seekingToStart = {};
+
+  /// Where the added sound should be for this video position: it starts with the (trimmed) video, restarts when
+  /// the video loops and repeats by itself when it is shorter.
+  Duration _soundOffset(Map<String, dynamic>? drop, Duration videoPos, Duration soundLength) {
+    final start = drop == null ? Duration.zero : (_trimOf(drop)?.start ?? Duration.zero);
+    var offset = videoPos - start;
+    if (offset < Duration.zero) offset = Duration.zero;
+    if (soundLength > Duration.zero) offset = Duration(microseconds: offset.inMicroseconds % soundLength.inMicroseconds);
+    return offset;
+  }
+
+  /// Plays a video drop's added sound exactly while its video plays, and moves it back in step when the video
+  /// looped, was scrubbed or stalled.
+  void _syncSound(int id) {
+    final v = _videos[id];
+    final s = _sounds[id];
+    if (s == null || !s.value.isInitialized) return;
+    final playing = v != null && v.value.isInitialized && v.value.isPlaying && !v.value.isBuffering;
+    if (!playing) {
+      if (s.value.isPlaying) s.pause();
+      return;
+    }
+    final expected = _soundOffset(_dropWithId(id), v.value.position, s.value.duration);
+    final drift = (s.value.position - expected).abs();
+    // Positions are reported about twice a second, so small differences are only reporting lag
+    if (drift > const Duration(milliseconds: 900)) s.seekTo(expected);
+    if (!s.value.isPlaying) s.play();
   }
 
   void _syncPlayback() {
@@ -317,6 +489,9 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
         c.pause();
       }
     });
+    for (final id in _sounds.keys.toList()) {
+      _syncSound(id);
+    }
   }
 
   void _onPage(int i) {
@@ -440,6 +615,172 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     if (res.ok && mounted) setState(() => drop['shareCount'] = res.data['shareCount']);
   }
 
+  /// The API saves drops since 2.14 (feed items then carry `saveCount`); older servers show no Save.
+  bool _canSave(Map<String, dynamic> drop) => drop.containsKey('saveCount') || drop.containsKey('savedByMe');
+
+  /// Asks a signed-out viewer to sign in first; returns whether they are signed in.
+  bool _signedInFor(String en, String fi) {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    if (auth.isAuthenticated) return true;
+    MSnack.show(context, tr(context, en, fi), actionLabel: tr(context, 'Sign in', 'Kirjaudu'), onAction: () => openSignIn(context));
+    return false;
+  }
+
+  Future<void> _toggleSave(Map<String, dynamic> drop) async {
+    if (!_signedInFor('Sign in to save drops', 'Kirjaudu sisään tallentaaksesi dropeja')) return;
+    final id = asInt(drop['id']);
+    if (id == null || _saving.contains(id)) return;
+    final saved = drop['savedByMe'] == true;
+    Haptics.light();
+    _saving.add(id);
+    setState(() {
+      drop['savedByMe'] = !saved;
+      drop['saveCount'] = math.max(0, (asInt(drop['saveCount']) ?? 0) + (saved ? -1 : 1));
+    });
+    final api = ApiClient(Provider.of<AuthService>(context, listen: false));
+    final res = saved ? await api.delete('/drops/$id/save') : await api.put('/drops/$id/save');
+    _saving.remove(id);
+    if (!mounted) return;
+    setState(() {
+      if (res.ok) {
+        drop['savedByMe'] = res.data['saved'] == true;
+        if (res.data['saveCount'] != null) drop['saveCount'] = asInt(res.data['saveCount']);
+      } else {
+        drop['savedByMe'] = saved;
+        drop['saveCount'] = math.max(0, (asInt(drop['saveCount']) ?? 0) + (saved ? 1 : -1));
+      }
+    });
+    if (!res.ok) {
+      MSnack.error(context, res.errorText(context) ?? tr(context, 'Could not save. Try again.', 'Tallennus ei onnistunut. Yritä uudelleen.'));
+    } else if (!saved) {
+      _snack(tr(context, 'Saved. Find it in Profile under Saved drops.', 'Tallennettu. Löydät sen Profiilista kohdasta Tallennetut dropit.'));
+    }
+  }
+
+  /// Hides the drop from this viewer's lists for good (the server remembers it); it leaves the reel at once
+  /// and the snack offers Undo.
+  Future<void> _notInterested(Map<String, dynamic> drop) async {
+    if (!_signedInFor('Sign in to tune your drops', 'Kirjaudu sisään muokataksesi droppejasi')) return;
+    final id = asInt(drop['id']);
+    final at = _drops.indexOf(drop);
+    if (id == null || at < 0) return;
+    Haptics.selection();
+    _removeAt(at);
+    final api = ApiClient(Provider.of<AuthService>(context, listen: false));
+    final res = await api.post('/drops/$id/not-interested');
+    if (!mounted) return;
+    if (!res.ok) {
+      _insertAt(at, drop);
+      MSnack.error(context, res.errorText(context) ?? tr(context, 'Could not hide the drop. Try again.', 'Dropin piilottaminen ei onnistunut. Yritä uudelleen.'));
+      return;
+    }
+    MSnack.show(
+      context,
+      tr(context, 'You will not see this drop again.', 'Et näe tätä droppia enää.'),
+      actionLabel: tr(context, 'Undo', 'Kumoa'),
+      onAction: () async {
+        final undo = await api.delete('/drops/$id/not-interested');
+        if (!mounted) return;
+        if (undo.ok) {
+          if (!_drops.any((d) => asInt(d['id']) == id)) _insertAt(at, drop);
+        } else {
+          MSnack.error(context, undo.errorText(context) ?? tr(context, 'Could not undo. Try again.', 'Kumoaminen ei onnistunut. Yritä uudelleen.'));
+        }
+      },
+    );
+  }
+
+  /// Takes a drop out of the reel; the next one moves into its place.
+  void _removeAt(int at) {
+    if (at == _index) _flushView();
+    final id = asInt(_drops[at]['id']);
+    if (id != null) _release(id);
+    setState(() {
+      _drops.removeAt(at);
+      if (at < _index) _index--;
+      if (_index >= _drops.length) _index = math.max(0, _drops.length - 1);
+      _paused = false;
+    });
+    _watchStart = DateTime.now();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _pages.hasClients && _drops.isNotEmpty) _pages.jumpToPage(_index);
+    });
+    _prepareAround(_index);
+    if (_index >= _drops.length - 3) _load();
+  }
+
+  /// Puts a drop back (Undo, or the server refused to hide it) and shows it.
+  void _insertAt(int at, Map<String, dynamic> drop) {
+    _flushView();
+    final pos = math.min(at, _drops.length);
+    setState(() {
+      _drops.insert(pos, drop);
+      _index = pos;
+      _paused = false;
+    });
+    _watchStart = DateTime.now();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _pages.hasClients) _pages.jumpToPage(pos);
+    });
+    _prepareAround(pos);
+  }
+
+  /// Save, Not interested, Share and Report, from a long press or the rail's More button. Playback waits while
+  /// it is open.
+  Future<void> _showOptions(Map<String, dynamic> drop) async {
+    setState(() => _holding = true);
+    _syncPlayback();
+    final saved = drop['savedByMe'] == true;
+    final choice = await showMSheet<String>(
+      context,
+      isScrollControlled: false,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_canSave(drop))
+              ListTile(
+                leading: Icon(saved ? Icons.bookmark_remove_outlined : Icons.bookmark_add_outlined),
+                title: Text(saved ? tr(ctx, 'Remove from saved', 'Poista tallennetuista') : tr(ctx, 'Save', 'Tallenna')),
+                onTap: () => Navigator.pop(ctx, 'save'),
+              ),
+            if (_canSave(drop))
+              ListTile(
+                leading: const Icon(Icons.visibility_off_outlined),
+                title: Text(tr(ctx, 'Not interested', 'Ei kiinnosta')),
+                subtitle: Text(tr(ctx, 'Hide this drop from your lists', 'Piilota tämä droppi listoiltasi')),
+                onTap: () => Navigator.pop(ctx, 'hide'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.reply_rounded),
+              title: Text(tr(ctx, 'Share', 'Jaa')),
+              onTap: () => Navigator.pop(ctx, 'share'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.flag_outlined),
+              title: Text(tr(ctx, 'Report', 'Ilmoita')),
+              onTap: () => Navigator.pop(ctx, 'report'),
+            ),
+            const SizedBox(height: MSpace.sm),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    setState(() => _holding = false);
+    _syncPlayback();
+    switch (choice) {
+      case 'save':
+        _toggleSave(drop);
+      case 'hide':
+        _notInterested(drop);
+      case 'share':
+        _share(drop);
+      case 'report':
+        _report(drop);
+    }
+  }
+
   Future<void> _addToBag(Map<String, dynamic> drop) async {
     final added = await showAddToBagSheet(context, Map<String, dynamic>.from(drop['product']), store: Map<String, dynamic>.from(drop['store']));
     if (added && mounted) showAddedToBag(context);
@@ -542,7 +883,11 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
             else if (_drops.isEmpty)
               _message(
                 _mode == 'following' ? Icons.storefront_rounded : Icons.play_circle_outline_rounded,
-                _mode == 'following'
+                widget.saved
+                    ? tr(context, 'No saved drops. Tap the bookmark on a drop to keep it here.', 'Ei tallennettuja droppeja. Tallenna droppi kirjanmerkillä, niin se löytyy täältä.')
+                    : widget.soundId != null
+                    ? tr(context, 'No drops use this sound right now.', 'Tätä ääntä ei käytetä nyt yhdessäkään dropissa.')
+                    : _mode == 'following' && !widget.standalone
                     ? tr(context, 'Follow stores to see their new drops here. Tap + on a store in For you.',
                         'Seuraa kauppoja nähdäksesi niiden uudet dropit täällä. Napauta kaupan +-merkkiä Sinulle-välilehdellä.')
                     : tr(context, 'No drops yet. When stores near you post videos, they show up here.',
@@ -625,7 +970,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
           children: [
             const BackButton(color: MPalette.white),
             Expanded(
-              child: Text(widget.storeName ?? '',
+              child: Text(widget.storeName ?? widget.title ?? '',
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: AppTheme.onMedia, fontWeight: FontWeight.w700, fontSize: MTextSize.bodyL, shadows: [Shadow(blurRadius: 8, color: MPalette.scrim)])),
             ),
@@ -712,6 +1057,18 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
         }
         _toggleLike(drop, onlyLike: true);
       },
+      // Holding a finger on the drop pauses it; letting go opens its options (playback waits until they close)
+      onLongPressStart: (_) {
+        Haptics.light();
+        setState(() => _holding = true);
+        _syncPlayback();
+      },
+      onLongPressEnd: (_) => _showOptions(drop),
+      onLongPressCancel: () {
+        if (!_holding) return;
+        setState(() => _holding = false);
+        _syncPlayback();
+      },
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -750,19 +1107,24 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                 },
               ),
             ),
-          Positioned(right: 10, bottom: bottomInset + 20, child: _rail(drop)),
+          // The rail shrinks on short screens instead of running under the top bar
+          Positioned(
+            right: 10,
+            top: MediaQuery.of(context).viewPadding.top + 64,
+            bottom: bottomInset + 20,
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.bottomCenter, child: _rail(drop)),
+            ),
+          ),
           Positioned(left: 16, right: 84, bottom: bottomInset, child: _info(drop)),
           if (ready && isVideo)
             Positioned(
               left: 0,
               right: 0,
-              bottom: bottomInset - 10,
-              child: VideoProgressIndicator(
-                controller,
-                allowScrubbing: true,
-                padding: EdgeInsets.zero,
-                colors: VideoProgressColors(playedColor: AppTheme.sunshine, bufferedColor: MPalette.white.withValues(alpha: 0.24), backgroundColor: MPalette.white.withValues(alpha: 0.1)),
-              ),
+              // The bar sits where it always did; the touch area below it makes scrubbing easier
+              bottom: bottomInset - 10 - _ReelProgress.touchHeight + _ReelProgress.barHeight,
+              child: _ReelProgress(controller: controller, trim: _trimOf(drop)),
             ),
         ],
       ),
@@ -772,6 +1134,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   Widget _rail(Map<String, dynamic> drop) {
     final store = (drop['store'] as Map?)?.cast<String, dynamic>() ?? {};
     final liked = drop['likedByMe'] == true;
+    final saved = drop['savedByMe'] == true;
     Widget action(IconData icon, String? label, VoidCallback onTap, {Color color = MPalette.white, String? tooltip, Object? bumpOn}) => Padding(
           padding: const EdgeInsets.only(bottom: 18),
           child: Semantics(
@@ -861,6 +1224,11 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
             tooltip: liked ? tr(context, 'Unlike', 'Poista tykkäys') : tr(context, 'Like', 'Tykkää'),
             bumpOn: liked),
         action(Icons.chat_bubble_outline_rounded, _compact(drop['commentCount']), () => _openComments(drop), tooltip: tr(context, 'Comments', 'Kommentit')),
+        if (_canSave(drop))
+          action(saved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded, _compact(drop['saveCount']), () => _toggleSave(drop),
+              color: saved ? AppTheme.sunshine : MPalette.white,
+              tooltip: saved ? tr(context, 'Remove from saved', 'Poista tallennetuista') : tr(context, 'Save', 'Tallenna'),
+              bumpOn: saved),
         Padding(
           padding: const EdgeInsets.only(bottom: 18),
           child: Semantics(
@@ -890,7 +1258,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
           ),
         ),
         action(Icons.reply_rounded, _compact(drop['shareCount']), () => _share(drop), tooltip: tr(context, 'Share', 'Jaa')),
-        action(Icons.more_horiz_rounded, null, () => _report(drop), tooltip: tr(context, 'More', 'Lisää')),
+        action(Icons.more_horiz_rounded, null, () => _showOptions(drop), tooltip: tr(context, 'More options', 'Lisää toimintoja')),
       ],
     );
   }
@@ -900,6 +1268,57 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     if (v >= 1000000) return '${(v / 1000000).toStringAsFixed(1)} M';
     if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)} k';
     return '$v';
+  }
+
+  /// "♪ Title · Artist" for a library sound (opens the sound's page), "♪ Sound by <store>" for the store's own.
+  Widget _soundLine(Map<String, dynamic> drop, Map<String, dynamic> store) {
+    const shadow = [Shadow(blurRadius: 8, color: MPalette.ink)];
+    final raw = _audioOf(drop)?['sound'];
+    final Map sound = raw is Map ? raw : const {};
+    final soundId = asInt(sound['id']);
+    final String name;
+    if (soundId != null) {
+      final title = (sound['title'] ?? '').toString();
+      final artist = (sound['artist'] ?? '').toString();
+      name = [if (title.isNotEmpty) title, if (artist.isNotEmpty) artist].join(' · ');
+    } else {
+      name = tr(context, 'Sound by ${store['name'] ?? 'the store'}', 'Ääni: ${store['name'] ?? 'kauppa'}');
+    }
+    final text = _muted ? tr(context, '$name · tap the speaker to listen', '$name · napauta kaiutinta kuunnellaksesi') : name;
+    // Inside that sound's own list the line has nowhere new to go
+    final tappable = soundId != null && soundId != widget.soundId;
+    final row = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.music_note_rounded, size: 16, color: AppTheme.onMedia, shadows: shadow),
+        const SizedBox(width: 4),
+        Flexible(
+          child: Text(
+            text,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppTheme.onMedia,
+              fontSize: MTextSize.caption,
+              fontWeight: tappable ? FontWeight.w700 : FontWeight.w600,
+              shadows: shadow,
+            ),
+          ),
+        ),
+        if (tappable) const Icon(Icons.chevron_right_rounded, size: 16, color: AppTheme.onMedia, shadows: shadow),
+      ],
+    );
+    if (!tappable) return Padding(padding: const EdgeInsets.only(top: MSpace.xs), child: row);
+    return Semantics(
+      button: true,
+      label: tr(context, 'Sound: $name. Open drops with this sound', 'Ääni: $name. Avaa dropit, joissa on tämä ääni'),
+      excludeSemantics: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _open(SoundScreen(soundId: soundId, title: sound['title']?.toString(), artist: sound['artist']?.toString())),
+        // A taller tap area than the text line
+        child: Padding(padding: const EdgeInsets.symmetric(vertical: MSpace.xs), child: row),
+      ),
+    );
   }
 
   Widget _info(Map<String, dynamic> drop) {
@@ -941,26 +1360,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
             ),
           ],
         ),
-        if (_soundUrl(drop) != null)
-          Padding(
-            padding: const EdgeInsets.only(top: MSpace.xs),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.music_note_rounded, size: 16, color: AppTheme.onMedia, shadows: shadow),
-                const SizedBox(width: 4),
-                Flexible(
-                  child: Text(
-                    _muted
-                        ? tr(context, 'Sound by ${store['name'] ?? 'the store'} · tap the speaker to listen', 'Ääni: ${store['name'] ?? 'kauppa'} · napauta kaiutinta kuunnellaksesi')
-                        : tr(context, 'Sound by ${store['name'] ?? 'the store'}', 'Ääni: ${store['name'] ?? 'kauppa'}'),
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: AppTheme.onMedia, fontSize: MTextSize.caption, fontWeight: FontWeight.w600, shadows: shadow),
-                  ),
-                ),
-              ],
-            ),
-          ),
+        if (_audioOf(drop) != null) _soundLine(drop, store),
         if ((drop['caption'] ?? '').toString().isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 6),
@@ -1165,6 +1565,70 @@ class _PhotoSlideshowState extends State<_PhotoSlideshow> {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// The progress bar of a video drop. For a trimmed drop it covers only the part that plays; dragging or
+/// tapping along it moves the video within that part.
+class _ReelProgress extends StatelessWidget {
+  static const double barHeight = 3;
+  static const double touchHeight = 20;
+
+  final VideoPlayerController controller;
+  final ({Duration start, Duration end})? trim;
+  const _ReelProgress({required this.controller, this.trim});
+
+  ({Duration start, Duration length}) _window(Duration duration) {
+    final t = trim;
+    final start = t == null || t.start >= duration ? Duration.zero : t.start;
+    final end = t == null || t.end > duration || t.end <= start ? duration : t.end;
+    return (start: start, length: end - start);
+  }
+
+  void _seek(double dx, double width) {
+    final duration = controller.value.duration;
+    if (width <= 0 || duration <= Duration.zero) return;
+    final w = _window(duration);
+    final f = (dx / width).clamp(0.0, 1.0);
+    controller.seekTo(w.start + Duration(microseconds: (w.length.inMicroseconds * f).round()));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, box) => Semantics(
+        label: tr(context, 'Video progress', 'Videon eteneminen'),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapUp: (d) => _seek(d.localPosition.dx, box.maxWidth),
+          onHorizontalDragUpdate: (d) => _seek(d.localPosition.dx, box.maxWidth),
+          child: SizedBox(
+            height: touchHeight,
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: ValueListenableBuilder<VideoPlayerValue>(
+                valueListenable: controller,
+                builder: (context, v, _) {
+                  var played = 0.0;
+                  if (v.isInitialized && v.duration > Duration.zero) {
+                    final w = _window(v.duration);
+                    if (w.length > Duration.zero) {
+                      played = ((v.position - w.start).inMicroseconds / w.length.inMicroseconds).clamp(0.0, 1.0);
+                    }
+                  }
+                  return Container(
+                    height: barHeight,
+                    color: MPalette.white.withValues(alpha: 0.14),
+                    alignment: Alignment.centerLeft,
+                    child: FractionallySizedBox(widthFactor: played, child: Container(color: AppTheme.sunshine)),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

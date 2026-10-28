@@ -45,6 +45,8 @@ for (const path of [
   "/api/v1/drops/feed",
   "/api/v1/drops/ranking",
   "/api/v1/drops/:id(\\d+)",
+  "/api/v1/sounds/:id(\\d+)",
+  "/api/v1/sounds/:id(\\d+)/drops",
 ]) publicCacheRoutes.get(path, api);
 // Pages people open from links: a little longer
 const pages = publicCache(Math.max(scale.publicCacheSeconds, 60), Math.max(scale.publicStaleSeconds, 600));

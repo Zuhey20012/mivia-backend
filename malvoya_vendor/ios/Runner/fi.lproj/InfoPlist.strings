@@ -2,5 +2,5 @@
 "NSLocationWhenInUseUsageDescription" = "Malvoya käyttää sijaintiasi kerran, jotta asiakkaat ja lähetit näkevät kauppasi oikeassa paikassa kartalla.";
 "NSLocationAlwaysAndWhenInUseUsageDescription" = "Malvoya Store käyttää sijaintiasi vain sovellusta käyttäessäsi, kun asetat kauppasi kartalle. Sijaintiasi ei käytetä taustalla.";
 "NSCameraUsageDescription" = "Malvoya Store käyttää kameraa, kun otat tuotekuvia tai kuvaat videon tuotteelle tai dropille.";
-"NSMicrophoneUsageDescription" = "Malvoya Store käyttää mikrofonia vain, kun kuvaat tuote- tai drop-videota, jotta videossa on ääni.";
+"NSMicrophoneUsageDescription" = "Malvoya Store käyttää mikrofonia vain nauhoituksen ajan: tuote- tai drop-videon ääneen tai julkaisun selostukseen.";
 "NSPhotoLibraryUsageDescription" = "Malvoya Store käyttää valitsemiasi kuvia ja videoita tuotteisiisi, dropeihisi, logoosi ja kansikuvaasi.";

@@ -15,6 +15,7 @@ import { getAnalytics } from "./analytics";
 import { adminDac7, adminDac7Csv, adminStoreStatement } from "../sellers/admin.sellers";
 import { adminLegalRoutes } from "../legal/admin.legal";
 import { catalogAdminRoutes } from "../catalog/admin";
+import { adminSoundRoutes } from "../sounds/sounds.routes";
 
 const router = Router();
 
@@ -44,6 +45,7 @@ router.get("/stores/:id(\\d+)/statements", adminStoreStatement); // ?month=YYYY-
 router.use(adminLegalRoutes); // /legal, /legal/:doc/publish, /users/:id/agreements
 router.use(catalogAdminRoutes); // /categories, /certificates, /product-reports, /recalls, /products/:id (2.12)
 router.use(moderationRoutes);
+router.use(adminSoundRoutes); // /sounds: the licensed sound library (2.14)
 router.use(promoRoutes); // /promo-codes
 
 export default router;

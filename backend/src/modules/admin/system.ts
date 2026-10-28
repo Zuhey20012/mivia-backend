@@ -183,7 +183,7 @@ export async function getSystemStatus(_req: Request, res: Response) {
 
     res.json({
       ok: true,
-      version: "2.13.0",
+      version: "2.14.0",
       region: "frankfurt",
       startedAt,
       readyForOrders: blockers.length === 0,
