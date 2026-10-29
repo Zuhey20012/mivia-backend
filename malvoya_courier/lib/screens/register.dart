@@ -4,6 +4,7 @@ import 'package:malvoya_core/malvoya_core.dart';
 import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
+import '../core/account_security.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -19,6 +20,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _loading = false;
   bool _obscurePass = true;
   bool _agreed = false;
+  bool _adult = false;
   String? _error;
 
   @override
@@ -34,6 +36,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
       setState(() => _error = tr(context, 'Please fill out all fields.', 'Täytä kaikki kentät.'));
       return;
     }
+    if (_passCtrl.text.length < kMinPasswordLength) {
+      setState(() => _error = tr(context, 'Use a password of at least $kMinPasswordLength characters.', 'Käytä vähintään $kMinPasswordLength merkin salasanaa.'));
+      return;
+    }
+    if (!_adult) {
+      setState(() => _error = tr(context, 'Couriers must be 18 or older. Confirm your age to send your application.', 'Lähettien on oltava vähintään 18-vuotiaita. Vahvista ikäsi lähettääksesi hakemuksen.'));
+      return;
+    }
     if (!_agreed) {
       setState(() => _error = tr(context, 'Accept the courier agreement to send your application.', 'Hyväksy lähettisopimus lähettääksesi hakemuksen.'));
       return;
@@ -45,6 +55,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _emailCtrl.text.trim(),
       _passCtrl.text,
       acceptTerms: _agreed,
+      ageConfirmed: _adult,
     );
     // On success the app closes this screen itself and its home shows the pending-approval screen
     if (mounted && err != null) setState(() { _error = err; _loading = false; });
@@ -105,9 +116,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 controller: _passCtrl,
                 obscureText: _obscurePass,
                 textInputAction: TextInputAction.done,
+                autofillHints: const [AutofillHints.newPassword],
                 onSubmitted: (_) => _handleRegister(),
                 decoration: InputDecoration(
                   labelText: tr(context, 'Password', 'Salasana'),
+                  helperText: tr(context, 'At least $kMinPasswordLength characters', 'Vähintään $kMinPasswordLength merkkiä'),
                   prefixIcon: const Icon(Icons.lock_outline_rounded),
                   suffixIcon: IconButton(
                     icon: Icon(_obscurePass ? Icons.visibility_off_outlined : Icons.visibility_outlined),
@@ -135,6 +148,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ],
 
               const SizedBox(height: MSpace.xl),
+              // Required for every new account (API 2.16); never pre-ticked
+              AgeCheckbox(value: _adult, onChanged: _loading ? null : (v) => setState(() { _adult = v; if (v) _error = null; })),
               // Required: the application records that the courier accepted the agreement
               CheckboxListTile(
                 value: _agreed,
@@ -156,7 +171,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
               ),
               const SizedBox(height: MSpace.xl),
-              MButton(label: tr(context, 'Send application', 'Lähetä hakemus'), expand: true, loading: _loading, onPressed: _agreed ? _handleRegister : null),
+              MButton(label: tr(context, 'Send application', 'Lähetä hakemus'), expand: true, loading: _loading, onPressed: _agreed && _adult ? _handleRegister : null),
               const SizedBox(height: MSpace.x3l),
             ],
           ),

@@ -7,12 +7,14 @@ export interface AccessTokenPayload {
   email: string;
   /** The session passed two-step sign-in (authenticator code). */
   mfa?: boolean;
+  /** The sign-in (UserSession id) this token belongs to (since 2.16.0; absent on older tokens). */
+  sid?: number;
 }
 
 const ALGORITHM = "HS256" as const;
 
 export function signAccessToken(payload: AccessTokenPayload): string {
-  return jwt.sign({ id: payload.id, role: payload.role, email: payload.email, typ: "access", ...(payload.mfa ? { mfa: true } : {}) }, env.jwtSecret, {
+  return jwt.sign({ id: payload.id, role: payload.role, email: payload.email, typ: "access", ...(payload.mfa ? { mfa: true } : {}), ...(payload.sid ? { sid: payload.sid } : {}) }, env.jwtSecret, {
     algorithm: ALGORITHM,
     expiresIn: env.jwtExpiresIn,
   } as jwt.SignOptions);
@@ -31,7 +33,10 @@ export function signRefreshToken(userId: number, mfa = false): string {
 export function verifyAccessToken(token: string): AccessTokenPayload & { iat: number } {
   const payload = jwt.verify(token, env.jwtSecret, { algorithms: [ALGORITHM] }) as jwt.JwtPayload;
   if (payload.typ !== "access") throw new Error("Wrong token type");
-  return { id: Number(payload.id), role: String(payload.role), email: String(payload.email), mfa: payload.mfa === true, iat: Number(payload.iat ?? 0) };
+  return {
+    id: Number(payload.id), role: String(payload.role), email: String(payload.email), mfa: payload.mfa === true, iat: Number(payload.iat ?? 0),
+    ...(Number.isInteger(payload.sid) ? { sid: Number(payload.sid) } : {}),
+  };
 }
 
 export function verifyRefreshToken(token: string): { id: number; mfa: boolean } {

@@ -13,6 +13,7 @@ import 'package:malvoya_core/malvoya_core.dart';
 import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
+import '../core/account_security.dart';
 import '../core/agreements.dart';
 import '../core/connectivity.dart';
 import '../core/nav_apps.dart';
@@ -34,6 +35,7 @@ import 'go_online_check.dart';
 import 'help_screen.dart';
 import 'offer_screen.dart';
 import 'payouts_screen.dart';
+import 'safety_screen.dart';
 
 enum _Load { loading, ready, error }
 
@@ -218,6 +220,14 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
 
   Future<void> _init() async {
     unawaited(_loadReturnedDone());
+    // e.g. "You used a recovery code" from the second sign-in step
+    final notice = _auth.lastSignInNotice;
+    if (notice != null) {
+      _auth.lastSignInNotice = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _snack(notice);
+      });
+    }
     final me = await _api.get('/courier/me');
     if (!mounted) return;
     _meLoaded = me.ok;
@@ -307,6 +317,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     setState(() => _switching = true);
     double? lat;
     double? lng;
+    var mocked = false;
     if (next) {
       if (!await _startSharing()) {
         if (mounted) {
@@ -319,11 +330,12 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
         final p = await Geolocator.getCurrentPosition(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
         lat = p.latitude;
         lng = p.longitude;
+        mocked = p.isMocked;
       } catch (_) {}
     } else {
       CourierTelemetryService().stop();
     }
-    final body = {'isOnline': next, 'latitude': lat, 'longitude': lng};
+    final body = {'isOnline': next, 'latitude': lat, 'longitude': lng, if (mocked) 'mocked': true};
     var res = await _api.post('/courier/status', body);
     if (!mounted) return;
     // Going online needs the Courier Agreement in force (428, API 2.11): show it, then go online by itself
@@ -371,6 +383,12 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
   Future<void> _openHelp({int? orderId, bool stopping = false}) =>
       Navigator.push(context, MaterialPageRoute(builder: (_) => HelpScreen(orderId: orderId, stoppingDelivery: stopping)));
 
+  /// Safety while online: call 112, report an incident, see the status of reports.
+  Future<void> _openSafety() {
+    HapticFeedback.mediumImpact();
+    return Navigator.push(context, MaterialPageRoute(builder: (_) => SafetyScreen(orderId: asInt(_active?['id']))));
+  }
+
   /// Account: Google link, help, sign out and delete account.
   void _openAccount() {
     HapticFeedback.selectionClick();
@@ -392,6 +410,17 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
             const Divider(height: 16),
             // No Google sign-in on iPhone (App Review 4.8: the courier app uses Malvoya's own sign-in there)
             if (!SignInSetup.isIOS) GoogleLinkTile(account: Provider.of<AuthService>(context, listen: false)),
+            const TwoStepTile(),
+            ListTile(
+              leading: const Icon(Icons.devices_rounded),
+              title: Text(tr(context, 'Signed-in devices', 'Kirjautuneet laitteet'), style: const TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text(tr(context, 'See where you are signed in, sign out others', 'Katso, missä olet kirjautuneena, ja kirjaa muut ulos')),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const SignedInDevicesScreen()));
+              },
+            ),
             FutureBuilder<NavApp?>(
               future: NavApps.saved(),
               builder: (ctx, snap) => ListTile(
@@ -404,6 +433,15 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
                   await NavApps.choose(context, offerRemember: false);
                 },
               ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.info_outline_rounded),
+              title: Text(tr(context, 'How offers and pay work', 'Miten tarjoukset ja palkkio toimivat'), style: const TextStyle(fontWeight: FontWeight.w600)),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () {
+                Navigator.pop(ctx);
+                _howJobsWork();
+              },
             ),
             ListTile(
               leading: const Icon(Icons.support_agent_rounded),
@@ -1285,14 +1323,124 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
         ]),
       ), isScrollControlled: false, useSafeArea: false);
     if (method == null || !mounted) return;
+    await _deliver(o, method, swiped: swiped);
+  }
+
+  /// Orders of 80 € or more need the customer's 4-digit handover code for an in-person handover
+  /// (API 2.16). Older servers send nothing, so no code is asked.
+  bool _pinRequired(Map o) {
+    final h = o['handover'];
+    return o['handoverPinRequired'] == true ||
+        o['requiresHandoverPin'] == true ||
+        o['pinRequired'] == true ||
+        (h is Map && (h['pinRequired'] == true || h['required'] == true));
+  }
+
+  String _codeOf(ApiResult res) => '${res.data['code'] ?? ''}'.toUpperCase();
+
+  /// 409: the courier is not close enough to the door for an in-person handover, so a photo is needed.
+  bool _photoNeeded(ApiResult res) {
+    final code = _codeOf(res);
+    if (code.contains('PHOTO') || code.contains('TOO_FAR') || code.contains('DISTANCE')) return true;
+    return res.status == 409 && (res.rawError ?? '').toLowerCase().contains('photo');
+  }
+
+  /// The handover code is missing or wrong.
+  bool _pinProblem(ApiResult res) {
+    final code = _codeOf(res);
+    if (code.contains('PIN')) return true;
+    final raw = res.rawError ?? '';
+    return RegExp(r'\bpin\b', caseSensitive: false).hasMatch(raw) || raw.toLowerCase().contains('handover code');
+  }
+
+  /// Asks for the customer's handover code. Null when cancelled.
+  Future<String?> _askHandoverPin(int orderId, {String? error}) async {
+    final ctrl = TextEditingController();
+    final pin = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          final ok = RegExp(r'^\d{4,6}$').hasMatch(ctrl.text.trim());
+          return AlertDialog(
+            title: Text(tr(ctx, 'Handover code', 'Luovutuskoodi')),
+            content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(
+                tr(ctx, 'Order #$orderId needs the customer\'s 4-digit code. Ask the customer to show it in their Malvoya app, then enter it here. Never ask for it by chat or phone before you are at the door.',
+                    'Tilaus #$orderId vaatii asiakkaan 4-numeroisen koodin. Pyydä asiakasta näyttämään se Malvoya-sovelluksestaan ja kirjoita se tähän. Älä kysy sitä chatissa tai puhelimessa ennen kuin olet ovella.'),
+                style: const TextStyle(height: 1.4),
+              ),
+              const SizedBox(height: MSpace.md),
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                maxLength: 6,
+                textAlign: TextAlign.center,
+                style: AppTheme.display(size: 28),
+                onChanged: (_) => setLocal(() {}),
+                onSubmitted: (_) {
+                  if (RegExp(r'^\d{4,6}$').hasMatch(ctrl.text.trim())) Navigator.pop(ctx, ctrl.text.trim());
+                },
+                decoration: const InputDecoration(hintText: '0000', counterText: ''),
+              ),
+              if (error != null) ...[
+                const SizedBox(height: MSpace.sm),
+                Text(error, style: const TextStyle(color: AppTheme.dangerInk, fontWeight: FontWeight.w600)),
+              ],
+            ]),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr(ctx, 'Cancel', 'Peruuta'))),
+              FilledButton(onPressed: ok ? () => Navigator.pop(ctx, ctrl.text.trim()) : null, child: Text(tr(ctx, 'Delivered', 'Toimitettu'))),
+            ],
+          );
+        },
+      ),
+    );
+    ctrl.dispose();
+    return pin;
+  }
+
+  /// The server needs a photo instead (too far from the door, or no fresh position). True = take one.
+  Future<bool> _offerPhotoInstead(String? message) async {
+    final take = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(tr(ctx, 'A photo is needed', 'Kuva tarvitaan')),
+        content: Text(
+          '${message ?? ''}${message == null ? '' : '\n\n'}${tr(ctx, 'An in-person handover is accepted only near the delivery address. If you are at the door, wait a moment for the location to update and try again, or take a photo of the order at the door instead.', 'Henkilökohtainen luovutus hyväksytään vain toimitusosoitteen lähellä. Jos olet ovella, odota hetki, että sijainti päivittyy, ja yritä uudelleen, tai ota sen sijaan kuva tilauksesta ovella.')}',
+          style: const TextStyle(height: 1.4),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(ctx, 'Not now', 'Ei nyt'))),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.photo_camera_outlined),
+            label: Text(tr(ctx, 'Take a photo', 'Ota kuva')),
+          ),
+        ],
+      ),
+    );
+    return take == true;
+  }
+
+  /// Hands the order over with [method]. [pin] / [askPin]: the customer's handover code (asked
+  /// when the order needs it or the server says so; [pinError] is the server's last answer).
+  Future<void> _deliver(Map<String, dynamic> o, String method, {bool swiped = false, bool askPin = false, String? pinError}) async {
     final orderId = asInt(o['id'])!;
     XFile? shot;
     if (method == 'PHOTO') {
       shot = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 80);
       if (shot == null || !mounted) return;
     }
-    // Delivered cannot be undone: one last check before telling the customer
-    final confirmed = (swiped && method == 'IN_PERSON') || await _confirm(
+    String? pin;
+    if (method == 'IN_PERSON' && (askPin || _pinRequired(o))) {
+      pin = await _askHandoverPin(orderId, error: pinError);
+      if (pin == null || !mounted) return;
+    }
+    // Delivered cannot be undone: one last check before telling the customer (entering the
+    // customer's code is that check for an in-person handover)
+    final confirmed = (swiped && method == 'IN_PERSON') || pin != null || await _confirm(
       title: tr(context, 'Mark order #$orderId as delivered?', 'Merkitäänkö tilaus #$orderId toimitetuksi?'),
       body: method == 'PHOTO'
           ? tr(context, 'The customer is told the order was left at the door and sees this photo. This cannot be undone.',
@@ -1322,16 +1470,29 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
         return;
       }
     }
-    final pos = await _here();
+    // An in-person handover is checked against a fresh position near the door: send one first
+    if (method == 'IN_PERSON') await CourierTelemetryService().sendNow(post: _postPosition);
+    final pos = method == 'IN_PERSON' ? (CourierTelemetryService().lastPosition ?? await _here()) : await _here();
     final res = await _api.post('/orders/$orderId/deliver', {
       'method': method,
       if (proof != null) 'upload': proof,
       if (pos != null) 'latitude': pos.latitude,
       if (pos != null) 'longitude': pos.longitude,
+      if (pos != null && pos.isMocked) 'mocked': true,
+      if (pin != null) 'handoverPin': pin,
     });
     if (!mounted) return;
     setState(() => _completing = false);
-    if (!res.ok) return _snack(res.error!);
+    if (!res.ok) {
+      if (method == 'IN_PERSON' && _photoNeeded(res)) {
+        if (await _offerPhotoInstead(res.error) && mounted) await _deliver(o, 'PHOTO');
+        return;
+      }
+      if (method == 'IN_PERSON' && _pinProblem(res) && res.status != 429) {
+        return _deliver(o, 'IN_PERSON', askPin: true, pinError: res.error);
+      }
+      return _snack(res.error!);
+    }
     HapticFeedback.heavyImpact();
     _resetChat();
     await Future.wait([_loadMine(), _loadEarnings(), _loadJobs()]);
@@ -1474,16 +1635,120 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
             : (prominent ? tr(context, 'Chat with the customer', 'Chattaa asiakkaan kanssa') : tr(context, 'Chat', 'Chat'))),
       );
 
+  /// The pay formula as the server explains it in an offer (`courierPay.explanation`): the job
+  /// being carried, a listed job or the latest live offer.
+  String? _payFormulaText() {
+    final sources = <Map?>[
+      if (_active != null) _payOf(_active!),
+      for (final j in _jobs) _payOf(j),
+      ..._offerPay.values,
+    ];
+    for (final pay in sources) {
+      final text = _localized(pay?['explanation']);
+      if (text != null) return text;
+    }
+    return null;
+  }
+
+  /// "How offers and pay work" (Platform Work Directive): every automated system that affects the
+  /// courier's work, what is never used, and how to reach a person at Malvoya.
   void _howJobsWork() {
-    showMSheet(context, builder: (_) => SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(MSpace.xxl, MSpace.xxl, MSpace.xxl, MSpace.x3l),
+    final formula = _payFormulaText();
+    Widget point(IconData icon, String title, String body, {Widget? extra}) => Padding(
+          padding: const EdgeInsets.only(bottom: MSpace.lg),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(color: AppTheme.peach, borderRadius: BorderRadius.circular(12)),
+              child: Icon(icon, size: 20, color: AppTheme.primaryDark),
+            ),
+            const SizedBox(width: MSpace.md),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: MTextSize.bodyL)),
+                const SizedBox(height: 2),
+                Text(body, style: const TextStyle(height: 1.45, color: AppTheme.textSecondary)),
+                if (extra != null) ...[const SizedBox(height: MSpace.sm), extra],
+              ]),
+            ),
+          ]),
+        );
+    showMSheet(context, builder: (sheetCtx) => SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(MSpace.xxl, MSpace.sm, MSpace.xxl, MSpace.x3l),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(tr(context, 'How jobs are offered', 'Miten keikat tarjotaan'), style: const TextStyle(fontSize: MTextSize.title, fontWeight: FontWeight.w700)),
-          const SizedBox(height: MSpace.md),
+          Text(tr(context, 'How offers and pay work', 'Miten tarjoukset ja palkkio toimivat'), style: AppTheme.display(size: 22)),
+          const SizedBox(height: 6),
+          Text(
+            tr(context, 'Malvoya uses these automated systems, and only these, for your work:', 'Malvoya käyttää työssäsi näitä automaattisia järjestelmiä, eikä muita:'),
+            style: const TextStyle(height: 1.45, color: AppTheme.textSecondary),
+          ),
+          const SizedBox(height: MSpace.lg),
+          point(
+            Icons.near_me_rounded,
+            tr(context, '1. Offers go to nearby couriers, nearest first', '1. Tarjoukset menevät lähellä oleville, lähin ensin'),
+            tr(context,
+                'When a store accepts an order, it is offered automatically to approved couriers who are online within 7.5 km of the store, nearest first by distance from your last shared position. If nobody is that close, every online courier sees it. An unanswered offer is sent again every few minutes.',
+                'Kun kauppa hyväksyy tilauksen, se tarjotaan automaattisesti hyväksytyille, linjoilla oleville läheteille 7,5 km:n säteellä kaupasta, lähin ensin viimeksi jaetun sijaintisi perusteella. Jos kukaan ei ole niin lähellä, kaikki linjoilla olevat näkevät sen. Vastaamaton tarjous lähetetään uudelleen muutaman minuutin välein.'),
+          ),
+          point(
+            Icons.touch_app_rounded,
+            tr(context, '2. The first courier to accept gets the job', '2. Ensimmäinen hyväksyjä saa keikan'),
+            tr(context,
+                'Nothing is ever assigned to you automatically: you choose which jobs to take. Declining or ignoring an offer has no consequences.',
+                'Mitään ei koskaan anneta sinulle automaattisesti: valitset itse keikkasi. Tarjouksesta kieltäytyminen tai sen ohittaminen ei vaikuta sinuun mitenkään.'),
+          ),
+          point(
+            Icons.calculate_rounded,
+            tr(context, '3. Pay is calculated by a fixed formula', '3. Palkkio lasketaan kiinteällä kaavalla'),
+            tr(context,
+                'Every offer shows your pay and its breakdown before you accept. Paid waiting at the shop beyond the free minutes is added at pickup. Tips go to you in full.',
+                'Jokainen tarjous näyttää palkkiosi ja sen erittelyn ennen kuin hyväksyt. Maksullinen odotus kaupassa ilmaisten minuuttien jälkeen lisätään noudon yhteydessä. Tipit saat kokonaan.'),
+            extra: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(MSpace.md),
+              decoration: BoxDecoration(color: AppTheme.sand, borderRadius: BorderRadius.circular(MRadius.sm)),
+              child: Text(
+                formula ??
+                    tr(context, 'The formula is shown with each offer. Go online to see it with the next job.',
+                        'Kaava näytetään jokaisen tarjouksen yhteydessä. Mene linjoille nähdäksesi sen seuraavan keikan kohdalla.'),
+                style: const TextStyle(height: 1.4, fontWeight: FontWeight.w600, fontSize: MTextSize.label),
+              ),
+            ),
+          ),
+          point(
+            Icons.location_on_outlined,
+            tr(context, '4. Location checks', '4. Sijainnin tarkistukset'),
+            tr(context,
+                'While you are online your position is used for offers, the ride-to-shop part of your pay, "I\'m at the shop" and in-person handovers (checked near the door; otherwise a photo is asked). Positions from mock-location apps are ignored.',
+                'Linjoilla ollessasi sijaintiasi käytetään tarjouksiin, palkkion kauppaan ajon osuuteen, "Olen kaupalla" -ilmoitukseen ja henkilökohtaisiin luovutuksiin (tarkistetaan oven lähellä; muuten pyydetään kuva). Sijaintia väärentävien sovellusten sijainnit ohitetaan.'),
+          ),
+          point(
+            Icons.block_rounded,
+            tr(context, 'Never used', 'Ei koskaan käytetä'),
+            tr(context,
+                'Ratings, acceptance rates, declines, speed and earnings are not used for offers or pay. No automated system rates, ranks, suspends or deactivates you.',
+                'Arvioita, hyväksymisprosenttia, kieltäytymisiä, nopeutta tai ansioita ei käytetä tarjouksiin eikä palkkioon. Mikään automaatti ei arvioi, järjestä, keskeytä tai sulje tiliäsi.'),
+          ),
+          point(
+            Icons.support_agent_rounded,
+            tr(context, 'A person at Malvoya', 'Ihminen Malvoyalla'),
+            tr(context,
+                'Decisions about your account are made by a person and explained to you. You can ask a person to explain or review anything above, for example a pay amount, through Help and contact.',
+                'Tiliäsi koskevat päätökset tekee ihminen ja perustelee ne sinulle. Voit pyytää ihmistä selittämään tai tarkistamaan minkä tahansa yllä olevan, esimerkiksi palkkion, Apua ja yhteydenotto -sivun kautta.'),
+            extra: OutlinedButton.icon(
+              onPressed: () {
+                Navigator.pop(sheetCtx);
+                _openHelp(orderId: asInt(_active?['id']));
+              },
+              icon: const Icon(Icons.chat_outlined),
+              label: Text(tr(context, 'Contact a person at Malvoya', 'Ota yhteyttä Malvoyan työntekijään')),
+            ),
+          ),
           Text(
             tr(context,
-                'When a store accepts an order, it is offered to online couriers within 7.5 km of the store, nearest first. If nobody is that close, every online courier sees it. Distance to the store is the only factor: ratings, acceptance rates and declines are not used. You choose which jobs to take — declining or ignoring a job never affects you.\n\nEach offer shows your pay before you accept, with a breakdown. If the shop is not ready when you arrive, waiting beyond the free minutes is paid and added when you pick up. Tips go to you in full.\n\nMalvoya is just starting, so there may be few jobs or none at first. No number of jobs or level of earnings is promised. You deliver as an independent entrepreneur and may also work for other platforms.\n\nNo automated system rates or deactivates you; account decisions are made by a person and explained to you.',
-                'Kun kauppa hyväksyy tilauksen, se tarjotaan linjoilla oleville läheteille 7,5 km:n säteellä kaupasta, lähin ensin. Jos kukaan ei ole niin lähellä, kaikki linjoilla olevat näkevät sen. Ainoa peruste on etäisyys kauppaan: arvioita, hyväksymisprosenttia tai hylkäyksiä ei käytetä. Valitset itse keikkasi — kieltäytyminen tai ohittaminen ei vaikuta sinuun.\n\nJokainen tarjous näyttää palkkiosi erittelyineen ennen kuin hyväksyt. Jos tilaus ei ole valmis, kun saavut kauppaan, odotus ilmaisten minuuttien jälkeen maksetaan ja lisätään noudon yhteydessä. Tipit saat kokonaan.\n\nMalvoya on vasta aloittamassa, joten keikkoja voi aluksi olla vähän tai ei lainkaan. Keikkojen määrää tai ansioita ei luvata. Toimitat itsenäisenä yrittäjänä ja voit tehdä keikkoja myös muille alustoille.\n\nMikään automaatti ei arvioi tai sulje tiliäsi; päätökset tekee ihminen ja perustelee ne sinulle.'),
+                'Malvoya is just starting, so there may be few jobs or none at first. No number of jobs or level of earnings is promised. You deliver as an independent entrepreneur and may also work for other platforms.',
+                'Malvoya on vasta aloittamassa, joten keikkoja voi aluksi olla vähän tai ei lainkaan. Keikkojen määrää tai ansioita ei luvata. Toimitat itsenäisenä yrittäjänä ja voit tehdä keikkoja myös muille alustoille.'),
             style: const TextStyle(height: 1.45, color: AppTheme.textSecondary),
           ),
           const SizedBox(height: MSpace.md),
@@ -1513,7 +1778,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
         centerTitle: false,
         title: Text(name.isEmpty ? 'Malvoya Courier' : '${tr(context, 'Hi', 'Hei')} $name', style: AppTheme.display(size: 22)),
         actions: [
-          IconButton(tooltip: tr(context, 'How jobs are offered', 'Miten keikat tarjotaan'), icon: const Icon(Icons.info_outline_rounded), onPressed: _howJobsWork),
+          IconButton(tooltip: tr(context, 'How offers and pay work', 'Miten tarjoukset ja palkkio toimivat'), icon: const Icon(Icons.info_outline_rounded), onPressed: _howJobsWork),
           IconButton(
             tooltip: tr(context, 'Help and contact', 'Apua ja yhteydenotto'),
             icon: const Icon(Icons.support_agent_rounded),
@@ -1598,6 +1863,36 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
               ),
             ]),
           ),
+          // Safety help is one tap away the whole time the courier is online
+          if (_online) ...[
+            const SizedBox(width: 6),
+            Semantics(
+              button: true,
+              label: tr(context, 'Help and safety: call 112 or report an incident', 'Apu ja turvallisuus: soita 112 tai ilmoita tapahtumasta'),
+              child: Material(
+                color: AppTheme.surface,
+                shape: const StadiumBorder(),
+                child: InkWell(
+                  customBorder: const StadiumBorder(),
+                  onTap: _openSafety,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: 40, minWidth: 48),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        const Icon(Icons.health_and_safety_rounded, size: 18, color: AppTheme.danger),
+                        const SizedBox(width: 4),
+                        ExcludeSemantics(
+                          child: Text(tr(context, 'Help', 'Apua'),
+                              style: const TextStyle(color: AppTheme.dangerInk, fontWeight: FontWeight.w800, fontSize: MTextSize.label)),
+                        ),
+                      ]),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
           const SizedBox(width: 6),
           _switching
               ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.onPrimary))
@@ -2021,13 +2316,31 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
         onConfirmed: () => _pickedUp(o, swiped: true),
       );
     } else {
-      action = MSwipeConfirm(
+      final swipe = MSwipeConfirm(
         busy: _completing,
         color: AppTheme.successDark,
         icon: Icons.task_alt_rounded,
         label: tr(context, 'Slide to hand over', 'Liu\'uta luovuttaaksesi'),
         onConfirmed: () => _complete(o, swiped: true),
       );
+      action = !_pinRequired(o)
+          ? swipe
+          : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Padding(
+                padding: const EdgeInsets.only(bottom: MSpace.sm),
+                child: Row(children: [
+                  const Icon(Icons.pin_outlined, size: 18, color: AppTheme.amberInk),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      tr(context, 'In person: ask the customer for their 4-digit handover code.', 'Henkilökohtaisesti: pyydä asiakkaalta 4-numeroinen luovutuskoodi.'),
+                      style: const TextStyle(fontSize: MTextSize.caption, fontWeight: FontWeight.w600, color: AppTheme.amberInk),
+                    ),
+                  ),
+                ]),
+              ),
+              swipe,
+            ]);
     }
     return Container(
       decoration: const BoxDecoration(

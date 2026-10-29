@@ -24,6 +24,8 @@ import 'drops_manager.dart';
 import 'import_products_screen.dart';
 import 'incoming_order_sheet.dart';
 import 'payouts_screen.dart';
+import 'signed_in_devices_screen.dart';
+import 'two_step_screen.dart';
 import 'pickup_code_sheet.dart';
 import 'product_editor.dart';
 import 'product_quick_edit.dart';
@@ -1985,7 +1987,9 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             tile(Icons.account_balance_outlined, tr(context, 'Payouts', 'Tilitykset'),
                 hasCommission(_store?['commissionRate'] as num?)
                     ? tr(context, 'Through Stripe · commission ${commissionText(_store?['commissionRate'] as num?)}', 'Stripen kautta · provisio ${commissionText(_store?['commissionRate'] as num?)}')
-                    : tr(context, 'Through Stripe · no commission', 'Stripen kautta · ei provisiota'),
+                    : commissionKnown(_store?['commissionRate'] as num?)
+                        ? tr(context, 'Through Stripe · no commission', 'Stripen kautta · ei provisiota')
+                        : tr(context, 'Through Stripe', 'Stripen kautta'),
                 () => Navigator.push(context, MaterialPageRoute(builder: (_) => PayoutsScreen(commissionRate: _store?['commissionRate'] as num?)))),
             const Divider(height: 1),
             tile(
@@ -2045,6 +2049,14 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
               GoogleLinkTile(account: Provider.of<AuthService>(context, listen: false), leading: const CircleAvatar(backgroundColor: AppTheme.primaryLight, child: Icon(Icons.link_rounded, color: AppTheme.primary))),
               const Divider(height: 1),
             ],
+            tile(Icons.shield_outlined, tr(context, 'Two-step sign-in', 'Kaksivaiheinen kirjautuminen'),
+                tr(context, 'A code from an authenticator app when you sign in', 'Todennussovelluksen koodi kirjautuessa'),
+                () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TwoStepScreen()))),
+            const Divider(height: 1),
+            tile(Icons.devices_rounded, tr(context, 'Signed-in devices', 'Kirjautuneet laitteet'),
+                tr(context, 'See where you are signed in and sign devices out', 'Katso, missä olet kirjautuneena, ja kirjaa laitteita ulos'),
+                () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SignedInDevicesScreen()))),
+            const Divider(height: 1),
             tile(Icons.help_outline_rounded, tr(context, 'Help', 'Apua'), tr(context, 'Answers for sellers', 'Vastauksia myyjille'),
                 () => Navigator.push(context, MaterialPageRoute(builder: (_) => ChatbotScreen(commissionRate: _store?['commissionRate'] as num?)))),
             const Divider(height: 1),

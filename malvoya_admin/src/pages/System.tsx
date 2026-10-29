@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { CheckCircle2, XCircle, AlertTriangle, RefreshCw, MapPin, PlugZap, MinusCircle } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../utils/api';
+import { readFreeDeliveryThreshold, readDefaultCommission, percent } from '../utils/pricing';
+import { SWITCHES, parseSwitches, type Switch } from '../utils/switches';
 
 type Integration = { configured: boolean; mode?: 'live' | 'test' | 'off' };
 // Result of "Test connections": ok null = not set up, false = set up but failing
@@ -29,6 +31,7 @@ type Status = {
   apps?: Record<string, { minBuild: number; maintenance: { active: boolean; message: string | null } }>;
   backgroundJobs: { name: string; lastRunAt: string | null }[];
   pricing?: Pricing;
+  switches?: unknown; // runtime switches (2.16), edited on the Switches page
 };
 type PayExample = {
   straightKm: number; routeKm: number | null; customerFeeCents: number; courierPayCents: number; marginCents: number;
@@ -156,6 +159,8 @@ export default function System() {
               <ul className="space-y-1 text-sm list-disc pl-6">{status.attention.map(a => <li key={a}>{a}</li>)}</ul>
             </div>
           )}
+
+          <SwitchesSummary status={status} />
 
           {status.readyForApproval && (status.readyForApproval.stores.length > 0 || status.readyForApproval.couriers.length > 0) && (
             <div className="apple-card">
@@ -304,7 +309,7 @@ export default function System() {
           )}
 
           {status.pricing?.courierPay && (
-            <CourierPayCard pricing={status.pricing} />
+            <CourierPayCard pricing={status.pricing} freeFromCents={readFreeDeliveryThreshold(status)} defaultCommission={readDefaultCommission(status)} />
           )}
 
           <div className="apple-card">
@@ -353,7 +358,7 @@ function ReferralCard({ r }: { r: Referrals }) {
 }
 
 /** Courier pay settings and the delivery margin (customer delivery fee − courier pay, tips excluded) on example jobs. */
-function CourierPayCard({ pricing }: { pricing: Pricing }) {
+function CourierPayCard({ pricing, freeFromCents, defaultCommission }: { pricing: Pricing; freeFromCents: number | null; defaultCommission: number | null }) {
   const pay = pricing.courierPay!;
   const fee = pricing.deliveryFee;
   const rows: [string, string][] = pay.mode === "formula"
@@ -389,6 +394,16 @@ function CourierPayCard({ pricing }: { pricing: Pricing }) {
             <div className="flex items-center justify-between text-sm"><span>Each further km</span><span className="font-semibold">{euro(fee.perKmCents)}</span></div>
             <div className="flex items-center justify-between text-sm"><span>Maximum</span><span className="font-semibold">{fee.maxCents > 0 ? euro(fee.maxCents) : "no cap"}</span></div>
             <div className="flex items-center justify-between text-sm"><span>Address without coordinates</span><span className="font-semibold">{euro(fee.unknownDistanceCents)}</span></div>
+            {freeFromCents !== null && (
+              <div className="flex items-center justify-between text-sm" title="FREE_DELIVERY_THRESHOLD_CENTS: items before any promo discount; courier pay is unchanged (Malvoya pays it)">
+                <span>Free delivery</span><span className="font-semibold">{freeFromCents > 0 ? `items from ${euro(freeFromCents)}` : 'off'}</span>
+              </div>
+            )}
+            {defaultCommission !== null && (
+              <div className="flex items-center justify-between text-sm" title="DEFAULT_COMMISSION_RATE: set when a store is created; change single stores on Vendors">
+                <span>Commission for new stores</span><span className="font-semibold">{percent(defaultCommission)}</span>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -418,6 +433,32 @@ function CourierPayCard({ pricing }: { pricing: Pricing }) {
           a ride of {pay.approachExample.routeKm ?? "?"} km to the shop adds {euro(pay.approachExample.cents)}. A negative margin means Malvoya pays the difference.
         </p>
       </div>
+    </div>
+  );
+}
+
+/** Runtime switches in force (2.16); shown only when the API reports them. Edited on the Switches page. */
+function SwitchesSummary({ status }: { status: Status }) {
+  let switches: Switch[];
+  try { switches = parseSwitches(status as unknown as Record<string, unknown>); } catch { return null; }
+  const stopped = switches.filter((s) => s.value === SWITCHES.find((d) => d.key === s.key)?.stopsWhen);
+  return (
+    <div className={`apple-card ${stopped.length ? 'border-amber-200' : ''}`}>
+      <div className="flex items-center justify-between mb-2">
+        <p className="font-semibold">Switches</p>
+        <a className="text-blue-600 text-sm" href="#/switches">Change</a>
+      </div>
+      {stopped.length === 0
+        ? <p className="text-sm text-gray-500">Everything is on: ordering, delivery, pickup, lives, drops and sign-ups.</p>
+        : (
+          <ul className="space-y-1 text-sm list-disc pl-6">
+            {stopped.map((s) => {
+              const def = SWITCHES.find((d) => d.key === s.key)!;
+              const msg = (typeof s.message === 'string' ? s.message : [s.message.fi, s.message.en].filter(Boolean).join(' / ')) || s.defaultMessage;
+              return <li key={s.key}><span className="font-medium text-amber-700">{def.off}</span>{msg ? ` · “${msg}”` : ''}</li>;
+            })}
+          </ul>
+        )}
     </div>
   );
 }

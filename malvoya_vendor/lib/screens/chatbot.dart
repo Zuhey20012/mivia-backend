@@ -8,7 +8,7 @@ import '../core/strings.dart';
 
 /// Help for sellers: straight answers, the seller terms, and a way to reach the Malvoya team.
 class ChatbotScreen extends StatefulWidget {
-  /// The store's commission (fraction of the item price); null or 0 = no commission (the case for every store).
+  /// The store's commission (fraction of the item price); 0 = none, null = not known (no store yet).
   final num? commissionRate;
   const ChatbotScreen({super.key, this.commissionRate});
 
@@ -76,7 +76,10 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
           hasCommission(widget.commissionRate)
               ? tr(context, 'A commission of $commission of the item price on each delivered sale; the delivery fee and tips are not part of it. There is no monthly fee. If an item is refunded before you are paid, your payout is reduced and the commission on it is not charged.',
                   'Provision, $commission tuotteiden hinnasta, jokaisesta toimitetusta myynnistä; toimitusmaksu ja tipit eivät kuulu siihen. Kuukausimaksua ei ole. Jos tuote hyvitetään ennen tilitystä, tilitys pienenee eikä siitä veloiteta provisiota.')
-              : tr(context, 'Nothing. There is no commission and no monthly fee: you receive the full item price of each delivered sale. Customers pay the delivery fee to Malvoya. If an item is refunded before you are paid, your payout is reduced by it.',
+              : !commissionKnown(widget.commissionRate)
+                  ? tr(context, 'A commission on the item price of each delivered sale, as set out in the Seller Terms; the delivery fee and tips are not part of it. There is no monthly fee. Your store\'s own rate is shown in Store → Payouts once the store is set up.',
+                      'Provisio jokaisen toimitetun myynnin tuotteiden hinnasta myyjän ehtojen mukaisesti; toimitusmaksu ja tipit eivät kuulu siihen. Kuukausimaksua ei ole. Kauppasi oma provisio näkyy kohdassa Kauppa → Tilitykset, kun kauppa on perustettu.')
+                  : tr(context, 'Nothing. There is no commission and no monthly fee: you receive the full item price of each delivered sale. Customers pay the delivery fee to Malvoya. If an item is refunded before you are paid, your payout is reduced by it.',
                   'Ei mitään. Provisiota tai kuukausimaksua ei ole: saat jokaisesta toimitetusta myynnistä tuotteiden koko hinnan. Asiakkaat maksavat toimitusmaksun Malvoyalle. Jos tuote hyvitetään ennen tilitystä, tilitys pienenee sen verran.')),
       (tr(context, 'How many shoppers does Malvoya have?', 'Kuinka paljon Malvoyalla on asiakkaita?'),
           tr(context, 'Malvoya is just starting in Finland and has very few shoppers and couriers so far. We cannot promise a number of orders yet. We will tell you honestly how it grows.',

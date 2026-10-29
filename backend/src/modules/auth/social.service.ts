@@ -5,7 +5,7 @@ import crypto from "crypto";
 import { prisma } from "../../lib/prisma";
 import { env } from "../../config/env";
 import { issueSession } from "./session";
-import { AuthError, assertVerifiedSignInAllowed, phoneToSyntheticEmail } from "./auth.service";
+import { AuthError, assertAgeConfirmed, assertSignupsOpen, assertVerifiedSignInAllowed, phoneToSyntheticEmail } from "./auth.service";
 
 const googleClient = new OAuth2Client(env.googleClientId);
 
@@ -20,13 +20,20 @@ if (!getApps().some((a) => a.name === "[DEFAULT]")) {
 
 type SocialUser = { id: number; name: string; email: string; role: string; isActive: boolean; googleSub: string | null };
 export type SignupRole = "CUSTOMER" | "VENDOR" | "COURIER";
+/** Sent by the apps with a sign-in; only used when the sign-in creates a new account. */
+export type SignupOptions = { ageConfirmed?: boolean };
 
-/** The role only applies when a new account is created; existing accounts keep theirs. */
-async function createSocialUser(data: { email: string; name: string; phone?: string; googleSub?: string; appleSub?: string }, role: SignupRole) {
+/**
+ * The role only applies when a new account is created; existing accounts keep theirs. A new account needs
+ * "I am 18 or older" (400 AGE_CONFIRMATION_REQUIRED, 2.16) and is refused while sign-ups are paused.
+ */
+async function createSocialUser(data: { email: string; name: string; phone?: string; googleSub?: string; appleSub?: string }, role: SignupRole, opts: SignupOptions) {
+  assertAgeConfirmed(opts.ageConfirmed);
+  await assertSignupsOpen();
   const user = await prisma.user.create({
     data: {
       email: data.email, name: data.name, phone: data.phone ?? null, googleSub: data.googleSub ?? null, appleSub: data.appleSub ?? null,
-      passwordHash: unusablePasswordHash(), role,
+      passwordHash: unusablePasswordHash(), role, ageConfirmedAt: new Date(),
     },
   });
   if (role === "COURIER") {
@@ -56,7 +63,7 @@ async function verifyGoogleToken(idToken: string) {
   return { sub: payload.sub, email: payload.email.toLowerCase(), name: payload.name };
 }
 
-export async function loginWithGoogle(idToken: string, role: SignupRole = "CUSTOMER") {
+export async function loginWithGoogle(idToken: string, role: SignupRole = "CUSTOMER", opts: SignupOptions = {}) {
   const google = await verifyGoogleToken(idToken);
 
   // A linked Google account opens the account it was linked to, whatever that account's email is.
@@ -67,7 +74,7 @@ export async function loginWithGoogle(idToken: string, role: SignupRole = "CUSTO
       assertVerifiedSignInAllowed(user);
       if (!user.googleSub) user = await prisma.user.update({ where: { id: user.id }, data: { googleSub: google.sub } });
     } else {
-      user = await createSocialUser({ email: google.email, name: google.name || google.email.split("@")[0], googleSub: google.sub }, role);
+      user = await createSocialUser({ email: google.email, name: google.name || google.email.split("@")[0], googleSub: google.sub }, role, opts);
     }
   }
   assertActive(user);
@@ -114,7 +121,7 @@ async function verifyFirebaseToken(token: string) {
   }
 }
 
-export async function loginWithPhone(firebaseToken: string, role: SignupRole = "CUSTOMER") {
+export async function loginWithPhone(firebaseToken: string, role: SignupRole = "CUSTOMER", opts: SignupOptions = {}) {
   const decoded = await verifyFirebaseToken(firebaseToken);
   const phoneNumber = decoded.phone_number;
   if (!phoneNumber) throw new AuthError("Invalid phone token", 401);
@@ -123,22 +130,22 @@ export async function loginWithPhone(firebaseToken: string, role: SignupRole = "
   if (user) {
     assertVerifiedSignInAllowed(user);
   } else {
-    user = await createSocialUser({ phone: phoneNumber, email: phoneToSyntheticEmail(phoneNumber), name: role === "CUSTOMER" ? "Customer" : "Partner" }, role);
+    user = await createSocialUser({ phone: phoneNumber, email: phoneToSyntheticEmail(phoneNumber), name: role === "CUSTOMER" ? "Customer" : "Partner" }, role, opts);
   }
   assertActive(user);
   return issueSession(user);
 }
 
-export async function loginWithApple(identityToken: string, role: SignupRole = "CUSTOMER", name?: string) {
+export async function loginWithApple(identityToken: string, role: SignupRole = "CUSTOMER", name?: string, opts: SignupOptions = {}) {
   const decoded = await verifyFirebaseToken(identityToken);
-  return signInWithAppleClaims(decoded, role, name);
+  return signInWithAppleClaims(decoded, role, name, opts);
 }
 
 export type AppleClaims = {
   email?: string;
   email_verified?: boolean;
   name?: string;
-  firebase?: { identities?: Record<string, unknown[] | undefined> };
+  firebase?: { identities?: Record<string, unknown[] | undefined>; sign_in_provider?: string };
 };
 
 /**
@@ -148,11 +155,15 @@ export type AppleClaims = {
  * remembered on first use; otherwise a new account is created with the Apple id and the name the app sends (Apple gives
  * the name to the app only once, on the first sign-in).
  */
-export async function signInWithAppleClaims(decoded: AppleClaims, role: SignupRole = "CUSTOMER", name?: string) {
+export async function signInWithAppleClaims(decoded: AppleClaims, role: SignupRole = "CUSTOMER", name?: string, opts: SignupOptions = {}) {
+  // Only a Firebase token from an actual Apple sign-in counts (2.16): a Google, phone or email token with an
+  // "apple.com" identity listed must not open accounts here
+  if (decoded.firebase?.sign_in_provider !== "apple.com") throw new AuthError("Invalid Apple sign-in", 401);
   const rawSub = decoded.firebase?.identities?.["apple.com"]?.[0];
   const appleSub = typeof rawSub === "string" && rawSub.trim() ? rawSub.trim() : typeof rawSub === "number" ? String(rawSub) : null;
   const email = decoded.email?.toLowerCase();
-  const emailVerified = !!email && decoded.email_verified !== false;
+  // The email counts only when the token says it was verified
+  const emailVerified = !!email && decoded.email_verified === true;
   if (!appleSub && !emailVerified) throw new AuthError("Apple sign-in did not provide a verified email", 401);
 
   let user = appleSub ? await prisma.user.findUnique({ where: { appleSub } }) : null;
@@ -172,7 +183,7 @@ export async function signInWithAppleClaims(decoded: AppleClaims, role: SignupRo
   if (!user) {
     if (!emailVerified) throw new AuthError("Apple sign-in did not provide a verified email", 401);
     const clean = name?.trim().slice(0, 100) || decoded.name?.trim().slice(0, 100) || "Customer";
-    user = await createSocialUser({ email: email!, name: clean, appleSub: appleSub ?? undefined }, role);
+    user = await createSocialUser({ email: email!, name: clean, appleSub: appleSub ?? undefined }, role, opts);
   }
   assertActive(user);
   return issueSession(user);

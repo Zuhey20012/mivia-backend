@@ -169,24 +169,27 @@ model User {
   isActive  Boolean   @default(true) // false = banned or deleted
   deletedAt DateTime? // set when the account is anonymised (GDPR Art. 17)
 
-  store            Store?
-  courier          Courier?
-  orders           Order[]
-  rentals          Rental[]
-  returns          Return[]
-  refreshTokens    RefreshToken[]
-  favorites        Favorite[]
-  dropLikes        DropLike[]
-  dropSaves        DropSave[] // drops the user saved (since 2.14.0)
-  dropHides        DropHide[] // drops the user marked "Not interested" (since 2.14.0)
-  reviews          Review[]
-  devices          DeviceToken[]
-  dropComments     DropComment[]
-  follows          StoreFollow[]
-  launchAlert      LaunchAlert?
-  promoRedemptions PromoRedemption[]
-  liveMessages     LiveMessage[] // chat messages in stores' live streams (since 2.15.0)
-  liveBans         LiveBan[] // live streams whose store muted this user
+  store              Store?
+  courier            Courier?
+  orders             Order[]
+  rentals            Rental[]
+  returns            Return[]
+  refreshTokens      RefreshToken[]
+  favorites          Favorite[]
+  dropLikes          DropLike[]
+  dropSaves          DropSave[] // drops the user saved (since 2.14.0)
+  dropHides          DropHide[] // drops the user marked "Not interested" (since 2.14.0)
+  reviews            Review[]
+  devices            DeviceToken[]
+  dropComments       DropComment[]
+  follows            StoreFollow[]
+  launchAlert        LaunchAlert?
+  promoRedemptions   PromoRedemption[]
+  liveMessages       LiveMessage[] // chat messages in stores' live streams (since 2.15.0)
+  liveBans           LiveBan[] // live streams whose store muted this user
+  liveMessageReports LiveMessageReport[] // live chat messages this user reported (2.16)
+  sessions           UserSession[] // signed-in devices (refresh-token families, 2.16)
+  notices            UserNotice[] // in-app notices: statements of reasons, report outcomes (2.16)
 
   // Referrals (since 2.8.0): the customer's own invite code, created on first use of GET /me/referral
   referralCode   String?     @unique
@@ -210,6 +213,14 @@ model User {
   agreementAcceptances AgreementAcceptance[]
   // Known or likely under 18 (since 2.12.0): never gets profiling-based recommendations (DSA Art. 28)
   isMinor              Boolean               @default(false)
+  // "I am 18 or older", confirmed at registration or the first social sign-in (since 2.16.0; null = older account)
+  ageConfirmedAt       DateTime?
+
+  // Optional pushes (since 2.16.0); service messages (orders, deliveries, payouts, security) are always sent
+  notifyFollowedDrops   Boolean @default(true) // new drops from followed stores
+  notifyLives           Boolean @default(true) // a followed store goes live
+  notifyReferralRewards Boolean @default(true) // invite rewards
+  notifyLaunchAlerts    Boolean @default(true) // "Malvoya opens near you"
 
   // Two-step sign-in with an authenticator app (since 2.13.0; admins). The secret is AES-256-GCM encrypted (key derived
   // from JWT_SECRET); it is set by setup and counts only once totpEnabledAt is set. Never returned by any query by default.
@@ -228,15 +239,87 @@ model User {
 }
 
 model RefreshToken {
-  id        Int      @id @default(autoincrement())
-  token     String   @unique // SHA-256 hash of the refresh token, never the raw token
+  id        Int          @id @default(autoincrement())
+  token     String       @unique // SHA-256 hash of the refresh token, never the raw token
   userId    Int
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // The sign-in (device) this token belongs to (since 2.16.0; null = issued before). Reusing a token that was already
+  // exchanged ends the whole sign-in: someone else has a copy.
+  sessionId Int?
+  session   UserSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  usedAt    DateTime? // exchanged for a new one (kept until it expires, to detect reuse)
   expiresAt DateTime
-  createdAt DateTime @default(now())
+  createdAt DateTime     @default(now())
 
   // Query-path indexes (Postgres does not index foreign keys automatically)
   @@index([userId])
+  @@index([sessionId])
+}
+
+// One sign-in on one device (a refresh-token family, since 2.16.0): listed under Settings → Signed-in devices.
+// Access tokens carry its id (sid), so ending it ends that device at once.
+model UserSession {
+  id          Int            @id @default(autoincrement())
+  userId      Int
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device      String? // "Malvoya app (Android)", "Chrome on Windows"… from the User-Agent; never the IP address
+  mfa         Boolean        @default(false) // passed two-step sign-in
+  createdAt   DateTime       @default(now())
+  lastUsedAt  DateTime       @default(now())
+  revokedAt   DateTime?
+  // The password (or a code) was entered again: payout links work until then (10 minutes)
+  reauthUntil DateTime?
+  tokens      RefreshToken[]
+
+  @@index([userId, revokedAt])
+  @@index([revokedAt])
+}
+
+// Small shared counters with an expiry (since 2.16.0): sign-in failures, SMS per day, code guesses, failed payments.
+// Fixed windows, incremented atomically in SQL, so every API instance sees the same numbers.
+model Counter {
+  key       String   @id
+  count     Int      @default(0)
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}
+
+// Runtime switches set by admins (since 2.16.0): { on: boolean, message?: string } per key, audited, cached 30 s.
+model PlatformSetting {
+  key         String   @id
+  value       Json
+  updatedById Int?
+  updatedAt   DateTime @updatedAt
+}
+
+// In-app notices to one user (since 2.16.0): statements of reasons when their content is hidden or removed (DSA
+// Art. 17) and the outcome of their reports (DSA Art. 16(5)). Also emailed. Deleted with the account.
+model UserNotice {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      String // "statement_of_reasons" | "report_outcome"
+  titleEn   String
+  titleFi   String
+  bodyEn    String
+  bodyFi    String
+  entity    String? // "DropComment" | "Review" | "LiveMessage" | "Drop" | "Product" | "LiveStream"
+  entityId  Int?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, id])
+}
+
+// A new item in System → attention that admins were already told about (ops-alerts, since 2.16.0): sha-256 of the text
+model OpsAlert {
+  hash        String   @id
+  text        String
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  @@index([lastSeenAt])
 }
 
 // ─────────────────────────────────────────────
@@ -307,6 +390,11 @@ model Store {
   // Every onboarding step except approval done: set once, when the admin was told (System → ready for approval)
   readyForApprovalAt     DateTime?
 
+  // An approved store changed its name, address or map position (since 2.16.0): shown in System → attention until an
+  // admin approves it again. Nothing is unapproved automatically.
+  changedAfterApprovalAt DateTime?
+  changedFields          String[]  @default([])
+
   // Product-safety self-certification (GPSR Art. 22(10)(b), since 2.12.0): "I only offer products that comply with EU
   // law", given once before the first product is published; the version is a hash of the pledge text accepted
   safetyPledgeAt      DateTime?
@@ -321,6 +409,7 @@ model Store {
   // Query-path indexes (Postgres does not index foreign keys automatically)
   @@index([isVerified, rating])
   @@index([isVerified, readyForApprovalAt])
+  @@index([changedAfterApprovalAt])
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin) // product search matches shop names (pg_trgm)
 }
 
@@ -599,6 +688,21 @@ model Order {
   readyAt              DateTime? // the store marked the order ready (PROCESSING)
   pickupRemindedAt     DateTime? // "your order is waiting" push, sent once
 
+  // Orders of 80 € or more (since 2.16.0): the customer tells the courier this 4-digit PIN at an in-person handover.
+  // Shown to the customer only, while the order is on its way (omitted from every order query, see lib/prisma.ts).
+  // Wrong PINs use pickupFailedAttempts / pickupLockedUntil (delivery orders never use them for pickup).
+  handoverPin String?
+
+  // Fraud signals and disputes (since 2.16.0)
+  cardFingerprint       String? // Stripe's card fingerprint of the payment (same card = same value, across accounts)
+  disputedAt            DateTime? // the customer's bank opened a chargeback (charge.dispute.created)
+  disputeStatus         String? // Stripe dispute status: needs_response, under_review, won, lost, warning_* …
+  disputeId             String?
+  disputeReason         String?
+  externalRefundedCents Int       @default(0) // refunded outside Malvoya (Stripe dashboard), synced from charge.refunded
+  // Where to send the receipt when the account has no email address (phone sign-in), optional at checkout
+  receiptEmail          String?
+
   // Watchdog bookkeeping (see services/orderWatchdog.ts)
   storeRemindedAt         DateTime?
   lastOfferAt             DateTime?
@@ -639,6 +743,9 @@ model Order {
   // Order watchdog every minute (docs/scaling/indexes.md (1)): paid orders waiting for the store, unpaid checkouts
   @@index([status, paymentStatus, paidAt])
   @@index([status, paymentStatus, createdAt])
+  @@index([stripePaymentIntentId])
+  @@index([cardFingerprint])
+  @@index([disputedAt])
 }
 
 model OrderItem {
@@ -803,11 +910,12 @@ model Courier {
   locationDisclosureAt DateTime?
   readyForApprovalAt   DateTime?
 
-  orders  Order[]
-  rentals Rental[]
-  returns Return[]
-  payouts Payout[]
-  reviews Review[]
+  orders    Order[]
+  rentals   Rental[]
+  returns   Return[]
+  payouts   Payout[]
+  reviews   Review[]
+  incidents CourierIncident[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1046,6 +1154,7 @@ model StoreFollow {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   storeId   Int
   store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  muted     Boolean  @default(false) // still followed, but no pushes from this store (2.16)
   createdAt DateTime @default(now())
 
   @@id([userId, storeId])
@@ -1612,17 +1721,37 @@ model LiveStream {
 
 // Live chat: kept 30 days after the live ended (scheduler live-chat-purge); deleted with the account
 model LiveMessage {
-  id        Int        @id @default(autoincrement())
-  liveId    Int
-  live      LiveStream @relation(fields: [liveId], references: [id], onDelete: Cascade)
-  userId    Int
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  text      String
-  hidden    Boolean    @default(false) // hidden by the store or an admin
-  createdAt DateTime   @default(now())
+  id          Int        @id @default(autoincrement())
+  liveId      Int
+  live        LiveStream @relation(fields: [liveId], references: [id], onDelete: Cascade)
+  userId      Int
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  text        String
+  hidden      Boolean    @default(false) // hidden by the store, an admin or three reports
+  // Who hid it (2.16): "store" | "admin" | "reports"; reports from viewers and when an admin looked at them
+  hiddenBy    String?
+  reportCount Int        @default(0)
+  reviewedAt  DateTime? // an admin decided on the reports
+  createdAt   DateTime   @default(now())
+
+  reports LiveMessageReport[]
 
   @@index([liveId, id])
   @@index([userId, createdAt])
+  @@index([reportCount, reviewedAt])
+}
+
+// A viewer reported a live chat message (DSA Art. 16, since 2.16.0); three distinct reporters hide it until an admin decides
+model LiveMessageReport {
+  messageId  Int
+  message    LiveMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  reporterId Int
+  reporter   User        @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+  reason     String
+  createdAt  DateTime    @default(now())
+
+  @@id([messageId, reporterId])
+  @@index([reporterId])
 }
 
 // The store (or an admin) muted this viewer in this live: their chat is refused
@@ -1655,4 +1784,37 @@ model LiveReport {
   @@index([liveId, status])
   @@index([status, createdAt])
   @@index([reporterId])
+}
+
+// ─────────────────────────────────────────────
+// COURIER SAFETY (since 2.16.0)
+// ─────────────────────────────────────────────
+
+enum IncidentType {
+  ACCIDENT
+  THREAT
+  DAMAGED
+  THEFT
+  OTHER
+}
+
+// A courier asked for help or reported something that happened on a job. Admins are pushed and emailed at once; it
+// stays in System → attention until an admin resolves it.
+model CourierIncident {
+  id             Int          @id @default(autoincrement())
+  courierId      Int
+  courier        Courier      @relation(fields: [courierId], references: [id])
+  type           IncidentType
+  orderId        Int?
+  note           String?
+  latitude       Float?
+  longitude      Float?
+  status         String       @default("OPEN") // OPEN | RESOLVED
+  resolutionNote String?
+  resolvedById   Int?
+  resolvedAt     DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@index([status, createdAt])
+  @@index([courierId, createdAt])
 }

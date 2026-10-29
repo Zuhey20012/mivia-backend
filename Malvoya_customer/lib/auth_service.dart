@@ -172,6 +172,62 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
     return fallback;
   }
 
+  // ── Age (18+) for new accounts ────────────────────────────────────────────
+
+  /// Returned by the social sign-in methods instead of an error when the server needs the
+  /// "I am 18 or older" confirmation before it creates a new account (400 AGE_CONFIRMATION_REQUIRED).
+  /// Ask the person (core/age_gate.dart), then call [retryWithAgeConfirmed].
+  static const ageConfirmationRequired = 'AGE_CONFIRMATION_REQUIRED';
+
+  /// The sign-in request that was refused for the missing age confirmation (path + body).
+  ({String path, Map<String, dynamic> body, String fallback})? _pendingAgeRetry;
+
+  /// True when a JSON error body says the age confirmation is missing.
+  static bool isAgeConfirmationError(int status, Object? body) {
+    if (status != 400 || body is! Map) return false;
+    return body['code'] == ageConfirmationRequired || body['error'] == ageConfirmationRequired;
+  }
+
+  /// Posts a sign-in request; a session answer signs in. When the server needs the age
+  /// confirmation for a new account, the request is kept and [ageConfirmationRequired] returned.
+  Future<String?> _signInRequest(String path, Map<String, dynamic> body, String fallback) async {
+    final res = await http
+        .post(Uri.parse('${AppConstants.apiBase}$path'),
+            headers: {'Content-Type': 'application/json', ...AppLanguage.headers}, body: jsonEncode(body))
+        .timeout(const Duration(seconds: 15));
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      _pendingAgeRetry = null;
+      return await _applySession(jsonDecode(res.body));
+    }
+    Object? decoded;
+    try {
+      decoded = jsonDecode(res.body);
+    } catch (_) {}
+    if (isAgeConfirmationError(res.statusCode, decoded)) {
+      _pendingAgeRetry = (path: path, body: body, fallback: fallback);
+      return ageConfirmationRequired;
+    }
+    _pendingAgeRetry = null;
+    return _errorFrom(res, fallback);
+  }
+
+  /// Sends the sign-in refused for the missing age confirmation again, now with `ageConfirmed: true`.
+  Future<String?> retryWithAgeConfirmed() async {
+    final pending = _pendingAgeRetry;
+    _pendingAgeRetry = null;
+    if (pending == null) return 'Please sign in again.';
+    try {
+      final err = await _signInRequest(pending.path, {...pending.body, 'ageConfirmed': true}, pending.fallback);
+      // The server asked again although it was confirmed: do not loop
+      return err == ageConfirmationRequired ? pending.fallback : err;
+    } catch (_) {
+      return 'Could not connect. Please check your internet connection.';
+    }
+  }
+
+  /// The person said they are not 18 or older: forget the kept request.
+  void cancelAgeRetry() => _pendingAgeRetry = null;
+
   // ── Email / password ───────────────────────────────────────────────────────
 
   Future<String?> login(String emailOrPhone, String password) async {
@@ -188,12 +244,20 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
     }
   }
 
-  Future<String?> register(String name, String email, String password, [String? _]) async {
+  /// Creates an account. The screen asks "I am 18 or older" first ([ageConfirmed]).
+  Future<String?> register(String name, String email, String password, {bool ageConfirmed = true}) async {
     try {
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/register'),
               headers: {'Content-Type': 'application/json', ...AppLanguage.headers},
-              body: jsonEncode({'name': name.trim(), 'email': email.trim(), 'password': password, 'role': kAppRole, 'acceptTerms': true}))
+              body: jsonEncode({
+                'name': name.trim(),
+                'email': email.trim(),
+                'password': password,
+                'role': kAppRole,
+                'acceptTerms': true,
+                if (ageConfirmed) 'ageConfirmed': true,
+              }))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 201) return await _applySession(jsonDecode(res.body), withPassword: true);
       return _errorFrom(res, 'Registration failed. Please try again.');
@@ -232,12 +296,7 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
       if (googleUser == null) return 'Google sign-in cancelled';
       final idToken = (await googleUser.authentication).idToken;
       if (idToken == null) return 'Google did not return a sign-in token';
-      final res = await http
-          .post(Uri.parse('${AppConstants.apiBase}/auth/google'),
-              headers: {'Content-Type': 'application/json', ...AppLanguage.headers}, body: jsonEncode({'idToken': idToken, 'role': kAppRole}))
-          .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
-      return _errorFrom(res, 'Google sign-in failed.');
+      return await _signInRequest('/auth/google', {'idToken': idToken, 'role': kAppRole}, 'Google sign-in failed.');
     } catch (_) {
       return 'Google sign-in failed. Please check your internet connection.';
     }
@@ -343,13 +402,7 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
       final result = await _firebaseAuth.signInWithCredential(credential);
       final firebaseToken = await result.user?.getIdToken();
       if (firebaseToken == null) return 'Phone verification failed';
-      final res = await http
-          .post(Uri.parse('${AppConstants.apiBase}/auth/phone'),
-              headers: {'Content-Type': 'application/json', ...AppLanguage.headers},
-              body: jsonEncode({'firebaseToken': firebaseToken, 'role': kAppRole}))
-          .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
-      return _errorFrom(res, 'Phone sign-in failed.');
+      return await _signInRequest('/auth/phone', {'firebaseToken': firebaseToken, 'role': kAppRole}, 'Phone sign-in failed.');
     } on fb_auth.FirebaseAuthException catch (e) {
       return e.code == 'invalid-verification-code' ? 'The code is incorrect.' : (e.message ?? 'Phone verification failed');
     } catch (_) {
@@ -379,13 +432,7 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
   /// After Firebase has verified the phone number, exchange its ID token for a Malvoya session.
   Future<String?> exchangeFirebasePhoneToken(String firebaseIdToken) async {
     try {
-      final res = await http
-          .post(Uri.parse('${AppConstants.apiBase}/auth/phone'),
-              headers: {'Content-Type': 'application/json', ...AppLanguage.headers},
-              body: jsonEncode({'firebaseToken': firebaseIdToken, 'role': kAppRole}))
-          .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
-      return _errorFrom(res, 'Phone sign-in failed.');
+      return await _signInRequest('/auth/phone', {'firebaseToken': firebaseIdToken, 'role': kAppRole}, 'Phone sign-in failed.');
     } catch (_) {
       return 'Could not connect. Please check your internet connection.';
     }
@@ -404,13 +451,8 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
       final firebaseToken = await result.user?.getIdToken();
       if (firebaseToken == null) return 'Apple sign-in failed.';
       final name = result.user?.displayName?.trim();
-      final res = await http
-          .post(Uri.parse('${AppConstants.apiBase}/auth/apple'),
-              headers: {'Content-Type': 'application/json', ...AppLanguage.headers},
-              body: jsonEncode({'idToken': firebaseToken, 'role': kAppRole, if (name != null && name.isNotEmpty) 'name': name}))
-          .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
-      return _errorFrom(res, 'Apple sign-in failed.');
+      return await _signInRequest(
+          '/auth/apple', {'idToken': firebaseToken, 'role': kAppRole, if (name != null && name.isNotEmpty) 'name': name}, 'Apple sign-in failed.');
     } on fb_auth.FirebaseAuthException catch (e) {
       // Closing Apple's sheet is not an error
       return e.code == 'canceled' || e.code == 'web-context-canceled' ? null : 'Apple sign-in failed.';

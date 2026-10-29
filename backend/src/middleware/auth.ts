@@ -9,7 +9,7 @@ export type Role = "CUSTOMER" | "VENDOR" | "COURIER" | "ADMIN";
 
 export interface AuthRequest extends Request {
   /** mfa: this session passed two-step sign-in (authenticator code) */
-  user?: { id: number; role: Role; email: string; mfa?: boolean };
+  user?: { id: number; role: Role; email: string; mfa?: boolean; sid?: number };
 }
 
 function readBearer(req: Request): string | null {
@@ -23,7 +23,8 @@ function readBearer(req: Request): string | null {
  * 30 seconds per user and instance, so a reset or ban reaches every instance within 30 s (at once on this one).
  */
 // twoStep: two-step sign-in is on, so only sessions that passed it (mfa claim) count
-type SessionState = { active: boolean; validAfterSec: number; locale: string | null; twoStep: boolean; at: number };
+// revoked: sign-ins (UserSession ids) ended in the last 20 minutes, so their access tokens stop working at once
+type SessionState = { active: boolean; validAfterSec: number; locale: string | null; twoStep: boolean; revoked: Set<number>; at: number };
 const STATE_TTL_MS = 30_000;
 const MAX_STATES = 20_000;
 const states = new Map<number, SessionState>();
@@ -32,8 +33,12 @@ async function sessionState(userId: number): Promise<SessionState | null> {
   const hit = states.get(userId);
   if (hit && Date.now() - hit.at < STATE_TTL_MS) return hit;
   try {
-    const u = await prisma.user.findUnique({ where: { id: userId }, select: { isActive: true, tokensValidAfter: true, locale: true, totpEnabledAt: true } });
+    const [u, ended] = await Promise.all([
+      prisma.user.findUnique({ where: { id: userId }, select: { isActive: true, tokensValidAfter: true, locale: true, totpEnabledAt: true } }),
+      prisma.userSession.findMany({ where: { userId, revokedAt: { gte: new Date(Date.now() - 20 * 60_000) } }, select: { id: true }, take: 200 }),
+    ]);
     const state: SessionState = {
+      revoked: new Set(ended.map((e) => e.id)),
       active: !!u?.isActive,
       validAfterSec: u?.tokensValidAfter ? Math.floor(u.tokensValidAfter.getTime() / 1000) : 0,
       locale: u?.locale ?? null,
@@ -61,10 +66,10 @@ const SESSION_FORGET_CHANNEL = "session-forget";
 subscribe(SESSION_FORGET_CHANNEL, (message) => states.delete(Number(message)));
 
 /** The same session checks for a live (socket) connection: active account, not ended, two-step state respected. */
-export async function sessionAllows(payload: { id: number; iat: number; mfa?: boolean }) {
+export async function sessionAllows(payload: { id: number; iat: number; mfa?: boolean; sid?: number }) {
   const state = await sessionState(payload.id);
   if (!state) return true; // database hiccup: the signed token alone decides, as for HTTP
-  return state.active && payload.iat >= state.validAfterSec && !(state.twoStep && !payload.mfa);
+  return state.active && payload.iat >= state.validAfterSec && !(state.twoStep && !payload.mfa) && !(payload.sid && state.revoked.has(payload.sid));
 }
 
 /** The apps send Accept-Language on every request; the user's language is written only when it changes. */
@@ -102,12 +107,12 @@ async function authenticate(req: Request): Promise<{ user: NonNullable<AuthReque
   const state = await sessionState(payload.id);
   if (state) {
     // A token from before two-step sign-in was turned on lacks the mfa claim: ended too, even if issued in the same second
-    if (!state.active || payload.iat < state.validAfterSec || (state.twoStep && !payload.mfa)) {
+    if (!state.active || payload.iat < state.validAfterSec || (state.twoStep && !payload.mfa) || (payload.sid && state.revoked.has(payload.sid))) {
       return { error: "Your session has ended. Please sign in again." };
     }
     rememberLocale(req, payload.id, state);
   }
-  const user = { id: payload.id, role: payload.role as Role, email: payload.email, mfa: payload.mfa };
+  const user = { id: payload.id, role: payload.role as Role, email: payload.email, mfa: payload.mfa, sid: payload.sid };
   if (adminNeedsMfa(user) && !MFA_SETUP_PATHS.test(req.originalUrl.split("?")[0])) return MFA_SETUP_REQUIRED;
   return { user };
 }

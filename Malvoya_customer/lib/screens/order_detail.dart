@@ -720,6 +720,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                   if (!_isPickup && _active.contains(o['status']) && (_storePos != null || _homePos != null)) _mapCard(),
                   _statusCard(o),
                   if (_isPickup && o['status'] != 'CANCELLED' && o['status'] != 'REFUNDED') _pickupCard(o),
+                  if (!_isPickup && _handoverPin(o) != null) _handoverPinCard(o, _handoverPin(o)!),
                   if (_canRate(o)) _ratePrompt(o),
                   _itemsCard(o),
                   _actions(o),
@@ -886,6 +887,47 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
       if (await launchUrl(web, mode: LaunchMode.externalApplication)) return;
     } catch (_) {}
     if (mounted) _snack(tr(context, 'Could not open maps.', 'Karttaa ei voitu avata.'));
+  }
+
+  /// The 4-digit handover PIN of a larger delivery (API 2.16, orders of 80 € or more): only the
+  /// customer gets it, and only while the order is on its way. Null when the order has none.
+  String? _handoverPin(Map<String, dynamic> o) {
+    final pin = o['handoverPin']?.toString().trim() ?? '';
+    if (pin.isEmpty) return null;
+    return const {'CONFIRMED', 'PROCESSING', 'SHIPPED'}.contains(o['status']) ? pin : null;
+  }
+
+  /// Shown like the pickup code: the courier asks for it at the door.
+  Widget _handoverPinCard(Map<String, dynamic> o, String pin) {
+    return _card(Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: MSpace.xl, horizontal: MSpace.lg),
+      decoration: BoxDecoration(
+        color: AppTheme.pastel(context, AppTheme.sunshineLight, AppTheme.sunshine),
+        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+      ),
+      child: Column(children: [
+        Text(tr(context, 'Handover PIN', 'Luovutuskoodi'), style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
+        const SizedBox(height: MSpace.sm),
+        Semantics(
+          label: '${tr(context, 'Handover PIN', 'Luovutuskoodi')} ${pin.split('').join(' ')}',
+          excludeSemantics: true,
+          child: FittedBox(
+            child: SelectableText(
+              pin,
+              style: AppTheme.display(context, size: 44, color: AppTheme.primaryText(context)).copyWith(letterSpacing: 10),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          tr(context, 'Tell this code to the courier when they hand over your order. Do not share it with anyone else.',
+              'Kerro tämä koodi kuriirille, kun hän luovuttaa tilauksesi. Älä anna sitä kenellekään muulle.'),
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: MTextSize.label, color: AppTheme.primaryText(context), height: 1.35),
+        ),
+      ]),
+    ));
   }
 
   /// Reserve & collect: the pickup code (while it can be used), the shop and how to get there.

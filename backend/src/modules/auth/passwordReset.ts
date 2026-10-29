@@ -6,7 +6,9 @@ import { prisma } from "../../lib/prisma";
 import { Locale, asLocale } from "../../lib/i18n";
 import { emailAvailable, sendNoPasswordNote, sendPasswordResetCode, SignInMethod } from "../../services/notificationDeliveryService";
 import { forgetSessionState } from "../../middleware/auth";
-import { AuthError, isSyntheticEmail } from "./auth.service";
+import { AuthError, assertPasswordNotBreached, isSyntheticEmail } from "./auth.service";
+import { localeOfUser } from "../../lib/i18n";
+import { sendPasswordChangedEmail } from "../../services/notificationDeliveryService";
 import { revokeAllSessions } from "./session";
 
 const logger = pino({ name: "password-reset" });
@@ -29,7 +31,7 @@ export const resetSchema = z.object({
   email,
   code: z.string().trim().regex(/^\d{6}$/, "Enter the 6-digit code from the email"),
   // Same rules as registration (bcrypt only uses the first 72 bytes)
-  password: z.string().min(8, "Password must be at least 8 characters").max(72),
+  password: z.string().min(10, "Password must be at least 10 characters").max(72),
 });
 
 const targetOf = (address: string) => `${RESET_TARGET_PREFIX}${address.trim().toLowerCase()}`;
@@ -84,6 +86,8 @@ const WRONG = "The code is wrong or has expired. Request a new one.";
  */
 export async function resetPassword(address: string, code: string, password: string) {
   const target = targetOf(address);
+  // A breached password is refused before the code is used, so the customer can pick another with the same code
+  await assertPasswordNotBreached(password);
   const stored = await prisma.otpCode.findUnique({ where: { target } });
   if (!stored || Date.now() > stored.expiresAt.getTime()) {
     await prisma.otpCode.deleteMany({ where: { target } });
@@ -113,7 +117,7 @@ export async function resetPassword(address: string, code: string, password: str
 
   const user = await prisma.user.findFirst({
     where: { email: { equals: address, mode: "insensitive" }, isActive: true },
-    select: { id: true, passwordHash: true },
+    select: { id: true, passwordHash: true, email: true },
   });
   if (!user || !user.passwordHash.startsWith("$2")) throw new AuthError(WRONG, 400);
 
@@ -121,5 +125,6 @@ export async function resetPassword(address: string, code: string, password: str
   await prisma.user.update({ where: { id: user.id }, data: { passwordHash, tokensValidAfter: new Date() } });
   await revokeAllSessions(user.id);
   forgetSessionState(user.id);
+  localeOfUser(user.id).then((l) => sendPasswordChangedEmail(user.email, "reset", l)).catch(() => {});
   logger.info({ userId: user.id }, "Password reset; all sessions ended");
 }

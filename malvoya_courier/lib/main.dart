@@ -7,6 +7,7 @@ import 'package:malvoya_core/malvoya_core.dart';
 import 'package:malvoya_ui/malvoya_ui.dart';
 import 'config/constants.dart';
 import 'config/theme.dart';
+import 'core/account_security.dart';
 import 'core/connectivity.dart';
 import 'core/location_disclosure.dart';
 import 'screens/courier_welcome.dart';
@@ -43,6 +44,17 @@ void main() async {
     CourierTelemetryService().stop();
     CourierSocketService().disconnect();
   });
+  // Two-step sign-in (code from the authenticator app) and "I am 18 or older" for a new account
+  // made with Google or a phone number are asked over whatever screen started the sign-in
+  AuthService.askTwoStepCode = (auth, mfaToken) async {
+    final context = appNavigatorKey.currentState?.overlay?.context;
+    if (context == null) return 'Enter the code from your authenticator app to sign in.';
+    return showTwoStepSignIn(context, auth, mfaToken);
+  };
+  AuthService.confirmAge = () async {
+    final context = appNavigatorKey.currentState?.overlay?.context;
+    return context != null && await showAgeConfirmation(context);
+  };
   runApp(const MalvoyaCourierApp());
 }
 

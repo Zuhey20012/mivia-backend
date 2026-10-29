@@ -130,13 +130,26 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
 
   /// [signedIn] is false for a token refresh (the same person stays signed in).
   Future<String?> _applySession(Map<String, dynamic> data, {bool signedIn = true}) async {
-    final user = User.fromJson(data['user']);
+    // Two-step sign-in is on for this account (API 2.13/2.16): the first step only gives a short-lived
+    // challenge; the app's home then asks for the authenticator code (see [completeTwoStep]).
+    if (data['mfaRequired'] == true) {
+      final token = data['mfaToken'];
+      if (token is! String || token.isEmpty) return 'Sign-in failed. Please try again.';
+      _mfaToken = token;
+      _ageRetry = null;
+      notifyListeners();
+      return null;
+    }
+    if (data['user'] is! Map) return 'Sign-in failed. Please try again.';
+    final user = User.fromJson(Map<String, dynamic>.from(data['user']));
     if (user.role != kAppRole) {
       return 'This account is not a store account. Please use the matching Malvoya app.';
     }
     _currentUser = user;
     _accessToken = data['accessToken'];
     _refreshToken = data['refreshToken'];
+    _mfaToken = null;
+    _ageRetry = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('user', jsonEncode(user.toJson()));
     await _secureStorage.write(key: 'accessToken', value: _accessToken);
@@ -206,6 +219,107 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
     return ServerMessages.localize(fallback);
   }
 
+  // ── Two-step sign-in (authenticator app; API 2.13, offered to stores since 2.16) ──
+
+  String? _mfaToken;
+
+  /// The first sign-in step worked and the account has two-step sign-in on: the app asks for a code.
+  bool get twoStepPending => _mfaToken != null;
+
+  /// POST /auth/login/mfa with the code from the authenticator app (or a recovery code).
+  /// Returns null when signed in, otherwise a message to show. [twoStepPending] becomes false when
+  /// the challenge has expired (the person starts again from the sign-in screen).
+  Future<String?> completeTwoStep(String code) async {
+    final token = _mfaToken;
+    if (token == null) return 'This sign-in has expired. Please start again.';
+    final res = await const ApiClient().post('/auth/login/mfa', {'mfaToken': token, 'code': code.replaceAll(' ', '').trim()});
+    if (res.ok) {
+      final err = await _applySession(res.data);
+      if (err != null) cancelTwoStep();
+      return err;
+    }
+    if (res.status == 401) cancelTwoStep();
+    return res.errorMessage;
+  }
+
+  /// Back to the sign-in screen without finishing the second step.
+  void cancelTwoStep() {
+    if (_mfaToken == null) return;
+    _mfaToken = null;
+    notifyListeners();
+  }
+
+  /// A session the server issued to the signed-in user (e.g. turning two-step sign-in on ends every
+  /// older session and returns a fresh one). Returns an error message when it could not be used.
+  Future<String?> adoptSession(Map<String, dynamic> data) async {
+    if (data['accessToken'] is! String || data['refreshToken'] is! String || data['user'] is! Map) return null;
+    return _applySession(data, signedIn: false);
+  }
+
+  // ── Age confirmation for new accounts (API 2.16) ─────────────────────────────
+
+  /// A Google or phone sign-in that would create a new account, waiting for "I am 18 or older".
+  _SignInRetry? _ageRetry;
+
+  /// The server needs "I am 18 or older" before it creates the account; the app's home asks for it.
+  bool get ageConfirmationNeeded => _ageRetry != null;
+
+  /// Repeats the waiting sign-in with `ageConfirmed: true`. Null when signed in (or a two-step code is
+  /// needed next), otherwise a message to show.
+  Future<String?> confirmAgeAndContinue() async {
+    final retry = _ageRetry;
+    if (retry == null) return 'Please start again.';
+    String? err;
+    try {
+      err = await _postSignIn(retry.path, {...retry.body, 'ageConfirmed': true}, retry.fallback);
+    } catch (_) {
+      // Offline: keep the attempt, so the person can try again
+      return ServerMessages.localize('Could not reach Malvoya. Check your connection and try again.');
+    }
+    // A refusal other than the age question ends the attempt: back to the sign-in screen with it
+    if (err != null) {
+      _ageRetry = null;
+      notifyListeners();
+    }
+    return err;
+  }
+
+  void cancelAgeConfirmation() {
+    if (_ageRetry == null) return;
+    _ageRetry = null;
+    notifyListeners();
+  }
+
+  /// 400 for a new account without "I am 18 or older" (the code name is checked first; the
+  /// sentence is the fallback for a server that answers without one).
+  static bool _isAgeRequired(int status, Map<String, dynamic> data) {
+    if (status != 400) return false;
+    final code = '${data['code'] ?? ''}'.toUpperCase();
+    if (code.contains('AGE')) return true;
+    final error = '${data['error'] ?? ''}'.toLowerCase();
+    return error.contains('18 or older') || error.contains('ageconfirmed');
+  }
+
+  /// Google and phone sign-in: posts [body] to [path] and applies the session. When the server asks
+  /// for the age confirmation first, the attempt waits in [ageConfirmationNeeded] and null is returned.
+  Future<String?> _postSignIn(String path, Map<String, dynamic> body, String fallback) async {
+    final res = await http
+        .post(Uri.parse('${AppConstants.apiBase}$path'), headers: ApiClient.baseHeaders, body: jsonEncode(body))
+        .timeout(const Duration(seconds: 15));
+    if (res.statusCode == 200 || res.statusCode == 201) return await _applySession(jsonDecode(res.body));
+    Map<String, dynamic> data = const {};
+    try {
+      final decoded = jsonDecode(res.body);
+      if (decoded is Map<String, dynamic>) data = decoded;
+    } catch (_) {}
+    if (_isAgeRequired(res.statusCode, data) && body['ageConfirmed'] != true) {
+      _ageRetry = _SignInRetry(path, body, fallback);
+      notifyListeners();
+      return null;
+    }
+    return _errorFrom(res, fallback);
+  }
+
   // ── Email / password ───────────────────────────────────────────────────────
 
   /// The last password sign-in was refused because the email/phone or password was wrong (401):
@@ -229,7 +343,8 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
   }
 
   /// [acceptTerms]: the person ticked "I accept the Seller Terms" (the server records when and which version).
-  Future<String?> register(String name, String email, String password, {bool acceptTerms = false}) async {
+  /// [ageConfirmed]: the person ticked "I am 18 or older" (API 2.16; required for new accounts).
+  Future<String?> register(String name, String email, String password, {bool acceptTerms = false, bool ageConfirmed = false}) async {
     try {
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/register'),
@@ -240,6 +355,7 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
                 'password': password,
                 'role': kAppRole,
                 if (acceptTerms) 'acceptTerms': true,
+                if (ageConfirmed) 'ageConfirmed': true,
               }))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 201) return await _applySession(jsonDecode(res.body));
@@ -270,12 +386,7 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
       if (googleUser == null) return 'Google sign-in cancelled';
       final idToken = (await googleUser.authentication).idToken;
       if (idToken == null) return 'Google did not return a sign-in token';
-      final res = await http
-          .post(Uri.parse('${AppConstants.apiBase}/auth/google'),
-              headers: ApiClient.baseHeaders, body: jsonEncode({'idToken': idToken, 'role': kAppRole}))
-          .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
-      return _errorFrom(res, 'Google sign-in failed.');
+      return await _postSignIn('/auth/google', {'idToken': idToken, 'role': kAppRole}, 'Google sign-in failed.');
     } catch (_) {
       return 'Google sign-in failed. Please check your internet connection.';
     }
@@ -379,13 +490,7 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
       final result = await _firebaseAuth.signInWithCredential(credential);
       final firebaseToken = await result.user?.getIdToken();
       if (firebaseToken == null) return 'Phone verification failed';
-      final res = await http
-          .post(Uri.parse('${AppConstants.apiBase}/auth/phone'),
-              headers: ApiClient.baseHeaders,
-              body: jsonEncode({'firebaseToken': firebaseToken, 'role': kAppRole}))
-          .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) return await _applySession(jsonDecode(res.body));
-      return _errorFrom(res, 'Phone sign-in failed.');
+      return await _postSignIn('/auth/phone', {'firebaseToken': firebaseToken, 'role': kAppRole}, 'Phone sign-in failed.');
     } on fb_auth.FirebaseAuthException catch (e) {
       return e.code == 'invalid-verification-code' ? 'The code is incorrect.' : (e.message ?? 'Phone verification failed');
     } catch (_) {
@@ -400,6 +505,8 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
     _currentUser = null;
     _accessToken = null;
     _refreshToken = null;
+    _mfaToken = null;
+    _ageRetry = null;
     _storeState = StoreState.unknown;
     _storeError = null;
     final prefs = await SharedPreferences.getInstance();
@@ -440,4 +547,12 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
     _refreshTimer?.cancel();
     super.dispose();
   }
+}
+
+/// A sign-in request kept for one repeat (with `ageConfirmed: true`).
+class _SignInRetry {
+  final String path;
+  final Map<String, dynamic> body;
+  final String fallback;
+  const _SignInRetry(this.path, this.body, this.fallback);
 }

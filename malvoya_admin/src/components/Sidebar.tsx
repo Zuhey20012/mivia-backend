@@ -1,13 +1,15 @@
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, ShoppingBag, Users, Truck,
-  Store, CheckSquare, LogOut, Settings, Flag, Banknote, LifeBuoy, Activity, Ticket, BarChart3, FileText, ScrollText, FolderTree, BadgeCheck, ShieldAlert, Siren, ShieldCheck, Music, Radio
+  Store, CheckSquare, LogOut, Settings, Flag, Banknote, LifeBuoy, Activity, Ticket, BarChart3, FileText, ScrollText, FolderTree, BadgeCheck, ShieldAlert, Siren, ShieldCheck, Music, Radio, Gavel, ToggleRight, History, HeartPulse
 } from 'lucide-react';
 
 const nav = [
   { to: '/',         icon: LayoutDashboard, label: 'Overview'   },
   { to: '/analytics', icon: BarChart3,      label: 'Analytics'  },
   { to: '/orders',   icon: ShoppingBag,     label: 'Orders'     },
+  { to: '/incidents', icon: HeartPulse,     label: 'Incidents'  },
+  { to: '/disputes', icon: Gavel,           label: 'Disputes'   },
   { to: '/vendors',  icon: Store,           label: 'Vendors'    },
   { to: '/couriers', icon: Truck,           label: 'Couriers'   },
   { to: '/users',    icon: Users,           label: 'Users'      },
@@ -25,6 +27,8 @@ const nav = [
   { to: '/legal',    icon: ScrollText,      label: 'Legal'      },
   { to: '/support',  icon: LifeBuoy,        label: 'Support'    },
   { to: '/system',   icon: Activity,        label: 'System'     },
+  { to: '/switches', icon: ToggleRight,     label: 'Switches'   },
+  { to: '/audit',    icon: History,         label: 'Audit log'  },
   { to: '/security', icon: ShieldCheck,     label: 'Security'   },
 ];
 

@@ -4,6 +4,7 @@ import 'package:malvoya_core/malvoya_core.dart';
 import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
+import '../core/age_gate.dart';
 import '../l10n.dart';
 import '../realtime_notification_service.dart';
 
@@ -20,6 +21,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _loading = false;
   bool _obscurePass = true;
   bool _agreeToTerms = false;
+  bool _adult = false;
   String? _error;
 
   @override
@@ -29,6 +31,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _emailCtrl.clear();
     _passCtrl.clear();
     _agreeToTerms = false;
+    _adult = false;
   }
 
   @override
@@ -45,8 +48,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
       setState(() => _error = l10n.translate('fillAllFields'));
       return;
     }
-    if (_passCtrl.text.length < 8) {
+    if (_passCtrl.text.length < 10) {
       setState(() => _error = l10n.translate('passTooShort'));
+      return;
+    }
+    if (!_adult) {
+      setState(() => _error = tr(context, 'Confirm that you are 18 or older.', 'Vahvista, että olet täyttänyt 18 vuotta.'));
       return;
     }
     if (!_agreeToTerms) {
@@ -59,11 +66,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _nameCtrl.text.trim(),
       _emailCtrl.text.trim(),
       _passCtrl.text,
-      'CUSTOMER',
+      ageConfirmed: _adult,
     );
     if (!mounted) return;
     if (err != null) {
-      setState(() { _error = err; _loading = false; });
+      // Server messages (e.g. a password found in known data breaches) are shown as they are
+      setState(() { _error = localizeServerMessage(context, err); _loading = false; });
     } else {
       RealtimeNotificationService.notifyCustomerJoined(
         context,
@@ -300,6 +308,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
               const SizedBox(height: MSpace.xl),
 
+              // Accounts are for adults (the server refuses a new account without this)
+              AgeCheckbox(
+                value: _adult,
+                onChanged: (v) => setState(() {
+                  _adult = v;
+                  if (v && _error == tr(context, 'Confirm that you are 18 or older.', 'Vahvista, että olet täyttänyt 18 vuotta.')) _error = null;
+                }),
+              ),
+              const SizedBox(height: MSpace.sm),
+
               // Legal Terms & Privacy Policy Checkbox (Ultra-High Contrast OLED & Light Compliant)
               Container(
                 padding: const EdgeInsets.all(14),
@@ -381,7 +399,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 label: l10n.translate('createAccount'),
                 expand: true,
                 loading: _loading,
-                variant: _agreeToTerms ? MButtonVariant.primary : MButtonVariant.secondary,
+                variant: _agreeToTerms && _adult ? MButtonVariant.primary : MButtonVariant.secondary,
                 onPressed: _handleRegister,
               ),
 

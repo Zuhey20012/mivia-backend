@@ -10,6 +10,7 @@ import 'config/theme.dart';
 import 'core/connectivity.dart';
 import 'screens/login.dart';
 import 'screens/returns_manager.dart';
+import 'screens/sign_in_steps.dart';
 import 'screens/vendor_home.dart';
 import 'auth_service.dart';
 import 'l10n.dart';
@@ -109,6 +110,9 @@ class MalvoyaVendorApp extends StatelessWidget {
           builder: (context, child) => OfflineBanner(child: AppGate(app: 'store', child: child ?? const SizedBox.shrink())),
           home: Consumer<AuthService>(
             builder: (context, auth, child) {
+              // Two-step code, or "I am 18 or older" for a new Google/phone account, before signing in
+              if (!auth.isAuthenticated && auth.twoStepPending) return const TwoStepSignInScreen();
+              if (!auth.isAuthenticated && auth.ageConfirmationNeeded) return const AgeConfirmScreen();
               if (!auth.isAuthenticated) return const LoginScreen();
               // Welcome and store setup until the store exists, then the dashboard
               return const VendorHome();

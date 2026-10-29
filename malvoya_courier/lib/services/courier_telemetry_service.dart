@@ -136,6 +136,8 @@ class CourierTelemetryService extends ChangeNotifier {
         'bearing': p.heading,
         'speed': p.speed,
         'accuracy': p.accuracy,
+        // A position from a mock-location app: the server ignores it (API 2.16)
+        if (p.isMocked) 'mocked': true,
       });
     }
     notifyListeners();
@@ -157,6 +159,7 @@ class CourierTelemetryService extends ChangeNotifier {
         'bearing': p.heading,
         'speed': p.speed,
         'accuracy': p.accuracy,
+        if (p.isMocked) 'mocked': true,
         if (_orderId != null) 'orderId': _orderId,
       };
 

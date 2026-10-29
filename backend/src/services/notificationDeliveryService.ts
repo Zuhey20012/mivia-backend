@@ -28,7 +28,7 @@ export function escapeHtml(value: unknown): string {
     .replace(/'/g, "&#39;");
 }
 
-function isDeliverableEmail(email?: string | null): email is string {
+export function isDeliverableEmail(email?: string | null): email is string {
   return !!email && !email.endsWith("@phone.malvoya.app") && !email.endsWith("@deleted.invalid");
 }
 
@@ -317,6 +317,16 @@ export interface OrderConfirmationData {
   deliveryAddress?: string | null;
   /** Scheduled delivery window, e.g. { en: "Tonight 17:00–19:00", fi: "Tänä iltana 17.00–19.00" } */
   deliveryWindow?: { en: string; fi: string } | null;
+  /** Pre-contract and confirmation details (2.16, KSL 6:9 / CRD Art. 6 and 8(7)) */
+  seller?: {
+    type: "BUSINESS" | "PRIVATE";
+    address?: string | null;
+    businessId?: string | null;
+    email?: string | null;
+    phone?: string | null;
+  };
+  fulfilment?: "DELIVERY" | "PICKUP";
+  termsVersion?: string | null;
 }
 
 /**
@@ -335,9 +345,38 @@ function sealedNote(items: OrderConfirmationData["items"], L: Locale) {
   return `<p style="margin:8px 0 0;color:#6E6E73;font-size:13px;line-height:1.5">${text}</p>`;
 }
 
-export async function sendOrderConfirmation(data: OrderConfirmationData): Promise<DeliveryResult> {
-  if (!isDeliverableEmail(data.email)) return { delivered: false };
-  const L = await localeOfEmail(data.email);
+/**
+ * Who the seller is and what the customer's rights are (2.16): a business seller's identity and contact, the 14-day
+ * right of withdrawal with the model form and how to return; a private seller: no statutory right of withdrawal.
+ * Malvoya's own fees are listed separately above; the terms version is the one in force at the order.
+ */
+function legalBlock(data: OrderConfirmationData, L: Locale) {
+  const p = (en: string, fi: string) => (L === "fi" ? fi : en);
+  const muted = "margin:8px 0 0;color:#6E6E73;font-size:13px;line-height:1.5";
+  const s = data.seller;
+  const formUrl = `${env.publicApiUrl}/legal/withdrawal-form`;
+  const lines: string[] = [];
+  if (s) {
+    const contact = [s.email, s.phone].filter(Boolean).map((x) => escapeHtml(x)).join(" · ");
+    lines.push(`<p style="${muted}">${p("Seller", "Myyjä")}: <strong>${escapeHtml(data.storeName)}</strong> — ${s.type === "BUSINESS" ? p("business seller", "elinkeinonharjoittaja") : p("private seller", "yksityinen myyjä")}${s.type === "BUSINESS" && s.businessId ? ` · ${p("Business ID", "Y-tunnus")} ${escapeHtml(s.businessId)}` : ""}${s.address ? `<br>${escapeHtml(s.address)}` : ""}${contact ? `<br>${contact}` : ""}</p>`);
+  }
+  if (!s || s.type === "BUSINESS") {
+    lines.push(`<p style="${muted}">${p("You have a 14-day right of withdrawal from the day you receive the item.", "Sinulla on 14 päivän peruuttamisoikeus tuotteen vastaanottamisesta.")} ${p("To withdraw, use Returns in the Malvoya app or the model withdrawal form", "Peruuta tilaus Malvoya-sovelluksen Palautukset-kohdassa tai peruuttamislomakkeella")}: <a href="${formUrl}" style="color:#6D2E8C">${formUrl}</a>. ${data.fulfilment === "PICKUP"
+      ? p("Return the items to the store.", "Palauta tuotteet kauppaan.")
+      : p("Return the items to the store as the app shows (the store's address is in the app); the store tells you if you pay the return cost.", "Palauta tuotteet kauppaan sovelluksen ohjeiden mukaan (kaupan osoite on sovelluksessa); kauppa kertoo, jos maksat palautuskulut.")}</p>`);
+  } else {
+    lines.push(`<p style="${muted}">${p("Bought from a private seller: there is no statutory right of withdrawal. Faulty or wrong items can still be reported through the app.", "Ostettu yksityiseltä myyjältä: lakisääteistä peruuttamisoikeutta ei ole. Virheellisistä tai vääristä tuotteista voi silti ilmoittaa sovelluksessa.")}</p>`);
+  }
+  lines.push(`<p style="${muted}">${p("Malvoya runs the marketplace and collects the payment for the seller; the contract of sale is between you and the seller.", "Malvoya ylläpitää kauppapaikkaa ja vastaanottaa maksun myyjän puolesta; kauppasopimus on sinun ja myyjän välinen.")}${data.termsVersion ? ` ${p("Terms of Service", "Käyttöehdot")}: ${escapeHtml(data.termsVersion)} — <a href="${env.publicApiUrl}/legal/terms" style="color:#6D2E8C">${env.publicApiUrl}/legal/terms</a>` : ""}</p>`);
+  return lines.join("\n");
+}
+
+/** The confirmation as a standalone HTML page (GET /orders/:id/confirmation.html): same content as the email. */
+export async function orderConfirmationHtml(data: OrderConfirmationData, L: Locale) {
+  return confirmationHtml(data, L);
+}
+
+function confirmationHtml(data: OrderConfirmationData, L: Locale) {
   const p = (en: string, fi: string) => (L === "fi" ? fi : en);
   const row = (label: string, cents: number, minus = false) =>
     `<tr><td style="padding:6px 0">${label}</td><td style="padding:6px 0;text-align:right">${minus ? "−" : ""}${money(cents, L)}</td></tr>`;
@@ -345,24 +384,31 @@ export async function sendOrderConfirmation(data: OrderConfirmationData): Promis
     .map((i) => `<tr><td style="padding:6px 0">${escapeHtml(i.name)} × ${i.quantity}</td><td style="padding:6px 0;text-align:right">${money(i.unitCents * i.quantity, L)}</td></tr>`)
     .join("");
   const title = p(`Order confirmation #${data.orderId}`, `Tilausvahvistus #${data.orderId}`);
-  const html = layout(
+  return { title, html: layout(
     title,
     `<p style="margin:0 0 4px;font-size:22px;font-weight:700">${p("Thank you for your order", "Kiitos tilauksestasi")}, ${escapeHtml(data.customerName)}!</p>
 <p style="margin:0 0 20px;color:#6E6E73">${p("Order", "Tilaus")} #${data.orderId}</p>
 <p style="margin:0 0 12px">${p("Seller", "Myyjä")}: <strong>${escapeHtml(data.storeName)}</strong></p>
 <table style="width:100%;border-collapse:collapse;font-size:15px">${rows}
 <tr><td style="padding:6px 0;border-top:1px solid #E5E5EA">${p("Delivery", "Toimitus")}</td><td style="padding:6px 0;border-top:1px solid #E5E5EA;text-align:right">${money(data.deliveryFeeCents, L)}</td></tr>
-${data.serviceFeeCents ? row(p("Service fee", "Palvelumaksu"), data.serviceFeeCents) : ""}
-${data.smallOrderFeeCents ? row(p("Small-order fee", "Pientilauslisä"), data.smallOrderFeeCents) : ""}
+${data.serviceFeeCents ? row(p("Service fee (Malvoya)", "Palvelumaksu (Malvoya)"), data.serviceFeeCents) : ""}
+${data.smallOrderFeeCents ? row(p("Small-order fee (Malvoya)", "Pientilauslisä (Malvoya)"), data.smallOrderFeeCents) : ""}
 ${data.discountCents ? row(`${p("Discount", "Alennus")}${data.promoCode ? ` (${escapeHtml(data.promoCode)})` : ""}`, data.discountCents, true) : ""}
 ${data.tipCents ? row(p("Courier tip", "Tippi lähetille"), data.tipCents) : ""}
 <tr><td style="padding:10px 0;font-weight:700">${p("Total (incl. VAT)", "Yhteensä (sis. ALV)")}</td><td style="padding:10px 0;text-align:right;font-weight:700">${money(data.totalCents, L)}</td></tr></table>
 ${data.deliveryAddress ? `<p style="margin:16px 0 0;color:#6E6E73;font-size:14px">${p("Delivery address", "Toimitusosoite")}: ${escapeHtml(data.deliveryAddress)}</p>` : ""}
 ${data.deliveryWindow ? `<p style="margin:8px 0 0;color:#6E6E73;font-size:14px">${p("Delivery time", "Toimitusaika")}: ${escapeHtml(pick(data.deliveryWindow, L))}</p>` : ""}
-<p style="margin:20px 0 0;color:#6E6E73;font-size:13px;line-height:1.5">${p("You have a 14-day right of withdrawal from the day you receive the item.", "Sinulla on 14 päivän peruuttamisoikeus tuotteen vastaanottamisesta.")}</p>
+${legalBlock(data, L)}
 ${sealedNote(data.items, L)}`,
     L,
-  );
+  ) };
+}
+
+export async function sendOrderConfirmation(data: OrderConfirmationData): Promise<DeliveryResult> {
+  if (!isDeliverableEmail(data.email)) return { delivered: false };
+  const L = await localeOfEmail(data.email);
+  const p = (en: string, fi: string) => (L === "fi" ? fi : en);
+  const { html } = confirmationHtml(data, L);
   const text = p(`Order #${data.orderId} from ${data.storeName}. Total ${money(data.totalCents, L)} incl. VAT.`,
     `Tilaus #${data.orderId} myyjältä ${data.storeName}. Yhteensä ${money(data.totalCents, L)} sis. ALV.`);
   return sendEmail(data.email, `${BRAND} – ${p("order confirmation", "tilausvahvistus")} #${data.orderId}`, html, text);
@@ -390,4 +436,49 @@ export async function sendOrderStatusEmail(orderId: number, email: string | null
   const reason = extra.reason ? `${pick(t("Reason", "Syy"), L)}: ${extra.reason}` : "";
   const html = layout(order, `<p style="margin:0 0 8px;font-size:18px;font-weight:700">${escapeHtml(order)}</p><p style="margin:0">${escapeHtml(pick(text, L))}</p>${reason ? `<p style="margin:12px 0 0;color:#6E6E73">${escapeHtml(reason)}</p>` : ""}`, L);
   return sendEmail(email, `${BRAND} – ${order.toLowerCase()}`, html, `${pick(text, L)}${reason ? `\n${reason}` : ""} (${order})`);
+}
+
+// ─── Account security and operations (2.16) ─────────────────────────────────
+
+/** In-app notice (statement of reasons, report outcome) also by email. */
+export async function sendNoticeEmail(to: string, title: string, paragraphs: string[], locale: Locale): Promise<DeliveryResult> {
+  return simpleEmail(to, locale, title, title, paragraphs);
+}
+
+export async function sendPasswordChangedEmail(to: string, how: "changed" | "reset", locale: Locale): Promise<DeliveryResult> {
+  return simpleEmail(to, locale, t("your password was changed", "salasanasi vaihdettiin"), t("Your password was changed", "Salasanasi vaihdettiin"), [
+    how === "reset"
+      ? t("The password of your Malvoya account was reset with a code sent to this address. Every device was signed out.",
+        "Malvoya-tilisi salasana vaihdettiin tähän osoitteeseen lähetetyllä koodilla. Kaikki laitteet kirjattiin ulos.")
+      : t("The password of your Malvoya account was changed. Your other devices were signed out.",
+        "Malvoya-tilisi salasana vaihdettiin. Muut laitteesi kirjattiin ulos."),
+    t("If this was not you, reset your password at once (Forgot password) and contact the Malvoya team through Support.",
+      "Jos tämä et ollut sinä, vaihda salasana heti (Unohtuiko salasana) ja ota yhteyttä Malvoyan tiimiin Tuki-osion kautta."),
+  ]);
+}
+
+export async function sendNewSignInEmail(to: string, device: string, at: Date, locale: Locale): Promise<DeliveryResult> {
+  const when = new Intl.DateTimeFormat(locale === "fi" ? "fi-FI" : "en-GB", { timeZone: "Europe/Helsinki", dateStyle: "medium", timeStyle: "short" }).format(at);
+  return simpleEmail(to, locale, t("new sign-in", "uusi kirjautuminen"), t("New sign-in to your Malvoya account", "Uusi kirjautuminen Malvoya-tilillesi"), [
+    t(`Device: ${device}\nTime: ${when} (Finnish time)`, `Laite: ${device}\nAika: ${when} (Suomen aikaa)`),
+    t("If this was you, there is nothing to do. If not, change your password at once and end the other sessions in the app (Settings → Signed-in devices).",
+      "Jos tämä olit sinä, mitään ei tarvitse tehdä. Jos et, vaihda salasana heti ja kirjaa muut laitteet ulos sovelluksessa (Asetukset → Kirjautuneet laitteet)."),
+  ]);
+}
+
+export async function sendPayoutLinkEmail(to: string, kind: "onboarding" | "dashboard", locale: Locale): Promise<DeliveryResult> {
+  return simpleEmail(to, locale, t("payout settings opened", "tilitysasetukset avattiin"), t("Your payout settings were opened", "Tilitysasetuksesi avattiin"), [
+    kind === "dashboard"
+      ? t("A link to your Stripe payout dashboard (bank account and payouts) was just created from your Malvoya account.",
+        "Malvoya-tililtäsi luotiin juuri linkki Stripe-tilityssivullesi (pankkitili ja tilitykset).")
+      : t("A link to set up or change your payout details on Stripe was just created from your Malvoya account.",
+        "Malvoya-tililtäsi luotiin juuri linkki tilitystietojesi asettamiseen tai muuttamiseen Stripessä."),
+    t("If this was not you, change your password at once and contact the Malvoya team through Support.",
+      "Jos tämä et ollut sinä, vaihda salasana heti ja ota yhteyttä Malvoyan tiimiin Tuki-osion kautta."),
+  ]);
+}
+
+/** Operations alert to an admin (new attention items, disputes, courier incidents, payout failures). */
+export async function sendAdminAlertEmail(to: string, subject: string, lines: string[]): Promise<DeliveryResult> {
+  return simpleEmail(to, "en", subject, subject, [...lines, "Open the admin panel → System for details."]);
 }

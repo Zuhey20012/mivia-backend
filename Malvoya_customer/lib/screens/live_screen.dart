@@ -9,6 +9,7 @@ import 'package:malvoya_core/malvoya_core.dart';
 import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
+import '../core/blocked_users.dart';
 import '../core/deep_links.dart';
 import '../core/media_sound.dart';
 import '../core/report_reasons.dart';
@@ -17,6 +18,7 @@ import '../services/socket_service.dart';
 import '../widgets/add_to_bag_sheet.dart';
 import '../widgets/app_image.dart';
 import '../widgets/live_list.dart';
+import '../widgets/ugc_actions.dart';
 import 'product_detail.dart';
 import 'store_detail.dart';
 
@@ -99,6 +101,10 @@ class _LiveScreenState extends State<LiveScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    // Messages from people this customer blocked are hidden here too
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _auth.isAuthenticated) BlockedUsers.instance.load(_auth);
+    });
     final preview = widget.preview;
     if (preview != null) {
       _live = Map<String, dynamic>.from(preview);
@@ -945,8 +951,13 @@ class _LiveScreenState extends State<LiveScreen> with WidgetsBindingObserver {
   }
 
   /// Recent messages, newest at the bottom; older ones fade out towards the top and can be scrolled back to.
-  Widget _chatList(double height) {
-    if (_messages.isEmpty) return const SizedBox.shrink();
+  Widget _chatList(double height) => ListenableBuilder(
+        listenable: BlockedUsers.instance,
+        builder: (context, _) => _chatListOf(_messages.where((m) => !BlockedUsers.instance.isBlocked(m['userId'])).toList(), height),
+      );
+
+  Widget _chatListOf(List<Map<String, dynamic>> messages, double height) {
+    if (messages.isEmpty) return const SizedBox.shrink();
     return SizedBox(
       height: height,
       child: ShaderMask(
@@ -960,31 +971,75 @@ class _LiveScreenState extends State<LiveScreen> with WidgetsBindingObserver {
         child: ListView.builder(
           reverse: true,
           padding: EdgeInsets.zero,
-          itemCount: _messages.length,
-          itemBuilder: (_, i) => _messageBubble(_messages[_messages.length - 1 - i]),
+          itemCount: messages.length,
+          itemBuilder: (_, i) => _messageBubble(messages[messages.length - 1 - i]),
         ),
       ),
     );
   }
 
+  /// Long-press on someone else's message: report it (DSA Art. 16) or block its author.
+  Future<void> _messageActions(Map<String, dynamic> m) async {
+    final messageId = asInt(m['id']);
+    final authorId = asInt(m['userId']);
+    if (messageId == null) return;
+    if (authorId != null && authorId == _auth.currentUser?.id) return;
+    if (!await _signedInFor('Sign in to report messages', 'Kirjaudu sisään ilmoittaaksesi viesteistä')) return;
+    if (!mounted) return;
+    Haptics.selection();
+    final byStore = m['byStore'] == true;
+    final action = await showUgcActions(
+      context,
+      canReport: true,
+      canBlock: authorId != null && !byStore && BlockedUsers.instance.available,
+    );
+    if (!mounted || action == null) return;
+    if (action == 'block') {
+      await confirmAndBlock(context, userId: authorId!, name: (m['name'] ?? '').toString());
+      return;
+    }
+    if (action != 'report') return;
+    final reason = await pickReportReason(context, title: tr(context, 'Report this message', 'Ilmoita viestistä'));
+    if (!mounted || reason == null) return;
+    final res = await _api.post('/live/$_id/messages/$messageId/report', {'reason': reason});
+    if (!mounted) return;
+    if (res.ok) {
+      MSnack.show(context, tr(context, 'Thanks — we will review it.', 'Kiitos — tarkistamme sen.'));
+    } else {
+      MSnack.error(
+          context,
+          res.status == 404 && res.data['error'] == 'Not found'
+              ? tr(context, 'Reporting single messages is not available yet. You can report the whole live from the menu.',
+                  'Yksittäisistä viesteistä ei voi vielä ilmoittaa. Voit ilmoittaa koko livestä valikosta.')
+              : (res.errorText(context) ?? tr(context, 'Could not send the report. Try again.', 'Ilmoitusta ei voitu lähettää. Yritä uudelleen.')));
+    }
+  }
+
   Widget _messageBubble(Map<String, dynamic> m) {
     final byStore = m['byStore'] == true;
     final name = (m['name'] ?? '').toString();
+    final own = asInt(m['userId']) != null && asInt(m['userId']) == _auth.currentUser?.id;
     return Align(
       alignment: Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(top: MSpace.xs),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(color: MPalette.night.withValues(alpha: 0.42), borderRadius: BorderRadius.circular(MRadius.sm)),
-        child: Text.rich(
-          TextSpan(children: [
-            TextSpan(
-              text: byStore ? '$name · ${tr(context, 'Store', 'Kauppa')}  ' : '$name  ',
-              style: TextStyle(color: byStore ? AppTheme.sunshine : AppTheme.onMedia.withValues(alpha: 0.75), fontWeight: FontWeight.w800),
+      child: GestureDetector(
+        onLongPress: own ? null : () => _messageActions(m),
+        child: Semantics(
+          onLongPressHint: own ? null : tr(context, 'Report or block', 'Ilmoita tai estä'),
+          child: Container(
+            margin: const EdgeInsets.only(top: MSpace.xs),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(color: MPalette.night.withValues(alpha: 0.42), borderRadius: BorderRadius.circular(MRadius.sm)),
+            child: Text.rich(
+              TextSpan(children: [
+                TextSpan(
+                  text: byStore ? '$name · ${tr(context, 'Store', 'Kauppa')}  ' : '$name  ',
+                  style: TextStyle(color: byStore ? AppTheme.sunshine : AppTheme.onMedia.withValues(alpha: 0.75), fontWeight: FontWeight.w800),
+                ),
+                TextSpan(text: (m['text'] ?? '').toString()),
+              ]),
+              style: const TextStyle(color: AppTheme.onMedia, fontSize: MTextSize.label, height: 1.3),
             ),
-            TextSpan(text: (m['text'] ?? '').toString()),
-          ]),
-          style: const TextStyle(color: AppTheme.onMedia, fontSize: MTextSize.label, height: 1.3),
+          ),
         ),
       ),
     );

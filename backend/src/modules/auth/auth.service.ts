@@ -3,7 +3,7 @@ import crypto from "crypto";
 import { prisma } from "../../lib/prisma";
 import { verifyRefreshToken } from "../../utils/jwt";
 import { RegisterInput, LoginInput } from "./auth.schema";
-import { issueSession, hashToken, revokeAllSessions, isMfaChallenge } from "./session";
+import { issueSession, hashToken, revokeAllSessions, revokeSession, isMfaChallenge, Session } from "./session";
 import { AcceptContext, recordAcceptances, registrationVersions } from "../legal/agreements";
 import { mainDocForRole } from "../legal/legalDocs";
 import { forgetSessionState } from "../../middleware/auth";
@@ -11,12 +11,38 @@ import { deleteFirebaseUser, deleteStoreMedia } from "./accountCleanup";
 import { TWO_STEP_OFF } from "./twoStepFields";
 import { disconnectUser } from "../../lib/socket";
 import { endLivesOfStore } from "../live/live.service";
+import { blocked } from "../../lib/settings";
+import { isBreachedPassword, BREACHED_PASSWORD } from "../../lib/hibp";
+import { bump, clear, hashKey, peek, setFlag } from "../../lib/counters";
+import { localeOfUser } from "../../lib/i18n";
+import { sendPasswordChangedEmail } from "../../services/notificationDeliveryService";
 
 export class AuthError extends Error {
-  constructor(message: string, public status: number) {
+  constructor(message: string, public status: number, public code?: string) {
     super(message);
   }
 }
+
+export const AGE_REQUIRED = "Confirm that you are 18 or older";
+/** New accounts (register, social or code sign-up) need "I am 18 or older" (2.16); existing accounts never do. */
+export function assertAgeConfirmed(ageConfirmed: unknown) {
+  if (ageConfirmed !== true) throw new AuthError(AGE_REQUIRED, 400, "AGE_CONFIRMATION_REQUIRED");
+}
+
+/** Admin switch "Pause new accounts" (2.16): 503 SIGNUPS_PAUSED for new accounts only. */
+export async function assertSignupsOpen() {
+  const message = await blocked("signupsPaused");
+  if (message) throw new AuthError(message, 503, "SIGNUPS_PAUSED");
+}
+
+/** New passwords: not in a known breach (HIBP range API, fail open). Length (≥ 10) is checked by the schemas. */
+export async function assertPasswordNotBreached(password: string) {
+  if (await isBreachedPassword(password)) throw new AuthError(BREACHED_PASSWORD, 400, "PASSWORD_BREACHED");
+}
+
+// Sign-in failures per identifier (hashed): 5 wrong passwords lock that identifier for 15 minutes (2.16)
+const LOGIN_MAX_FAILURES = 5;
+const LOGIN_WINDOW_MS = 15 * 60_000;
 
 const PHONE_EMAIL_DOMAIN = "phone.malvoya.app";
 const DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(16).toString("hex"), 12);
@@ -67,6 +93,9 @@ export async function registerUser(input: RegisterInput, ctx: AcceptContext = { 
   });
   // Never hand out a session for an existing account from the register endpoint.
   if (existing) throw new AuthError("An account with this email or phone already exists. Please sign in.", 409);
+  assertAgeConfirmed(input.ageConfirmed);
+  await assertSignupsOpen();
+  await assertPasswordNotBreached(input.password);
 
   const passwordHash = await bcrypt.hash(input.password, 12);
   // The versions in force of the role's documents (customers: Terms of Service + Privacy Policy acknowledgement)
@@ -75,7 +104,7 @@ export async function registerUser(input: RegisterInput, ctx: AcceptContext = { 
   const now = new Date();
   const user = await prisma.user.create({
     data: {
-      name: input.name, email, phone, passwordHash, role: input.role,
+      name: input.name, email, phone, passwordHash, role: input.role, ageConfirmedAt: now,
       ...(input.acceptTerms ? { termsAcceptedAt: now, termsVersion: main?.version ?? null } : {}),
     },
     select: { id: true, name: true, email: true, role: true, passwordHash: true },
@@ -97,13 +126,27 @@ export async function loginUser(input: LoginInput) {
     ? [{ phone: identifier.replace(/[^0-9+]/g, "") }, { email: phoneToSyntheticEmail(identifier) }]
     : [{ email: { equals: identifier.toLowerCase(), mode: "insensitive" as const } }];
 
+  // Locked identifiers (5 wrong passwords in 15 minutes) answer 429 whether or not the account exists
+  const key = hashKey(isPhoneIdentifier(identifier) ? identifier.replace(/[^0-9+]/g, "") : identifier.toLowerCase());
+  if ((await peek(`login-lock:${key}`)).count > 0) {
+    throw new AuthError("Too many wrong passwords. Try again in 15 minutes or reset your password.", 429, "LOGIN_LOCKED");
+  }
+
   const user = await prisma.user.findFirst({ where: { OR: candidates } });
 
   // Compare against a dummy hash when the user does not exist so response timing does not reveal accounts.
   // Social/OTP-only accounts have no bcrypt hash, so they can't sign in with a password.
   const hash = user?.passwordHash?.startsWith("$2") ? user.passwordHash : DUMMY_HASH;
   const valid = await bcrypt.compare(input.password, hash);
-  if (!user || !valid || !user.isActive) throw new AuthError("Invalid credentials", 401);
+  if (!user || !valid || !user.isActive) {
+    const fails = await bump(`login-fail:${key}`, LOGIN_WINDOW_MS);
+    if (fails.count >= LOGIN_MAX_FAILURES) {
+      await setFlag(`login-lock:${key}`, LOGIN_WINDOW_MS);
+      await clear(`login-fail:${key}`);
+    }
+    throw new AuthError("Invalid credentials", 401);
+  }
+  await clear(`login-fail:${key}`);
 
   return issueSession(user);
 }
@@ -116,12 +159,28 @@ export async function refreshTokens(refreshToken: string) {
     throw new AuthError("Refresh token expired or invalid", 401);
   }
   const tokenHash = hashToken(refreshToken);
-  const stored = await prisma.refreshToken.findUnique({ where: { token: tokenHash }, include: { user: true } });
+  const stored = await prisma.refreshToken.findUnique({ where: { token: tokenHash }, include: { user: true, session: true } });
   if (!stored || stored.expiresAt < new Date() || !stored.user.isActive) {
     throw new AuthError("Refresh token expired or invalid", 401);
   }
 
-  // Rotation: each refresh token is single use
+  if (stored.sessionId) {
+    // Refresh-token family (2.16): an already exchanged token used again means a copy exists somewhere, so the whole
+    // sign-in ends. Two refreshes from the same app within a few seconds (a race, not theft) only fail the later one.
+    if (stored.usedAt) {
+      if (Date.now() - stored.usedAt.getTime() > 10_000) {
+        await revokeSession(stored.userId, stored.sessionId);
+        forgetSessionState(stored.userId);
+      }
+      throw new AuthError("Refresh token expired or invalid", 401);
+    }
+    if (!stored.session || stored.session.revokedAt) throw new AuthError("Refresh token expired or invalid", 401);
+    const claimed = await prisma.refreshToken.updateMany({ where: { id: stored.id, usedAt: null }, data: { usedAt: new Date() } });
+    if (claimed.count !== 1) throw new AuthError("Refresh token expired or invalid", 401);
+    return issueSession(stored.user, { mfa, sessionId: stored.sessionId }) as Promise<Session>;
+  }
+
+  // A token from before 2.16 (no sign-in family): single use as before; the next one starts a family
   await prisma.refreshToken.delete({ where: { token: tokenHash } });
   const session = await issueSession(stored.user, { mfa });
   // Turning two-step sign-in on ends every older session, so this only happens to a token from before that
@@ -140,10 +199,12 @@ export async function changePassword(userId: number, currentPassword: string, ne
     throw new AuthError("This account signs in without a password (Google, phone or email code), so there is no password to change.", 400);
   }
   if (!(await bcrypt.compare(currentPassword, user.passwordHash))) throw new AuthError("The current password is wrong", 400);
+  await assertPasswordNotBreached(newPassword);
   const passwordHash = await bcrypt.hash(newPassword, 12);
   const updated = await prisma.user.update({ where: { id: userId }, data: { passwordHash, tokensValidAfter: new Date() } });
   await revokeAllSessions(userId);
   forgetSessionState(userId);
+  localeOfUser(userId).then((l) => sendPasswordChangedEmail(updated.email, "changed", l)).catch(() => {});
   // The caller is signed in: the new session keeps whether theirs passed two-step sign-in
   return issueSession(updated, { mfa });
 }

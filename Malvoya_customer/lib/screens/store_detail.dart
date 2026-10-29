@@ -10,6 +10,7 @@ import '../core/blocked_users.dart';
 import '../core/delivery_location.dart';
 import '../core/sign_in.dart';
 import '../core/store_hours.dart';
+import '../widgets/free_delivery_hint.dart';
 import '../widgets/product_tile.dart';
 import '../widgets/ugc_actions.dart';
 import 'drops_feed.dart';
@@ -64,9 +65,45 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
       if (res.ok) {
         _store['followedByMe'] = res.data['following'] == true;
         _store['followerCount'] = res.data['followerCount'];
+        final m = res.data['muted'] ?? res.data['followMuted'];
+        if (m is bool) _store['followMuted'] = m;
       }
     });
     if (!res.ok) MSnack.show(context, res.errorText(context)!);
+  }
+
+  /// Whether this follower muted the store's notifications (API 2.16), or null when the server
+  /// does not say (then the mute button is hidden).
+  bool? get _muted {
+    final v = _store['followMuted'] ?? _store['mutedByMe'];
+    return v is bool ? v : null;
+  }
+
+  bool _muteBusy = false;
+
+  /// Keeps following the store but stops (or restarts) its drop and live notifications.
+  Future<void> _toggleMute() async {
+    final current = _muted;
+    if (current == null || _muteBusy) return;
+    Haptics.selection();
+    setState(() => _muteBusy = true);
+    final res = await ApiClient(Provider.of<AuthService>(context, listen: false)).patch('/stores/$_id/follow', {'muted': !current});
+    if (!mounted) return;
+    setState(() {
+      _muteBusy = false;
+      if (res.ok) {
+        final saved = res.data['muted'] ?? res.data['followMuted'];
+        _store['followMuted'] = saved is bool ? saved : !current;
+      }
+    });
+    if (!res.ok) {
+      MSnack.error(context, res.errorText(context) ?? tr(context, 'Could not save. Try again.', 'Tallennus ei onnistunut. Yritä uudelleen.'));
+      return;
+    }
+    MSnack.show(context, _store['followMuted'] == true
+        ? tr(context, 'Muted. You still follow ${_store['name'] ?? 'the store'}, without notifications.',
+            'Mykistetty. Seuraat edelleen kauppaa ${_store['name'] ?? ''} ilman ilmoituksia.')
+        : tr(context, 'Notifications from this store are on again.', 'Tämän kaupan ilmoitukset ovat taas päällä.'));
   }
 
   @override
@@ -301,6 +338,15 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                   style: TextStyle(color: muted, fontWeight: FontWeight.w600),
                 ),
               ),
+              if (_store['followedByMe'] == true && _muted != null)
+                IconButton(
+                  tooltip: _muted!
+                      ? tr(context, 'Unmute this store', 'Poista kaupan mykistys')
+                      : tr(context, 'Mute notifications from this store', 'Mykistä kaupan ilmoitukset'),
+                  onPressed: _muteBusy ? null : _toggleMute,
+                  icon: Icon(_muted! ? Icons.notifications_off_outlined : Icons.notifications_active_outlined,
+                      color: _muted! ? muted : AppTheme.primary),
+                ),
               _store['followedByMe'] == true
                   ? OutlinedButton.icon(
                       onPressed: _followBusy ? null : _toggleFollow,
@@ -328,6 +374,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
               if (eta != null) _meta(Icons.schedule_rounded, eta),
               if (_store['deliveryFeeCents'] != null) _meta(Icons.delivery_dining_rounded, '${euro(context, _store['deliveryFeeCents'])} ${tr(context, 'delivery', 'toimitus')}'),
               if (_store['distanceKm'] != null) _meta(Icons.near_me_outlined, '${_store['distanceKm']} km'),
+              if (freeDeliveryFromLabel(context, _store) case final free?) _meta(Icons.local_shipping_outlined, free),
             ],
           ),
           const SizedBox(height: MSpace.md),
@@ -372,6 +419,9 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
             Text(_store['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
             if (!isPrivate && _store['businessId'] != null) Text('Y-tunnus ${_store['businessId']}'),
             if (!isPrivate && _store['address'] != null) Text(_store['address']),
+            if (!isPrivate && (_store['phone'] ?? '').toString().isNotEmpty) Text(_store['phone'].toString()),
+            if (!isPrivate && (_store['email'] ?? '').toString().isNotEmpty) Text(_store['email'].toString()),
+            if (isPrivate && (_store['city'] ?? '').toString().isNotEmpty) Text(_store['city'].toString()),
             const SizedBox(height: MSpace.md),
             Text(
               isPrivate

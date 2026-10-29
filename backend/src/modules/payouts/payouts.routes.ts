@@ -2,13 +2,27 @@ import { Router, Response, Request } from "express";
 import { auth, requireRole, AuthRequest } from "../../middleware/auth";
 import { sendError } from "../../lib/errors";
 import * as payouts from "./payouts.service";
+import { requireRecentAuth } from "../auth/accountSecurity";
+import { prisma } from "../../lib/prisma";
+import { localeOfUser } from "../../lib/i18n";
+import { sendPayoutLinkEmail } from "../../services/notificationDeliveryService";
+
+/** The owner hears about every payout link (2.16): a stolen session should not change bank details unnoticed. */
+function tellOwner(userId: number, kind: "onboarding" | "dashboard") {
+  prisma.user.findUnique({ where: { id: userId }, select: { email: true } })
+    .then(async (u) => { if (u) await sendPayoutLinkEmail(u.email, kind, await localeOfUser(userId)); })
+    .catch(() => {});
+}
 
 const router = Router();
 const partners = [auth, requireRole("VENDOR", "COURIER")];
 
-router.post("/payouts/onboarding", ...partners, async (req: AuthRequest, res: Response) => {
+// Payout links need the password again within 10 minutes (or a two-step session): 403 REAUTH_REQUIRED (2.16)
+router.post("/payouts/onboarding", ...partners, requireRecentAuth, async (req: AuthRequest, res: Response) => {
   try {
-    res.json({ ok: true, ...(await payouts.startOnboarding(req.user!)) });
+    const link = await payouts.startOnboarding(req.user!);
+    tellOwner(req.user!.id, "onboarding");
+    res.json({ ok: true, ...link });
   } catch (e) { sendError(res, e); }
 });
 
@@ -18,9 +32,11 @@ router.get("/payouts/status", ...partners, async (req: AuthRequest, res: Respons
   } catch (e) { sendError(res, e); }
 });
 
-router.post("/payouts/dashboard", ...partners, async (req: AuthRequest, res: Response) => {
+router.post("/payouts/dashboard", ...partners, requireRecentAuth, async (req: AuthRequest, res: Response) => {
   try {
-    res.json({ ok: true, ...(await payouts.dashboardLink(req.user!)) });
+    const link = await payouts.dashboardLink(req.user!);
+    tellOwner(req.user!.id, "dashboard");
+    res.json({ ok: true, ...link });
   } catch (e) { sendError(res, e); }
 });
 

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:malvoya_core/malvoya_core.dart';
+import 'auth_service.dart';
 import 'config/constants.dart';
 
 /// In-app notification history + the OTP calls used by the login screen.
@@ -102,17 +103,22 @@ class RealtimeNotificationService {
   static Future<Map<String, dynamic>> verifyRealOtp({
     required String destination,
     required String code,
+    bool ageConfirmed = false,
   }) async {
     try {
       final res = await http
           .post(
             Uri.parse('${AppConstants.apiBase}/auth/otp/verify'),
             headers: {'Content-Type': 'application/json', ...AppLanguage.headers},
-            body: jsonEncode({'target': destination, 'code': code.trim()}),
+            body: jsonEncode({'target': destination, 'code': code.trim(), if (ageConfirmed) 'ageConfirmed': true}),
           )
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) return jsonDecode(res.body);
       final errData = jsonDecode(res.body);
+      // A new account needs "I am 18 or older" first (the login screen asks and sends the code again)
+      if (!ageConfirmed && AuthService.isAgeConfirmationError(res.statusCode, errData)) {
+        return {'ok': false, 'code': AuthService.ageConfirmationRequired, 'error': errData['error']};
+      }
       return {'ok': false, 'error': errData['error'] ?? 'Invalid or expired verification code.'};
     } catch (e) {
       return {'ok': false, 'error': 'Could not reach the server. Please check your connection.'};

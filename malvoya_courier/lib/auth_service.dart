@@ -128,7 +128,64 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
     notifyListeners();
   }
 
+  // ── Two-step sign-in and age confirmation (API 2.16) ─────────────────────
+
+  /// Shows the "code from your authenticator app" step when an account has two-step sign-in on.
+  /// Set once in `main()` (it needs the app's navigator). Returns null when the second step
+  /// signed in, otherwise the message to show (e.g. cancelled).
+  static Future<String?> Function(AuthService auth, String mfaToken)? askTwoStepCode;
+
+  /// Asks "I am 18 or older" when the server needs it for a new account created by a social
+  /// sign-in. True = confirmed, so the sign-in is sent once more with `ageConfirmed: true`.
+  static Future<bool> Function()? confirmAge;
+
+  /// The server refused to create a new account because the age was not confirmed (400).
+  static bool _needsAgeConfirmation(http.Response res) {
+    if (res.statusCode != 400) return false;
+    try {
+      final body = jsonDecode(res.body);
+      if (body is! Map) return false;
+      final code = '${body['code'] ?? ''}'.toUpperCase();
+      if (code.contains('AGE')) return true;
+      final text = jsonEncode(body).toLowerCase();
+      return text.contains('ageconfirmed') || text.contains('18 or older');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// POST /auth/login/mfa: the challenge from the first step plus an authenticator or recovery
+  /// code. Null when signed in, otherwise the server's message.
+  Future<String?> completeTwoStep(String mfaToken, String code) async {
+    final res = await const ApiClient().post('/auth/login/mfa', {'mfaToken': mfaToken, 'code': code.replaceAll(' ', '').trim()});
+    if (!res.ok) return res.errorMessage;
+    final err = await _applySession(res.data, signIn: true);
+    if (err != null) return err;
+    final left = asInt(res.data['recoveryCodesLeft']);
+    if (left != null) {
+      lastSignInNotice = _t('You used a recovery code. $left left. You can make new ones under Account → Two-step sign-in.',
+          'Käytit varakoodin. Jäljellä $left. Voit tehdä uudet kohdassa Tili → Kaksivaiheinen kirjautuminen.');
+    }
+    return null;
+  }
+
+  /// Something to tell the courier after signing in (e.g. a recovery code was used).
+  String? lastSignInNotice;
+
+  /// Applies a session the server returned to a signed-in action (e.g. turning two-step sign-in
+  /// on, which ends every older session and returns a fresh one).
+  Future<String?> applyFreshSession(Map<String, dynamic> data) async {
+    if (data['accessToken'] is! String || data['refreshToken'] is! String || data['user'] is! Map) return null;
+    return _applySession(data);
+  }
+
   Future<String?> _applySession(Map<String, dynamic> data, {bool signIn = false}) async {
+    // Two-step sign-in: no tokens yet, only a 5-minute challenge for the authenticator code
+    if (data['mfaRequired'] == true && data['mfaToken'] is String) {
+      final ask = askTwoStepCode;
+      if (ask == null) return _t('Enter the code from your authenticator app to sign in.', 'Kirjaudu antamalla todennussovelluksen koodi.');
+      return ask(this, data['mfaToken'] as String);
+    }
     final user = User.fromJson(data['user']);
     if (user.role != kAppRole) {
       return _t('This account is not a courier account. Please use the matching Malvoya app.', 'Tämä ei ole lähettitili. Käytä oikeaa Malvoya-sovellusta.');
@@ -221,7 +278,8 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
   }
 
   /// Creates a courier account. [acceptTerms] records that the courier accepted the courier agreement.
-  Future<String?> register(String name, String email, String password, {required bool acceptTerms}) async {
+  /// [ageConfirmed]: the courier ticked "I am 18 or older" (required for new accounts, API 2.16).
+  Future<String?> register(String name, String email, String password, {required bool acceptTerms, required bool ageConfirmed}) async {
     try {
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/register'),
@@ -232,6 +290,7 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
                 'password': password,
                 'role': kAppRole,
                 if (acceptTerms) 'acceptTerms': true,
+                if (ageConfirmed) 'ageConfirmed': true,
               }))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 201) return await _applySession(jsonDecode(res.body), signIn: true);
@@ -289,10 +348,17 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
       if (googleUser == null) return _t('Google sign-in cancelled', 'Google-kirjautuminen peruttiin');
       final idToken = (await googleUser.authentication).idToken;
       if (idToken == null) return _t('Google did not return a sign-in token', 'Google ei palauttanut kirjautumistunnistetta');
-      final res = await http
+      Future<http.Response> send({bool age = false}) => http
           .post(Uri.parse('${AppConstants.apiBase}/auth/google'),
-              headers: _jsonHeaders, body: jsonEncode({'idToken': idToken, 'role': kAppRole}))
+              headers: _jsonHeaders, body: jsonEncode({'idToken': idToken, 'role': kAppRole, if (age) 'ageConfirmed': true}))
           .timeout(const Duration(seconds: 15));
+      var res = await send();
+      // A new account: the server needs "I am 18 or older" first
+      if (_needsAgeConfirmation(res)) {
+        final confirm = confirmAge;
+        if (confirm == null || !await confirm()) return _t('Confirm that you are 18 or older to create an account.', 'Vahvista, että olet vähintään 18-vuotias luodaksesi tilin.');
+        res = await send(age: true);
+      }
       if (res.statusCode == 200) return await _applySession(jsonDecode(res.body), signIn: true);
       return _errorFrom(res, _t('Google sign-in failed.', 'Google-kirjautuminen epäonnistui.'));
     } catch (_) {
@@ -398,11 +464,17 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
       final result = await _firebaseAuth.signInWithCredential(credential);
       final firebaseToken = await result.user?.getIdToken();
       if (firebaseToken == null) return _t('Phone verification failed', 'Puhelinnumeron vahvistus epäonnistui');
-      final res = await http
+      Future<http.Response> send({bool age = false}) => http
           .post(Uri.parse('${AppConstants.apiBase}/auth/phone'),
               headers: _jsonHeaders,
-              body: jsonEncode({'firebaseToken': firebaseToken, 'role': kAppRole}))
+              body: jsonEncode({'firebaseToken': firebaseToken, 'role': kAppRole, if (age) 'ageConfirmed': true}))
           .timeout(const Duration(seconds: 15));
+      var res = await send();
+      if (_needsAgeConfirmation(res)) {
+        final confirm = confirmAge;
+        if (confirm == null || !await confirm()) return _t('Confirm that you are 18 or older to create an account.', 'Vahvista, että olet vähintään 18-vuotias luodaksesi tilin.');
+        res = await send(age: true);
+      }
       if (res.statusCode == 200) return await _applySession(jsonDecode(res.body), signIn: true);
       return _errorFrom(res, _t('Phone sign-in failed.', 'Puhelinkirjautuminen epäonnistui.'));
     } on fb_auth.FirebaseAuthException catch (e) {

@@ -11,7 +11,7 @@ import { acceptContext } from "../legal/agreements";
 
 /** AuthErrors carry a safe message + status; anything else is logged and hidden. */
 function sendError(res: Response, e: unknown, fallbackStatus = 500) {
-  if (e instanceof authService.AuthError) return res.status(e.status).json({ ok: false, error: e.message });
+  if (e instanceof authService.AuthError) return res.status(e.status).json({ ok: false, error: e.message, ...(e.code ? { code: e.code } : {}) });
   console.error(e);
   return res.status(fallbackStatus).json({ ok: false, error: fallbackStatus === 401 ? "Authentication failed" : "Something went wrong" });
 }
@@ -57,13 +57,13 @@ export async function logout(req: Request, res: Response) {
 
 const SIGNUP_ROLES = ["CUSTOMER", "VENDOR", "COURIER"] as const;
 
-function tokenHandler(field: "idToken" | "firebaseToken", login: (token: string, role: socialService.SignupRole) => Promise<unknown>) {
+function tokenHandler(field: "idToken" | "firebaseToken", login: (token: string, role: socialService.SignupRole, opts: socialService.SignupOptions) => Promise<unknown>) {
   return async (req: Request, res: Response) => {
     const token = req.body?.[field];
     if (typeof token !== "string" || !token) return res.status(400).json({ ok: false, error: `${field} is required` });
     const role = SIGNUP_ROLES.includes(req.body?.role) ? (req.body.role as socialService.SignupRole) : "CUSTOMER";
     try {
-      const data = await login(token, role);
+      const data = await login(token, role, { ageConfirmed: req.body?.ageConfirmed === true });
       res.json({ ok: true, ...(data as object) });
     } catch (e) {
       sendError(res, e, 401);
@@ -101,7 +101,7 @@ export async function appleLogin(req: Request, res: Response) {
   }
   const role = SIGNUP_ROLES.includes(req.body?.role) ? (req.body.role as socialService.SignupRole) : "CUSTOMER";
   try {
-    res.json({ ok: true, ...(await socialService.loginWithApple(token, role, typeof rawName === "string" ? rawName.trim() || undefined : undefined)) });
+    res.json({ ok: true, ...(await socialService.loginWithApple(token, role, typeof rawName === "string" ? rawName.trim() || undefined : undefined, { ageConfirmed: req.body?.ageConfirmed === true })) });
   } catch (e) {
     sendError(res, e, 401);
   }
@@ -121,13 +121,13 @@ export async function sendOtpHandler(req: Request, res: Response) {
 }
 
 export async function verifyOtpHandler(req: Request, res: Response) {
-  const { target, phone, email, code } = req.body ?? {};
+  const { target, phone, email, code, ageConfirmed } = req.body ?? {};
   const destination = target || phone || email;
   if (typeof destination !== "string" || typeof code !== "string" || !destination || !code) {
     return res.status(400).json({ ok: false, error: "Destination and verification code are required" });
   }
   try {
-    res.json(await verifyOtp(destination, code));
+    res.json(await verifyOtp(destination, code, { ageConfirmed: ageConfirmed === true }));
   } catch (e) {
     sendError(res, e, 401);
   }
@@ -135,8 +135,8 @@ export async function verifyOtpHandler(req: Request, res: Response) {
 
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1).max(72),
-  // Same rules as registration
-  newPassword: z.string().min(8, "Password must be at least 8 characters").max(72),
+  // Same rules as registration (at least 10 characters since 2.16.0)
+  newPassword: z.string().min(10, "Password must be at least 10 characters").max(72),
 });
 
 export async function changePasswordHandler(req: AuthRequest, res: Response) {

@@ -4,6 +4,7 @@ import 'package:malvoya_core/malvoya_core.dart';
 import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
+import 'sign_in_steps.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -19,6 +20,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _loading = false;
   bool _obscurePass = true;
   bool _acceptTerms = false;
+  bool _adult = false;
   String? _error;
 
   @override
@@ -34,8 +36,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
       setState(() => _error = tr(context, 'Please fill in all fields.', 'Täytä kaikki kentät.'));
       return;
     }
-    if (_passCtrl.text.length < 8) {
-      setState(() => _error = tr(context, 'The password needs at least 8 characters.', 'Salasanassa on oltava vähintään 8 merkkiä.'));
+    // API 2.16: new passwords need 10 characters; the server also refuses passwords known from data
+    // breaches, and its message is shown as it is
+    if (_passCtrl.text.length < 10) {
+      setState(() => _error = tr(context, 'The password needs at least 10 characters.', 'Salasanassa on oltava vähintään 10 merkkiä.'));
+      return;
+    }
+    if (!_adult) {
+      setState(() => _error = tr(context, 'Confirm that you are 18 or older.', 'Vahvista, että olet vähintään 18-vuotias.'));
       return;
     }
     if (!_acceptTerms) {
@@ -49,6 +57,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _emailCtrl.text.trim(),
       _passCtrl.text,
       acceptTerms: _acceptTerms,
+      ageConfirmed: _adult,
     );
 
     // On success the app's home switches to the welcome screen by itself and closes this one
@@ -125,7 +134,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
               ),
 
+              const SizedBox(height: MSpace.xs),
+              Text(tr(context, 'At least 10 characters. Passwords known from data breaches are refused.', 'Vähintään 10 merkkiä. Tietovuodoista tunnettuja salasanoja ei hyväksytä.'),
+                  style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
               const SizedBox(height: 14),
+              // Required for new accounts (API 2.16): the server records the confirmation
+              AgeCheckbox(value: _adult, onChanged: (v) => setState(() {
+                    _adult = v;
+                    _error = null;
+                  })),
+              const SizedBox(height: MSpace.sm),
               // Required: the server records when the Seller Terms were accepted, and which version
               Container(
                 decoration: BoxDecoration(color: AppTheme.sand, borderRadius: BorderRadius.circular(AppTheme.radiusMd)),

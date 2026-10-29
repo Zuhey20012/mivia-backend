@@ -146,7 +146,7 @@ async function register(name, role, extra = {}) {
   // Everyone accepts their agreement at sign-up (stores and couriers must, 2.10; customers too, since 2.11 orders need it)
   const terms = extra.acceptTerms === false ? {} : { acceptTerms: true };
   if (extra.acceptTerms === false) { extra = { ...extra }; delete extra.acceptTerms; }
-  const r = await call("POST", "/auth/register", { name, email: `${name.toLowerCase().replace(/\W/g, "")}${uniq}@example.fi`, password: "strong-pass-123", ...(role ? { role } : {}), ...terms, ...extra });
+  const r = await call("POST", "/auth/register", { ageConfirmed: true, name, email: `${name.toLowerCase().replace(/\W/g, "")}${uniq}@example.fi`, password: "strong-pass-123", ...(role ? { role } : {}), ...terms, ...extra });
   return r.body;
 }
 
@@ -170,11 +170,11 @@ function ean13(d12) {
 
 (async () => {
   console.log("\n— Auth");
-  const regA = await call("POST", "/auth/register", { name: "Aino Korhonen", email: `aino${uniq}@example.fi`, password: "correct-horse-1", acceptTerms: true });
+  const regA = await call("POST", "/auth/register", { ageConfirmed: true, name: "Aino Korhonen", email: `aino${uniq}@example.fi`, password: "correct-horse-1", acceptTerms: true });
   check("customer can register", regA.status === 201 && regA.body.accessToken, regA);
-  const takeover = await call("POST", "/auth/register", { name: "Evil", email: `aino${uniq}@example.fi`, password: "whatever12", role: "VENDOR", acceptTerms: true });
+  const takeover = await call("POST", "/auth/register", { ageConfirmed: true, name: "Evil", email: `aino${uniq}@example.fi`, password: "whatever12", role: "VENDOR", acceptTerms: true });
   check("register with existing email is refused and returns no tokens", takeover.status === 409 && !takeover.body.accessToken, takeover);
-  check("cannot self-register as ADMIN", (await call("POST", "/auth/register", { name: "X", email: `x${uniq}@example.fi`, password: "whatever12", role: "ADMIN" })).status === 400);
+  check("cannot self-register as ADMIN", (await call("POST", "/auth/register", { ageConfirmed: true, name: "X", email: `x${uniq}@example.fi`, password: "whatever12", role: "ADMIN" })).status === 400);
   check("wrong password rejected", (await call("POST", "/auth/login", { email: `aino${uniq}@example.fi`, password: "wrong-password" })).status === 401);
   const loginA = await call("POST", "/auth/login", { email: `AINO${uniq}@example.fi`, password: "correct-horse-1" });
   check("login works (case-insensitive email)", loginA.status === 200 && loginA.body.accessToken);
@@ -192,7 +192,7 @@ function ean13(d12) {
   const preHijackEmail = await call("POST", "/auth/otp/verify", { target: `aino${uniq}@example.fi`, code: "123456" });
   check("code sign-in does not open a registered account (unproven email)", preHijackEmail.status === 409 && !preHijackEmail.body.accessToken, preHijackEmail);
   const phoneP = `+35840${String(uniq).slice(-7)}`;
-  await call("POST", "/auth/register", { name: "Pre Hijacker", email: `prehijack${uniq}@example.fi`, phone: phoneP, password: "strong-pass-123" });
+  await call("POST", "/auth/register", { ageConfirmed: true, name: "Pre Hijacker", email: `prehijack${uniq}@example.fi`, phone: phoneP, password: "strong-pass-123" });
   plantCode(phoneP, "654321");
   const preHijackPhone = await call("POST", "/auth/otp/verify", { phone: phoneP, code: "654321" });
   check("code sign-in does not open a registered account (unproven phone)", preHijackPhone.status === 409 && !preHijackPhone.body.accessToken, preHijackPhone);
@@ -212,7 +212,7 @@ function ean13(d12) {
   check("sessions say whether the account has a password", regA.body.user?.hasPassword === true && codeNew.body.user?.hasPassword === false, [regA.body.user, codeNew.body.user]);
   const meA = await call("GET", "/me", null, tokenA);
   check("GET /me returns the account with hasPassword and googleLinked", meA.status === 200 && meA.body.user?.hasPassword === true && meA.body.user.googleLinked === false && !("passwordHash" in meA.body.user), meA.body);
-  const reija = await call("POST", "/auth/register", { name: "Reija Reset", email: `reija${uniq}@example.fi`, password: "old-password-1" });
+  const reija = await call("POST", "/auth/register", { ageConfirmed: true, name: "Reija Reset", email: `reija${uniq}@example.fi`, password: "old-password-1" });
   const reijaLogin2 = await call("POST", "/auth/login", { email: `reija${uniq}@example.fi`, password: "old-password-1" }); // "another device"
   const resetTarget = `pwreset:reija${uniq}@example.fi`;
   const resetRow = () => sql(`select count(*) from "OtpCode" where target = '${resetTarget}'`);
@@ -256,12 +256,12 @@ function ean13(d12) {
   check("an account without a password cannot 'change' one", (await call("POST", "/auth/password/change", { currentPassword: "x", newPassword: "whatever-123" }, codeNew.body.accessToken)).status === 400);
 
   console.log("\n— Agreements and language (2.10)");
-  const noTermsV = await call("POST", "/auth/register", { name: "No Terms", email: `noterms${uniq}@example.fi`, password: "strong-pass-123", role: "VENDOR" });
-  const noTermsC = await call("POST", "/auth/register", { name: "No Terms C", email: `notermsc${uniq}@example.fi`, password: "strong-pass-123", role: "COURIER" });
+  const noTermsV = await call("POST", "/auth/register", { ageConfirmed: true, name: "No Terms", email: `noterms${uniq}@example.fi`, password: "strong-pass-123", role: "VENDOR" });
+  const noTermsC = await call("POST", "/auth/register", { ageConfirmed: true, name: "No Terms C", email: `notermsc${uniq}@example.fi`, password: "strong-pass-123", role: "COURIER" });
   check("store and courier registration require accepting the agreement (400)", noTermsV.status === 400 && noTermsC.status === 400 && /Seller Terms/.test(noTermsV.body.error || ""), [noTermsV.body.error, noTermsC.body.error]);
   const withTerms = await register("Terhi", "VENDOR");
   check("accepting stores the time and the agreement version (seller terms)", sql(`select ("termsAcceptedAt" is not null) || '|' || "termsVersion" from "User" where id = ${withTerms.user.id}`).match(/^true\|vendor_terms@[0-9a-f]{12}$/) !== null, sql(`select coalesce("termsVersion", '-') from "User" where id = ${withTerms.user.id}`));
-  const custTerms = await call("POST", "/auth/register", { name: "Cecilia", email: `cecilia${uniq}@example.fi`, password: "strong-pass-123", acceptTerms: true });
+  const custTerms = await call("POST", "/auth/register", { ageConfirmed: true, name: "Cecilia", email: `cecilia${uniq}@example.fi`, password: "strong-pass-123", acceptTerms: true });
   check("a customer who accepts gets the customer terms version", custTerms.status === 201 && /^terms_of_service@[0-9a-f]{12}$/.test(sql(`select "termsVersion" from "User" where id = ${custTerms.body.user.id}`)));
   const fiTok = custTerms.body.accessToken;
   await call("GET", "/me", null, fiTok, { headers: { "Accept-Language": "fi-FI,fi;q=0.9,en;q=0.5" } });
@@ -1963,7 +1963,7 @@ function ean13(d12) {
   check("the public page shows the version in force", (await (await fetch(`${BASE}/legal/terms`)).text()).includes(verTerms.currentVersion));
 
   // Registration writes the acceptance records (customer: terms + privacy acknowledgement)
-  const lauriReg = await call("POST", "/auth/register", { name: "Lauri", email: `lauri${uniq}@example.fi`, password: "strong-pass-123", acceptTerms: true }, null, { headers: { "X-App-Version": "1.8.0+10", "User-Agent": "MalvoyaCustomer/1.8.0 " + "x".repeat(300) } });
+  const lauriReg = await call("POST", "/auth/register", { ageConfirmed: true, name: "Lauri", email: `lauri${uniq}@example.fi`, password: "strong-pass-123", acceptTerms: true }, null, { headers: { "X-App-Version": "1.8.0+10", "User-Agent": "MalvoyaCustomer/1.8.0 " + "x".repeat(300) } });
   const lauri = lauriReg.body;
   const lauriAg = (await call("GET", "/me/agreements", null, lauri.accessToken)).body;
   check("registering with acceptTerms records terms + privacy for a customer", lauriAg.ok && lauriAg.required.map((r) => r.doc).join(",") === "terms,privacy" && lauriAg.required.every((r) => r.accepted && r.acceptedAt && r.currentVersion && r.url && r.title?.fi) && lauriAg.history.length === 2 && lauriAg.history.every((h) => h.method === "register"), lauriAg);
@@ -2533,7 +2533,7 @@ function ean13(d12) {
     const stepNow = () => Math.floor(Date.now() / 30000);
     const jwtBody = (tok) => JSON.parse(Buffer.from(tok.split(".")[1], "base64url").toString());
     const a2Email = `admin2fa${uniq}@example.fi`;
-    const a2 = (await call("POST", "/auth/register", { name: "Admin Kaksi", email: a2Email, password: "strong-pass-123" })).body;
+    const a2 = (await call("POST", "/auth/register", { ageConfirmed: true, name: "Admin Kaksi", email: a2Email, password: "strong-pass-123" })).body;
     sql(`update "User" set role='ADMIN' where id=${a2.user.id}`);
     const login = () => call("POST", "/auth/login", { email: a2Email, password: "strong-pass-123" });
     let a2Token = (await login()).body.accessToken;
