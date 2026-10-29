@@ -518,7 +518,7 @@ class _LiveScreenState extends State<LiveScreen> with WidgetsBindingObserver {
         height: 160,
         child: IgnorePointer(
           child: DecoratedBox(
-            decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0x99000000), Color(0x00000000)])),
+            decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [MPalette.mediaScrimSoft, Colors.transparent])),
           ),
         ),
       ),
@@ -529,7 +529,7 @@ class _LiveScreenState extends State<LiveScreen> with WidgetsBindingObserver {
         height: 360,
         child: IgnorePointer(
           child: DecoratedBox(
-            decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Color(0xB3000000), Color(0x00000000)])),
+            decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [MPalette.mediaScrim, Colors.transparent])),
           ),
         ),
       ),
@@ -670,7 +670,7 @@ class _LiveScreenState extends State<LiveScreen> with WidgetsBindingObserver {
         shaderCallback: (rect) => const LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Color(0x00000000), Color(0xFF000000)],
+          colors: [Colors.transparent, MPalette.white],
           stops: [0, 0.18],
         ).createShader(rect),
         blendMode: BlendMode.dstIn,
