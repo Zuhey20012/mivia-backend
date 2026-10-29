@@ -9,6 +9,7 @@ import { haversineKm } from "../utils/distance";
 import { pushToUser } from "./push";
 import { t } from "./i18n";
 import { canReadChat, chatHistory, postMessage } from "../modules/orders/chat";
+import * as live from "../modules/live/live.service";
 import { createAdapter } from "@socket.io/redis-adapter";
 import { Emitter } from "@socket.io/redis-emitter";
 import { createRedisClient, redis, redisEnabled, rkey } from "./redis";
@@ -190,6 +191,88 @@ export function initSocket(httpServer: HttpServer): SocketServer {
         reply?.({ ok: false, error: typeof e?.status === "number" && e.status < 500 ? e.message : "Message not sent" });
       }
     });
+
+    // ── Live shopping (2.15; see modules/live) ─────────────────────────────
+    // Signed-in viewers and the store join live:<id> for chat, hearts, pins and the end of the live. Guests watch the
+    // video without a socket (GET /live/:id every 15 s for the viewer count).
+    const errorText = (e: any, fallback: string) => (typeof e?.status === "number" && e.status < 500 ? e.message : fallback);
+
+    socket.on("live:join", async (liveId: unknown, ack?: unknown) => {
+      const reply = typeof ack === "function" ? (ack as (r: unknown) => void) : null;
+      const id = toId(liveId);
+      if (!id) return reply?.({ ok: false, error: "Live not found" });
+      try {
+        const info = await live.joinRoom(id, user);
+        // The store's own sockets are not counted as viewers
+        if (info.host) socket.data.liveHosting = [...((socket.data.liveHosting as number[] | undefined) ?? []), id];
+        socket.join(`live:${id}`);
+        const viewers = await countLiveViewers(id);
+        live.recordViewers(id, viewers).catch(() => {});
+        scheduleViewerUpdate(id);
+        reply?.({ ok: true, viewers, likeCount: info.likeCount, pinnedProductId: info.pinnedProductId, messages: info.messages });
+      } catch (e: any) {
+        reply?.({ ok: false, error: errorText(e, "Could not join the live"), ...(e?.extra?.code ? { code: e.extra.code } : {}) });
+      }
+    });
+
+    socket.on("live:leave", (liveId: unknown) => {
+      const id = toId(liveId);
+      if (!id || !socket.rooms.has(`live:${id}`)) return;
+      socket.leave(`live:${id}`);
+      scheduleViewerUpdate(id);
+    });
+
+    socket.on("live:chat", async (data: any, ack?: unknown) => {
+      const reply = typeof ack === "function" ? (ack as (r: unknown) => void) : null;
+      const id = toId(data?.liveId);
+      const text = typeof data?.text === "string" ? data.text : "";
+      if (!id || !socket.rooms.has(`live:${id}`)) return reply?.({ ok: false, error: "Join the live first" });
+      try {
+        reply?.({ ok: true, message: await live.postMessage(id, user, text) });
+      } catch (e: any) {
+        reply?.({ ok: false, error: errorText(e, "Message not sent") });
+      }
+    });
+
+    socket.on("live:like", async (liveId: unknown, ack?: unknown) => {
+      const reply = typeof ack === "function" ? (ack as (r: unknown) => void) : null;
+      const id = toId(liveId);
+      if (!id || !socket.rooms.has(`live:${id}`)) return reply?.({ ok: false, error: "Join the live first" });
+      if (!takeLike(user.id)) return reply?.({ ok: false, error: "Slow down a little" });
+      queueLike(id);
+      reply?.({ ok: true });
+    });
+
+    socket.on("live:hide", async (data: any, ack?: unknown) => {
+      const reply = typeof ack === "function" ? (ack as (r: unknown) => void) : null;
+      const id = toId(data?.liveId);
+      const messageId = toId(data?.messageId);
+      if (!id || !messageId) return reply?.({ ok: false, error: "Message not found" });
+      try {
+        reply?.({ ok: true, ...(await live.hideMessage(id, messageId, user)) });
+      } catch (e: any) {
+        reply?.({ ok: false, error: errorText(e, "Could not hide the message") });
+      }
+    });
+
+    socket.on("live:ban", async (data: any, ack?: unknown) => {
+      const reply = typeof ack === "function" ? (ack as (r: unknown) => void) : null;
+      const id = toId(data?.liveId);
+      const userId = toId(data?.userId);
+      if (!id || !userId) return reply?.({ ok: false, error: "Viewer not found" });
+      try {
+        reply?.({ ok: true, ...(await live.banViewer(id, userId, user)) });
+      } catch (e: any) {
+        reply?.({ ok: false, error: errorText(e, "Could not mute the viewer") });
+      }
+    });
+
+    socket.on("disconnecting", () => {
+      for (const room of socket.rooms) {
+        const m = /^live:(\d+)$/.exec(room);
+        if (m) scheduleViewerUpdate(Number(m[1]));
+      }
+    });
   });
 
   return io;
@@ -243,4 +326,97 @@ export function emitToCourier(courierId: number, event: string, payload: unknown
 
 export function emitToAllCouriers(event: string, payload: unknown) {
   target()?.to("couriers").emit(event, payload);
+}
+
+// ── Live shopping helpers ──────────────────────────────────────────────────
+// Throttling state is per instance (allowed to differ between instances); everything shared is in rooms or the DB.
+
+const VIEWERS_EMIT_MS = 5_000;
+const LIKES_FLUSH_MS = 2_000;
+const LIKES_PER_WINDOW = 10; // per user, per 10 s
+const LIKE_WINDOW_MS = 10_000;
+
+/** Everything a live's viewers need to hear (chat, hearts, pin, end); with Redis from any instance or the worker. */
+export function emitToLive(liveId: number, event: string, payload: unknown) {
+  target()?.to(`live:${liveId}`).emit(event, payload);
+  if (event === "live:ended") {
+    // Emptied a little later, so live:ended reaches viewers on other instances first
+    setTimeout(() => io?.in(`live:${liveId}`).socketsLeave(`live:${liveId}`), 3_000).unref();
+    const v = viewerTimers.get(liveId);
+    if (v?.timer) clearTimeout(v.timer);
+    viewerTimers.delete(liveId);
+  }
+}
+
+/** Distinct signed-in viewers in live:<id> on every instance (the store's own sockets left out). */
+export async function countLiveViewers(liveId: number): Promise<number> {
+  if (!io) return 0;
+  const sockets = await io.in(`live:${liveId}`).fetchSockets();
+  const users = new Set<number>();
+  for (const s of sockets) {
+    const hosting = (s.data?.liveHosting as number[] | undefined) ?? [];
+    const uid = (s.data?.user as SocketUser | undefined)?.id;
+    if (uid && !hosting.includes(liveId)) users.add(uid);
+  }
+  return users.size;
+}
+
+const viewerTimers = new Map<number, { timer: NodeJS.Timeout | null; last: number }>();
+
+/** Recounts the viewers and emits live:viewers {count}, at most every 5 s per live (per instance). */
+function scheduleViewerUpdate(liveId: number) {
+  const state = viewerTimers.get(liveId) ?? { timer: null, last: 0 };
+  viewerTimers.set(liveId, state);
+  if (state.timer) return;
+  // A socket that is disconnecting is still in the room: count a moment later at the earliest
+  const wait = Math.max(300, state.last + VIEWERS_EMIT_MS - Date.now());
+  state.timer = setTimeout(async () => {
+    state.timer = null;
+    state.last = Date.now();
+    try {
+      const count = await countLiveViewers(liveId);
+      target()?.to(`live:${liveId}`).emit("live:viewers", { count });
+      await live.recordViewers(liveId, count);
+      if (count === 0) viewerTimers.delete(liveId);
+    } catch {
+      // the next join or leave tries again
+    }
+  }, wait);
+  state.timer.unref?.();
+}
+
+const likeWindows = new Map<number, { start: number; n: number }>();
+/** At most 10 hearts per user per 10 s on this instance. */
+function takeLike(userId: number) {
+  const now = Date.now();
+  const w = likeWindows.get(userId);
+  if (!w || now - w.start >= LIKE_WINDOW_MS) {
+    likeWindows.set(userId, { start: now, n: 1 });
+    return true;
+  }
+  if (w.n >= LIKES_PER_WINDOW) return false;
+  w.n++;
+  return true;
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, w] of likeWindows) if (now - w.start >= LIKE_WINDOW_MS) likeWindows.delete(k);
+}, 60_000).unref();
+
+const pendingLikes = new Map<number, number>();
+/** Hearts are added to the database in one update and announced as live:likes {count}, at most every 2 s per live. */
+function queueLike(liveId: number) {
+  const n = pendingLikes.get(liveId);
+  pendingLikes.set(liveId, (n ?? 0) + 1);
+  if (n !== undefined) return; // a flush is already scheduled
+  setTimeout(async () => {
+    const count = pendingLikes.get(liveId) ?? 0;
+    pendingLikes.delete(liveId);
+    try {
+      const total = await live.addLikes(liveId, count);
+      if (total !== null) target()?.to(`live:${liveId}`).emit("live:likes", { count: total });
+    } catch {
+      // lost hearts are not worth a retry
+    }
+  }, LIKES_FLUSH_MS).unref();
 }

@@ -21,6 +21,8 @@ export function sendError(res: Response, e: any) {
     if (typeof e.body === "function") return res.status(e.status).json(e.body(localeFromHeader(res.req?.headers["accept-language"]) ?? "en"));
     return res.status(e.status).json({ ok: false, error: e.message, ...(e.extra ?? {}) });
   }
+  // A feature switched off on this server (e.g. live video without LiveKit, 503 LIVE_OFF): safe to show, not a bug
+  if (e instanceof ApiError && e.status === 503) return res.status(503).json({ ok: false, error: e.message, ...(e.extra ?? {}) });
   if (typeof e?.type === "string" && e.type.startsWith("Stripe")) {
     logger.error({ reqId: currentRequestId(), err: e?.message, code: e?.code }, "Stripe error");
     reportError(e, { tags: { area: "stripe" } });

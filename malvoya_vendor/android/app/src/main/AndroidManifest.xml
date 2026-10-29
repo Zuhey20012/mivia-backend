@@ -5,6 +5,20 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <!-- Voice-overs for drops are recorded in the app (record package); only while the store records -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- Live shopping (livekit_client / flutter_webrtc): the camera and microphone are used only while the
+         store is on the "Go live" or live screen, in the foreground (no background capture, so no camera
+         foreground service). Audio settings and network state are what WebRTC needs; Bluetooth lets a
+         connected headset be used as the microphone. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <!-- Not required: the app still installs on devices without a camera (going live is then not possible) -->
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
     <application
         android:label="Malvoya Store"
         android:name="${applicationName}"

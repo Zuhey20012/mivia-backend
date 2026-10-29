@@ -1,6 +1,6 @@
 /* Purpose strings shown by iOS permission prompts (Finnish). Keep in sync with Info.plist. */
 "NSLocationWhenInUseUsageDescription" = "Malvoya käyttää sijaintiasi kerran, jotta asiakkaat ja lähetit näkevät kauppasi oikeassa paikassa kartalla.";
 "NSLocationAlwaysAndWhenInUseUsageDescription" = "Malvoya Store käyttää sijaintiasi vain sovellusta käyttäessäsi, kun asetat kauppasi kartalle. Sijaintiasi ei käytetä taustalla.";
-"NSCameraUsageDescription" = "Malvoya Store käyttää kameraa, kun otat tuotekuvia tai kuvaat videon tuotteelle tai dropille.";
-"NSMicrophoneUsageDescription" = "Malvoya Store käyttää mikrofonia vain nauhoituksen ajan: tuote- tai drop-videon ääneen tai julkaisun selostukseen.";
+"NSCameraUsageDescription" = "Malvoya Store käyttää kameraa, kun otat tuotekuvia, kuvaat videon tuotteelle tai dropille tai esittelet tuotteitasi livelähetyksessä.";
+"NSMicrophoneUsageDescription" = "Malvoya Store käyttää mikrofonia vain nauhoituksen ajan (tuote- tai drop-videon ääneen tai julkaisun selostukseen) tai livelähetyksen aikana.";
 "NSPhotoLibraryUsageDescription" = "Malvoya Store käyttää valitsemiasi kuvia ja videoita tuotteisiisi, dropeihisi, logoosi ja kansikuvaasi.";

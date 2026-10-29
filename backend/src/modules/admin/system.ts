@@ -3,6 +3,7 @@ import { prisma } from "../../lib/prisma";
 import { securityContacts } from "../ops/ops.routes";
 import { env } from "../../config/env";
 import { mediaConfigured } from "../../lib/cloudinary";
+import { liveConfigured } from "../../lib/livekit";
 import { pushConfigured } from "../../lib/push";
 import { sendError } from "../../lib/errors";
 import { storeAvailability } from "../../utils/openingHours";
@@ -66,6 +67,8 @@ export function integrationStatus() {
     googleSignIn: { configured: !!env.googleClientId },
     // DATA_ENCRYPTION_KEY: needed to save sellers' tax IDs (DAC7); "invalid" = set but not 32 bytes of base64
     dataEncryption: { configured: encryptionStatus() === "ok", status: encryptionStatus() },
+    // Live shopping video (LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET); off = going live answers 503 LIVE_OFF
+    live: { configured: liveConfigured() },
   };
 }
 
@@ -162,14 +165,18 @@ export async function getSystemStatus(_req: Request, res: Response) {
     for (const c of ready.couriers) attention.push(`Courier "${c.name}" (#${c.id}) is ready for approval (Couriers)`);
     for (const d of legalDrafts) attention.push(`${LEGAL_DOCS[d.doc].title.en}: the text in the repository has changed but is not published; the published version stays in force until you publish it (Legal)`);
     // Product safety and certificates (2.12)
-    const [openProductReports, pendingCerts, uncategorised] = await Promise.all([
+    const [openProductReports, pendingCerts, uncategorised, liveNow, openLiveReports] = await Promise.all([
       prisma.productReport.count({ where: { status: "OPEN" } }),
       prisma.certificate.count({ where: { status: "PENDING" } }),
       prisma.product.count({ where: { isAvailable: true, deletedAt: null, categoryId: null } }),
+      // Live shopping (2.15)
+      prisma.liveStream.count({ where: { status: "LIVE" } }),
+      prisma.liveReport.count({ where: { status: "OPEN" } }),
     ]);
     if (openProductReports) attention.push(`${openProductReports} product report(s) to decide: product-safety notices within 3 working days (Product reports)`);
     if (pendingCerts) attention.push(`${pendingCerts} certificate(s) waiting for verification (Certificates)`);
     if (uncategorised) attention.push(`${uncategorised} visible product(s) made before 2.12 have no category and miss the required product information; ask the stores to complete them`);
+    if (openLiveReports) attention.push(`${openLiveReports} report(s) about live streams to look at (Live)`);
     if (overPaid) attention.push(`${overPaid} delivered order(s) pay the store and courier more than the customer paid; Malvoya's Stripe balance covers the difference`);
     if (!securityContacts().length) attention.push("No security contact: set SECURITY_CONTACT (an email address you read) on Render, so /.well-known/security.txt tells researchers where to report a vulnerability.");
     // Two-step sign-in for admins (2.13)
@@ -183,7 +190,7 @@ export async function getSystemStatus(_req: Request, res: Response) {
 
     res.json({
       ok: true,
-      version: "2.14.0",
+      version: "2.15.0",
       region: "frankfurt",
       startedAt,
       readyForOrders: blockers.length === 0,
@@ -194,7 +201,7 @@ export async function getSystemStatus(_req: Request, res: Response) {
       marketplace: {
         liveStores: liveStores.length, storesOpenNow, pendingStores,
         approvedCouriers, onlineCouriers, pendingCouriers,
-        waitlist,
+        waitlist, liveNow,
       },
       // Stores and couriers that finished onboarding (everything but approval), oldest first
       readyForApproval: ready,

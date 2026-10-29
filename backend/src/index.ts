@@ -35,6 +35,7 @@ import mediaRoutes    from "./modules/media/media.routes";
 import dropsRoutes, { shareRouter } from "./modules/drops/drops.routes";
 import meRoutes       from "./modules/me/me.routes";
 import soundRoutes    from "./modules/sounds/sounds.routes";
+import liveRoutes     from "./modules/live/live.routes";
 import { mfaAuthRoutes, mfaMeRoutes } from "./modules/auth/mfa";
 import { contactRoutes } from "./modules/support/contactPage";
 import { launchAlertRoutes } from "./modules/me/launchAlerts";
@@ -113,6 +114,7 @@ app.use("/api/v1",        courierRoutes);
 app.use("/api/v1",        ordersRoutes);
 app.use("/api/v1",        dropsRoutes);
 app.use("/api/v1",        soundRoutes); // /sounds: Malvoya's licensed sound library and sound pages (2.14)
+app.use("/api/v1",        liveRoutes); // /live, /stores/my/live, /admin/live: live shopping (2.15; before /admin)
 app.use("/api/v1",        meRoutes);
 app.use("/api/v1",        mfaMeRoutes); // /me/mfa: authenticator set-up for admins (2.13)
 app.use("/api/v1",        launchAlertRoutes);
@@ -135,7 +137,7 @@ app.use(errorHandler);
 server.keepAliveTimeout = 65_000; // longer than typical load-balancer idle timeouts
 server.headersTimeout = 66_000;
 server.listen(env.port, () => {
-  logger.info(`Malvoya API v2.14 listening on port ${env.port} (${env.nodeEnv})`);
+  logger.info(`Malvoya API v2.15 listening on port ${env.port} (${env.nodeEnv})`);
   // Yes/no per integration (never secrets), so the deploy log shows at a glance what is switched on
   const on = integrationStatus();
   logger.info({ integrations: Object.fromEntries(Object.entries(on).map(([k, v]) => [k, "mode" in v ? v.mode : v.configured ? "on" : "off"])) }, "Integrations");

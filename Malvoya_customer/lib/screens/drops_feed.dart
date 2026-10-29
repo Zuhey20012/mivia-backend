@@ -18,6 +18,8 @@ import '../core/report_reasons.dart';
 import '../core/sign_in.dart';
 import '../widgets/add_to_bag_sheet.dart';
 import '../widgets/drop_comments_sheet.dart';
+import '../widgets/live_list.dart';
+import 'live_screen.dart';
 import 'product_detail.dart';
 import 'sound_screen.dart';
 import 'store_detail.dart';
@@ -82,6 +84,16 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   bool _seedUsed = false;
 
   String _mode = 'foryou';
+
+  /// The Live chip is showing (the feed's own tabs only). The reel stays loaded underneath, paused, so going
+  /// back to it continues where the viewer was.
+  bool _liveMode = false;
+
+  /// Stores that are live now (store id → live id), so their avatar in the rail opens the live. Refreshed
+  /// once a minute while the tab shows, and by the Live list's own refreshes.
+  final Map<int, int> _liveByStore = {};
+  Timer? _liveStoresTimer;
+  DateTime? _liveStoresAt;
   String? _cursor;
   bool _loading = true;
   bool _loadingMore = false;
@@ -104,7 +116,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   int _burstId = 0;
   Offset _lastDoubleTap = Offset.zero;
 
-  bool get _shouldPlay => widget.isActive && !_paused && !_routeCovered && !_holding && mounted;
+  bool get _shouldPlay => widget.isActive && !_liveMode && !_paused && !_routeCovered && !_holding && mounted;
 
   @override
   void initState() {
@@ -113,6 +125,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     MediaSound.instance.addListener(_onSoundChanged);
     NetworkStatus.instance.addListener(_onNetwork);
     _init();
+    _liveStoresTimer = Timer.periodic(const Duration(minutes: 1), (_) => _refreshLiveStores());
   }
 
   void _onSoundChanged() {
@@ -139,6 +152,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     } catch (_) {}
     await DeliveryLocation.instance.load();
     await _load(reset: true);
+    _refreshLiveStores();
   }
 
   @override
@@ -146,9 +160,12 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     super.didUpdateWidget(old);
     if (old.isActive != widget.isActive) {
       if (widget.isActive) {
-        _watchStart = DateTime.now();
-        // Get the neighbours ready again for an instant swipe
-        _prepareAround(_index);
+        _refreshLiveStores();
+        if (!_liveMode) {
+          _watchStart = DateTime.now();
+          // Get the neighbours ready again for an instant swipe
+          _prepareAround(_index);
+        }
       } else {
         _flushView();
         _releaseNeighbours();
@@ -174,6 +191,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     WidgetsBinding.instance.removeObserver(this);
     MediaSound.instance.removeListener(_onSoundChanged);
     NetworkStatus.instance.removeListener(_onNetwork);
+    _liveStoresTimer?.cancel();
     _flushView();
     for (final c in [..._videos.values, ..._sounds.values]) {
       c.dispose();
@@ -291,11 +309,69 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
   }
 
   void _switchMode(String mode) {
+    if (mode == 'live') {
+      if (_liveMode) return;
+      Haptics.selection();
+      _flushView();
+      setState(() => _liveMode = true);
+      // The reel waits paused underneath; only the current video stays loaded
+      _releaseNeighbours();
+      _syncPlayback();
+      return;
+    }
+    if (_liveMode) {
+      Haptics.selection();
+      setState(() => _liveMode = false);
+      if (mode == _mode) {
+        _watchStart = DateTime.now();
+        _prepareAround(_index);
+        return;
+      }
+      _mode = mode;
+      _load(reset: true);
+      return;
+    }
     if (mode == _mode) return;
     Haptics.selection();
     _flushView();
     _mode = mode;
     _load(reset: true);
+  }
+
+  // ── Live ────────────────────────────────────────────────────────────────
+
+  /// Which stores are live (at most once a minute, only while the tab shows and nothing covers it).
+  Future<void> _refreshLiveStores() async {
+    if (!mounted || !widget.isActive || _routeCovered) return;
+    final at = _liveStoresAt;
+    if (at != null && DateTime.now().difference(at) < const Duration(seconds: 55)) return;
+    _liveStoresAt = DateTime.now();
+    final lives = await fetchLives(context);
+    if (lives != null && mounted) _setLiveStores(lives);
+  }
+
+  void _setLiveStores(List<Map<String, dynamic>> lives) {
+    _liveStoresAt = DateTime.now();
+    final next = <int, int>{};
+    for (final l in lives) {
+      final storeId = asInt((l['store'] as Map?)?['id']);
+      final liveId = asInt(l['id']);
+      if (storeId != null && liveId != null) next[storeId] = liveId;
+    }
+    if (next.length == _liveByStore.length && next.entries.every((e) => _liveByStore[e.key] == e.value)) return;
+    setState(() {
+      _liveByStore
+        ..clear()
+        ..addAll(next);
+    });
+  }
+
+  Future<void> _openLive(int? liveId, [Map<String, dynamic>? preview]) async {
+    if (liveId == null) return;
+    await _open(LiveScreen(liveId: liveId, preview: preview));
+    // The live may have ended meanwhile
+    _liveStoresAt = null;
+    _refreshLiveStores();
   }
 
   // ── Playback ────────────────────────────────────────────────────────────
@@ -505,11 +581,11 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
     if (i >= _drops.length - 3) _load();
   }
 
-  /// Reports how long the drop was watched. Views under a second are not sent.
+  /// Reports how long the drop was watched. Views under a second are not sent; nothing is watched in Live.
   void _flushView() {
     final start = _watchStart;
     _watchStart = null;
-    if (start == null || _index >= _drops.length) return;
+    if (start == null || _liveMode || _index >= _drops.length) return;
     final watched = DateTime.now().difference(start).inMilliseconds / 1000;
     if (watched < 1) return;
     final id = _id(_index);
@@ -835,6 +911,14 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
               Text(drop!['reason'], style: const TextStyle(fontWeight: FontWeight.w600, color: AppTheme.primary)),
             ],
             const SizedBox(height: MSpace.md),
+            if (_liveMode)
+              Text(
+                tr(context,
+                    '"Live" shows the stores near your delivery address that are streaming right now, the most watched first. Lives are not recorded. We do not build a profile of you.',
+                    '"Live" näyttää toimitusosoitettasi lähellä olevat kaupat, jotka lähettävät liveä juuri nyt, katsotuimmat ensin. Livejä ei tallenneta. Emme profiloi sinua.'),
+                style: TextStyle(height: 1.45, color: AppTheme.secondaryText(context)),
+              )
+            else ...[
             Text(
               tr(context,
                   '"For you" ranks drops by how new they are, how people respond to them (likes, shares, full views), how close the store is to your delivery address and the store\'s rating. We do not build a profile of you. "Latest" shows the newest drops first, nothing else.',
@@ -852,6 +936,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                 child: Text(_mode == 'foryou' ? tr(context, 'Switch to Latest', 'Vaihda: Uusimmat') : tr(context, 'Switch to For you', 'Vaihda: Sinulle')),
               ),
             ),
+            ],
           ],
         ),
       ), isScrollControlled: false, useSafeArea: false);
@@ -866,6 +951,30 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
       child: Container(
         color: MPalette.night,
         child: Stack(
+          children: [
+            Offstage(offstage: _liveMode, child: _reelBody()),
+            if (_liveMode && !widget.standalone)
+              Positioned.fill(
+                child: LiveList(
+                  active: widget.isActive && !_routeCovered,
+                  topInset: MediaQuery.of(context).viewPadding.top + 64,
+                  bottomInset: 66.0 + math.max(12.0, MediaQuery.of(context).viewPadding.bottom) + 16,
+                  onOpen: (live) => _openLive(asInt(live['id']), live),
+                  onLoaded: _setLiveStores,
+                ),
+              ),
+            _topBar(),
+          ],
+        ),
+      ),
+    );
+    return widget.standalone ? Scaffold(backgroundColor: MPalette.night, body: body) : body;
+  }
+
+  /// The reel and its loading, sign-in, error and empty states.
+  Widget _reelBody() {
+    return Stack(
+          fit: StackFit.expand,
           children: [
             if (_loading)
               const Center(child: CircularProgressIndicator(color: AppTheme.onMedia))
@@ -906,12 +1015,8 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                   itemBuilder: (_, i) => _dropPage(_drops[i], i == _index),
                 ),
               ),
-            _topBar(),
           ],
-        ),
-      ),
-    );
-    return widget.standalone ? Scaffold(backgroundColor: MPalette.night, body: body) : body;
+        );
   }
 
   Widget _message(IconData icon, String text, {required String action, required VoidCallback onTap}) => Center(
@@ -936,7 +1041,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
 
   Widget _topBar() {
     Widget tab(String mode, String label) {
-      final selected = _mode == mode;
+      final selected = mode == 'live' ? _liveMode : !_liveMode && _mode == mode;
       return Semantics(
         button: true,
         selected: selected,
@@ -1008,6 +1113,7 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                         tab('foryou', tr(context, 'For you', 'Sinulle')),
                         tab('following', tr(context, 'Following', 'Seuratut')),
                         tab('latest', tr(context, 'Latest', 'Uusimmat')),
+                        tab('live', tr(context, 'Live', 'Live')),
                       ],
                     ),
                   ),
@@ -1133,6 +1239,8 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
 
   Widget _rail(Map<String, dynamic> drop) {
     final store = (drop['store'] as Map?)?.cast<String, dynamic>() ?? {};
+    final storeId = asInt(store['id']);
+    final liveId = storeId == null ? null : _liveByStore[storeId];
     final liked = drop['likedByMe'] == true;
     final saved = drop['savedByMe'] == true;
     Widget action(IconData icon, String? label, VoidCallback onTap, {Color color = MPalette.white, String? tooltip, Object? bumpOn}) => Padding(
@@ -1170,18 +1278,34 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
             width: 56,
             height: 76,
             child: Stack(
+            clipBehavior: Clip.none,
             alignment: Alignment.topCenter,
             children: [
-              GestureDetector(
-                onTap: () => _open(StoreDetailScreen(store: store)),
-                child: CircleAvatar(
-                  radius: 24,
-                  backgroundColor: MPalette.white,
-                  child: CircleAvatar(
-                    radius: 22,
-                    backgroundColor: AppTheme.primaryLight,
-                    backgroundImage: store['logoUrl'] != null ? sizedImageProvider(context, store['logoUrl'], 44) : null,
-                    child: store['logoUrl'] == null ? const Icon(Icons.storefront_rounded, color: AppTheme.primary) : null,
+              // A store that is live now gets a red ring and a LIVE tag; tapping it opens the live
+              Semantics(
+                button: true,
+                label: liveId != null
+                    ? tr(context, '${store['name'] ?? 'The store'} is live. Watch', '${store['name'] ?? 'Kauppa'} on livenä. Katso')
+                    : tr(context, 'Open ${store['name'] ?? 'the store'}', 'Avaa ${store['name'] ?? 'kauppa'}'),
+                excludeSemantics: true,
+                child: GestureDetector(
+                  onTap: () => liveId != null ? _openLive(liveId) : _open(StoreDetailScreen(store: store)),
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    alignment: Alignment.topCenter,
+                    children: [
+                      CircleAvatar(
+                        radius: 24,
+                        backgroundColor: liveId != null ? MPalette.red : MPalette.white,
+                        child: CircleAvatar(
+                          radius: liveId != null ? 21 : 22,
+                          backgroundColor: AppTheme.primaryLight,
+                          backgroundImage: store['logoUrl'] != null ? sizedImageProvider(context, store['logoUrl'], 44) : null,
+                          child: store['logoUrl'] == null ? const Icon(Icons.storefront_rounded, color: AppTheme.primary) : null,
+                        ),
+                      ),
+                      if (liveId != null) const Positioned(top: -5, child: LiveBadge(small: true)),
+                    ],
                   ),
                 ),
               ),

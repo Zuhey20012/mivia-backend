@@ -1,4 +1,4 @@
-// End-to-end test for API v2.14 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
+// End-to-end test for API v2.15 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
 const { execSync, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -86,6 +86,27 @@ const prhServer = require("http").createServer((req, res) => {
 });
 prhServer.listen(12224);
 process.on("exit", () => prhServer.close());
+// LiveKit RoomService mock (2.15): the API's Test connections (ListRooms) and room closing (DeleteRoom) come here
+// (LIVEKIT_URL=ws://localhost:12225 in test.env). Every call must carry an admin token signed with the test secret.
+const jwtLib = require("jsonwebtoken");
+const lkCalls = [];
+const lkVerify = (token) => { try { return jwtLib.verify(token, testEnv.LIVEKIT_API_SECRET, { algorithms: ["HS256"], issuer: testEnv.LIVEKIT_API_KEY }); } catch { return null; } };
+const lkServer = require("http").createServer((req, res) => {
+  let body = "";
+  req.on("data", (c) => { body += c; });
+  req.on("end", () => {
+    const claims = lkVerify((req.headers.authorization || "").replace(/^Bearer /, ""));
+    let json = {};
+    try { json = JSON.parse(body || "{}"); } catch {}
+    lkCalls.push({ path: req.url, claims, body: json });
+    if (!claims) { res.writeHead(401, { "Content-Type": "application/json" }); return res.end('{"code":"unauthenticated"}'); }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    if (req.url === "/twirp/livekit.RoomService/ListRooms") return res.end(JSON.stringify({ rooms: [{ name: "live-1-abc" }] }));
+    res.end("{}");
+  });
+});
+lkServer.listen(12225);
+process.on("exit", () => lkServer.close());
 // Finnish wall-clock date/time/weekday of an instant (scheduled delivery slots are in Europe/Helsinki)
 function hel(d = new Date()) {
   const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Helsinki", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short", hourCycle: "h23" }).formatToParts(d);
@@ -972,7 +993,7 @@ function ean13(d12) {
   }));
 
   const sysDefault = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.14.0", sysDefault.pricing);
+  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.15.0", sysDefault.pricing);
   const stockBeforeQuote = stockOf(productId);
   const ordersBeforeQuote = sql(`select count(*) from "Order" where "userId"=${otherCust.user.id}`);
   const q0 = await quote(quoteBody, otherCust.accessToken);
@@ -1697,7 +1718,9 @@ function ean13(d12) {
   check("connection test: a Stripe webhook that does not point at this server is reported", cc.paymentWebhook?.ok === false && cc.paymentWebhook.detail.includes("/api/v1/payments/webhook"), cc.paymentWebhook);
   check("connection test: Cloudinary accepts the account and key", cc.photosAndVideos?.ok === true, cc.photosAndVideos);
   check("connection test: services that are not set up say so instead of failing", cc.email?.ok === null && cc.sms?.ok === null && cc.pushNotifications?.ok === null && cc.googleSignIn?.ok === null && /Not set up/.test(cc.email.detail), cc);
-  check("connection test never returns keys or secrets", !JSON.stringify(conn.body).includes("sk_test_123") && !JSON.stringify(conn.body).includes(CLD_SECRET) && !JSON.stringify(conn.body).includes(WHSEC));
+  check("connection test: LiveKit accepts the key (RoomService ListRooms with a signed admin token, room-list grant only)", cc.live?.ok === true && /1 room/.test(cc.live.detail)
+    && lkCalls.some((c) => c.path === "/twirp/livekit.RoomService/ListRooms" && c.claims?.video?.roomList === true && !c.claims.video.roomJoin), [cc.live, lkCalls.slice(-1)]);
+  check("connection test never returns keys or secrets", !JSON.stringify(conn.body).includes("sk_test_123") && !JSON.stringify(conn.body).includes(CLD_SECRET) && !JSON.stringify(conn.body).includes(WHSEC) && !JSON.stringify(conn.body).includes(testEnv.LIVEKIT_API_SECRET));
   check("only admins can run the connection test", (await call("POST", "/admin/system/check", null, vendor.accessToken)).status === 403 && (await call("POST", "/admin/system/check")).status === 401);
   check("system status lists the background jobs", status.body.backgroundJobs?.some((j) => j.name === "order-watchdog" && j.lastRunAt), status.body.backgroundJobs);
   check("system status is admin-only", (await call("GET", "/admin/system", null, otherCust.accessToken)).status === 403);
@@ -2046,7 +2069,7 @@ function ean13(d12) {
   cob = (await call("GET", "/courier/me/onboarding", null, onni.accessToken)).body;
   check("courier ready for approval when everything but approval is done", cob.readyForApproval === true && cob.approved === false && cob.percent === 83 && sql(`select "readyForApprovalAt" is not null from "Courier" where "userId"=${onni.user.id}`) === "t", cob);
   const sys211 = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("System lists them as ready for approval", sys211.version === "2.14.0" && sys211.attention.some((a) => a.includes(`(#${pekkaStore.id}) is ready for approval`)) && sys211.attention.some((a) => a.includes("Courier \"Onni\"") && a.includes("ready for approval")) && sys211.readyForApproval?.stores?.some((s) => s.id === pekkaStore.id), sys211.attention);
+  check("System lists them as ready for approval", sys211.version === "2.15.0" && sys211.attention.some((a) => a.includes(`(#${pekkaStore.id}) is ready for approval`)) && sys211.attention.some((a) => a.includes("Courier \"Onni\"") && a.includes("ready for approval")) && sys211.readyForApproval?.stores?.some((s) => s.id === pekkaStore.id), sys211.attention);
   check("admin courier list shows vehicle, disclosure and readiness", (await call("GET", "/admin/couriers", null, adminToken)).body.couriers?.find((c) => c.user?.id === onni.user.id)?.vehicleType === "ebike");
 
   // Publishing changes (second instance reading a copy of the legal texts, same database)
@@ -2622,6 +2645,184 @@ function ean13(d12) {
   const sysLegal = (await call("GET", "/admin/system", null, adminToken)).body;
   check("System blocks real orders while the legal texts in force still have [PLACEHOLDERS]", sysLegal.blockers?.some((b) => /unfilled \[PLACEHOLDERS\]/.test(b) && b.includes("Terms of Service")), sysLegal.blockers);
 
+  console.log("\n— Live shopping (2.15)");
+  const lv_lkClaims = (tok) => lkVerify(tok);
+  const lv_lkWindowOk = (c) => !!c && c.exp - c.nbf <= 6 * 3600 && c.exp > Date.now() / 1000 && c.nbf <= Date.now() / 1000 + 1;
+  const lv_evOf = (sock, ev) => sock.events.filter((e) => e.ev === ev).map((e) => e.data);
+  const lv_liisa = await register("Liisa", "VENDOR");
+  const lv_lStore = (await call("POST", "/stores", { name: `Liisa Live ${uniq}`, category: "THRIFT", sellerType: "PRIVATE", latitude: 60.19, longitude: 24.93, address: "Kalevankatu 1, Helsinki" }, lv_liisa.accessToken)).body.store;
+  const lv_lMfr = await sellerReady(lv_liisa.accessToken);
+  const lv_mkLiveProduct = async (n, extra = {}) => (await call("POST", "/products", { name: `Live shirt ${n}`, category: "Shirt", salePriceCents: 2500, stockQuantity: 3, images: [ownImage(lv_lStore.id, `live${n}`)], ...clothing(lv_lMfr, "clothing-shirts-blouses"), ...extra }, lv_liisa.accessToken)).body.product;
+  const lv_lp1 = await lv_mkLiveProduct(1), lv_lp2 = await lv_mkLiveProduct(2), lv_lp3 = await lv_mkLiveProduct(3);
+  const lv_lpDraft = await lv_mkLiveProduct(4, { isAvailable: false });
+  check("live set-up: a store with products", !!(lv_lStore?.id && lv_lp1?.id && lv_lp2?.id && lv_lp3?.id && lv_lpDraft?.id), [lv_lStore, lv_lp1]);
+  const lv_goLive = (body, tok = lv_liisa.accessToken) => call("POST", "/live", body, tok);
+  check("going live needs an approved store (403)", (await lv_goLive({ title: "Spring drop", productIds: [lv_lp1.id] })).status === 403);
+  await call("PATCH", `/admin/vendors/${lv_lStore.id}/approve`, null, adminToken);
+  check("only stores go live (customers 403, guests 401)", (await lv_goLive({ title: "Spring drop", productIds: [lv_lp1.id] }, otherCust.accessToken)).status === 403 && (await call("POST", "/live", { title: "x", productIds: [1] })).status === 401);
+  check("going live needs 1–10 products and a 3–100 character title (400)", (await lv_goLive({ title: "Spring drop", productIds: [] })).status === 400
+    && (await lv_goLive({ title: "Spring drop", productIds: Array.from({ length: 11 }, (_, i) => i + 1) })).status === 400
+    && (await lv_goLive({ title: "  x ", productIds: [lv_lp1.id] })).status === 400 && (await lv_goLive({ title: "y".repeat(101), productIds: [lv_lp1.id] })).status === 400);
+  check("only the store's own products that are for sale (another store's or a hidden draft: 400)", (await lv_goLive({ title: "Spring drop", productIds: [lv_lp1.id, productId] })).status === 400 && (await lv_goLive({ title: "Spring drop", productIds: [lv_lpDraft.id] })).status === 400);
+  sql(`delete from "AgreementAcceptance" where "userId"=${lv_liisa.user.id}`);
+  const lv_live428 = await lv_goLive({ title: "Spring drop", productIds: [lv_lp1.id] });
+  check("going live needs the seller terms in force (428 AGREEMENT_REQUIRED)", lv_live428.status === 428 && lv_live428.body.code === "AGREEMENT_REQUIRED" && lv_live428.body.doc === "seller-terms", lv_live428.body);
+  await call("POST", "/me/agreements/accept", { doc: "seller-terms", version: lv_live428.body.version }, lv_liisa.accessToken);
+  await call("PUT", `/stores/${lv_lStore.id}/follow`, null, otherCust.accessToken);
+  const lv_l1 = await lv_goLive({ title: "  Spring   drop live ", productIds: [lv_lp2.id, lv_lp1.id, lv_lp2.id] });
+  const lv_L1 = lv_l1.body.live?.id;
+  const lv_room1 = sql(`select "roomName" from "LiveStream" where id=${lv_L1}`);
+  const lv_pub1 = lv_lkClaims(lv_l1.body.publish?.token);
+  check("the store goes live (201): products deduplicated in its order, the first product's photo as the cover", lv_l1.status === 201 && lv_l1.body.live.status === "LIVE" && lv_l1.body.live.title === "Spring drop live" && JSON.stringify(lv_l1.body.live.productIds) === JSON.stringify([lv_lp2.id, lv_lp1.id]) && lv_l1.body.live.cover === lv_lp2.images[0] && lv_l1.body.live.store?.id === lv_lStore.id, lv_l1.body);
+  check("publisher token: LiveKit JWT (HS256, test secret) for store-<id> in live-<id>-<random>, may publish, no data channel, ≤ 6 h", lv_l1.body.publish?.url === "ws://localhost:12225" && lv_pub1?.iss === testEnv.LIVEKIT_API_KEY && lv_pub1.sub === `store-${lv_lStore.id}` && lv_pub1.name === `Liisa Live ${uniq}`
+    && new RegExp(`^live-${lv_L1}-[0-9a-f]{8,}$`).test(lv_room1) && lv_pub1.video?.room === lv_room1 && lv_pub1.video.roomJoin === true && lv_pub1.video.canPublish === true && lv_pub1.video.canSubscribe === true && lv_pub1.video.canPublishData === false && lv_lkWindowOk(lv_pub1), lv_pub1);
+  check("followers get a push \"<store> is live\" (one follower queued)", sql(`select "followersNotified" from "LiveStream" where id=${lv_L1}`) === "1");
+  const lv_again = await lv_goLive({ title: "Second at once", productIds: [lv_lp1.id] });
+  check("one live at a time: 409 ALREADY_LIVE with the live's id and a fresh publisher token to resume it", lv_again.status === 409 && lv_again.body.code === "ALREADY_LIVE" && lv_again.body.liveId === lv_L1 && lv_lkClaims(lv_again.body.publish?.token)?.video?.room === lv_room1, lv_again.body);
+  const lv_myLive = await call("GET", "/stores/my/live", null, lv_liisa.accessToken);
+  check("GET /stores/my/live: the current live, a publisher token for it and the recent lives", lv_myLive.status === 200 && lv_myLive.body.live?.id === lv_L1 && lv_lkClaims(lv_myLive.body.publish?.token)?.sub === `store-${lv_lStore.id}` && lv_lkClaims(lv_myLive.body.publish.token).video.canPublish === true && lv_myLive.body.recent?.[0]?.id === lv_L1, lv_myLive.body);
+  check("…only for stores", (await call("GET", "/stores/my/live", null, otherCust.accessToken)).status === 403);
+  const lv_nearList = await call("GET", "/live?lat=60.19&lng=24.94");
+  const lv_listed1 = lv_nearList.body.lives?.find((l) => l.id === lv_L1);
+  check("GET /live lists it near the shopper (store, cover, viewers, lv_likes, pin); live video is on", lv_nearList.status === 200 && lv_nearList.body.enabled === true && lv_listed1?.store?.name === `Liisa Live ${uniq}` && lv_listed1.cover === lv_lp2.images[0] && lv_listed1.viewers === 0 && lv_listed1.likeCount === 0 && lv_listed1.pinnedProductId === null, lv_nearList.body);
+  check("…but not to a shopper out of reach (Tampere)", !(await call("GET", "/live?lat=61.5&lng=23.76")).body.lives?.some((l) => l.id === lv_L1));
+  const lv_lDetail = await call("GET", `/live/${lv_L1}`, null, otherCust.accessToken);
+  check("GET /live/:id: products as on product pages in the live's order, the store and whether you follow it", lv_lDetail.status === 200 && lv_lDetail.body.live.products?.map((p) => p.id).join() === `${lv_lp2.id},${lv_lp1.id}` && lv_lDetail.body.live.products[0].pricing && lv_lDetail.body.live.store?.followedByMe === true && lv_lDetail.body.live.status === "LIVE" && lv_lDetail.body.live.endedAt === null, lv_lDetail.body);
+  check("GET /live/:id has a share link (the store's share page)", lv_lDetail.body.live?.shareUrl === `${BASE}/s/${lv_lStore.id}`, lv_lDetail.body.live?.shareUrl);
+  check("GET /live/:id of an unknown live is 404", (await call("GET", "/live/999999")).status === 404);
+  const lv_guestJoin = await call("POST", `/live/${lv_L1}/join`);
+  const lv_gj = lv_lkClaims(lv_guestJoin.body.watch?.token);
+  check("a guest gets a viewer token: guest-<random>, subscribe only (canPublish false)", lv_guestJoin.status === 200 && lv_guestJoin.body.watch.url === "ws://localhost:12225" && /^guest-[0-9a-f]+$/.test(lv_gj?.sub) && lv_gj.video.room === lv_room1 && lv_gj.video.canPublish === false && lv_gj.video.canSubscribe === true && lv_gj.video.canPublishData === false && lv_gj.video.roomJoin === true && lv_lkWindowOk(lv_gj), lv_gj);
+  const lv_uj = lv_lkClaims((await call("POST", `/live/${lv_L1}/join`, null, otherCust.accessToken)).body.watch?.token);
+  check("a signed-in viewer's token is u-<userId> with the first name", lv_uj?.sub === `u-${otherCust.user.id}` && lv_uj.name === "Olli" && lv_uj.video.canPublish === false, lv_uj);
+  check("heartbeat by the store (200); not by another store (404)", (await call("POST", `/live/${lv_L1}/heartbeat`, null, lv_liisa.accessToken)).status === 200 && (await call("POST", `/live/${lv_L1}/heartbeat`, null, vendor.accessToken)).status === 404);
+
+  // Sockets: the store and two signed-in viewers
+  const lv_ville = await register("Ville");
+  const lv_hostSock = await connect(lv_liisa.accessToken);
+  const lv_v1Sock = await connect(otherCust.accessToken);
+  const lv_v2Sock = await connect(lv_ville.accessToken);
+  check("live:chat before live:join is refused", (await ack(lv_v1Sock, "live:chat", { liveId: lv_L1, text: "hi" }))?.ok === false);
+  const lv_j1 = await ack(lv_v1Sock, "live:join", lv_L1);
+  const lv_jh = await ack(lv_hostSock, "live:join", lv_L1);
+  const lv_j2 = await ack(lv_v2Sock, "live:join", lv_L1);
+  check("live:join acks viewers, hearts, pin and recent messages; the store is not counted as a viewer", lv_j1?.ok === true && lv_j1.viewers === 1 && lv_j1.likeCount === 0 && lv_j1.pinnedProductId === null && Array.isArray(lv_j1.messages) && lv_jh?.ok === true && lv_jh.viewers === 1 && lv_j2?.ok === true && lv_j2.viewers === 2, [lv_j1, lv_jh, lv_j2]);
+  check("live:join of an unknown live fails", (await ack(lv_v1Sock, "live:join", 999999))?.ok === false);
+  const lv_pinRes = await call("POST", `/live/${lv_L1}/pin`, { productId: lv_lp1.id }, lv_liisa.accessToken);
+  check("the store pins one of the live's products; not another product (400), not another store (404)", lv_pinRes.status === 200 && lv_pinRes.body.pinnedProductId === lv_lp1.id
+    && (await call("POST", `/live/${lv_L1}/pin`, { productId: lv_lp3.id }, lv_liisa.accessToken)).status === 400 && (await call("POST", `/live/${lv_L1}/pin`, { productId: lv_lp1.id }, vendor.accessToken)).status === 404, lv_pinRes.body);
+  const lv_m1 = await ack(lv_v1Sock, "live:chat", { liveId: lv_L1, text: "  Hello   live! <b>x</b> " });
+  const lv_mStore = await ack(lv_hostSock, "live:chat", { liveId: lv_L1, text: "Welcome, all sizes in stock" });
+  await sleep(300);
+  check("live:pinned reaches the viewers", lv_evOf(lv_v2Sock, "live:pinned").some((d) => d.productId === lv_lp1.id), lv_v2Sock.events.map((e) => e.ev));
+  check("live:chat stores a plain-text message, shown by first name with the author's userId; the store's as the store", lv_m1?.ok === true && lv_m1.message.text === "Hello live! <b>x</b>" && lv_m1.message.name === "Olli" && lv_m1.message.byStore === false && lv_m1.message.userId === otherCust.user.id
+    && lv_mStore?.ok === true && lv_mStore.message.byStore === true && lv_mStore.message.name === `Liisa Live ${uniq}`, [lv_m1, lv_mStore]);
+  check("live:message reaches everyone in the live", lv_evOf(lv_v2Sock, "live:message").some((d) => d.id === lv_m1.message.id && d.userId === otherCust.user.id) && lv_evOf(lv_hostSock, "live:message").some((d) => d.id === lv_m1.message.id), lv_v2Sock.events.slice(-4));
+  check("messages over 200 characters and empty ones are refused", (await ack(lv_v2Sock, "live:chat", { liveId: lv_L1, text: "x".repeat(201) }))?.ok === false && (await ack(lv_v2Sock, "live:chat", { liveId: lv_L1, text: "   " }))?.ok === false);
+  const lv_burst = [];
+  for (let i = 0; i < 11; i++) lv_burst.push(await ack(lv_v2Sock, "live:chat", { liveId: lv_L1, text: `Message ${i}` }));
+  check("at most 10 messages a minute per viewer", lv_burst.slice(0, 10).every((r) => r?.ok) && lv_burst[10]?.ok === false && /fast/.test(lv_burst[10].error), lv_burst[10]);
+  check("viewers cannot hide messages", (await ack(lv_v2Sock, "live:hide", { liveId: lv_L1, messageId: lv_m1.message.id }))?.ok === false);
+  const lv_hid = await ack(lv_hostSock, "live:hide", { liveId: lv_L1, messageId: lv_m1.message.id });
+  await sleep(300);
+  check("the store hides a message: live:message_hidden reaches the viewers", lv_hid?.ok === true && lv_evOf(lv_v1Sock, "live:message_hidden").some((d) => d.id === lv_m1.message.id), lv_hid);
+  check("the store cannot mute itself; viewers cannot mute others", (await ack(lv_hostSock, "live:ban", { liveId: lv_L1, userId: lv_liisa.user.id }))?.ok === false && (await ack(lv_v2Sock, "live:ban", { liveId: lv_L1, userId: otherCust.user.id }))?.ok === false);
+  const lv_ban = await ack(lv_hostSock, "live:ban", { liveId: lv_L1, userId: otherCust.user.id });
+  const lv_afterBan = await ack(lv_v1Sock, "live:chat", { liveId: lv_L1, text: "Can I still write?" });
+  check("the store mutes a viewer: their chat is refused in this live", lv_ban?.ok === true && lv_afterBan?.ok === false && /muted/.test(lv_afterBan.error) && sql(`select count(*) from "LiveBan" where "liveId"=${lv_L1} and "userId"=${otherCust.user.id}`) === "1", [lv_ban, lv_afterBan]);
+  const lv_likes = [];
+  for (let i = 0; i < 12; i++) lv_likes.push(await ack(lv_v1Sock, "live:like", lv_L1));
+  await sleep(2600);
+  check("hearts: at most 10 per viewer per 10 s; live:likes {count} after the batch", lv_likes.filter((r) => r?.ok).length === 10 && lv_likes[11]?.ok === false && lv_evOf(lv_v2Sock, "live:likes").some((d) => d.count === 10) && sql(`select "likeCount" from "LiveStream" where id=${lv_L1}`) === "10", [lv_likes.slice(-2), lv_evOf(lv_v2Sock, "live:likes")]);
+  await sleep(3000);
+  check("live:viewers {count} reaches the room (throttled) and the peak is kept", lv_evOf(lv_v1Sock, "live:viewers").some((d) => d.count === 2) && Number(sql(`select "viewerPeak" from "LiveStream" where id=${lv_L1}`)) === 2 && (await call("GET", `/live/${lv_L1}`)).body.live.viewers === 2, lv_evOf(lv_v1Sock, "live:viewers"));
+  const lv_v3Sock = await connect((await register("Valto Live")).accessToken);
+  const lv_j3 = await ack(lv_v3Sock, "live:join", lv_L1);
+  lv_v3Sock.emit("live:leave", lv_L1);
+  await sleep(5600);
+  check("live:leave: the viewer leaves the room and the count goes back down", lv_j3?.viewers === 3 && lv_evOf(lv_v1Sock, "live:viewers").slice(-1)[0]?.count === 2 && (await call("GET", `/live/${lv_L1}`)).body.live.viewers === 2, [lv_j3, lv_evOf(lv_v1Sock, "live:viewers")]);
+  lv_v3Sock.close();
+  const lv_msgs = await call("GET", `/live/${lv_L1}/messages`);
+  check("GET /live/:id/messages: visible messages oldest first (hidden left out) with name, byStore, userId", lv_msgs.status === 200 && lv_msgs.body.messages.length === 11 && lv_msgs.body.messages[0].id === lv_mStore.message.id && !lv_msgs.body.messages.some((m) => m.id === lv_m1.message.id) && lv_msgs.body.messages.every((m) => m.id && m.text && m.name && typeof m.byStore === "boolean" && m.userId && m.createdAt), lv_msgs.body);
+  await call("POST", "/me/blocks", { userId: lv_ville.user.id }, otherCust.accessToken);
+  check("…messages of users you blocked are left out for you", (await call("GET", `/live/${lv_L1}/messages`, null, otherCust.accessToken)).body.messages?.length === 1);
+
+  check("reporting a live needs a known reason (400)", (await call("POST", `/live/${lv_L1}/report`, { reason: "BORING" })).status === 400);
+  const lv_rep1 = await call("POST", `/live/${lv_L1}/report`, { reason: "SCAM", details: "Fake brand items" });
+  await call("POST", `/live/${lv_L1}/report`, { reason: "COUNTERFEIT" }, otherCust.accessToken);
+  await call("POST", `/live/${lv_L1}/report`, { reason: "COUNTERFEIT" }, otherCust.accessToken);
+  check("anyone can report a live (DSA notice); a user's repeat report counts once", lv_rep1.status === 200 && lv_rep1.body.received === true && sql(`select count(*) from "LiveReport" where "liveId"=${lv_L1}`) === "2");
+  const lv_adminLive = await call("GET", "/admin/live", null, adminToken);
+  const lv_aL1 = lv_adminLive.body.live?.find((l) => l.id === lv_L1);
+  check("GET /admin/live: live now with store, viewers, peak, hearts and report counts", lv_adminLive.status === 200 && Array.isArray(lv_adminLive.body.ended) && lv_aL1?.status === "LIVE" && lv_aL1.title === "Spring drop live" && lv_aL1.store?.id === lv_lStore.id && lv_aL1.store.name === `Liisa Live ${uniq}` && lv_aL1.viewers === 2 && lv_aL1.viewerPeak === 3 && lv_aL1.likeCount === 10 && lv_aL1.reportCount === 2 && lv_aL1.endedAt === null && lv_aL1.endedReason === null && !!lv_aL1.startedAt, lv_aL1);
+  check("…admins only", (await call("GET", "/admin/live", null, lv_liisa.accessToken)).status === 403 && (await call("GET", `/admin/live/${lv_L1}/messages`, null, otherCust.accessToken)).status === 403);
+  const lv_aMsgs = await call("GET", `/admin/live/${lv_L1}/messages`, null, adminToken);
+  check("GET /admin/live/:id/messages: every message oldest first, hidden ones marked", lv_aMsgs.status === 200 && lv_aMsgs.body.messages.length === 12 && lv_aMsgs.body.messages[0].id === lv_m1.message.id && lv_aMsgs.body.messages[0].hidden === true && lv_aMsgs.body.messages[1].hidden === false && lv_aMsgs.body.messages.every((m) => m.id && m.text && m.name && typeof m.byStore === "boolean" && m.createdAt) && lv_aMsgs.body.reports?.length === 2, lv_aMsgs.body.messages?.slice(0, 2));
+  const lv_sysLive = (await call("GET", "/admin/system", null, adminToken)).body;
+  check("System: LiveKit integration on, lives now and open live reports", lv_sysLive.integrations?.live?.configured === true && lv_sysLive.marketplace?.liveNow >= 1 && lv_sysLive.attention?.some((a) => /report\(s\) about live streams/.test(a)), [lv_sysLive.integrations?.live, lv_sysLive.marketplace]);
+
+  // The store ends the live
+  const lv_end1 = await call("POST", `/live/${lv_L1}/end`, null, lv_liisa.accessToken);
+  await sleep(500);
+  check("the store ends its live: live:ended {reason: store} reaches the viewers", lv_end1.status === 200 && lv_end1.body.live?.status === "ENDED" && lv_end1.body.live.endedReason === "store" && !!lv_end1.body.live.endedAt && lv_evOf(lv_v2Sock, "live:ended").some((d) => d.reason === "store"), lv_end1.body);
+  check("ending is idempotent", (await call("POST", `/live/${lv_L1}/end`, null, lv_liisa.accessToken)).body.live?.status === "ENDED");
+  check("LiveKit is asked to close the room (DeleteRoom, admin token for that room)", lkCalls.some((c) => c.path === "/twirp/livekit.RoomService/DeleteRoom" && c.body.room === lv_room1 && c.claims?.video?.roomCreate === true), lkCalls.slice(-2));
+  const lv_hbEnded = await call("POST", `/live/${lv_L1}/heartbeat`, null, lv_liisa.accessToken);
+  check("after the end: heartbeat and pin 409 LIVE_ENDED, joining 409, chat refused, not listed", lv_hbEnded.status === 409 && lv_hbEnded.body.code === "LIVE_ENDED" && (await call("POST", `/live/${lv_L1}/pin`, { productId: null }, lv_liisa.accessToken)).status === 409
+    && (await call("POST", `/live/${lv_L1}/join`)).status === 409 && (await ack(lv_v2Sock, "live:chat", { liveId: lv_L1, text: "still there?" }))?.ok === false && !(await call("GET", "/live")).body.lives.some((l) => l.id === lv_L1), lv_hbEnded.body);
+  check("…but its messages can still be read", (await call("GET", `/live/${lv_L1}/messages`)).body.messages?.length === 11);
+
+  // An admin ends the next one, with a statement of reasons
+  const lv_l2 = await lv_goLive({ title: "Evening live", productIds: [lv_lp3.id] });
+  const lv_L2 = lv_l2.body.live?.id;
+  check("a new live after the last one ended; followers are not pushed lv_again within 6 h", lv_l2.status === 201 && sql(`select coalesce("followersNotified"::text, 'null') from "LiveStream" where id=${lv_L2}`) === "null", lv_l2.body);
+  await call("POST", `/live/${lv_L2}/report`, { reason: "HATE" }, lv_ville.accessToken);
+  const lv_v1Join2 = await ack(lv_v2Sock, "live:join", lv_L2);
+  check("another store cannot end it (404); an admin needs a reason (400)", (await call("POST", `/live/${lv_L2}/end`, null, vendor.accessToken)).status === 404 && (await call("POST", `/admin/live/${lv_L2}/end`, { reason: "bad" }, adminToken)).status === 400 && (await call("POST", `/live/${lv_L2}/end`, {}, adminToken)).status === 400, lv_v1Join2);
+  const lv_adminEnd = await call("POST", `/admin/live/${lv_L2}/end`, { reason: "Products shown are counterfeit brand items" }, adminToken);
+  await sleep(500);
+  check("an admin ends a live: audited, reports actioned, viewers told (reason admin)", lv_adminEnd.status === 200 && lv_adminEnd.body.live?.status === "ENDED" && lv_adminEnd.body.live.endedReason === "Products shown are counterfeit brand items"
+    && sql(`select action || '|' || ("newValue"->>'reason') from "AdminAuditLog" where entity='LiveStream' and "entityId"=${lv_L2}`) === "live.end|Products shown are counterfeit brand items"
+    && sql(`select count(*) from "LiveReport" where "liveId"=${lv_L2} and status='ACTIONED' and "resolvedById"=${adminUser.user.id}`) === "1"
+    && lv_evOf(lv_v2Sock, "live:ended").some((d) => d.reason === "admin"), lv_adminEnd.body);
+  check("the public sees only that an admin ended it; the admin list keeps the reason", (await call("GET", `/live/${lv_L2}`)).body.live?.endedReason === "admin" && (await call("GET", "/admin/live", null, adminToken)).body.ended?.find((l) => l.id === lv_L2)?.endedReason === "Products shown are counterfeit brand items");
+
+  // Watchdog (run in this process against the same database) and limits
+  Object.assign(process.env, testEnv, { DISABLE_SCHEDULER: "true" });
+  const liveJobs = require(path.join(__dirname, "..", "..", "dist", "modules", "live", "live.service.js"));
+  const lv_l3 = (await lv_goLive({ title: "Quiet live", productIds: [lv_lp1.id] })).body.live?.id;
+  sql(`update "LiveStream" set "lastHeartbeatAt" = now() - interval '3 minutes' where id=${lv_l3}`);
+  await liveJobs.runLiveWatchdog();
+  check("watchdog: a live without a heartbeat for 2 min is ended (timeout)", sql(`select status || '|' || "endedReason" from "LiveStream" where id=${lv_l3}`) === "ENDED|timeout");
+  const lv_l4 = (await lv_goLive({ title: "Long live", productIds: [lv_lp1.id] })).body.live?.id;
+  sql(`update "LiveStream" set "startedAt" = now() - interval '4 hours 1 minute' where id=${lv_l4}`);
+  await liveJobs.runLiveWatchdog();
+  check("watchdog: a live longer than 4 h is ended (max_duration)", sql(`select status || '|' || "endedReason" from "LiveStream" where id=${lv_l4}`) === "ENDED|max_duration");
+  sql(`insert into "LiveStream" ("storeId","title","productIds","roomName","status","endedAt","endedReason") select ${lv_lStore.id}, 'Earlier', '{${lv_lp1.id}}', 'old-' || g || '-${uniq}', 'ENDED', now(), 'store' from generate_series(1,6) g`);
+  check("at most 10 lives per store a day (429)", (await lv_goLive({ title: "Eleventh", productIds: [lv_lp1.id] })).status === 429);
+  sql(`update "LiveStream" set "endedAt" = now() - interval '31 days' where id=${lv_L1}`);
+  await liveJobs.purgeOldLiveMessages();
+  check("live chat is purged 30 days after the live ended (others kept)", sql(`select count(*) from "LiveMessage" where "liveId"=${lv_L1}`) === "0" && sql(`select count(*) from "LiveBan" where "liveId"=${lv_L1}`) === "0");
+
+  // GDPR
+  const lv_lvData = (await call("GET", "/auth/me/data", null, lv_liisa.accessToken)).body.data;
+  check("data export: the store's lives", lv_lvData?.store?.lives?.length >= 10 && lv_lvData.store.lives.some((l) => l.id === lv_L2), lv_lvData?.store?.lives?.length);
+  const lv_l5 = await call("POST", `/live/${lv_L2}/report`, { reason: "OTHER" }, lv_ville.accessToken);
+  sql(`insert into "LiveMessage" ("liveId","userId","text") values (${lv_L2}, ${lv_ville.user.id}, 'kept for export')`);
+  const lv_villeData = (await call("GET", "/auth/me/data", null, lv_ville.accessToken)).body.data;
+  check("data export: the viewer's live chat messages", lv_l5.status === 200 && lv_villeData?.liveMessages?.some((m) => m.liveId === lv_L2 && m.text === "kept for export"), lv_villeData?.liveMessages);
+  check("account deletion erases the viewer's live messages", (await call("DELETE", "/auth/me", null, lv_ville.accessToken)).status === 200 && sql(`select count(*) from "LiveMessage" where "userId"=${lv_ville.user.id}`) === "0");
+  [lv_hostSock, lv_v1Sock, lv_v2Sock].forEach((sck) => sck.close());
+
+  // Without LiveKit settings live video is off
+  check("API without LIVEKIT_* started", await startFeeApi({ LIVEKIT_URL: "", LIVEKIT_API_KEY: "", LIVEKIT_API_SECRET: "" }));
+  const lv_off1 = await callAt(FEE_API, "POST", "/live", { title: "No video", productIds: [lv_lp1.id] }, lv_liisa.accessToken);
+  const lv_off2 = await callAt(FEE_API, "POST", `/live/${lv_L2}/join`);
+  const lv_offList = await callAt(FEE_API, "GET", "/live");
+  check("without LiveKit going live and watching answer 503 LIVE_OFF; the list says it is off", lv_off1.status === 503 && lv_off1.body.code === "LIVE_OFF" && lv_off1.body.error === "Live video is not switched on yet" && lv_off2.status === 503 && lv_off2.body.code === "LIVE_OFF" && lv_offList.status === 200 && lv_offList.body.enabled === false, [lv_off1.body, lv_off2.body]);
+  check("…and System says LiveKit is not set up", (await callAt(FEE_API, "GET", "/admin/system", null, adminToken)).body.integrations?.live?.configured === false);
+  feeApi.kill(); feeApi = null;
+
   console.log("\n— Background jobs and input hardening");
   const leaseSql = `INSERT INTO "JobLease" ("name","lockedUntil") VALUES ('t${uniq}', now() + interval '1 minute') ON CONFLICT ("name") DO UPDATE SET "lockedUntil" = now() + interval '1 minute' WHERE "JobLease"."lockedUntil" < now() RETURNING "name"`;
   const firstLine = (q) => sql(q).split(/\r?\n/)[0];
@@ -2632,7 +2833,7 @@ function ean13(d12) {
   check("huge search input rejected", (await call("GET", `/products/search?q=${"a".repeat(200)}`)).status === 400);
   const cors = await fetch(`${API}/stores`, { headers: { Origin: "https://evil.example" } });
   check("CORS does not allow unknown origins", !cors.headers.get("access-control-allow-origin"));
-  check("health reports v2.14.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.14.0");
+  check("health reports v2.15.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.15.0");
 
   [vendorSock, custSock, otherSock, c1Sock, c2Sock].forEach((s) => s.close());
   console.log(`\n${pass} passed, ${fail} failed`);

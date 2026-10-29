@@ -9,6 +9,8 @@ import '../config/theme.dart';
 import '../widgets/error_banner.dart';
 import 'create_drop.dart';
 import 'drop_comments.dart';
+import 'live/go_live_screen.dart';
+import 'live/live_common.dart';
 
 /// Your drops with their real numbers: views, likes, comments, shares and how many watched to the end.
 class DropsManager extends StatefulWidget {
@@ -23,6 +25,10 @@ class DropsManagerState extends State<DropsManager> {
   bool _loading = true;
   String? _error;
 
+  /// The store's live that is still on (`GET /stores/my/live`), e.g. after the app was closed mid-live.
+  Map<String, dynamic>? _currentLive;
+  bool _endingLive = false;
+
   @override
   void initState() {
     super.initState();
@@ -30,8 +36,11 @@ class DropsManagerState extends State<DropsManager> {
   }
 
   Future<void> load() async {
-    final res = await ApiClient(Provider.of<AuthService>(context, listen: false)).get('/drops/mine');
+    final api = ApiClient(Provider.of<AuthService>(context, listen: false));
+    final (res, live) = await (api.get('/drops/mine'), api.get('/stores/my/live')).wait;
     if (!mounted) return;
+    // A server without live shopping answers 404 here; the "Go live" card still opens the set-up
+    if (live.ok) _currentLive = currentLiveOf(live.data);
     setState(() {
       _loading = false;
       _error = res.ok ? null : res.error;
@@ -42,6 +51,28 @@ class DropsManagerState extends State<DropsManager> {
   void _retry() {
     HapticFeedback.selectionClick();
     setState(() => _loading = true);
+    load();
+  }
+
+  Future<void> goLive() async {
+    Haptics.medium();
+    await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => const GoLiveScreen()));
+    if (mounted) load();
+  }
+
+  Future<void> _endCurrentLive() async {
+    final live = _currentLive;
+    if (live == null || _endingLive) return;
+    if (!await confirmEndLive(context, title: '${live['title'] ?? ''}') || !mounted) return;
+    setState(() => _endingLive = true);
+    final res = await ApiClient(Provider.of<AuthService>(context, listen: false)).post('/live/${live['id']}/end');
+    if (!mounted) return;
+    setState(() => _endingLive = false);
+    if (!res.ok) {
+      MSnack.error(context, res.errorMessage);
+      return;
+    }
+    MSnack.success(context, tr(context, 'The live has ended.', 'Livelähetys on päättynyt.'));
     load();
   }
 
@@ -79,6 +110,8 @@ class DropsManagerState extends State<DropsManager> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.lg, MSpace.lg, 100),
         children: [
+          _liveCard(),
+          const SizedBox(height: MSpace.lg),
           if (_error != null && _drops.isEmpty)
             MStateMessage.error(scrollable: false, message: _error, onRetry: _retry, top: 24)
           else ...[
@@ -98,6 +131,56 @@ class DropsManagerState extends State<DropsManager> {
           for (final d in _drops) _card(d),
         ],
       ),
+    );
+  }
+
+  /// "Go live": show products on camera to nearby customers. While a live is still on (the app was
+  /// closed during it), the card says so and can end it.
+  Widget _liveCard() {
+    final live = _currentLive;
+    return Container(
+      padding: const EdgeInsets.all(MSpace.lg),
+      decoration: BoxDecoration(color: live != null ? AppTheme.dangerLight : AppTheme.lilac, borderRadius: BorderRadius.circular(MRadius.md)),
+      child: Row(children: [
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(color: live != null ? AppTheme.danger : AppTheme.surface, shape: BoxShape.circle),
+          child: Icon(Icons.sensors_rounded, color: live != null ? AppTheme.onPrimary : AppTheme.textPrimary),
+        ),
+        const SizedBox(width: MSpace.md),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(
+              live != null ? tr(context, 'You are live: ${live['title'] ?? ''}', 'Lähetyksesi on käynnissä: ${live['title'] ?? ''}') : tr(context, 'Go live', 'Aloita livelähetys'),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.textPrimary),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              live != null
+                  ? tr(context, 'Continue it from Go live, or end it here.', 'Jatka sitä kohdasta Aloita livelähetys tai lopeta se tästä.')
+                  : tr(context, 'Show your products on camera. Nearby customers watch, chat and buy. Not recorded.',
+                      'Esittele tuotteitasi kameralla. Lähellä olevat asiakkaat katsovat, keskustelevat ja ostavat. Ei tallenneta.'),
+              style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary, height: 1.35),
+            ),
+            const SizedBox(height: MSpace.sm),
+            Wrap(spacing: MSpace.sm, runSpacing: MSpace.xs, children: [
+              FilledButton.icon(
+                onPressed: goLive,
+                icon: const Icon(Icons.videocam_rounded),
+                label: Text(live != null ? tr(context, 'Go live', 'Aloita livelähetys') : tr(context, 'Set up a live', 'Valmistele lähetys')),
+              ),
+              if (live != null)
+                OutlinedButton(
+                  onPressed: _endingLive ? null : _endCurrentLive,
+                  child: Text(tr(context, 'End live', 'Lopeta lähetys')),
+                ),
+            ]),
+          ]),
+        ),
+      ]),
     );
   }
 

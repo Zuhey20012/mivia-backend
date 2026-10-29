@@ -185,6 +185,8 @@ model User {
   follows          StoreFollow[]
   launchAlert      LaunchAlert?
   promoRedemptions PromoRedemption[]
+  liveMessages     LiveMessage[] // chat messages in stores' live streams (since 2.15.0)
+  liveBans         LiveBan[] // live streams whose store muted this user
 
   // Referrals (since 2.8.0): the customer's own invite code, created on first use of GET /me/referral
   referralCode   String?     @unique
@@ -286,6 +288,10 @@ model Store {
   followers  StoreFollow[]
   importJobs ImportJob[]
   taxInfo    StoreTaxInfo?
+  lives      LiveStream[]
+
+  // Live shopping (2.15): when followers last heard "<store> is live" (at most once per 6 h)
+  liveNotifiedAt DateTime?
 
   // DAC7 reminders to stores with sales this year and incomplete tax data: at most every 30 days, 2 per year
   taxReminderAt    DateTime?
@@ -1561,4 +1567,92 @@ model RecallNotification {
 
   @@unique([recallId, userId, channel])
   @@index([userId])
+}
+
+// ─────────────────────────────────────────────
+// LIVE SHOPPING (since 2.15.0)
+// ─────────────────────────────────────────────
+
+enum LiveStatus {
+  LIVE
+  ENDED
+}
+
+// A store's live video (LiveKit WebRTC room; nothing is recorded). The store shows 1–10 of its own products.
+model LiveStream {
+  id                Int        @id @default(autoincrement())
+  storeId           Int
+  store             Store      @relation(fields: [storeId], references: [id])
+  title             String
+  productIds        Int[] // the featured products, in the store's order
+  pinnedProductId   Int?
+  roomName          String     @unique // LiveKit room: live-<id>-<random>
+  status            LiveStatus @default(LIVE)
+  startedAt         DateTime   @default(now())
+  endedAt           DateTime?
+  lastHeartbeatAt   DateTime   @default(now())
+  viewers           Int        @default(0) // signed-in viewers connected now (sockets in live:<id>), updated at most every 5 s
+  viewerPeak        Int        @default(0)
+  likeCount         Int        @default(0)
+  // "store" | "timeout" | "max_duration" | the admin's reason (statement of reasons, emailed to the store)
+  endedReason       String?
+  endedById         Int? // the admin who ended it
+  followersNotified Int? // followers pushed "<store> is live" (null = none: the store was announced in the last 6 h)
+  createdAt         DateTime   @default(now())
+
+  messages LiveMessage[]
+  bans     LiveBan[]
+  reports  LiveReport[]
+
+  @@index([status, startedAt])
+  @@index([status, lastHeartbeatAt])
+  @@index([status, endedAt])
+  @@index([storeId, createdAt])
+}
+
+// Live chat: kept 30 days after the live ended (scheduler live-chat-purge); deleted with the account
+model LiveMessage {
+  id        Int        @id @default(autoincrement())
+  liveId    Int
+  live      LiveStream @relation(fields: [liveId], references: [id], onDelete: Cascade)
+  userId    Int
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  text      String
+  hidden    Boolean    @default(false) // hidden by the store or an admin
+  createdAt DateTime   @default(now())
+
+  @@index([liveId, id])
+  @@index([userId, createdAt])
+}
+
+// The store (or an admin) muted this viewer in this live: their chat is refused
+model LiveBan {
+  id         Int        @id @default(autoincrement())
+  liveId     Int
+  live       LiveStream @relation(fields: [liveId], references: [id], onDelete: Cascade)
+  userId     Int
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bannedById Int
+  createdAt  DateTime   @default(now())
+
+  @@unique([liveId, userId])
+  @@index([userId])
+}
+
+// Notice-and-action on a live (DSA Art. 16), reasons as drop reports; decided by an admin
+model LiveReport {
+  id           Int          @id @default(autoincrement())
+  liveId       Int
+  live         LiveStream   @relation(fields: [liveId], references: [id], onDelete: Cascade)
+  reporterId   Int?
+  reason       String
+  details      String?
+  status       ReportStatus @default(OPEN)
+  resolvedById Int?
+  resolvedAt   DateTime?
+  createdAt    DateTime     @default(now())
+
+  @@index([liveId, status])
+  @@index([status, createdAt])
+  @@index([reporterId])
 }

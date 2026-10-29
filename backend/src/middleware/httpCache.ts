@@ -48,6 +48,8 @@ for (const path of [
   "/api/v1/sounds/:id(\\d+)",
   "/api/v1/sounds/:id(\\d+)/drops",
 ]) publicCacheRoutes.get(path, api);
+// Lives now (2.15): viewer counts change, so only a few seconds
+publicCacheRoutes.get("/api/v1/live", publicCache(5, 10));
 // Pages people open from links: a little longer
 const pages = publicCache(Math.max(scale.publicCacheSeconds, 60), Math.max(scale.publicStaleSeconds, 600));
 for (const path of ["/d/:id", "/s/:storeId", "/r/:code"]) publicCacheRoutes.get(path, pages);

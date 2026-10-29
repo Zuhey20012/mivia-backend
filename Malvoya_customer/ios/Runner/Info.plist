@@ -4,6 +4,10 @@
 	<dict>
 		<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 		<string>Malvoya uses your location only while you use the app, when you tap "Use my location". It does not use your location in the background.</string>
+		<key>NSCameraUsageDescription</key>
+		<string>Malvoya does not use your camera. The live-video library the app uses to show stores' live streams contains camera code, which Apple asks to be described.</string>
+		<key>NSMicrophoneUsageDescription</key>
+		<string>Malvoya does not use your microphone. The live-video library the app uses to show stores' live streams contains microphone code, which Apple asks to be described.</string>
 		<key>CADisableMinimumFrameDurationOnPhone</key>
 		<true/>
 		<key>NSLocationWhenInUseUsageDescription</key>

@@ -18,7 +18,7 @@ import { env } from "../../config/env";
  *  GET /.well-known/security.txt  where to report a vulnerability (RFC 9116)
  */
 export const opsRoutes = Router();
-const VERSION = "2.14.0";
+const VERSION = "2.15.0";
 
 let draining = false;
 /** Called on SIGTERM: readiness turns 503 so a load balancer stops sending new requests here. */

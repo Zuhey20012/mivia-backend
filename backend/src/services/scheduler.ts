@@ -10,6 +10,7 @@ import { runOrderWatchdog } from "./orderWatchdog";
 import { failStaleImports } from "../modules/imports/imports.service";
 import { purgeOldMessages } from "../modules/orders/chat";
 import { sendTaxInfoReminders } from "../modules/sellers/taxReminders";
+import { purgeOldLiveMessages, runLiveWatchdog } from "../modules/live/live.service";
 import { reportError } from "../lib/sentry";
 
 const logger = pino({ name: "scheduler" });
@@ -18,6 +19,8 @@ type Job = { name: string; everyMs: number; enabled: () => boolean; run: () => P
 
 const jobs: Job[] = [
   { name: "order-watchdog", everyMs: 60_000, enabled: () => true, run: runOrderWatchdog },
+  // Live shopping (2.15): ends lives without a heartbeat for 2 min or older than 4 h
+  { name: "live-watchdog", everyMs: 60_000, enabled: () => true, run: runLiveWatchdog },
   { name: "payouts", everyMs: 10 * 60_000, enabled: () => !!env.stripeSecretKey, run: processDuePayouts },
   { name: "drop-processing", everyMs: 2 * 60_000, enabled: mediaConfigured, run: checkProcessingDrops },
   { name: "product-video-processing", everyMs: 2 * 60_000, enabled: mediaConfigured, run: checkProcessingProductVideos },
@@ -25,6 +28,8 @@ const jobs: Job[] = [
   { name: "import-watchdog", everyMs: 5 * 60_000, enabled: () => true, run: failStaleImports },
   // Order chat is kept 30 days after the order is completed or cancelled
   { name: "chat-purge", everyMs: 6 * 60 * 60_000, enabled: () => true, run: purgeOldMessages },
+  // Live chat is kept 30 days after the live ended
+  { name: "live-chat-purge", everyMs: 6 * 60 * 60_000, enabled: () => true, run: purgeOldLiveMessages },
   // DAC7: stores with sales and no tax details are reminded (every 30 days at most, 2 a year)
   { name: "dac7-reminders", everyMs: 6 * 60 * 60_000, enabled: () => true, run: () => sendTaxInfoReminders() },
   // Agreement acceptance records are kept for the life of the account + 10 years (contract proof), then deleted

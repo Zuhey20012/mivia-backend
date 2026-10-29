@@ -62,6 +62,7 @@ const LABELS: Record<string, string> = {
   photosAndVideos: 'Photos and videos (Cloudinary)',
   googleSignIn: 'Google sign-in',
   phoneSignIn: 'Phone sign-in (Firebase)',
+  live: 'Live video (LiveKit)',
 };
 const MARKET: Record<string, string> = {
   liveStores: 'Live stores', storesOpenNow: 'Open right now', pendingStores: 'Stores waiting for approval',

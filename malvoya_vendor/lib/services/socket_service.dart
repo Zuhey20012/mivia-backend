@@ -17,6 +17,14 @@ class VendorSocketService extends ChangeNotifier {
   final StreamController<Map<String, dynamic>> _returnsNew = StreamController.broadcast();
   Stream<Map<String, dynamic>> get returnsNew => _returnsNew.stream;
 
+  /// Live shopping events (API 2.15): `live:viewers`, `live:likes`, `live:message`, `live:message_hidden`,
+  /// `live:pinned` and `live:ended`, for the live screen. Kept apart from [notifyListeners], which the
+  /// dashboard treats as "orders may have changed".
+  final StreamController<LiveSocketEvent> _live = StreamController.broadcast();
+  Stream<LiveSocketEvent> get liveEvents => _live.stream;
+
+  static const _liveEventNames = ['live:viewers', 'live:likes', 'live:message', 'live:message_hidden', 'live:pinned', 'live:ended'];
+
   final List<Map<String, dynamic>> _pendingOrders = [];
   List<Map<String, dynamic>> get pendingOrders => List.unmodifiable(_pendingOrders);
 
@@ -66,6 +74,10 @@ class VendorSocketService extends ChangeNotifier {
       _returnsNew.add(data is Map ? Map<String, dynamic>.from(data) : const {});
     });
 
+    for (final name in _liveEventNames) {
+      _socket!.on(name, (data) => _live.add(LiveSocketEvent(name, data is Map ? Map<String, dynamic>.from(data) : const {})));
+    }
+
     // Listen for order status changes
     _socket!.on('order:status', (data) {
       debugPrint('[VendorSocket] Order status update: $data');
@@ -89,6 +101,19 @@ class VendorSocketService extends ChangeNotifier {
     debugPrint('[VendorSocket] Joined store room: store:$storeId');
   }
 
+  /// Sends [event] and waits for the server's answer (its first argument, as a map). Null when the
+  /// connection is down or no answer came within [timeout], so callers never assume it worked.
+  Future<Map<String, dynamic>?> emitWithAck(String event, Object data, {Duration timeout = const Duration(seconds: 8)}) {
+    final socket = _socket;
+    if (socket == null || !_connected) return Future.value(null);
+    final done = Completer<Map<String, dynamic>?>();
+    socket.emitWithAck(event, data, ack: (dynamic answer, [dynamic _]) {
+      if (done.isCompleted) return;
+      done.complete(answer is Map ? Map<String, dynamic>.from(answer) : <String, dynamic>{});
+    });
+    return done.future.timeout(timeout, onTimeout: () => null);
+  }
+
   void clearPendingOrder(int index) {
     if (index >= 0 && index < _pendingOrders.length) {
       _pendingOrders.removeAt(index);
@@ -104,4 +129,11 @@ class VendorSocketService extends ChangeNotifier {
     _pendingOrders.clear();
     notifyListeners();
   }
+}
+
+/// One live-shopping socket event: its [name] (e.g. `live:viewers`) and payload.
+class LiveSocketEvent {
+  final String name;
+  final Map<String, dynamic> data;
+  const LiveSocketEvent(this.name, this.data);
 }

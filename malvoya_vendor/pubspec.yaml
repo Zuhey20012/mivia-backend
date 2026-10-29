@@ -40,6 +40,12 @@ dependencies:
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
   record: ^6.2.1 # 6.x: Android side builds with AGP 8 (7.x expects AGP 9)
+  # Live shopping (API 2.15): publishes the camera and microphone to LiveKit over WebRTC. 2.13.x is the newest;
+  # it and its flutter_webrtc 1.6.3 apply the Kotlin plugin themselves under AGP < 9, so they build with AGP 8.11.
+  livekit_client: ^2.13.2
+  # Keeps the screen on while the store is live (nothing else in the app does it)
+  wakelock_plus: ">=1.3.0 <1.8.0" # 1.8.0 needs Flutter 3.44 (the apps build with 3.41.2); 1.8.1+ also needs dbus 0.8
+  wakelock_plus_platform_interface: ">=1.2.0 <1.7.0" # 1.7.0 also needs Flutter 3.44
 
 dev_dependencies:
   flutter_launcher_icons: ^0.14.4

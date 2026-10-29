@@ -10,6 +10,7 @@ import { forgetSessionState } from "../../middleware/auth";
 import { deleteFirebaseUser, deleteStoreMedia } from "./accountCleanup";
 import { TWO_STEP_OFF } from "./twoStepFields";
 import { disconnectUser } from "../../lib/socket";
+import { endLivesOfStore } from "../live/live.service";
 
 export class AuthError extends Error {
   constructor(message: string, public status: number) {
@@ -154,15 +155,18 @@ export async function logoutUser(refreshToken: string) {
 // ─── GDPR: access (Art. 15/20) and erasure (Art. 17) ────────────────────────
 
 export async function exportUserData(userId: number) {
-  const [user, supportRequests, chatMessages, productReports] = await Promise.all([exportUser(userId), prisma.supportRequest.findMany({
+  const [user, supportRequests, chatMessages, productReports, liveMessages] = await Promise.all([exportUser(userId), prisma.supportRequest.findMany({
     where: { userId }, select: { id: true, topic: true, message: true, status: true, createdAt: true },
   }), prisma.orderMessage.findMany({
     where: { senderId: userId }, select: { orderId: true, text: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 5000,
   }), prisma.productReport.findMany({
     // "Report this product" notices the user sent (2.12)
     where: { reporterId: userId }, select: { productId: true, reason: true, details: true, status: true, createdAt: true }, take: 1000,
+  }), prisma.liveMessage.findMany({
+    // Messages written in stores' live streams (2.15), kept 30 days after each live
+    where: { userId }, select: { liveId: true, text: true, hidden: true, createdAt: true }, orderBy: { id: "desc" }, take: 5000,
   })]);
-  return user && { ...user, supportRequests, chatMessages, productReports };
+  return user && { ...user, supportRequests, chatMessages, productReports, liveMessages };
 }
 
 function exportUser(userId: number) {
@@ -182,6 +186,8 @@ function exportUser(userId: number) {
         include: {
           products: true,
           drops: { select: { id: true, caption: true, status: true, createdAt: true, likeCount: true, viewCount: true } },
+          // Live streams (2.15): nothing is recorded; title, products and counts only
+          lives: { select: { id: true, title: true, productIds: true, status: true, startedAt: true, endedAt: true, endedReason: true, viewerPeak: true, likeCount: true }, orderBy: { id: "desc" }, take: 1000 },
           // DAC7 seller data; the tax ID itself stays encrypted (shown masked in the store app)
           taxInfo: { select: { legalName: true, dateOfBirth: true, vatNumber: true, addressLine: true, postalCode: true, city: true, country: true, createdAt: true, updatedAt: true } },
         },
@@ -262,6 +268,9 @@ export async function deleteUserAccount(userId: number) {
     await tx.dropComment.deleteMany({ where: { userId } });
     // Chat messages, blocks and review reports are personal data too
     await tx.orderMessage.deleteMany({ where: { senderId: userId } });
+    // Live chat messages and mutes (2.15)
+    await tx.liveMessage.deleteMany({ where: { userId } });
+    await tx.liveBan.deleteMany({ where: { userId } });
     await tx.userBlock.deleteMany({ where: { OR: [{ blockerId: userId }, { blockedId: userId }] } });
     await tx.reviewReport.deleteMany({ where: { reporterId: userId } });
     // Product reports stay (product-safety notices must be processed) but no longer point at the person
@@ -301,6 +310,8 @@ export async function deleteUserAccount(userId: number) {
   await revokeAllSessions(userId);
   forgetSessionState(userId);
   disconnectUser(userId);
+  // A store that was live stops at once (viewers are told the live ended)
+  if (before?.store) await endLivesOfStore(before.store.id).catch(() => {});
   // Outside the database (best effort, logged on failure, never blocks the deletion): the Firebase sign-in user
   // and, for a store, its photos, videos and drops on Cloudinary
   if (before) {

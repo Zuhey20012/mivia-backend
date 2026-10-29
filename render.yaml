@@ -71,6 +71,13 @@ services:
         sync: false
       - key: APPLE_TEAM_ID
         sync: false
+      # Live shopping video (LiveKit Cloud or own server; wss://… URL, API key and secret). Empty = live is off
+      - key: LIVEKIT_URL
+        sync: false
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
+        sync: false
       # Optional: farthest delivery from a store in km (default 10, the catalogue reach)
       # DELIVERY_MAX_KM
       # Optional order-watchdog timers in minutes (defaults shown in the admin panel → System):

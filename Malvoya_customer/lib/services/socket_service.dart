@@ -7,6 +7,10 @@ typedef SocketEventListener = void Function(Map<String, dynamic> data);
 /// Recent chat messages of an order, from the server's answer to `chat:join` (newer servers).
 typedef ChatHistoryListener = void Function(int orderId, List<Map<String, dynamic>> messages);
 
+/// A live-shopping event (`live:message`, `live:viewers`, `live:likes`, `live:pinned`, `live:ended`,
+/// `live:message_hidden`, and `live:joined` for the answer to `live:join`, which carries `liveId`).
+typedef LiveEventListener = void Function(String event, Map<String, dynamic> data);
+
 /// One shared Socket.io connection for the customer app. Several screens can listen at the same
 /// time (the Orders tab and an open order, for example): listeners are added and removed, never
 /// overwritten, and order rooms are reference-counted so one screen closing does not stop
@@ -24,12 +28,41 @@ class CustomerSocketService extends ChangeNotifier {
   // Rooms are per connection, so they are joined again after every reconnect
   final Map<int, int> _trackedOrders = {};
   final Map<int, int> _chats = {};
+  final Map<int, int> _lives = {};
 
   final List<SocketEventListener> _locationListeners = [];
   final List<SocketEventListener> _statusListeners = [];
   final List<SocketEventListener> _chatListeners = [];
   final List<VoidCallback> _reconnectListeners = [];
   final List<ChatHistoryListener> _historyListeners = [];
+  final List<LiveEventListener> _liveListeners = [];
+
+  void addLiveListener(LiveEventListener l) => _liveListeners.add(l);
+  void removeLiveListener(LiveEventListener l) => _liveListeners.remove(l);
+
+  static const _liveEvents = ['live:message', 'live:message_hidden', 'live:viewers', 'live:likes', 'live:pinned', 'live:ended'];
+
+  void _dispatchLive(String event, dynamic data) {
+    final raw = data is List && data.isNotEmpty ? data.first : data;
+    final map = raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+    for (final l in List<LiveEventListener>.of(_liveListeners)) {
+      try {
+        l(event, map);
+      } catch (e) {
+        debugPrint('[CustomerSocket] live listener error: $e');
+      }
+    }
+  }
+
+  /// Joins a live's room; the answer (viewers, likes, pinned product, recent messages) goes to the live
+  /// listeners as `live:joined` with the `liveId` added.
+  void _emitJoinLive(io.Socket socket, int liveId) {
+    socket.emitWithAck('live:join', liveId, ack: (dynamic data) {
+      final raw = data is List && data.isNotEmpty ? data.first : data;
+      final map = raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+      _dispatchLive('live:joined', {...map, 'liveId': liveId});
+    });
+  }
 
   void addChatHistoryListener(ChatHistoryListener l) => _historyListeners.add(l);
   void removeChatHistoryListener(ChatHistoryListener l) => _historyListeners.remove(l);
@@ -106,6 +139,9 @@ class CustomerSocketService extends ChangeNotifier {
       for (final id in _chats.keys) {
         _emitJoinChat(socket, id);
       }
+      for (final id in _lives.keys) {
+        _emitJoinLive(socket, id);
+      }
       if (connectedBefore) {
         for (final l in List<VoidCallback>.of(_reconnectListeners)) {
           l();
@@ -129,6 +165,9 @@ class CustomerSocketService extends ChangeNotifier {
     socket.on('courier:location', (data) => _dispatch(_locationListeners, data));
     socket.on('order:status', (data) => _dispatch(_statusListeners, data));
     socket.on('chat:message', (data) => _dispatch(_chatListeners, data));
+    for (final event in _liveEvents) {
+      socket.on(event, (data) => _dispatchLive(event, data));
+    }
   }
 
   /// Order ids must be the numeric id (the server ignores anything else).
@@ -171,6 +210,46 @@ class CustomerSocketService extends ChangeNotifier {
     return true;
   }
 
+  /// Watches a live (counted per screen, joined again after every reconnect).
+  void joinLive(int liveId) {
+    final first = !_lives.containsKey(liveId);
+    _lives[liveId] = (_lives[liveId] ?? 0) + 1;
+    final socket = _socket;
+    if (first && socket != null && _connected) _emitJoinLive(socket, liveId);
+  }
+
+  /// Stops watching a live. `live:leave` lets the server count this viewer out at once; a server without
+  /// it counts the viewer out when the connection ends.
+  void leaveLive(int liveId) {
+    final n = (_lives[liveId] ?? 0) - 1;
+    if (n <= 0) {
+      _lives.remove(liveId);
+      if (_connected) _socket?.emit('live:leave', liveId);
+    } else {
+      _lives[liveId] = n;
+    }
+  }
+
+  /// Sends a chat message to a live. [onAnswer] gets the server's answer (`{ok}` or `{ok:false, error}`);
+  /// returns false when there is no connection.
+  bool sendLiveChat(int liveId, String text, void Function(Map<String, dynamic> answer) onAnswer) {
+    final socket = _socket;
+    if (socket == null || !_connected) return false;
+    socket.emitWithAck('live:chat', {'liveId': liveId, 'text': text}, ack: (dynamic data) {
+      final raw = data is List && data.isNotEmpty ? data.first : data;
+      onAnswer(raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{'ok': true});
+    });
+    return true;
+  }
+
+  /// One heart for a live; false when there is no connection.
+  bool sendLiveLike(int liveId) {
+    final socket = _socket;
+    if (socket == null || !_connected) return false;
+    socket.emit('live:like', liveId);
+    return true;
+  }
+
   void _closeSocket() {
     _socket?.disconnect();
     _socket?.dispose();
@@ -185,6 +264,7 @@ class CustomerSocketService extends ChangeNotifier {
     _closeSocket();
     _trackedOrders.clear();
     _chats.clear();
+    _lives.clear();
     notifyListeners();
   }
 }

@@ -283,6 +283,16 @@ export async function sendDropRemovedEmail(to: string, dropId: number, reason: s
   ]);
 }
 
+/** Statement of reasons (DSA Art. 17) when an admin ends a store's live stream. */
+export async function sendLiveEndedEmail(to: string, liveId: number, title: string, reason: string, locale: Locale): Promise<DeliveryResult> {
+  return simpleEmail(to, locale, t("your live was ended", "livelähetyksesi lopetettiin"), t(`Your live "${title}" (#${liveId}) was ended by Malvoya`, `Livelähetyksesi "${title}" (#${liveId}) lopetettiin Malvoyassa`), [
+    t(`Reason: ${reason}`, `Syy: ${reason}`),
+    t("This decision was made by a person on the Malvoya team. The live was not recorded.", "Päätöksen teki Malvoyan tiimin jäsen. Lähetystä ei tallennettu."),
+    t("If you think it is wrong, reply to this email or contact us through Support in Malvoya Store within 6 months and we will look at it again.",
+      "Jos päätös on mielestäsi väärä, vastaa tähän viestiin tai ota yhteyttä Malvoya Storen Tuki-osion kautta 6 kuukauden kuluessa, niin tarkistamme asian uudelleen."),
+  ]);
+}
+
 /** Support request received (to the person who wrote). */
 export async function sendSupportAck(to: string, requestId: number, locale: Locale): Promise<DeliveryResult> {
   return simpleEmail(to, locale, t(`we got your message #${requestId}`, `saimme viestisi #${requestId}`), t("Thanks for your message", "Kiitos viestistäsi"), [

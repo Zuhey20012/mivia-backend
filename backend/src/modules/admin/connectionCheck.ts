@@ -3,6 +3,7 @@ import { prisma } from "../../lib/prisma";
 import { env } from "../../config/env";
 import { getStripe } from "../../lib/stripe";
 import { pingCloudinary } from "../../lib/cloudinary";
+import { pingLiveKit } from "../../lib/livekit";
 import { verifyPushCredentials } from "../../lib/push";
 import { verifyEmailConnection } from "../../services/notificationDeliveryService";
 import { sendError } from "../../lib/errors";
@@ -118,6 +119,19 @@ async function media(): Promise<Check> {
   }
 }
 
+async function liveVideo(): Promise<Check> {
+  try {
+    const r = await withTimeout(pingLiveKit());
+    if (r.ok === null) return notSetUp("LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET");
+    if (!r.ok) {
+      return { ok: false, detail: r.status === 401 || r.status === 403 ? "LiveKit refused the API key or secret." : `LiveKit answered ${r.status}: check LIVEKIT_URL (wss://…).` };
+    }
+    return { ok: true, detail: `LiveKit accepted the key (${r.rooms} room(s) open now; nothing is recorded).` };
+  } catch (e: any) {
+    return failure(e, "Could not reach LiveKit: check LIVEKIT_URL (wss://…).");
+  }
+}
+
 function googleSignIn(): Check {
   if (!env.googleClientId) return notSetUp("GOOGLE_CLIENT_ID");
   if (!/^[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com$/.test(env.googleClientId)) {
@@ -136,12 +150,12 @@ let cache: { at: number; result: Record<string, Check> } | null = null;
 export async function runConnectionChecks(): Promise<Record<string, Check>> {
   // One run at a time per half minute: the button cannot be used to hammer the providers
   if (cache && Date.now() - cache.at < 30_000) return cache.result;
-  const [payments, paymentWebhook, emailCheck, smsCheck, pushCheck, mediaCheck] = await Promise.all([
-    stripeAccount(), stripeWebhook(), email(), sms(), push(), media(),
+  const [payments, paymentWebhook, emailCheck, smsCheck, pushCheck, mediaCheck, liveCheck] = await Promise.all([
+    stripeAccount(), stripeWebhook(), email(), sms(), push(), media(), liveVideo(),
   ]);
   const result = {
     payments, paymentWebhook, email: emailCheck, sms: smsCheck, pushNotifications: pushCheck, photosAndVideos: mediaCheck,
-    googleSignIn: googleSignIn(), phoneSignIn: phoneSignIn(),
+    googleSignIn: googleSignIn(), phoneSignIn: phoneSignIn(), live: liveCheck,
   };
   cache = { at: Date.now(), result };
   return result;
