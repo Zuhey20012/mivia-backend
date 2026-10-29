@@ -1,0 +1,316 @@
+# Malvoya Android builds: the three Flutter apps as APK (and AAB when the upload key is set),
+# optionally sent to testers with Firebase App Distribution, and attached to a GitHub Release on tags.
+# Owner's guide (secrets, keystore, testers): docs/release/README.md
+#
+# Runs without any secrets: it then builds installable *debug* APKs and says so in the run summary.
+# Secrets are never printed; they are passed through env vars and written to $RUNNER_TEMP only.
+name: Mobile - Android
+
+on:
+  workflow_dispatch:
+    inputs:
+      apps:
+        description: Which apps to build
+        type: choice
+        options: [all, customer, store, courier]
+        default: all
+      distribute:
+        description: Send the APKs to testers with Firebase App Distribution (needs the Firebase secrets)
+        type: boolean
+        default: false
+      release_notes:
+        description: Release notes for testers (optional)
+        type: string
+        default: ""
+      tester_groups:
+        description: Firebase tester group aliases, comma separated (optional; default secret FIREBASE_TESTER_GROUPS or "testers")
+        type: string
+        default: ""
+  push:
+    tags: ["mobile-v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-android-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # The same Flutter as ci.yml and the owner's machine (docs/ios/MAC-SETUP.md); every app's
+  # pubspec.lock resolves for Flutter >=3.41.0 / Dart >=3.11.0.
+  FLUTTER_VERSION: 3.41.2
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - id: plan
+        env:
+          APPS: ${{ inputs.apps || 'all' }}
+        run: |
+          all='[
+            {"app":"customer","label":"Malvoya","dir":"Malvoya_customer","package":"com.malvoya.customer","key":"CUSTOMER"},
+            {"app":"store","label":"Malvoya Store","dir":"malvoya_vendor","package":"com.malvoya.vendor","key":"STORE"},
+            {"app":"courier","label":"Malvoya Courier","dir":"malvoya_courier","package":"com.malvoya.courier","key":"COURIER"}
+          ]'
+          case "$APPS" in
+            all) sel="$all" ;;
+            customer|store|courier) sel=$(jq -c --arg a "$APPS" '[.[] | select(.app == $a)]' <<<"$all") ;;
+            *) echo "::error::Unknown app '$APPS'"; exit 1 ;;
+          esac
+          echo "matrix=$(jq -c '{include: .}' <<<"$sel")" >> "$GITHUB_OUTPUT"
+
+  android:
+    name: Android (${{ matrix.app }})
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The apps apply the Google Services Gradle plugin, which fails the build without this file.
+      - name: Check google-services.json
+        working-directory: .
+        env:
+          DIR: ${{ matrix.dir }}
+          PKG: ${{ matrix.package }}
+        run: |
+          echo "google-services.json in the repository:"
+          for d in Malvoya_customer malvoya_vendor malvoya_courier; do
+            if [ -f "$d/android/app/google-services.json" ]; then echo "  $d/android/app/google-services.json: present"; else echo "  $d/android/app/google-services.json: MISSING"; fi
+          done
+          f="$DIR/android/app/google-services.json"
+          if [ ! -f "$f" ]; then
+            echo "::error file=$f::$f is missing. Download it from Firebase console -> Project settings -> Your apps -> Android app $PKG and commit it (it holds no secrets)."
+            exit 1
+          fi
+          if ! jq -e --arg p "$PKG" '.client[] | select(.client_info.android_client_info.package_name == $p)' "$f" > /dev/null; then
+            echo "::error file=$f::$f has no Android client for $PKG. Add the Android app $PKG in Firebase and download the file again."
+            exit 1
+          fi
+
+      - name: Read version from pubspec.yaml
+        id: version
+        env:
+          APP: ${{ matrix.app }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          v=$(grep -m1 -E '^version:' pubspec.yaml | awk '{print $2}')
+          if [ -z "$v" ]; then echo "::error::No version: line in pubspec.yaml"; exit 1; fi
+          name="${v%%+*}"; build="${v#*+}"
+          [ "$build" = "$v" ] && build=1
+          echo "full=$v" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "base=malvoya-$APP-$name-build$build" >> "$GITHUB_OUTPUT"
+          if [ "$REF_TYPE" = "tag" ] && [ "$REF_NAME" != "mobile-v$name" ]; then
+            echo "::warning::Tag $REF_NAME does not match pubspec version $name (expected mobile-v$name)."
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Prepare signing
+        id: signing
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PW: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PW: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          missing=""
+          [ -z "$KEYSTORE_B64" ] && missing="$missing ANDROID_KEYSTORE_BASE64"
+          [ -z "$STORE_PW" ] && missing="$missing ANDROID_KEYSTORE_PASSWORD"
+          [ -z "$KEY_ALIAS" ] && missing="$missing ANDROID_KEY_ALIAS"
+          [ -z "$KEY_PW" ] && missing="$missing ANDROID_KEY_PASSWORD"
+          if [ "$missing" = " ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD" ]; then
+            echo "::notice::No upload key secrets: building an installable DEBUG APK instead of a signed release (see docs/release/README.md)."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "$missing" ]; then
+            echo "::error::Some Android signing secrets are set but these are missing:$missing"
+            exit 1
+          fi
+          ks="$RUNNER_TEMP/upload-keystore.jks"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$ks" || { echo "::error::ANDROID_KEYSTORE_BASE64 is not valid base64"; exit 1; }
+          if ! keytool -list -keystore "$ks" -storepass:env STORE_PW -alias "$KEY_ALIAS" > /dev/null 2>&1; then
+            echo "::error::The keystore could not be opened with ANDROID_KEYSTORE_PASSWORD, or it has no key named ANDROID_KEY_ALIAS."
+            exit 1
+          fi
+          # android/key.properties is read by android/app/build.gradle.kts (storeFile, storePassword, keyAlias, keyPassword).
+          esc() { printf '%s' "$1" | sed 's/\\/\\\\/g'; }
+          {
+            echo "storeFile=$(esc "$ks")"
+            echo "storePassword=$(esc "$STORE_PW")"
+            echo "keyAlias=$(esc "$KEY_ALIAS")"
+            echo "keyPassword=$(esc "$KEY_PW")"
+          } > android/key.properties
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        env:
+          SIGNED: ${{ steps.signing.outputs.signed }}
+          BASE: ${{ steps.version.outputs.base }}
+        run: |
+          out="$RUNNER_TEMP/out"; mkdir -p "$out"
+          if [ "$SIGNED" = "true" ]; then
+            flutter build apk --release
+            flutter build appbundle --release
+            cp build/app/outputs/flutter-apk/app-release.apk "$out/$BASE-release.apk"
+            cp build/app/outputs/bundle/release/app-release.aab "$out/$BASE-release.aab"
+          else
+            flutter build apk --debug
+            cp build/app/outputs/flutter-apk/app-debug.apk "$out/$BASE-debug.apk"
+          fi
+          ls -la "$out"
+          echo "OUT=$out" >> "$GITHUB_ENV"
+
+      - name: Remove signing files
+        if: always()
+        run: rm -f android/key.properties "$RUNNER_TEMP/upload-keystore.jks"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.version.outputs.base }}-android
+          path: ${{ env.OUT }}/*
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Firebase App Distribution
+        id: distribute
+        if: github.event_name == 'push' || inputs.distribute
+        env:
+          FIREBASE_SA: ${{ secrets.FIREBASE_DISTRIBUTION_SA }}
+          APP_ID_SECRET: ${{ secrets[format('FIREBASE_ANDROID_APP_ID_{0}', matrix.key)] }}
+          GROUPS_SECRET: ${{ secrets.FIREBASE_TESTER_GROUPS }}
+          GROUPS_INPUT: ${{ inputs.tester_groups }}
+          NOTES_INPUT: ${{ inputs.release_notes }}
+          PKG: ${{ matrix.package }}
+          LABEL: ${{ matrix.label }}
+          VERSION: ${{ steps.version.outputs.full }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ -z "$FIREBASE_SA" ]; then
+            echo "::notice::Firebase App Distribution skipped: secret FIREBASE_DISTRIBUTION_SA is not set."
+            echo "result=skipped (no FIREBASE_DISTRIBUTION_SA)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # The Firebase Android app id is not secret (it is in google-services.json); a secret overrides it.
+          app_id="$APP_ID_SECRET"
+          if [ -z "$app_id" ]; then
+            app_id=$(jq -r --arg p "$PKG" '[.client[] | select(.client_info.android_client_info.package_name == $p)][0].client_info.mobilesdk_app_id // empty' android/app/google-services.json)
+          fi
+          if [ -z "$app_id" ]; then
+            echo "::notice::Firebase App Distribution skipped: no Firebase app id for $PKG."
+            echo "result=skipped (no Firebase app id)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          groups="${GROUPS_INPUT:-${GROUPS_SECRET:-testers}}"
+          notes="$RUNNER_TEMP/release-notes.txt"
+          if [ -n "$NOTES_INPUT" ]; then printf '%s\n' "$NOTES_INPUT" > "$notes"
+          else printf '%s %s (%s, %s)\n' "$LABEL" "$VERSION" "$REF_NAME" "${GITHUB_SHA:0:7}" > "$notes"; fi
+          sa="$RUNNER_TEMP/firebase-sa.json"
+          # Accept the service-account JSON as-is or base64-encoded.
+          # ("{" never occurs in base64.)
+          case "$FIREBASE_SA" in
+            *"{"*) printf '%s' "$FIREBASE_SA" > "$sa" ;;
+            *) printf '%s' "$FIREBASE_SA" | base64 -d > "$sa" || { echo "::error::FIREBASE_DISTRIBUTION_SA is neither JSON nor base64"; exit 1; } ;;
+          esac
+          export GOOGLE_APPLICATION_CREDENTIALS="$sa"
+          npm install -g firebase-tools@15 --no-fund --no-audit > /dev/null
+          apk=$(ls "$OUT"/*.apk | head -1)
+          firebase appdistribution:distribute "$apk" --app "$app_id" --groups "$groups" --release-notes-file "$notes"
+          echo "result=sent to group(s) $groups" >> "$GITHUB_OUTPUT"
+
+      - name: Remove Firebase credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/firebase-sa.json"
+
+      - name: Summary
+        if: always()
+        env:
+          LABEL: ${{ matrix.label }}
+          VERSION: ${{ steps.version.outputs.full }}
+          SIGNED: ${{ steps.signing.outputs.signed }}
+          ARTIFACT: ${{ steps.version.outputs.base }}-android
+          DIST: ${{ steps.distribute.outputs.result || 'not requested' }}
+        run: |
+          if [ "$SIGNED" = "true" ]; then kind="signed release APK + AAB (upload key)";
+          else kind="DEBUG APK (no upload key secrets). Installable for testing; not for Google Play. Each run uses a new debug key, so testers uninstall the previous build first."; fi
+          {
+            echo "### $LABEL $VERSION"
+            echo "- Build: $kind"
+            echo "- Artifact: \`$ARTIFACT\` (kept 14 days; Summary page -> Artifacts)"
+            echo "- Firebase App Distribution: $DIST"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: GitHub Release (APKs)
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/mobile-v')
+    needs: android
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "*-android"
+          path: dist
+          merge-multiple: true
+      - name: Prepare release
+        id: prep
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          ls -la dist
+          if ls dist/*-debug.apk > /dev/null 2>&1; then
+            prerelease=true
+            kind="Debug builds (the upload key was not configured). Installable for testing only."
+          else
+            prerelease=false
+            kind="Release builds signed with the Malvoya upload key."
+          fi
+          {
+            echo "Android test builds of the Malvoya apps ($TAG)."
+            echo
+            echo "$kind"
+            echo
+            echo "- \`malvoya-customer-*\`: Malvoya (customer)"
+            echo "- \`malvoya-store-*\`: Malvoya Store"
+            echo "- \`malvoya-courier-*\`: Malvoya Courier"
+            echo
+            echo "Install: open the APK on an Android phone and allow \"Install unknown apps\" for the browser or file app."
+            echo "This repository is public, so these files can be downloaded by anyone. The apps use Stripe test mode."
+          } > release-body.md
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+      # Third-party action with write access: pinned to the full commit SHA of v3.0.3.
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          name: Malvoya apps ${{ github.ref_name }}
+          body_path: release-body.md
+          prerelease: ${{ steps.prep.outputs.prerelease }}
+          files: dist/*.apk
+          fail_on_unmatched_files: true

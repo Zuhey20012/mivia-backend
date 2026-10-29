@@ -1,0 +1,354 @@
+# Malvoya iOS builds on GitHub's macOS runners (free for public repositories).
+# Owner's guide (Apple account, certificates, secrets): docs/release/README.md
+#
+# With the signing secrets: an App Store .ipa (artifact) and, when asked or on a tag, an upload to TestFlight.
+# Without them: `flutter build ios --no-codesign` as a compile check; the zipped Runner.app artifact is
+# NOT installable and only proves the app builds.
+# Secrets are never printed; they are passed through env vars, written to $RUNNER_TEMP or a temporary
+# keychain, and removed at the end.
+name: Mobile - iOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      apps:
+        description: Which apps to build
+        type: choice
+        options: [all, customer, store, courier]
+        default: all
+      testflight:
+        description: Upload the signed build to TestFlight (needs the signing and App Store Connect API secrets)
+        type: boolean
+        default: false
+  push:
+    tags: ["mobile-v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-ios-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # The same Flutter as ci.yml and the owner's machine (docs/ios/MAC-SETUP.md); every app's
+  # pubspec.lock resolves for Flutter >=3.41.0 / Dart >=3.11.0.
+  FLUTTER_VERSION: 3.41.2
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - id: plan
+        env:
+          APPS: ${{ inputs.apps || 'all' }}
+        run: |
+          all='[
+            {"app":"customer","label":"Malvoya","dir":"Malvoya_customer","bundle":"com.malvoya.customer","package":"com.malvoya.customer","key":"CUSTOMER"},
+            {"app":"store","label":"Malvoya Store","dir":"malvoya_vendor","bundle":"com.malvoya.vendor","package":"com.malvoya.vendor","key":"STORE"},
+            {"app":"courier","label":"Malvoya Courier","dir":"malvoya_courier","bundle":"com.malvoya.courier","package":"com.malvoya.courier","key":"COURIER"}
+          ]'
+          case "$APPS" in
+            all) sel="$all" ;;
+            customer|store|courier) sel=$(jq -c --arg a "$APPS" '[.[] | select(.app == $a)]' <<<"$all") ;;
+            *) echo "::error::Unknown app '$APPS'"; exit 1 ;;
+          esac
+          echo "matrix=$(jq -c '{include: .}' <<<"$sel")" >> "$GITHUB_OUTPUT"
+
+  ios:
+    name: iOS (${{ matrix.app }})
+    needs: plan
+    runs-on: macos-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # App Store Connect accepts uploads only from Xcode 26 or newer (since 2026-04-28).
+      - name: Select Xcode
+        working-directory: .
+        run: |
+          xc=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ -n "$xc" ]; then sudo xcode-select -s "$xc/Contents/Developer"
+          else echo "::warning::No Xcode 26 on this runner; using the default. App Store uploads need Xcode 26 or newer."; fi
+          xcodebuild -version
+
+      - name: Check secrets
+        id: secrets
+        working-directory: .
+        env:
+          CERT_P12: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
+          CERT_PW: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+          PROFILE: ${{ secrets[format('IOS_PROVISIONING_PROFILE_{0}_BASE64', matrix.key)] }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.APPSTORE_CONNECT_API_KEY_ID }}
+          ASC_ISSUER: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}
+          ASC_P8: ${{ secrets.APPSTORE_CONNECT_API_KEY_P8_BASE64 }}
+          KEY: ${{ matrix.key }}
+        run: |
+          missing=""; present=0
+          check() { if [ -n "$2" ]; then present=$((present+1)); else missing="$missing $1"; fi; }
+          check IOS_DIST_CERT_P12_BASE64 "$CERT_P12"
+          check IOS_DIST_CERT_PASSWORD "$CERT_PW"
+          check "IOS_PROVISIONING_PROFILE_${KEY}_BASE64" "$PROFILE"
+          check APPLE_TEAM_ID "$TEAM_ID"
+          if [ "$present" -eq 0 ]; then
+            echo "::notice::No iOS signing secrets: compile check only (unsigned, not installable). See docs/release/README.md."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          elif [ -n "$missing" ]; then
+            echo "::error::Some iOS signing secrets are set but these are missing:$missing"
+            exit 1
+          else
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "$ASC_KEY_ID" ] && [ -n "$ASC_ISSUER" ] && [ -n "$ASC_P8" ]; then echo "asc=true" >> "$GITHUB_OUTPUT"
+          else echo "asc=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Read version from pubspec.yaml
+        id: version
+        env:
+          APP: ${{ matrix.app }}
+        run: |
+          v=$(grep -m1 -E '^version:' pubspec.yaml | awk '{print $2}')
+          if [ -z "$v" ]; then echo "::error::No version: line in pubspec.yaml"; exit 1; fi
+          name="${v%%+*}"; build="${v#*+}"
+          [ "$build" = "$v" ] && build=1
+          echo "full=$v" >> "$GITHUB_OUTPUT"
+          echo "base=malvoya-$APP-$name-build$build" >> "$GITHUB_OUTPUT"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Pub get
+        run: flutter pub get
+
+      # GoogleService-Info.plist is not committed (ios/.gitignore). Without it the app still builds and
+      # runs, but hides push, Firebase phone sign-in, Google and Apple sign-in (docs/ios/MAC-SETUP.md §9).
+      - name: GoogleService-Info.plist
+        id: firebase
+        env:
+          PLIST_B64: ${{ secrets[format('GOOGLESERVICE_INFO_PLIST_{0}_BASE64', matrix.key)] }}
+          KEY: ${{ matrix.key }}
+          BUNDLE: ${{ matrix.bundle }}
+          PKG: ${{ matrix.package }}
+          APP: ${{ matrix.app }}
+        run: |
+          if [ -z "$PLIST_B64" ]; then
+            echo "::notice::GOOGLESERVICE_INFO_PLIST_${KEY}_BASE64 is not set: building without Firebase on iOS (no push, no phone/Google/Apple sign-in)."
+            echo "result=missing" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          p=ios/Runner/GoogleService-Info.plist
+          printf '%s' "$PLIST_B64" | base64 -D > "$p" || { echo "::error::GOOGLESERVICE_INFO_PLIST_${KEY}_BASE64 is not valid base64"; exit 1; }
+          plutil -lint "$p" > /dev/null || { echo "::error::GOOGLESERVICE_INFO_PLIST_${KEY}_BASE64 is not a plist"; exit 1; }
+          got=$(/usr/libexec/PlistBuddy -c 'Print :BUNDLE_ID' "$p")
+          if [ "$got" != "$BUNDLE" ]; then echo "::error::GoogleService-Info.plist is for $got, expected $BUNDLE"; exit 1; fi
+          # Add it to the Runner target's resources (Xcode only bundles files listed in the project).
+          ruby -e 'require "xcodeproj"' 2>/dev/null || gem install --user-install xcodeproj --no-document > /dev/null
+          ruby -e '
+            require "xcodeproj"
+            project = Xcodeproj::Project.open("ios/Runner.xcodeproj")
+            target = project.targets.find { |t| t.name == "Runner" }
+            group = project.main_group.find_subpath("Runner", false)
+            ref = group.files.find { |f| f.path == "GoogleService-Info.plist" } || group.new_reference("GoogleService-Info.plist")
+            target.resources_build_phase.add_file_reference(ref, true)
+            project.save
+          '
+          # Fill the non-secret values in ios/Flutter/Malvoya.xcconfig that are still "not-set"
+          # (only in this CI checkout; nothing is committed).
+          xc=ios/Flutter/Malvoya.xcconfig
+          setval() { # name value: replace only an empty or "not-set" value
+            if grep -qE "^$1 =[[:space:]]*(.*not-set)?[[:space:]]*$" "$xc"; then sed -i '' "s|^$1 =.*|$1 = $2|" "$xc"; fi
+          }
+          gid=$(/usr/libexec/PlistBuddy -c 'Print :GOOGLE_APP_ID' "$p")
+          setval FIREBASE_ENCODED_APP_ID "app-$(printf '%s' "$gid" | tr ':' '-')"
+          if [ "$APP" = "customer" ]; then
+            cid=$(/usr/libexec/PlistBuddy -c 'Print :CLIENT_ID' "$p" 2>/dev/null || true)
+            rcid=$(/usr/libexec/PlistBuddy -c 'Print :REVERSED_CLIENT_ID' "$p" 2>/dev/null || true)
+            web=$(jq -r --arg p "$PKG" '[.client[] | select(.client_info.android_client_info.package_name == $p) | .oauth_client[]? | select(.client_type == 3) | .client_id][0] // empty' android/app/google-services.json)
+            if [ -n "$cid" ] && [ -n "$rcid" ] && [ -n "$web" ]; then
+              setval GOOGLE_IOS_CLIENT_ID "$cid"
+              setval GOOGLE_REVERSED_CLIENT_ID "$rcid"
+              setval GOOGLE_SERVER_CLIENT_ID "$web"
+            else
+              echo "::notice::Google sign-in stays hidden on iPhone: CLIENT_ID/REVERSED_CLIENT_ID missing in the plist (enable Google in Firebase Authentication and download it again)."
+            fi
+          fi
+          echo "result=added" >> "$GITHUB_OUTPUT"
+
+      - name: Install signing certificate and profile
+        if: steps.secrets.outputs.signed == 'true'
+        id: signing
+        env:
+          CERT_P12: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
+          CERT_PW: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+          PROFILE: ${{ secrets[format('IOS_PROVISIONING_PROFILE_{0}_BASE64', matrix.key)] }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          BUNDLE: ${{ matrix.bundle }}
+        run: |
+          kc="$RUNNER_TEMP/malvoya-signing.keychain-db"
+          kc_pw=$(openssl rand -base64 24)
+          echo "::add-mask::$kc_pw"
+          cert="$RUNNER_TEMP/dist-cert.p12"
+          prof="$RUNNER_TEMP/profile.mobileprovision"
+          printf '%s' "$CERT_P12" | base64 -D > "$cert" || { echo "::error::IOS_DIST_CERT_P12_BASE64 is not valid base64"; exit 1; }
+          printf '%s' "$PROFILE" | base64 -D > "$prof" || { echo "::error::The provisioning profile secret is not valid base64"; exit 1; }
+
+          security create-keychain -p "$kc_pw" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$kc_pw" "$kc"
+          if ! security import "$cert" -P "$CERT_PW" -A -t cert -f pkcs12 -k "$kc" > /dev/null; then
+            echo "::error::The certificate could not be imported: wrong IOS_DIST_CERT_PASSWORD or not a .p12 file."
+            exit 1
+          fi
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kc_pw" "$kc" > /dev/null
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          rm -f "$cert"
+          identity=$(security find-identity -v -p codesigning "$kc" | grep -E '"(Apple|iPhone) Distribution' | head -1 | awk '{print $2}')
+          if [ -z "$identity" ]; then
+            echo "::error::No 'Apple Distribution' identity in the .p12 (is it a Distribution certificate with its private key?)."
+            exit 1
+          fi
+
+          # Read and check the provisioning profile
+          plist="$RUNNER_TEMP/profile.plist"
+          security cms -D -i "$prof" > "$plist"
+          uuid=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$plist")
+          pname=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$plist")
+          pteam=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$plist")
+          appid=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$plist")
+          if [ "$appid" != "$pteam.$BUNDLE" ]; then echo "::error::The provisioning profile is for $appid, expected $pteam.$BUNDLE"; exit 1; fi
+          if [ "$pteam" != "$TEAM_ID" ]; then echo "::error::The provisioning profile belongs to team $pteam, but APPLE_TEAM_ID is different."; exit 1; fi
+          if /usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "$plist" > /dev/null 2>&1; then
+            echo "::error::The provisioning profile lists devices (Development/Ad Hoc). Create an 'App Store Connect' distribution profile."
+            exit 1
+          fi
+          for d in "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$d"; cp "$prof" "$d/$uuid.mobileprovision"
+          done
+          rm -f "$prof" "$plist"
+
+          # Manual signing for the Runner target only (Malvoya.xcconfig is its base configuration).
+          {
+            echo ""
+            echo "// Added by .github/workflows/mobile-ios.yml (CI checkout only)"
+            echo "DEVELOPMENT_TEAM = $TEAM_ID"
+            echo "CODE_SIGN_STYLE = Manual"
+            echo "CODE_SIGN_IDENTITY = $identity"
+            echo "CODE_SIGN_IDENTITY[sdk=iphoneos*] = $identity"
+            echo "PROVISIONING_PROFILE_SPECIFIER = $pname"
+          } >> ios/Flutter/Malvoya.xcconfig
+
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>export</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>$identity</string>
+            <key>provisioningProfiles</key>
+            <dict><key>$BUNDLE</key><string>$uuid</string></dict>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict>
+          </plist>
+          EOF
+          plutil -lint "$RUNNER_TEMP/ExportOptions.plist"
+          echo "KEYCHAIN=$kc" >> "$GITHUB_ENV"
+
+      - name: Build (signed .ipa)
+        if: steps.secrets.outputs.signed == 'true'
+        env:
+          BASE: ${{ steps.version.outputs.base }}
+        run: |
+          flutter build ipa --release --export-options-plist="$RUNNER_TEMP/ExportOptions.plist"
+          out="$RUNNER_TEMP/out"; mkdir -p "$out"
+          ipa=$(ls build/ios/ipa/*.ipa | head -1)
+          cp "$ipa" "$out/$BASE.ipa"
+          echo "OUT=$out" >> "$GITHUB_ENV"
+          echo "ARTIFACT=$BASE-ios-appstore" >> "$GITHUB_ENV"
+
+      - name: Build (unsigned compile check)
+        if: steps.secrets.outputs.signed != 'true'
+        env:
+          BASE: ${{ steps.version.outputs.base }}
+        run: |
+          flutter build ios --release --no-codesign
+          out="$RUNNER_TEMP/out"; mkdir -p "$out"
+          ditto -c -k --keepParent build/ios/iphoneos/Runner.app "$out/$BASE-UNSIGNED-not-installable.zip"
+          printf '%s\n' \
+            "This is an UNSIGNED iOS build made only to verify that the app compiles." \
+            "It cannot be installed on an iPhone or uploaded to TestFlight." \
+            "Add the signing secrets (docs/release/README.md) to get an installable App Store build." > "$out/README.txt"
+          echo "OUT=$out" >> "$GITHUB_ENV"
+          echo "ARTIFACT=$BASE-ios-UNSIGNED-not-installable" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT }}
+          path: ${{ env.OUT }}/*
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload to TestFlight
+        id: testflight
+        if: steps.secrets.outputs.signed == 'true' && (github.event_name == 'push' || inputs.testflight)
+        env:
+          ASC: ${{ steps.secrets.outputs.asc }}
+          ASC_KEY_ID: ${{ secrets.APPSTORE_CONNECT_API_KEY_ID }}
+          ASC_ISSUER: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}
+          ASC_P8: ${{ secrets.APPSTORE_CONNECT_API_KEY_P8_BASE64 }}
+          BASE: ${{ steps.version.outputs.base }}
+        run: |
+          if [ "$ASC" != "true" ]; then
+            echo "::notice::TestFlight upload skipped: APPSTORE_CONNECT_API_KEY_ID, APPSTORE_CONNECT_ISSUER_ID and APPSTORE_CONNECT_API_KEY_P8_BASE64 are needed."
+            echo "result=skipped (no App Store Connect API key)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # altool looks for the key as ~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8
+          d="$HOME/.appstoreconnect/private_keys"; mkdir -p "$d"
+          printf '%s' "$ASC_P8" | base64 -D > "$d/AuthKey_$ASC_KEY_ID.p8"
+          xcrun altool --upload-app -f "$OUT/$BASE.ipa" -t ios --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER"
+          echo "result=uploaded (appears in App Store Connect -> TestFlight after processing)" >> "$GITHUB_OUTPUT"
+
+      - name: Clean up signing material
+        if: always()
+        run: |
+          [ -n "$KEYCHAIN" ] && security delete-keychain "$KEYCHAIN" 2>/dev/null || true
+          rm -rf "$HOME/.appstoreconnect/private_keys"
+          rm -f "$RUNNER_TEMP/dist-cert.p12" "$RUNNER_TEMP/profile.mobileprovision" "$RUNNER_TEMP/profile.plist" "$RUNNER_TEMP/ExportOptions.plist"
+          rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/"*.mobileprovision
+          rm -f ios/Runner/GoogleService-Info.plist
+
+      - name: Summary
+        if: always()
+        env:
+          LABEL: ${{ matrix.label }}
+          VERSION: ${{ steps.version.outputs.full }}
+          SIGNED: ${{ steps.secrets.outputs.signed }}
+          FIREBASE: ${{ steps.firebase.outputs.result }}
+          TF: ${{ steps.testflight.outputs.result || 'not requested' }}
+        run: |
+          if [ "$SIGNED" = "true" ]; then kind="signed App Store .ipa"; else kind="UNSIGNED compile check (not installable; add the signing secrets for a real build)"; fi
+          if [ "$FIREBASE" = "added" ]; then fb="included"; else fb="not included (no push / Firebase sign-in on iPhone)"; fi
+          {
+            echo "### $LABEL $VERSION (iOS)"
+            echo "- Build: $kind"
+            echo "- Artifact: \`${ARTIFACT:-none}\` (kept 14 days)"
+            echo "- GoogleService-Info.plist: $fb"
+            echo "- TestFlight: $TF"
+          } >> "$GITHUB_STEP_SUMMARY"
