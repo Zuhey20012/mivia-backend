@@ -188,12 +188,13 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
     }
   }
 
-  Future<String?> register(String name, String email, String password, [String? _]) async {
+  /// [ageConfirmed]: the person ticked "I am 18 or older" (API 2.16 refuses registration without it).
+  Future<String?> register(String name, String email, String password, [String? _, bool ageConfirmed = false]) async {
     try {
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/register'),
               headers: {'Content-Type': 'application/json', ...AppLanguage.headers},
-              body: jsonEncode({'name': name.trim(), 'email': email.trim(), 'password': password, 'role': kAppRole, 'acceptTerms': true}))
+              body: jsonEncode({'name': name.trim(), 'email': email.trim(), 'password': password, 'role': kAppRole, 'acceptTerms': true, if (ageConfirmed) 'ageConfirmed': true}))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 201) return await _applySession(jsonDecode(res.body), withPassword: true);
       return _errorFrom(res, 'Registration failed. Please try again.');

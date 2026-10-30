@@ -19,10 +19,12 @@ const PAGES: Record<string, { title: string; doc?: LegalDoc; file?: string }> = 
   sellers: { title: "Seller Terms", doc: "seller-terms" },
   couriers: { title: "Courier Agreement", doc: "courier-agreement" },
   "delete-account": { title: "Delete your account", file: "account_deletion.md" },
+  // How rights holders report copyright / trademark infringement, sellers' counter-notice, repeat infringers (2.16.0)
+  "ip-notice": { title: "Copyright & trademark", file: "ip_notice.md" },
 };
 // Other names the apps use for the same pages
 const ALIASES: Record<string, string> = {
-  "vendor-terms": "sellers", "seller-terms": "sellers", "courier-agreement": "couriers", "account-deletion": "delete-account",
+  "vendor-terms": "sellers", "seller-terms": "sellers", "courier-agreement": "couriers", "account-deletion": "delete-account", "copyright": "ip-notice", "ip": "ip-notice",
 };
 
 const fileCache = new Map<string, string>();

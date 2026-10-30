@@ -10,6 +10,9 @@ library;
 
 export 'src/agreements/agreements_api.dart';
 export 'src/api/api_client.dart';
+export 'src/crash/crash_backend.dart';
+export 'src/crash/crash_reporting.dart';
+export 'src/crash/crash_scrubber.dart';
 export 'src/format/dates.dart';
 export 'src/format/money.dart';
 export 'src/i18n/app_language.dart';

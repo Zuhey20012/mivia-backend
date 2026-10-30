@@ -1,4 +1,5 @@
 import { Router, Response } from "express";
+import { readIpNotice } from "../../lib/ipNotice";
 import { z } from "zod";
 import { auth, optionalAuth, requireRole, AuthRequest } from "../../middleware/auth";
 import { sendError, positiveId } from "../../lib/errors";
@@ -169,13 +170,16 @@ router.post("/drops/:id(\\d+)/share", optionalAuth, async (req: AuthRequest, res
 const reportSchema = z.object({
   reason: z.enum(drops.REPORT_REASONS),
   details: z.string().max(1000).optional(),
+  ipNotice: z.unknown().optional(),
 });
 
 router.post("/drops/:id(\\d+)/report", optionalAuth, async (req: AuthRequest, res: Response) => {
   const body = reportSchema.safeParse(req.body);
   if (!body.success) return res.status(400).json({ ok: false, error: "Choose a reason" });
+  const ip = readIpNotice(body.data.reason, body.data.ipNotice);
+  if (!ip.ok) return res.status(400).json({ ok: false, code: "IP_NOTICE_REQUIRED", error: ip.error });
   try {
-    res.json({ ok: true, ...(await drops.report(Number(req.params.id), req.user?.id ?? null, body.data.reason, body.data.details)) });
+    res.json({ ok: true, ...(await drops.report(Number(req.params.id), req.user?.id ?? null, body.data.reason, body.data.details, ip.value)) });
   } catch (e) { sendError(res, e); }
 });
 

@@ -37,6 +37,8 @@ class _AgreementSheet extends StatefulWidget {
 class _AgreementSheetState extends State<_AgreementSheet> {
   late AgreementPrompt _prompt = widget.prompt;
   bool _checked = false;
+  /// "I am 18 or older", asked when [AgreementPrompt.ageRequired]
+  bool _ageChecked = false;
   bool _busy = false;
   bool _retried = false;
   String? _error;
@@ -81,8 +83,10 @@ class _AgreementSheetState extends State<_AgreementSheet> {
     }
   }
 
+  bool get _ready => _checked && (!_prompt.ageRequired || _ageChecked);
+
   Future<void> _accept() async {
-    if (!_checked || _busy) return;
+    if (!_ready || _busy) return;
     Haptics.medium();
     setState(() {
       _busy = true;
@@ -90,7 +94,7 @@ class _AgreementSheetState extends State<_AgreementSheet> {
       _notice = null;
     });
     final auth = context.read<AuthService>();
-    final res = await AgreementsApi(ApiClient(auth)).accept(_prompt.doc, _prompt.version);
+    final res = await AgreementsApi(ApiClient(auth)).accept(_prompt.doc, _prompt.version, ageConfirmed: _prompt.ageRequired);
     if (!mounted) return;
     if (res.ok) {
       final emailed = res.emailed;
@@ -108,11 +112,17 @@ class _AgreementSheetState extends State<_AgreementSheet> {
       final item = Agreements.instance.itemFor(_prompt.doc);
       if (item != null) {
         final wantsPending = _prompt.pending && item['pendingVersion'] != null;
-        if (wantsPending ? item['pendingAccepted'] == true : item['accepted'] == true) {
+        if ((wantsPending ? item['pendingAccepted'] == true : item['accepted'] == true) && !_prompt.ageRequired) {
           Navigator.pop(context, const _Accepted(false, null));
           return;
         }
-        final fresh = Agreements.instance.promptFor(item, pending: wantsPending);
+        final promptFresh = Agreements.instance.promptFor(item, pending: wantsPending);
+        final fresh = _prompt.ageRequired && !promptFresh.ageRequired
+            ? AgreementPrompt(
+                doc: promptFresh.doc, version: promptFresh.version, title: promptFresh.title, url: promptFresh.url,
+                summary: promptFresh.summary, effectiveAt: promptFresh.effectiveAt, pending: promptFresh.pending,
+                isUpdate: promptFresh.isUpdate, blocking: promptFresh.blocking, ageRequired: true)
+            : promptFresh;
         if (fresh.version == _prompt.version) {
           setState(() => _busy = false);
           return _accept();
@@ -276,6 +286,34 @@ class _AgreementSheetState extends State<_AgreementSheet> {
                 title: Text(checkboxText, style: TextStyle(fontSize: MTextSize.bodyM, fontWeight: FontWeight.w600, color: textPrimary)),
               ),
             ),
+            if (p.ageRequired) ...[
+              Text(
+                tr(context, 'Malvoya is for adults. Please also confirm your age.', 'Malvoya on aikuisille. Vahvista myös ikäsi.'),
+                style: TextStyle(fontSize: MTextSize.label, height: 1.35, color: textSecondary),
+              ),
+              Material(
+                color: Colors.transparent,
+                child: CheckboxListTile(
+                  key: const Key('agreement-age-confirm'),
+                  value: _ageChecked,
+                  onChanged: _busy
+                      ? null
+                      : (v) {
+                          Haptics.selection();
+                          setState(() {
+                            _ageChecked = v ?? false;
+                            if (_ageChecked) _error = null;
+                          });
+                        },
+                  controlAffinity: ListTileControlAffinity.leading,
+                  contentPadding: EdgeInsets.zero,
+                  activeColor: AppTheme.primary,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusSm)),
+                  title: Text(tr(context, 'I am 18 or older', 'Olen vähintään 18-vuotias'),
+                      style: TextStyle(fontSize: MTextSize.bodyM, fontWeight: FontWeight.w600, color: textPrimary)),
+                ),
+              ),
+            ],
             if (_notice != null) ...[
               const SizedBox(height: 6),
               Text(_notice!, style: const TextStyle(fontSize: MTextSize.label, height: 1.35, color: MPalette.amberInk)),
@@ -287,7 +325,7 @@ class _AgreementSheetState extends State<_AgreementSheet> {
             const SizedBox(height: 14),
             SizedBox(
               width: double.infinity,
-              child: MButton(label: acceptText, loading: _busy, onPressed: _checked && !_busy ? _accept : null),
+              child: MButton(label: acceptText, loading: _busy, onPressed: _ready && !_busy ? _accept : null),
             ),
             const SizedBox(height: 6),
             SizedBox(

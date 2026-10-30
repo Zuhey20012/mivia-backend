@@ -221,7 +221,8 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
   }
 
   /// Creates a courier account. [acceptTerms] records that the courier accepted the courier agreement.
-  Future<String?> register(String name, String email, String password, {required bool acceptTerms}) async {
+  /// [ageConfirmed]: "I am 18 or older" (API 2.16 refuses registration without it).
+  Future<String?> register(String name, String email, String password, {required bool acceptTerms, bool ageConfirmed = false}) async {
     try {
       final res = await http
           .post(Uri.parse('${AppConstants.apiBase}/auth/register'),
@@ -232,6 +233,7 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
                 'password': password,
                 'role': kAppRole,
                 if (acceptTerms) 'acceptTerms': true,
+                if (ageConfirmed) 'ageConfirmed': true,
               }))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 201) return await _applySession(jsonDecode(res.body), signIn: true);

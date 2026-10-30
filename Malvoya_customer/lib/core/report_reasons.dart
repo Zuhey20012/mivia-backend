@@ -8,7 +8,9 @@ const reportReasons = {
   'VIOLENCE': ['Violence', 'Väkivalta'],
   'HATE': ['Hate speech', 'Vihapuhe'],
   'HARASSMENT': ['Harassment', 'Häirintä'],
-  'IP_INFRINGEMENT': ['Uses someone else\'s content or brand', 'Loukkaa tekijän- tai tavaramerkkioikeutta'],
+  // Copyright and trademark notices ask for the DSA Art. 16(2) details (widgets/ip_notice_form.dart, API 2.16)
+  'COPYRIGHT': ['Copyright: uses my work', 'Tekijänoikeus: käyttää teostani'],
+  'TRADEMARK': ['Trademark: uses my brand', 'Tavaramerkki: käyttää tavaramerkkiäni'],
   'MINOR_SAFETY': ['Child safety', 'Lasten turvallisuus'],
   'OTHER': ['Something else', 'Jokin muu'],
 };

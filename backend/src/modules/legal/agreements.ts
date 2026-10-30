@@ -89,6 +89,22 @@ export async function missingAgreement(userId: number, role: string) {
 }
 
 /**
+ * True when the account has not confirmed being 18 or older (since 2.16.0). Accounts made by /register confirmed it there;
+ * Google, phone, Apple and email-code accounts (and accounts from before 2.16) confirm it once with
+ * POST /me/agreements/accept {ageConfirmed: true}. Admins are never asked.
+ */
+export async function ageConfirmationMissing(userId: number, role: string) {
+  if (role === "ADMIN") return false;
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { ageConfirmedAt: true } });
+  return !!u && !u.ageConfirmedAt;
+}
+
+export const AGE_CONFIRMATION_TEXT = {
+  en: "Please confirm that you are 18 or older to continue.",
+  fi: "Vahvista, että olet vähintään 18-vuotias, jotta voit jatkaa.",
+};
+
+/**
  * Refuses a role-critical action with 428 AGREEMENT_REQUIRED until the user has accepted the version in force of their
  * agreement: a store accepting orders or publishing products, a courier going online or taking jobs, a customer
  * placing an order. `when` limits it to the requests that are such an action. Reading, support, payouts, data export
@@ -98,11 +114,28 @@ export function requireAgreement(when?: (req: AuthRequest) => boolean) {
   return async (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user || req.user.role === "ADMIN" || (when && !when(req))) return next();
     try {
-      const missing = await missingAgreement(req.user.id, req.user.role);
-      if (!missing) return next();
-      const def = LEGAL_DOCS[missing.doc];
+      const [missing, ageMissing] = await Promise.all([missingAgreement(req.user.id, req.user.role), ageConfirmationMissing(req.user.id, req.user.role)]);
+      if (!missing && !ageMissing) return next();
       const fi = localeFromHeader(req.headers["accept-language"]) === "fi";
+      if (!missing) {
+        // Only the age confirmation is missing: the app shows its agreement sheet for the role's own document (already
+        // accepted) with the "I am 18 or older" box, and accepts it again with ageConfirmed: true (idempotent)
+        const doc = mainDocForRole(req.user.role);
+        const { current } = await legalState(doc);
+        return res.status(428).json({
+          ok: false,
+          error: fi ? AGE_CONFIRMATION_TEXT.fi : AGE_CONFIRMATION_TEXT.en,
+          code: "AGREEMENT_REQUIRED",
+          ageConfirmationRequired: true,
+          doc,
+          version: current?.version ?? null,
+          title: LEGAL_DOCS[doc].title,
+          url: docUrl(doc, current?.version),
+        });
+      }
+      const def = LEGAL_DOCS[missing.doc];
       res.status(428).json({
+        ageConfirmationRequired: ageMissing,
         ok: false,
         error: missing.changed
           ? (fi
@@ -182,7 +215,7 @@ async function emailCopy(a: AcceptanceRow) {
   if (!copy.email) return false;
   const html = `<div style="font-family:-apple-system,system-ui,'Segoe UI',sans-serif;max-width:720px;margin:0 auto;color:#17131C;line-height:1.55">${copy.body}</div>`;
   // `sensitive` keeps the long text out of development logs (it is not secret)
-  const r = await sendEmail(copy.email, `Malvoya – ${copy.title}`, html, copy.plain, { sensitive: true });
+  const r = await sendEmail(copy.email, `Malvoya – ${copy.title}`, html, copy.plain, { sensitive: true, kind: "legal", locale });
   return r.delivered;
 }
 
@@ -245,7 +278,14 @@ export async function agreementsFor(userId: number, role: string) {
       } : {}),
     });
   }
-  return { required, history: history.map(presentAcceptance) };
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { ageConfirmedAt: true } });
+  return {
+    required,
+    history: history.map(presentAcceptance),
+    // "I am 18 or older" (2.16.0): shown as a required box in the agreement sheet while this is true
+    ageConfirmationRequired: role !== "ADMIN" && !user?.ageConfirmedAt,
+    ageConfirmedAt: user?.ageConfirmedAt ?? null,
+  };
 }
 
 // ─── Routes (mounted under /api/v1 through me.routes) ────────────────────────
@@ -258,7 +298,17 @@ agreementRoutes.get("/me/agreements", auth, async (req: AuthRequest, res: Respon
   } catch (e) { sendError(res, e); }
 });
 
-const acceptSchema = z.object({ doc: z.string().min(1).max(40), version: z.string().min(3).max(120) });
+const acceptSchema = z.object({
+  doc: z.string().min(1).max(40).optional(),
+  version: z.string().min(3).max(120).optional(),
+  // "I am 18 or older" (2.16.0): sent with the role's document, or on its own
+  ageConfirmed: z.boolean().optional(),
+}).refine((d) => (d.doc && d.version) || d.ageConfirmed === true, { message: "doc and version are required" });
+
+/** Stores the age confirmation once (the first time counts). */
+async function confirmAge(userId: number) {
+  await prisma.user.updateMany({ where: { id: userId, ageConfirmedAt: null }, data: { ageConfirmedAt: new Date() } });
+}
 
 /**
  * Accepts the version in force or the announced one of one of the user's documents. Idempotent: accepting again
@@ -268,6 +318,13 @@ agreementRoutes.post("/me/agreements/accept", auth, async (req: AuthRequest, res
   const body = acceptSchema.safeParse(req.body);
   if (!body.success) return res.status(400).json({ ok: false, error: "doc and version are required" });
   try {
+    if (!body.data.doc || !body.data.version) {
+      await confirmAge(req.user!.id);
+      // Only the age confirmation
+      const { checkReadyForApproval } = await import("../onboarding/onboarding");
+      checkReadyForApproval(req.user!.id, req.user!.role).catch(() => {});
+      return res.json({ ok: true, ageConfirmed: true });
+    }
     const doc = docFromParam(body.data.doc);
     if (!doc || !docsForRole(req.user!.role).includes(doc)) throw new ApiError("This document is not one your account accepts", 400);
     const { current, pending } = await legalState(doc);
@@ -297,13 +354,17 @@ agreementRoutes.post("/me/agreements/accept", auth, async (req: AuthRequest, res
         await prisma.user.update({ where: { id: userId }, data: { termsAcceptedAt: row.acceptedAt, termsVersion: version } });
       }
     }
+    if (body.data.ageConfirmed === true) await confirmAge(userId);
     const emailed = created ? await emailCopy(row).catch(() => false) : false;
-    if (created) {
+    if (created || body.data.ageConfirmed === true) {
       // Onboarding: the agreement step may have been the last one before approval
       const { checkReadyForApproval } = await import("../onboarding/onboarding");
       checkReadyForApproval(userId, req.user!.role).catch(() => {});
     }
-    res.status(created ? 201 : 200).json({ ok: true, acceptance: presentAcceptance(row), alreadyAccepted: !created, emailed });
+    res.status(created ? 201 : 200).json({
+      ok: true, acceptance: presentAcceptance(row), alreadyAccepted: !created, emailed,
+      ageConfirmed: !(await ageConfirmationMissing(userId, req.user!.role)),
+    });
   } catch (e) { sendError(res, e); }
 });
 

@@ -45,7 +45,7 @@ router.post("/support", supportLimiter, optionalAuth, async (req: AuthRequest, r
 
     const text = `Support request #${request.id} (${body.data.app})\nFrom: ${email}${req.user ? ` (user ${req.user.id})` : ""}\n` +
       `${body.data.orderId ? `Order: #${body.data.orderId}\n` : ""}Topic: ${body.data.topic}\n\n${body.data.message}`;
-    if (SUPPORT_EMAIL) sendEmail(SUPPORT_EMAIL, `Malvoya support #${request.id}: ${body.data.topic}`, `<pre style="font-family:inherit;white-space:pre-wrap">${escapeHtml(text)}</pre>`, text).catch(() => {});
+    if (SUPPORT_EMAIL) sendEmail(SUPPORT_EMAIL, `Malvoya support #${request.id}: ${body.data.topic}`, `<pre style="font-family:inherit;white-space:pre-wrap">${escapeHtml(text)}</pre>`, text, { kind: "internal" }).catch(() => {});
     const locale = req.user ? await localeOfUser(req.user.id) : localeFromHeader(req.headers["accept-language"]) ?? "en";
     sendSupportAck(email, request.id, locale).catch(() => {});
 

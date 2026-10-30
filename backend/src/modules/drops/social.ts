@@ -1,4 +1,5 @@
 import { Router, Response } from "express";
+import { readIpNotice } from "../../lib/ipNotice";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { ApiError, positiveId, sendError } from "../../lib/errors";
@@ -111,12 +112,12 @@ export async function deleteComment(dropId: number, commentId: number, user: { i
 }
 
 /** DSA notice: three distinct reporters hide the comment until an admin decides. */
-export async function reportComment(dropId: number, commentId: number, reporterId: number, reason: string) {
+export async function reportComment(dropId: number, commentId: number, reporterId: number, reason: string, ipNotice?: object | null) {
   const comment = await prisma.dropComment.findFirst({ where: { id: commentId, dropId, status: "VISIBLE" }, select: { id: true, userId: true } });
   if (!comment) throw new ApiError("Comment not found", 404);
   if (comment.userId === reporterId) throw new ApiError("You cannot report your own comment", 400);
   try {
-    await prisma.dropCommentReport.create({ data: { commentId, reporterId, reason } });
+    await prisma.dropCommentReport.create({ data: { commentId, reporterId, reason, ...(ipNotice ? { ipNotice } : {}) } });
   } catch (e: any) {
     if (e?.code === "P2002") return { reported: true }; // already reported by this user
     throw e;
@@ -132,7 +133,7 @@ export async function adminReportedComments() {
     select: {
       id: true, dropId: true, body: true, status: true, reportCount: true, createdAt: true,
       user: { select: { id: true, name: true } },
-      reports: { select: { reason: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 10 },
+      reports: { select: { reason: true, ipNotice: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 10 },
     },
     orderBy: [{ reportCount: "desc" }, { id: "desc" }],
     take: 100,
@@ -213,10 +214,12 @@ socialRoutes.delete("/drops/:id(\\d+)/comments/:commentId(\\d+)", auth, async (r
 });
 
 socialRoutes.post("/drops/:id(\\d+)/comments/:commentId(\\d+)/report", auth, async (req: AuthRequest, res: Response) => {
-  const body = z.object({ reason: z.enum(REPORT_REASONS) }).safeParse(req.body);
+  const body = z.object({ reason: z.enum(REPORT_REASONS), ipNotice: z.unknown().optional() }).safeParse(req.body);
   if (!body.success) return res.status(400).json({ ok: false, error: "Choose a reason" });
+  const ip = readIpNotice(body.data.reason, body.data.ipNotice);
+  if (!ip.ok) return res.status(400).json({ ok: false, code: "IP_NOTICE_REQUIRED", error: ip.error });
   try {
-    res.json({ ok: true, ...(await reportComment(positiveId(req.params.id)!, positiveId(req.params.commentId)!, req.user!.id, body.data.reason)) });
+    res.json({ ok: true, ...(await reportComment(positiveId(req.params.id)!, positiveId(req.params.commentId)!, req.user!.id, body.data.reason, ip.value)) });
   } catch (e) { sendError(res, e); }
 });
 

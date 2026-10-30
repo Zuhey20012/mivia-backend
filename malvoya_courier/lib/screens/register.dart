@@ -19,6 +19,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _loading = false;
   bool _obscurePass = true;
   bool _agreed = false;
+  /// "I am 18 or older" (Courier Agreement §3; required by the server)
+  bool _ageConfirmed = false;
   String? _error;
 
   @override
@@ -38,6 +40,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
       setState(() => _error = tr(context, 'Accept the courier agreement to send your application.', 'Hyväksy lähettisopimus lähettääksesi hakemuksen.'));
       return;
     }
+    if (!_ageConfirmed) {
+      setState(() => _error = tr(context, 'Please confirm that you are 18 or older.', 'Vahvista, että olet vähintään 18-vuotias.'));
+      return;
+    }
     setState(() { _loading = true; _error = null; });
     final auth = Provider.of<AuthService>(context, listen: false);
     final err = await auth.register(
@@ -45,6 +51,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _emailCtrl.text.trim(),
       _passCtrl.text,
       acceptTerms: _agreed,
+      ageConfirmed: _ageConfirmed,
     );
     // On success the app closes this screen itself and its home shows the pending-approval screen
     if (mounted && err != null) setState(() { _error = err; _loading = false; });
@@ -147,6 +154,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   style: const TextStyle(fontSize: MTextSize.bodyL, fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
                 ),
               ),
+              // Required: couriers must be adults (Courier Agreement §3)
+              CheckboxListTile(
+                key: const Key('register-age-confirm'),
+                value: _ageConfirmed,
+                onChanged: _loading ? null : (v) => setState(() { _ageConfirmed = v ?? false; if (_ageConfirmed) _error = null; }),
+                controlAffinity: ListTileControlAffinity.leading,
+                contentPadding: EdgeInsets.zero,
+                activeColor: AppTheme.primary,
+                title: Text(
+                  tr(context, 'I am 18 or older', 'Olen vähintään 18-vuotias'),
+                  style: const TextStyle(fontSize: MTextSize.bodyL, fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
+                ),
+              ),
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
@@ -156,7 +176,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
               ),
               const SizedBox(height: MSpace.xl),
-              MButton(label: tr(context, 'Send application', 'Lähetä hakemus'), expand: true, loading: _loading, onPressed: _agreed ? _handleRegister : null),
+              MButton(label: tr(context, 'Send application', 'Lähetä hakemus'), expand: true, loading: _loading, onPressed: _agreed && _ageConfirmed ? _handleRegister : null),
               const SizedBox(height: MSpace.x3l),
             ],
           ),

@@ -37,7 +37,7 @@ class Agreements {
   /// was accepted, so the caller can retry straight away.
   static Future<bool> resolve(BuildContext context, AuthService auth, AgreementRequired need) async {
     HapticFeedback.selectionClick();
-    final result = await _show(context, auth, doc: need.doc, version: need.version, title: need.title, url: need.url, blocking: true);
+    final result = await _show(context, auth, doc: need.doc, version: need.version, title: need.title, url: need.url, blocking: true, ageRequired: need.ageConfirmationRequired);
     if (result == null || !context.mounted) return false;
     _confirmed(context, need.doc, result.emailed);
     return true;
@@ -77,7 +77,8 @@ class Agreements {
       if (state.unsupported) await openDocument(null, doc);
       return false;
     }
-    if (d.accepted && !d.hasOpenUpdate) return true;
+    // Accepted, but "I am 18 or older" not confirmed yet (API 2.16): the sheet asks for it with the agreement
+    if (d.accepted && !d.hasOpenUpdate && !state.ageConfirmationRequired) return true;
     return review(context, auth, d);
   }
 
@@ -110,6 +111,7 @@ class Agreements {
     required bool blocking,
     DateTime? pendingAt,
     Map? changeSummary,
+    bool ageRequired = false,
   }) =>
       showMSheet<_AcceptResult>(context, builder: (_) => _AgreementSheet(
           auth: auth,
@@ -120,6 +122,7 @@ class Agreements {
           blocking: blocking,
           pendingAt: pendingAt,
           changeSummary: changeSummary,
+          ageRequired: ageRequired,
         ), isScrollControlled: true, useSafeArea: false);
 }
 
@@ -138,6 +141,8 @@ class _AgreementSheet extends StatefulWidget {
   /// Set for an announced version: when it takes effect.
   final DateTime? pendingAt;
   final Map? changeSummary;
+  /// Also ask "I am 18 or older" (API 2.16: social sign-ups and older accounts)
+  final bool ageRequired;
 
   const _AgreementSheet({
     required this.auth,
@@ -148,6 +153,7 @@ class _AgreementSheet extends StatefulWidget {
     this.url,
     this.pendingAt,
     this.changeSummary,
+    this.ageRequired = false,
   });
 
   @override
@@ -164,10 +170,13 @@ class _AgreementSheetState extends State<_AgreementSheet> {
   bool _changed = false;
   bool _firstVersion = false;
   bool _checked = false;
+  late bool _ageRequired = widget.ageRequired;
+  bool _ageChecked = false;
   bool _accepting = false;
   String? _error;
 
   bool get _pending => _pendingAt != null;
+  bool get _ready => _checked && (!_ageRequired || _ageChecked);
   bool get _privacy => widget.doc == 'privacy';
   ApiClient get _api => ApiClient(widget.auth);
 
@@ -195,17 +204,18 @@ class _AgreementSheetState extends State<_AgreementSheet> {
         _firstVersion = list.length <= 1 || list.last.version == _version;
       }
       if (mine.ok) _changed = mine.acceptedEarlier(widget.doc, _version);
+      if (mine.ok && mine.ageConfirmationRequired && !_privacy && !_pending) _ageRequired = true;
     });
   }
 
   Future<void> _accept() async {
-    if (!_checked || _accepting) return;
+    if (!_ready || _accepting) return;
     HapticFeedback.mediumImpact();
     setState(() {
       _accepting = true;
       _error = null;
     });
-    final res = await AgreementsApi(_api).accept(widget.doc, _version);
+    final res = await AgreementsApi(_api).accept(widget.doc, _version, ageConfirmed: _ageRequired);
     if (!mounted) return;
     if (res.ok) {
       Navigator.pop(context, _AcceptResult(res.emailed));
@@ -361,6 +371,21 @@ class _AgreementSheetState extends State<_AgreementSheet> {
                 title: Text(checkLabel, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: MTextSize.bodyM)),
               ),
             ),
+            if (_ageRequired) ...[
+              const SizedBox(height: MSpace.sm),
+              Material(
+                color: AppTheme.sand,
+                borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                child: CheckboxListTile(
+                  key: const Key('agreement-age-confirm'),
+                  value: _ageChecked,
+                  onChanged: _accepting ? null : (v) => setState(() => _ageChecked = v == true),
+                  controlAffinity: ListTileControlAffinity.leading,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
+                  title: Text(tr(context, 'I am 18 or older', 'Olen vähintään 18-vuotias'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: MTextSize.bodyM)),
+                ),
+              ),
+            ],
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(top: 10),
@@ -369,7 +394,7 @@ class _AgreementSheetState extends State<_AgreementSheet> {
             const SizedBox(height: MSpace.md),
             SizedBox(
               width: double.infinity,
-              child: MButton(label: _privacy ? tr(context, 'Mark as read', 'Merkitse luetuksi') : tr(context, 'Accept', 'Hyväksy'), loading: _accepting, onPressed: _checked && !_accepting ? _accept : null),
+              child: MButton(label: _privacy ? tr(context, 'Mark as read', 'Merkitse luetuksi') : tr(context, 'Accept', 'Hyväksy'), loading: _accepting, onPressed: _ready && !_accepting ? _accept : null),
             ),
             const SizedBox(height: MSpace.xs),
             Center(

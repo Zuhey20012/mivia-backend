@@ -1390,6 +1390,22 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
             busy: busy != null,
           ),
         ),
+      // The withdrawal function (KSL 6:14 a, API 2.16): business sellers only, while the period lasts
+      if (status == 'DELIVERED' && o['withdrawal'] is Map && o['withdrawal']['available'] == true)
+        _button(Icons.assignment_turned_in_outlined, tr(context, 'Withdraw from contract here', 'Peru sopimus tästä'), () async {
+          await Navigator.push(context, MaterialPageRoute(builder: (_) => ReturnsScreen(order: o, withdrawal: true)));
+          if (mounted) _load();
+        }, primary: true),
+      if (status == 'DELIVERED' && withinReturn && o['withdrawal'] is Map && o['withdrawal']['reason'] == 'private_seller')
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Text(
+            tr(context,
+                'This seller is a private person, so the legal right of withdrawal does not apply. You can still send a return request below.',
+                'Myyjä on yksityishenkilö, joten lakisääteinen peruuttamisoikeus ei koske tätä ostoa. Voit silti lähettää palautuspyynnön alta.'),
+            style: TextStyle(fontSize: MTextSize.label, height: 1.4, color: AppTheme.secondaryText(context)),
+          ),
+        ),
       if (status == 'DELIVERED' && withinReturn)
         _button(Icons.assignment_return_outlined, tr(context, 'Return items', 'Palauta tuotteita'),
             () async {

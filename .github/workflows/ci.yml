@@ -55,6 +55,26 @@ jobs:
         if: failure()
         run: tail -200 api.log || true
 
+  # Privacy guard (2.16): no font, analytics or session-replay service that would send visitors' IP addresses or
+  # behaviour to a third party without consent (GDPR; Act on Electronic Communications Services 917/2014 §205;
+  # docs/compliance/litigation-risk-shield.md). Fonts are bundled. Fails the build when any of them appears.
+  privacy-guard:
+    name: No remote fonts, analytics or session replay
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Search the web site, admin panel, API and the apps
+        run: |
+          # "clarity" is matched only in its script forms, so ordinary prose ("for clarity") does not trip it
+          PATTERN='fonts\.googleapis|fonts\.gstatic|hotjar|fullstory|clarity\.ms|ms-clarity|microsoft[ ._-]?clarity|window\.clarity|clarity\(|posthog|mixpanel|gtag|google-analytics|googletagmanager|smartlook|logrocket'
+          DIRS="web/src malvoya_admin/src backend/src Malvoya_customer/lib malvoya_vendor/lib malvoya_courier/lib packages/malvoya_core/lib packages/malvoya_ui/lib"
+          if grep -rnIiE "$PATTERN" $DIRS; then
+            echo "::error::Remote fonts, analytics or session-replay code found (see the lines above). Bundle fonts locally and do not add trackers without a consent design and a privacy review."
+            exit 1
+          fi
+          echo "No remote fonts, analytics or session-replay scripts."
+
   admin:
     name: Admin build
     runs-on: ubuntu-latest

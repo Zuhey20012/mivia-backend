@@ -4,6 +4,8 @@ import { env } from "../config/env";
 import { formatCents } from "../utils/pricing";
 import { Locale, Text, localeOfEmail, pick, t } from "../lib/i18n";
 import { defineJob, enqueue, queueIsRemote } from "../lib/queue";
+import { prisma } from "../lib/prisma";
+import { unsubscribeHeaders, unsubscribeUrl } from "../lib/unsubscribe";
 
 const logger = pino({ name: "Notifications" });
 
@@ -13,6 +15,57 @@ export interface DeliveryResult {
   simulated?: boolean;
   /** true when the email was handed to the background queue (REDIS_URL set); it is sent with retries */
   queued?: boolean;
+  /** An optional email was not sent because the account switched optional emails off */
+  skipped?: "opted_out";
+}
+
+// ─── Which emails are which (2.16.0) ────────────────────────────────────────
+//
+// Transactional (always sent; each carries a one-line footer saying why it was sent):
+//   account  – sign-in and password-reset codes, "no password needed", two-step sign-in notices
+//   order    – order confirmation, status and cancellation emails, withdrawal acknowledgements
+//   legal    – agreement copies, legal-text change notices (P2B / Terms changes)
+//   recall   – product-safety recall notices to buyers and the store
+//   seller   – store/courier approval, DAC7 tax-detail reminders, statements of reasons (drop, live, listing removed),
+//              payout matters
+//   support  – "we got your message"
+//   report   – the outcome of a notice the person sent (DSA Art. 16(5))
+//   internal – messages to the Malvoya team only (support inbox, admins); no footer
+// Optional (sendOptionalEmail: unsubscribe link in the footer, List-Unsubscribe + List-Unsubscribe-Post headers,
+// never sent once User.emailMarketingOptOutAt is set):
+//   launch alerts ("Malvoya is open near you"); any future referral, promo or newsletter email must use it too.
+export type EmailKind = "account" | "order" | "legal" | "recall" | "seller" | "support" | "report" | "internal";
+
+const WHY: Record<Exclude<EmailKind, "internal">, Text> = {
+  account: t("You received this service message because it concerns the security of your Malvoya account.",
+    "Saat tämän palveluviestin, koska se koskee Malvoya-tilisi turvallisuutta."),
+  order: t("You received this service message because it concerns an order you placed on Malvoya.",
+    "Saat tämän palveluviestin, koska se koskee Malvoyassa tekemääsi tilausta."),
+  legal: t("You received this service message because it concerns an agreement between you and Malvoya.",
+    "Saat tämän palveluviestin, koska se koskee sinun ja Malvoyan välistä sopimusta."),
+  recall: t("You received this safety notice because it concerns a product you bought or sell on Malvoya.",
+    "Saat tämän turvallisuustiedotteen, koska se koskee Malvoyassa ostamaasi tai myymääsi tuotetta."),
+  seller: t("You received this service message because it concerns your store or courier account on Malvoya.",
+    "Saat tämän palveluviestin, koska se koskee kauppa- tai lähettitiliäsi Malvoyassa."),
+  support: t("You received this message because you contacted Malvoya.", "Saat tämän viestin, koska otit yhteyttä Malvoyaan."),
+  report: t("You received this message because you sent Malvoya a report.", "Saat tämän viestin, koska teit ilmoituksen Malvoyalle."),
+};
+
+/** The footer line of a transactional email; both languages when the reader's language is not known. */
+export function whyText(kind: EmailKind, locale?: Locale | null): string | null {
+  if (kind === "internal") return null;
+  const why = WHY[kind];
+  return locale ? pick(why, locale) : `${pick(why, "en")} / ${pick(why, "fi")}`;
+}
+
+/** Puts the footer line into a message: in the layout's slot, or as a last paragraph of a plain message. */
+function withWhy(html: string, text: string, why: string | null) {
+  if (!why) return { html: html.replace("<!--why-->", ""), text };
+  const line = escapeHtml(why);
+  const outHtml = html.includes("<!--why-->")
+    ? html.replace("<!--why-->", `${line}<br>`)
+    : `${html}<p style="margin:16px 0 0;color:#86868B;font-size:12px;line-height:1.5">${line}</p>`;
+  return { html: outHtml, text: `${text}\n\n${why}` };
 }
 
 const BRAND = "Malvoya";
@@ -68,25 +121,30 @@ export function emailAvailable() {
  * `sensitive`: the text holds a one-time code; in development the email is logged without its text,
  * because codes and tokens are never written to logs.
  */
-export async function sendEmail(to: string, subject: string, html: string, text: string, opts: { sensitive?: boolean } = {}): Promise<DeliveryResult> {
+export async function sendEmail(
+  to: string, subject: string, htmlIn: string, textIn: string,
+  opts: { sensitive?: boolean; kind?: EmailKind; locale?: Locale | null; headers?: Record<string, string> } = {},
+): Promise<DeliveryResult> {
   if (!isDeliverableEmail(to)) return { delivered: false };
+  const { html, text } = withWhy(htmlIn, textIn, opts.kind ? whyText(opts.kind, opts.locale) : null);
+  const headers = opts.headers;
   const transport = getTransporter();
   if (!transport) {
     if (env.isProduction) {
       logger.error("SMTP is not configured; email not sent");
       return { delivered: false };
     }
-    logger.info({ to: mask(to), subject, ...(opts.sensitive ? {} : { text }) }, "[dev] Email not sent (SMTP not configured)");
+    logger.info({ to: mask(to), subject, ...(opts.sensitive ? {} : { text }), ...(headers ? { headers: Object.keys(headers) } : {}) }, "[dev] Email not sent (SMTP not configured)");
     return { delivered: true, simulated: true };
   }
   // With Redis, ordinary emails go through the background queue (retries, no waiting on SMTP in the request).
   // Sign-in and reset codes (sensitive) are always sent directly, so codes are never stored in Redis.
   if (queueIsRemote() && !opts.sensitive) {
-    await enqueue<EmailJob>("email", { to, subject, html, text });
+    await enqueue<EmailJob>("email", { to, subject, html, text, headers });
     return { delivered: true, queued: true };
   }
   try {
-    await deliverEmail(transport, { to, subject, html, text });
+    await deliverEmail(transport, { to, subject, html, text, headers });
     return { delivered: true };
   } catch (err: any) {
     logger.error({ err: err?.message, to: mask(to) }, "Email delivery failed");
@@ -94,11 +152,11 @@ export async function sendEmail(to: string, subject: string, html: string, text:
   }
 }
 
-type EmailJob = { to: string; subject: string; html: string; text: string };
+type EmailJob = { to: string; subject: string; html: string; text: string; headers?: Record<string, string> };
 
 function deliverEmail(transport: NonNullable<ReturnType<typeof getTransporter>>, m: EmailJob) {
   // Send as the mailbox we log in with (e.g. a Gmail address); a foreign domain would fail SPF/DMARC
-  return transport.sendMail({ from: process.env.SMTP_FROM || `"${BRAND}" <${process.env.SMTP_USER}>`, to: m.to, subject: m.subject, html: m.html, text: m.text });
+  return transport.sendMail({ from: process.env.SMTP_FROM || `"${BRAND}" <${process.env.SMTP_USER}>`, to: m.to, subject: m.subject, html: m.html, text: m.text, ...(m.headers ? { headers: m.headers } : {}) });
 }
 
 defineJob<EmailJob>("email", async (m) => {
@@ -147,7 +205,7 @@ export async function sendSms(to: string, body: string, opts: { sensitive?: bool
 
 const money = (cents: number, locale: Locale) => formatCents(cents, locale === "fi" ? "fi-FI" : "en-IE");
 
-function layout(title: string, bodyHtml: string, locale: Locale) {
+function layout(title: string, bodyHtml: string, locale: Locale, footerHtml = "") {
   const support = SUPPORT_EMAIL
     ? `${pick(t("Support", "Asiakaspalvelu"), locale)}: <a href="mailto:${SUPPORT_EMAIL}" style="color:#86868B">${SUPPORT_EMAIL}</a>`
     : escapeHtml(pick(t("Support: the Malvoya app → Support", "Asiakaspalvelu: Malvoya-sovellus → Tuki"), locale));
@@ -157,17 +215,40 @@ function layout(title: string, bodyHtml: string, locale: Locale) {
 <div style="padding:24px 28px;border-bottom:1px solid #E5E5EA;font-weight:700;font-size:20px;letter-spacing:-0.3px">${BRAND}</div>
 <div style="padding:28px">${bodyHtml}</div>
 <div style="padding:18px 28px;background:#FAFAFC;color:#86868B;font-size:12px;line-height:1.5">
-${escapeHtml(pick(t("This is an automated message.", "Tämä on automaattinen viesti."), locale))}<br>${support}
+<!--why-->${escapeHtml(pick(t("This is an automated message.", "Tämä on automaattinen viesti."), locale))}<br>${support}${footerHtml}
 </div></div></body></html>`;
 }
 
 /** A plain message: a heading and paragraphs (each escaped), in the reader's language. */
-function simpleEmail(to: string, locale: Locale, subject: Text, heading: Text, paragraphs: Text[]) {
+function simpleEmail(to: string, locale: Locale, subject: Text, heading: Text, paragraphs: Text[], kind: EmailKind) {
   const h = pick(heading, locale);
   const ps = paragraphs.map((p) => pick(p, locale));
   const body = `<p style="margin:0 0 12px;font-size:18px;font-weight:700">${escapeHtml(h)}</p>` +
     ps.map((p) => `<p style="margin:0 0 12px;line-height:1.5">${escapeHtml(p).replace(/\n/g, "<br>")}</p>`).join("");
-  return sendEmail(to, `${BRAND} – ${pick(subject, locale)}`, layout(h, body, locale), [h, ...ps].join("\n\n"));
+  return sendEmail(to, `${BRAND} – ${pick(subject, locale)}`, layout(h, body, locale), [h, ...ps].join("\n\n"), { kind, locale });
+}
+
+/**
+ * An optional email (launch alerts; any future referral, promo or newsletter message): never sent to an account that
+ * switched optional emails off, and always carries an unsubscribe link in the footer plus List-Unsubscribe and
+ * List-Unsubscribe-Post (RFC 8058 one-click) headers.
+ */
+export async function sendOptionalEmail(userId: number, subject: Text, heading: Text, paragraphs: Text[]): Promise<DeliveryResult> {
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { email: true, locale: true, isActive: true, emailMarketingOptOutAt: true } });
+  if (!u || !u.isActive || !isDeliverableEmail(u.email)) return { delivered: false };
+  if (u.emailMarketingOptOutAt) return { delivered: false, skipped: "opted_out" };
+  const locale: Locale = u.locale === "fi" ? "fi" : "en";
+  const h = pick(heading, locale);
+  const ps = paragraphs.map((p) => pick(p, locale));
+  const url = unsubscribeUrl(userId);
+  const why = pick(t("You received this because you asked Malvoya to tell you about it. You can stop these emails at any time:",
+    "Saat tämän, koska pyysit Malvoyaa kertomaan siitä. Voit lopettaa nämä viestit milloin tahansa:"), locale);
+  const linkText = pick(t("Unsubscribe", "Peru tilaus"), locale);
+  const body = `<p style="margin:0 0 12px;font-size:18px;font-weight:700">${escapeHtml(h)}</p>` +
+    ps.map((p) => `<p style="margin:0 0 12px;line-height:1.5">${escapeHtml(p)}</p>`).join("");
+  const footer = `<br><br>${escapeHtml(why)} <a href="${escapeHtml(url)}" style="color:#6D2E8C">${escapeHtml(linkText)}</a>`;
+  const text = [h, ...ps, `${why} ${url}`].join("\n\n");
+  return sendEmail(u.email, `${BRAND} – ${pick(subject, locale)}`, layout(h, body, locale, footer), text, { headers: unsubscribeHeaders(userId) });
 }
 
 /** A one-time code in large type (sign-in or password reset). Never logged. */
@@ -180,7 +261,7 @@ function codeEmail(to: string, locale: Locale, subject: Text, intro: Text, valid
     locale,
   );
   const text = `${pick(intro, locale)} ${code}\n\n${pick(validity, locale)}`;
-  return sendEmail(to, `${BRAND} – ${pick(subject, locale)}`, html, text, { sensitive: true });
+  return sendEmail(to, `${BRAND} – ${pick(subject, locale)}`, html, text, { sensitive: true, kind: "account", locale });
 }
 
 export async function sendVerificationCode(target: string, channel: "sms" | "email", code: string, locale: Locale = "en"): Promise<DeliveryResult> {
@@ -222,7 +303,7 @@ export async function sendNoPasswordNote(to: string, method: SignInMethod, local
     how[method],
     t("Use that to sign in. No password is needed.", "Kirjaudu samalla tavalla. Salasanaa ei tarvita."),
     t("If you didn't ask for this, ignore this email.", "Jos et pyytänyt tätä, voit jättää viestin huomiotta."),
-  ]);
+  ], "account");
 }
 
 /** An admin approved a store or courier account. */
@@ -244,7 +325,7 @@ export async function sendTwoStepNotice(to: string, event: TwoStepEvent, recover
   const [heading, body] = texts[event];
   return simpleEmail(to, locale, heading, heading, [body,
     t("If this was not you, change your password at once and contact the Malvoya team.",
-      "Jos tämä et ollut sinä, vaihda salasanasi heti ja ota yhteyttä Malvoyan tiimiin.")]);
+      "Jos tämä et ollut sinä, vaihda salasanasi heti ja ota yhteyttä Malvoyan tiimiin.")], "account");
 }
 
 export async function sendApprovalEmail(to: string, kind: "store" | "courier", locale: Locale): Promise<DeliveryResult> {
@@ -254,13 +335,13 @@ export async function sendApprovalEmail(to: string, kind: "store" | "courier", l
           "Kauppasi näkyy nyt Malvoyassa: voit aloittaa myynnin. Lähellä olevat ostajat näkevät tuotteesi."),
         t("Set up payouts in Malvoya Store so your sales reach your bank account.",
           "Ota maksut käyttöön Malvoya Store -sovelluksessa, jotta myyntisi tilitetään pankkitilillesi."),
-      ])
+      ], "seller")
     : simpleEmail(to, locale, t("your courier account is approved", "lähettitilisi on hyväksytty"), t("You're approved", "Sinut on hyväksytty"), [
         t("Your courier account is approved: you can start delivering. Go online in Malvoya Courier to get delivery offers.",
           "Lähettitilisi on hyväksytty: voit aloittaa toimitukset. Siirry linjoille Malvoya Courier -sovelluksessa, niin saat toimitustarjouksia."),
         t("Set up payouts in the app so your earnings reach your bank account.",
           "Ota maksut käyttöön sovelluksessa, jotta ansiosi tilitetään pankkitilillesi."),
-      ]);
+      ], "seller");
 }
 
 /** DAC7: the store has sales this year but has not given its tax details yet. */
@@ -270,7 +351,7 @@ export async function sendTaxInfoReminder(to: string, storeName: string, locale:
       `Kaupallasi ${storeName} on myyntiä Malvoyassa tänä vuonna. EU:n säännöt (DAC7) velvoittavat Malvoyan ilmoittamaan myyjien myynnit ja tunnistetiedot Verohallinnolle kerran vuodessa.`),
     t("Open Malvoya Store → Tax details and fill them in. It takes a couple of minutes.",
       "Avaa Malvoya Store → Verotiedot ja täytä ne. Se vie pari minuuttia."),
-  ]);
+  ], "seller");
 }
 
 /** DSA statement of reasons when a moderator removes a store's drop. */
@@ -280,7 +361,7 @@ export async function sendDropRemovedEmail(to: string, dropId: number, reason: s
     t("This decision was made by a person on the Malvoya team after review.", "Päätöksen teki Malvoyan tiimin jäsen tarkistuksen jälkeen."),
     t("If you think it is wrong, reply to this email or contact us through Support in Malvoya Store within 6 months and we will look at it again.",
       "Jos päätös on mielestäsi väärä, vastaa tähän viestiin tai ota yhteyttä Malvoya Storen Tuki-osion kautta 6 kuukauden kuluessa, niin tarkistamme asian uudelleen."),
-  ]);
+  ], "seller");
 }
 
 /** Statement of reasons (DSA Art. 17) when an admin ends a store's live stream. */
@@ -290,14 +371,14 @@ export async function sendLiveEndedEmail(to: string, liveId: number, title: stri
     t("This decision was made by a person on the Malvoya team. The live was not recorded.", "Päätöksen teki Malvoyan tiimin jäsen. Lähetystä ei tallennettu."),
     t("If you think it is wrong, reply to this email or contact us through Support in Malvoya Store within 6 months and we will look at it again.",
       "Jos päätös on mielestäsi väärä, vastaa tähän viestiin tai ota yhteyttä Malvoya Storen Tuki-osion kautta 6 kuukauden kuluessa, niin tarkistamme asian uudelleen."),
-  ]);
+  ], "seller");
 }
 
 /** Support request received (to the person who wrote). */
 export async function sendSupportAck(to: string, requestId: number, locale: Locale): Promise<DeliveryResult> {
   return simpleEmail(to, locale, t(`we got your message #${requestId}`, `saimme viestisi #${requestId}`), t("Thanks for your message", "Kiitos viestistäsi"), [
     t(`We received your message (#${requestId}) and will reply to ${to}.`, `Viestisi (#${requestId}) on vastaanotettu. Vastaamme osoitteeseen ${to}.`),
-  ]);
+  ], "support");
 }
 
 export interface OrderConfirmationData {
@@ -365,7 +446,7 @@ ${sealedNote(data.items, L)}`,
   );
   const text = p(`Order #${data.orderId} from ${data.storeName}. Total ${money(data.totalCents, L)} incl. VAT.`,
     `Tilaus #${data.orderId} myyjältä ${data.storeName}. Yhteensä ${money(data.totalCents, L)} sis. ALV.`);
-  return sendEmail(data.email, `${BRAND} – ${p("order confirmation", "tilausvahvistus")} #${data.orderId}`, html, text);
+  return sendEmail(data.email, `${BRAND} – ${p("order confirmation", "tilausvahvistus")} #${data.orderId}`, html, text, { kind: "order", locale: L });
 }
 
 const STATUS_TEXT: Record<string, { fi: string; en: string }> = {
@@ -389,5 +470,54 @@ export async function sendOrderStatusEmail(orderId: number, email: string | null
   const order = pick(t(`Order #${orderId}`, `Tilaus #${orderId}`), L);
   const reason = extra.reason ? `${pick(t("Reason", "Syy"), L)}: ${extra.reason}` : "";
   const html = layout(order, `<p style="margin:0 0 8px;font-size:18px;font-weight:700">${escapeHtml(order)}</p><p style="margin:0">${escapeHtml(pick(text, L))}</p>${reason ? `<p style="margin:12px 0 0;color:#6E6E73">${escapeHtml(reason)}</p>` : ""}`, L);
-  return sendEmail(email, `${BRAND} – ${order.toLowerCase()}`, html, `${pick(text, L)}${reason ? `\n${reason}` : ""} (${order})`);
+  return sendEmail(email, `${BRAND} – ${order.toLowerCase()}`, html, `${pick(text, L)}${reason ? `\n${reason}` : ""} (${order})`, { kind: "order", locale: L });
+}
+
+export interface WithdrawalAck {
+  orderId: number;
+  at: Date;
+  storeName: string;
+  storeAddress: string | null;
+  items: { name: string; quantity: number }[];
+  note: string | null;
+  email: string | null;
+  phone: string | null;
+  locale: Locale;
+}
+
+/**
+ * Acknowledgement of a withdrawal made with the withdrawal function (KSL 6:14 a, CRD Art. 11a; since 2.16.0), sent at
+ * once on a durable medium: what was withdrawn (order, seller, items), the date and time, and what happens next. Email
+ * to the account address; phone-only accounts get an SMS. Returns the channel used, or null when neither could be sent.
+ */
+export async function sendWithdrawalAck(a: WithdrawalAck): Promise<{ channel: "email" | "sms" | null }> {
+  const L = a.locale;
+  const when = new Intl.DateTimeFormat(L === "fi" ? "fi-FI" : "en-GB", {
+    timeZone: "Europe/Helsinki", day: "numeric", month: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }).format(a.at);
+  const items = a.items.map((i) => `${i.name} × ${i.quantity}`).join(", ");
+  if (isDeliverableEmail(a.email)) {
+    const r = await simpleEmail(a.email, L,
+      t(`withdrawal received – order #${a.orderId}`, `peruminen vastaanotettu – tilaus #${a.orderId}`),
+      t("We received your withdrawal", "Perumisesi on vastaanotettu"),
+      [
+        t(`You withdrew from your purchase from ${a.storeName} (order #${a.orderId}) with the withdrawal function in the Malvoya app on ${when} (Finnish time, ${a.at.toISOString()}).`,
+          `Peruit ostoksesi myyjältä ${a.storeName} (tilaus #${a.orderId}) Malvoya-sovelluksen peruuttamistoiminnolla ${when} (Suomen aikaa, ${a.at.toISOString()}).`),
+        t(`Items withdrawn: ${items}.`, `Perutut tuotteet: ${items}.`),
+        ...(a.note ? [t(`Your note: ${a.note}`, `Viestisi: ${a.note}`)] : []),
+        t(`Next steps: return the items to ${a.storeName}${a.storeAddress ? `, ${a.storeAddress}` : ""} within 14 days of today. The seller refunds what you paid for them, and the standard delivery fee when you return the whole order, within 14 days of receiving your withdrawal; the seller may wait until it has the items back or you show that you have sent them. Hygiene-sealed items must come back with the seal unbroken.`,
+          `Seuraavaksi: palauta tuotteet myyjälle ${a.storeName}${a.storeAddress ? `, ${a.storeAddress}` : ""} 14 päivän kuluessa tästä päivästä. Myyjä palauttaa niistä maksamasi summan, ja koko tilauksen palauttaessasi myös tavallisen toimitusmaksun, 14 päivän kuluessa perumisesi vastaanottamisesta; myyjä voi odottaa, kunnes se on saanut tuotteet takaisin tai osoitat lähettäneesi ne. Hygieniasinetöidyt tuotteet on palautettava sinetti ehjänä.`),
+        t("You can follow the return in the app: Profile → Returns. Keep this email: it is your acknowledgement of the withdrawal.",
+          "Voit seurata palautusta sovelluksessa: Profiili → Palautukset. Säilytä tämä viesti: se on vahvistus perumisestasi."),
+      ], "order");
+    return { channel: r.delivered ? "email" : null };
+  }
+  if (a.phone) {
+    const r = await sendSms(a.phone, pick(t(
+      `Malvoya: withdrawal received ${when} for order #${a.orderId} (${a.storeName}): ${items}. Return the items within 14 days; refund within 14 days. Details: app → Returns.`,
+      `Malvoya: peruminen vastaanotettu ${when}, tilaus #${a.orderId} (${a.storeName}): ${items}. Palauta tuotteet 14 päivässä; hyvitys 14 päivässä. Lisätiedot: sovellus → Palautukset.`,
+    ), L));
+    return { channel: r.delivered ? "sms" : null };
+  }
+  return { channel: null };
 }

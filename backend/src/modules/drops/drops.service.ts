@@ -25,8 +25,10 @@ const MAX_DROPS_PER_DAY = 20;
 const FEED_WINDOW_DAYS = 60;
 const AUTO_HIDE_REPORTS = 3;
 
+// COPYRIGHT / TRADEMARK (2.16.0) need the DSA Art. 16(2) notice fields (lib/ipNotice.ts); IP_INFRINGEMENT is kept for
+// older app builds and works as before.
 export const REPORT_REASONS = [
-  "ILLEGAL_PRODUCT", "COUNTERFEIT", "SCAM", "NUDITY", "VIOLENCE", "HATE", "HARASSMENT", "IP_INFRINGEMENT", "MINOR_SAFETY", "OTHER",
+  "ILLEGAL_PRODUCT", "COUNTERFEIT", "SCAM", "NUDITY", "VIOLENCE", "HATE", "HARASSMENT", "IP_INFRINGEMENT", "COPYRIGHT", "TRADEMARK", "MINOR_SAFETY", "OTHER",
 ] as const;
 
 // ─── Presentation ───────────────────────────────────────────────────────────
@@ -391,14 +393,14 @@ export async function unhide(dropId: number, userId: number) {
 }
 
 /** Notice-and-action (DSA Art. 16). Three independent reports hide the drop until a person reviews it. */
-export async function report(dropId: number, reporterId: number | null, reason: string, details?: string) {
+export async function report(dropId: number, reporterId: number | null, reason: string, details?: string, ipNotice?: object | null) {
   const drop = await prisma.drop.findUnique({ where: { id: dropId }, select: { id: true, status: true } });
   if (!drop) throw new ApiError("Drop not found", 404);
   if (reporterId) {
     const dup = await prisma.dropReport.findFirst({ where: { dropId, reporterId, status: "OPEN" } });
     if (dup) return { received: true };
   }
-  await prisma.dropReport.create({ data: { dropId, reporterId, reason, details: details?.slice(0, 1000) } });
+  await prisma.dropReport.create({ data: { dropId, reporterId, reason, details: details?.slice(0, 1000), ...(ipNotice ? { ipNotice } : {}) } });
 
   const distinct = await prisma.dropReport.groupBy({ by: ["reporterId"], where: { dropId, status: "OPEN", reporterId: { not: null } } });
   if (drop.status === "READY" && distinct.length >= AUTO_HIDE_REPORTS) {

@@ -37,10 +37,22 @@ Malvoya is a marketplace. Stores that sell through Malvoya are independent selle
 | Reports you make about a product ("Report this product"): the product, the reason, what you wrote, and your account or, if you are not signed in and choose to give it, your email address | Process the notice (Digital Services Act Art. 16; product safety notices under the General Product Safety Regulation) and tell you the outcome | Legal obligation (6(1)(c)) |
 | Your purchases of a product that is recalled for safety reasons | Tell you directly about the recall by push notification and email, also if you switched marketing off; we keep a record of when we told you | Legal obligation (6(1)(c), GPSR Art. 22(12) and 35) |
 | Whether you are known or likely to be under 18 | Never show you recommendations based on profiling (Digital Services Act Art. 28) | Legal obligation (6(1)(c)) |
+| When you confirmed that you are 18 or older | Malvoya's services are for adults (Terms of Service §3, Seller Terms §2, Courier Agreement §3) | Contract (6(1)(b)) |
+| Whether you switched optional emails off, and when | Never send you optional emails (such as launch news) after you said no; service messages are still sent | Legal obligation (6(1)(c), Act on Electronic Communications Services 917/2014 §200) |
+| Withdrawals you make with the withdrawal function: the order, the items, your optional note, the date and time, and when and how we sent you the acknowledgement | Handle your withdrawal and prove that we acknowledged it (Consumer Protection Act chapter 6 §14 a) | Legal obligation (6(1)(c)); contract (6(1)(b)) |
+| Copyright or trademark notices you send: your name and email, the work or mark concerned, where it is used, whether you act for someone else, and your good-faith statement | Process the notice (Digital Services Act Art. 16) and tell you the outcome. We tell the seller what was reported and why, but not your name or email unless you agree or the law requires it | Legal obligation (6(1)(c)) |
 | Users you blocked, and reports you make about comments or reviews | Hide blocked users' content for you; let our team review reported content | Legitimate interest (6(1)(f)); legal obligation (Digital Services Act) |
 | Technical logs (IP address, error logs) | Security and abuse prevention | Legitimate interest (6(1)(f)) |
 
 We do not sell personal data, and we do not use your data for advertising profiling.
+
+### Crash reports (Firebase Crashlytics)
+
+When a Malvoya app crashes, or a request fails because of a fault on our side, the app sends a crash report to Google Firebase Crashlytics, which processes it for us (section 5). A report holds the technical details of the fault (the error, where in the app it happened, which app and app version), information about the device (such as model, operating system version and free memory), a random identifier of the app installation and, if you are signed in, your numeric Malvoya user id. It never holds your name, email address, phone number, address, messages or what you typed; error texts are cleaned of such details before they are sent. Development builds of the apps send no reports.
+
+- **Purpose:** finding and fixing faults in the apps.
+- **Legal basis:** our legitimate interest in apps that work reliably and securely (6(1)(f)). You can object (section 8).
+- **Retention:** Firebase keeps crash reports for 90 days and then deletes them automatically.
 
 ## 3. Location data
 

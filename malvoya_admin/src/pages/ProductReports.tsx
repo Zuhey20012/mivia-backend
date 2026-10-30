@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import api from '../utils/api';
+import IpNoticeBox, { type IpNotice } from '../components/IpNoticeBox';
 
 type Issue = { field: string; code: string; message: { en: string; fi: string } };
 type Claim = { field: string; term: string; blocking: boolean; message: { en: string; fi: string } };
 type Report = {
   id: number; reason: string; details: string | null; status: string; createdAt: string; dueBy: string; overdue: boolean;
+  ipNotice?: IpNotice;
   reporter: { signedIn: boolean; userId: number | null; email: string | null };
   resolution: string | null; resolutionNote: string | null; resolvedAt: string | null;
   product: { id: number; name: string; isAvailable: boolean; lockedReason: string | null; store: { id: number; name: string }; claims: Claim[] };
@@ -83,7 +85,7 @@ export default function ProductReports() {
                   <button className="font-medium text-blue-600 text-left" onClick={() => showProduct(r.product.id)}>{r.product.name}</button>
                   <p className="text-xs text-gray-400">{r.product.store.name} · {r.product.isAvailable ? 'visible' : r.product.lockedReason ? `locked (${r.product.lockedReason.toLowerCase()})` : 'hidden'}</p>
                 </td>
-                <td className="px-6 py-3"><span className={r.reason === 'unsafe' ? 'badge-red' : 'badge-yellow'}>{r.reason}</span>{r.details && <p className="text-xs text-gray-500 mt-1 max-w-xs">{r.details}</p>}</td>
+                <td className="px-6 py-3"><span className={r.reason === 'unsafe' ? 'badge-red' : 'badge-yellow'}>{r.reason}</span>{r.details && <p className="text-xs text-gray-500 mt-1 max-w-xs">{r.details}</p>}<IpNoticeBox notice={r.ipNotice} /></td>
                 <td className="px-6 py-3 text-xs text-gray-500">{r.reporter.signedIn ? `user #${r.reporter.userId}` : r.reporter.email ?? 'anonymous'}</td>
                 <td className="px-6 py-3 text-xs">{when(r.createdAt)}<p className={r.overdue ? 'text-red-500 font-medium' : 'text-gray-400'}>due {when(r.dueBy)}</p>
                   {r.resolutionNote && <p className="text-gray-500 mt-1">{r.resolution}: {r.resolutionNote}</p>}</td>

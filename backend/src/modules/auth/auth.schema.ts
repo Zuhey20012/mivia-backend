@@ -13,6 +13,9 @@ export const registerSchema = z.object({
   // The agreement for the role (customer terms / seller terms / courier agreement); required for stores and
   // couriers. When given, the time and the version of the text are stored on the account.
   acceptTerms: z.literal(true).optional(),
+  // "I am 18 or older" (since 2.16.0): required for every role. The customer terms, seller terms and courier agreement
+  // all require the account holder to be an adult; the time is stored as User.ageConfirmedAt.
+  ageConfirmed: z.boolean().optional(),
 }).superRefine((d, ctx) => {
   if ((d.role === "VENDOR" || d.role === "COURIER") && d.acceptTerms !== true) {
     ctx.addIssue({
@@ -20,7 +23,14 @@ export const registerSchema = z.object({
       message: d.role === "VENDOR" ? "Accept the Seller Terms to create a store account" : "Accept the Courier Agreement to create a courier account",
     });
   }
+  if (d.ageConfirmed !== true) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["ageConfirmed"], message: AGE_REQUIRED_MESSAGE });
+  }
 });
+
+/** Shown when /auth/register is called without ageConfirmed: true (both languages: no account, no locale yet). */
+export const AGE_REQUIRED_MESSAGE =
+  "Confirm that you are 18 or older to create an account. / Vahvista, että olet vähintään 18-vuotias, jotta voit luoda tilin.";
 
 export const loginSchema = z.object({
   email:    identifier,

@@ -8,7 +8,7 @@ import { haversineKm } from "../../utils/distance";
 import { env } from "../../config/env";
 import { emitOrderStatus, emitToStore, emitToAllCouriers } from "../../lib/socket";
 import { offerOrderToCouriers } from "../../services/dispatchService";
-import { sendOrderConfirmation, sendOrderStatusEmail } from "../../services/notificationDeliveryService";
+import { sendOrderConfirmation, sendOrderStatusEmail, sendWithdrawalAck, WithdrawalAck } from "../../services/notificationDeliveryService";
 import { pushToUser } from "../../lib/push";
 import { authenticatedImageUrl, destroyResource } from "../../lib/cloudinary";
 import { estimateDelivery } from "../../utils/distance";
@@ -928,7 +928,7 @@ const courierPublic = { select: { id: true, name: true, latitude: true, longitud
 const orderDetailInclude = {
   items: { include: { product: { select: { id: true, name: true, images: true } }, variant: { select: { size: true, color: true } } } },
   courier: courierPublic,
-  store: { select: { id: true, name: true, address: true, latitude: true, longitude: true, logoUrl: true, phone: true } },
+  store: { select: { id: true, name: true, address: true, latitude: true, longitude: true, logoUrl: true, phone: true, sellerType: true } },
   promoCode: { select: { code: true, description: true } },
 } satisfies Prisma.OrderInclude;
 
@@ -941,7 +941,9 @@ export async function getOrder(id: number, actor: Actor) {
   const relation = await getOrderRelation(id, actor);
   if (!relation) throw new OrderError("Order not found", 404);
   if (relation === "customer") {
-    return withPickupCode(await prisma.order.findUniqueOrThrow({ where: { id }, omit: { pickupCode: false }, include: orderDetailInclude }));
+    const order = withPickupCode(await prisma.order.findUniqueOrThrow({ where: { id }, omit: { pickupCode: false }, include: orderDetailInclude }));
+    // The withdrawal function's availability (2.16.0): business sellers only, within the withdrawal period
+    return { ...order, withdrawal: withdrawalInfo(order) };
   }
   return prisma.order.findUniqueOrThrow({ where: { id }, include: orderDetailInclude });
 }
@@ -955,7 +957,7 @@ const beforeId = (p: ListPage) => (p.before ? { id: { lt: p.before } } : {});
 export async function listOrdersFor(actor: Actor, page: ListPage = {}) {
   const include = {
     items: { include: { product: { select: { name: true, images: true } }, variant: { select: { size: true, color: true } } } },
-    store: { select: { id: true, name: true, logoUrl: true, address: true, latitude: true, longitude: true } },
+    store: { select: { id: true, name: true, logoUrl: true, address: true, latitude: true, longitude: true, sellerType: true } },
     review: { select: { storeRating: true } },
   };
 
@@ -975,7 +977,7 @@ export async function listOrdersFor(actor: Actor, page: ListPage = {}) {
   const mine = await prisma.order.findMany({
     where: { userId: actor.id, ...beforeId(page) }, omit: { pickupCode: false }, include, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: pageTake(page, 200),
   });
-  return mine.map(withPickupCode);
+  return mine.map((o) => ({ ...withPickupCode(o), withdrawal: withdrawalInfo(o) }));
 }
 
 // ─── Courier side ───────────────────────────────────────────────────────────
@@ -1275,20 +1277,47 @@ const planOrderSelect = {
 /** Reasons that use the 14-day right of withdrawal; faults (wrong, damaged, not as described) are always returnable. */
 const WITHDRAWAL_REASONS = ["CHANGED_MIND", "OTHER"];
 
+/**
+ * The withdrawal function (KSL 6:14 a, CRD Art. 11a; since 2.16.0) is offered on delivered orders from business sellers
+ * while the withdrawal period lasts. Consumer rights do not apply to purchases from private persons, so their orders
+ * say so instead. `until` is the end of the period (delivery + returnWindowDays).
+ */
+export function withdrawalInfo(order: { status: string; deliveredAt: Date | null; store?: { sellerType?: string | null } | null }) {
+  const sellerType = order.store?.sellerType ?? null;
+  const until = order.deliveredAt ? new Date(order.deliveredAt.getTime() + env.returnWindowDays * 86_400_000) : null;
+  const reason = sellerType !== "BUSINESS" ? "private_seller"
+    : order.status !== "DELIVERED" || !until ? "not_delivered"
+    : until.getTime() < Date.now() ? "period_ended" : null;
+  return { available: reason === null, until, sellerType, reason };
+}
+
+export const PRIVATE_SELLER_WITHDRAWAL = {
+  en: "This seller is a private person, not a business. The statutory right of withdrawal (Consumer Protection Act ch. 6) applies only to purchases from businesses, so there is no withdrawal function for this order. You can still contact the seller about a return, and Malvoya support if the item is not as described.",
+  fi: "Myyjä on yksityishenkilö eikä yritys. Lakisääteinen peruuttamisoikeus (kuluttajansuojalaki 6 luku) koskee vain ostoja yrityksiltä, joten tähän tilaukseen ei ole peruuttamistoimintoa. Voit silti sopia palautuksesta myyjän kanssa ja ottaa yhteyttä Malvoyan tukeen, jos tuote ei vastaa kuvausta.",
+};
+
 export async function createReturn(userId: number, input: {
-  orderId?: number; rentalId?: number; reason: string; conditionNote?: string; items?: ReturnLine[]; sealIntact?: boolean;
+  orderId?: number; rentalId?: number; reason?: string; conditionNote?: string; items?: ReturnLine[]; sealIntact?: boolean; withdrawal?: boolean;
 }) {
+  const withdrawal = input.withdrawal === true;
+  // A withdrawal needs no reason (it counts as a change of mind for the hygiene-seal rule)
+  input = { ...input, reason: input.reason ?? "CHANGED_MIND" };
   let lines: ReturnLine[] = [];
-  let storeOf: { id: number; ownerId: number } | null = null;
+  let storeOf: { id: number; ownerId: number; name: string; address: string | null } | null = null;
   let sealIntact: boolean | null = null;
+  let orderItems: { id: number; product: { name: string } }[] = [];
   if (input.orderId) {
     const order = await prisma.order.findUnique({
       where: { id: input.orderId },
-      select: { id: true, userId: true, status: true, deliveredAt: true, store: { select: { id: true, ownerId: true } }, ...planOrderSelect },
+      select: { id: true, userId: true, status: true, deliveredAt: true, store: { select: { id: true, ownerId: true, name: true, address: true, sellerType: true } }, ...planOrderSelect },
     });
     if (!order || order.userId !== userId) throw new OrderError("Order not found", 404);
+    if (withdrawal && order.store.sellerType !== "BUSINESS") {
+      throw new OrderError(`${PRIVATE_SELLER_WITHDRAWAL.en} / ${PRIVATE_SELLER_WITHDRAWAL.fi}`, 422, { code: "WITHDRAWAL_NOT_APPLICABLE", reason: PRIVATE_SELLER_WITHDRAWAL });
+    }
     if (order.status !== "DELIVERED" || !order.deliveredAt) throw new OrderError("You can return an order once it has been delivered");
     storeOf = order.store;
+    orderItems = order.items;
     // Kuluttajansuojalaki 6:14 — 14 days from the day the consumer received the goods
     const windowMs = env.returnWindowDays * 24 * 60 * 60 * 1000;
     if (Date.now() - order.deliveredAt.getTime() > windowMs) {
@@ -1319,7 +1348,7 @@ export async function createReturn(userId: number, input: {
     // Hygiene seal (KSL 6:16, CRD Art. 16(e)): a sealed item whose seal was opened cannot be withdrawn from; the
     // customer was told on the product page and in the order confirmation. Faulty items stay returnable.
     const sealed = lines.filter((ln) => order.items.find((i) => i.id === ln.orderItemId)?.hygieneSealed);
-    if (sealed.length && WITHDRAWAL_REASONS.includes(input.reason)) {
+    if (sealed.length && WITHDRAWAL_REASONS.includes(input.reason!)) {
       if (typeof input.sealIntact !== "boolean") {
         throw new OrderError("Is the hygiene seal unbroken? Answer sealIntact: true or false. / Onko hygieniasinetti ehjä? Vastaa sealIntact: true tai false.", 400, {
           code: "SEAL_STATUS_REQUIRED",
@@ -1347,17 +1376,29 @@ export async function createReturn(userId: number, input: {
   const created = await prisma.return.create({
     data: {
       userId, orderId: input.orderId, rentalId: input.rentalId, reason: input.reason as any, conditionNote: input.conditionNote, sealIntact,
+      withdrawal,
       ...(lines.length ? { items: { createMany: { data: lines } } } : {}),
     },
     include: { items: returnItemsSelect },
   });
+  if (withdrawal && storeOf && input.orderId) {
+    // The acknowledgement on a durable medium, at once (KSL 6:14 a, 4th paragraph): what was withdrawn, date and time
+    const byId = new Map(orderItems.map((i) => [i.id, i.product.name]));
+    await acknowledgeWithdrawal(created.id, userId, {
+      orderId: input.orderId, at: created.createdAt, storeName: storeOf.name, storeAddress: storeOf.address,
+      items: lines.map((l) => ({ name: byId.get(l.orderItemId) ?? `#${l.orderItemId}`, quantity: l.quantity })),
+      note: input.conditionNote ?? null,
+    }).catch((e) => console.error("Withdrawal acknowledgement failed", e?.message));
+  }
   const presented = await getReturn(created.id, { id: userId, role: "CUSTOMER" });
   if (storeOf && input.orderId) {
     // The store hears about it at once: push (orders channel) and a live event in the store app
     const itemCount = lines.reduce((n, l) => n + l.quantity, 0);
     emitToStore(storeOf.id, "return:new", { returnId: created.id, orderId: input.orderId, reason: input.reason, itemCount, createdAt: created.createdAt });
     pushToUser(storeOf.ownerId, {
-      title: t(`Return requested for order #${input.orderId}`, `Palautuspyyntö tilaukselle #${input.orderId}`),
+      title: withdrawal
+        ? t(`Withdrawal from order #${input.orderId}`, `Peruminen: tilaus #${input.orderId}`)
+        : t(`Return requested for order #${input.orderId}`, `Palautuspyyntö tilaukselle #${input.orderId}`),
       body: t(`${itemCount} item(s). Open Malvoya Store to approve or reject it.`, `${itemCount} tuote(tta). Hyväksy tai hylkää se Malvoya Storessa.`),
       data: { type: "return", returnId: String(created.id), orderId: String(input.orderId) },
       channel: "orders",
@@ -1372,6 +1413,18 @@ export async function createReturn(userId: number, input: {
  * A deduction is only lawful for handling beyond what was needed to inspect the item
  * (Kuluttajansuojalaki 6:17), so any deduction must come with a written condition note.
  */
+/**
+ * Sends the withdrawal acknowledgement: email to the account address, or SMS for phone-only accounts, and records when
+ * and how on the return. Without any deliverable address the app's confirmation screen is the only record (flagged
+ * for the lawyer in docs/compliance/litigation-risk-shield.md).
+ */
+async function acknowledgeWithdrawal(returnId: number, userId: number, data: Omit<WithdrawalAck, "email" | "phone" | "locale">) {
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { email: true, phone: true, locale: true } });
+  if (!u) return;
+  const r = await sendWithdrawalAck({ ...data, email: u.email, phone: u.phone, locale: u.locale === "fi" ? "fi" : "en" });
+  if (r.channel) await prisma.return.update({ where: { id: returnId }, data: { withdrawalAckSentAt: new Date(), withdrawalAckChannel: r.channel } });
+}
+
 export async function updateReturnStatus(id: number, actor: Actor, data: {
   status: "APPROVED" | "IN_TRANSIT" | "RECEIVED" | "REFUNDED" | "REJECTED";
   conditionNote?: string; storeNote?: string; refundCents?: number; damageDedCents?: number;

@@ -14,6 +14,7 @@ export const LEGAL = {
   sellers: `${API_BASE}/legal/sellers`,
   couriers: `${API_BASE}/legal/couriers`,
   deleteAccount: `${API_BASE}/legal/delete-account`,
+  ipNotice: `${API_BASE}/legal/ip-notice`,
   recalls: `${API_BASE}/recalls`,
 } as const;
 

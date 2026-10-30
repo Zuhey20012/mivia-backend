@@ -1,8 +1,10 @@
+import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:malvoya_core/malvoya_core.dart';
 import 'package:malvoya_ui/malvoya_ui.dart';
 import 'config/constants.dart';
@@ -35,7 +37,25 @@ void main() async {
   } catch (e) {
     debugPrint('Firebase: $e');
   }
+  // Crash reports (Firebase Crashlytics, docs/release/crashlytics.md): sent from release builds only,
+  // and only when Firebase started (an iPhone build without GoogleService-Info.plist skips them).
+  // Only the numeric user id, the app version and the role go with them.
+  await CrashReporting.instance.init(backend: SignInSetup.firebaseReady ? _crashlyticsBackend() : null, role: 'store');
+  FlutterError.onError = CrashReporting.instance.recordFlutterFatalError;
+  PlatformDispatcher.instance.onError = CrashReporting.instance.recordPlatformError;
   runApp(const MalvoyaVendorApp());
+}
+
+/// Firebase Crashlytics behind the shared [CrashReporting] (built only when Firebase started).
+CrashBackend _crashlyticsBackend() {
+  final c = FirebaseCrashlytics.instance;
+  return CallbackCrashBackend(
+    setCollectionEnabled: c.setCrashlyticsCollectionEnabled,
+    setUserIdentifier: c.setUserIdentifier,
+    setCustomKey: c.setCustomKey,
+    recordError: (e, s, {reason, fatal = false}) => c.recordError(e, s, reason: reason, fatal: fatal),
+    recordFlutterFatalError: c.recordFlutterFatalError,
+  );
 }
 
 final _navigatorKey = GlobalKey<NavigatorState>();
@@ -76,6 +96,8 @@ class MalvoyaVendorApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) {
           final auth = AuthService();
+          // Crash reports carry the signed-in account's numeric id; cleared on sign-out
+          CrashReporting.instance.followUser(auth, () => auth.isAuthenticated ? auth.currentUser?.id : null);
           _closeStackOnAuthChange(auth);
           // New orders and payouts arrive as notifications even when the app is closed
           PushService.instance.attach(auth);

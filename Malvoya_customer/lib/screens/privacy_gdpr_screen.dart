@@ -28,6 +28,11 @@ class PrivacyGdprScreen extends StatefulWidget {
 
 class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
   bool _loading = true;
+  /// Optional emails on (null while loading or signed out; API 2.16, PATCH /me {emailMarketing})
+  bool? _emailMarketing;
+  /// A "tell me when Malvoya opens near me" alert is waiting (push + optional email)
+  bool? _launchAlert;
+  bool _prefsBusy = false;
 
   @override
   void initState() {
@@ -37,6 +42,48 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
 
   Future<void> _loadConsentPreferences() async {
     setState(() => _loading = false);
+    final auth = Provider.of<AuthService>(context, listen: false);
+    if (!auth.isAuthenticated) return;
+    final api = ApiClient(auth);
+    final (me, alert) = await (api.get('/me'), api.get('/me/launch-alert')).wait;
+    if (!mounted) return;
+    setState(() {
+      if (me.ok && me.data['user'] is Map) _emailMarketing = (me.data['user'] as Map)['emailMarketing'] != false;
+      if (alert.ok) _launchAlert = alert.data['alert'] is Map && (alert.data['alert'] as Map)['notifiedAt'] == null;
+    });
+  }
+
+  /// Optional emails on or off (service messages about orders, the account and agreements always arrive).
+  Future<void> _setEmailMarketing(bool on) async {
+    final auth = Provider.of<AuthService>(context, listen: false);
+    Haptics.selection();
+    setState(() => _prefsBusy = true);
+    final res = await ApiClient(auth).patch('/me', {'emailMarketing': on});
+    if (!mounted) return;
+    setState(() {
+      _prefsBusy = false;
+      if (res.ok) _emailMarketing = on;
+    });
+    if (!res.ok) MSnack.error(context, res.errorText(context) ?? tr(context, 'Could not save. Please try again.', 'Tallennus ei onnistunut. Yritä uudelleen.'));
+  }
+
+  /// Switches off the launch alert (its push and email). Switching it on needs a pinned address,
+  /// which the Home screen asks for.
+  Future<void> _setLaunchAlert(bool on) async {
+    if (on) {
+      MSnack.show(context, tr(context, 'Turn this on from Home: "Tell me when Malvoya opens near me".', 'Ota tämä käyttöön etusivulta: "Kerro, kun Malvoya avautuu lähelläni".'));
+      return;
+    }
+    final auth = Provider.of<AuthService>(context, listen: false);
+    Haptics.selection();
+    setState(() => _prefsBusy = true);
+    final res = await ApiClient(auth).delete('/me/launch-alert');
+    if (!mounted) return;
+    setState(() {
+      _prefsBusy = false;
+      if (res.ok) _launchAlert = false;
+    });
+    if (!res.ok) MSnack.error(context, res.errorText(context) ?? tr(context, 'Could not save. Please try again.', 'Tallennus ei onnistunut. Yritä uudelleen.'));
   }
 
 
@@ -421,6 +468,50 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                       ],
                     ),
                     const SizedBox(height: MSpace.lg),
+
+                    // Email preferences (API 2.16): optional emails and the launch alert can be switched off here
+                    if (auth.isAuthenticated) ...[
+                      _buildCard(
+                        title: tr(context, 'Email preferences', 'Sähköpostiasetukset'),
+                        cardBg: cardBg,
+                        borderColor: borderColor,
+                        textSecondary: textSecondary,
+                        children: [
+                          SwitchListTile(
+                            key: const Key('privacy-email-marketing'),
+                            secondary: const Icon(Icons.mark_email_unread_outlined, color: AppTheme.primary),
+                            value: _emailMarketing ?? true,
+                            onChanged: _emailMarketing == null || _prefsBusy ? null : _setEmailMarketing,
+                            title: Text(tr(context, 'Optional emails', 'Valinnaiset sähköpostit'),
+                                style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyM, color: textPrimary)),
+                            subtitle: Text(
+                              tr(context,
+                                  'News such as "Malvoya is open near you". Messages about your orders, returns, account and agreements always arrive.',
+                                  'Uutiset, kuten "Malvoya on avattu lähelläsi". Tilauksiisi, palautuksiisi, tiliisi ja sopimuksiisi liittyvät viestit tulevat aina.'),
+                              style: TextStyle(fontSize: MTextSize.caption, color: textSecondary, height: 1.4),
+                            ),
+                          ),
+                          Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
+                          SwitchListTile(
+                            key: const Key('privacy-launch-alert'),
+                            secondary: const Icon(Icons.notifications_active_outlined, color: AppTheme.primary),
+                            value: _launchAlert ?? false,
+                            onChanged: _launchAlert == null || _prefsBusy ? null : _setLaunchAlert,
+                            title: Text(tr(context, 'Launch news near me', 'Avausuutiset lähelläni'),
+                                style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyM, color: textPrimary)),
+                            subtitle: Text(
+                              _launchAlert == true
+                                  ? tr(context, 'One notification and email when Malvoya opens near your address. Switch off to cancel it.',
+                                      'Yksi ilmoitus ja sähköposti, kun Malvoya avautuu osoitteesi lähellä. Peru se kytkemällä pois.')
+                                  : tr(context, 'Off. You can ask for it on Home when no shop delivers to you yet.',
+                                      'Pois päältä. Voit pyytää sitä etusivulla, kun lähelläsi ei vielä ole kauppoja.'),
+                              style: TextStyle(fontSize: MTextSize.caption, color: textSecondary, height: 1.4),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: MSpace.lg),
+                    ],
 
                     // 3. DPO & REGULATORY CONTACT
                     _buildCard(

@@ -76,6 +76,8 @@ export async function registerUser(input: RegisterInput, ctx: AcceptContext = { 
   const user = await prisma.user.create({
     data: {
       name: input.name, email, phone, passwordHash, role: input.role,
+      // The schema refuses registration without ageConfirmed: true (2.16.0)
+      ageConfirmedAt: now,
       ...(input.acceptTerms ? { termsAcceptedAt: now, termsVersion: main?.version ?? null } : {}),
     },
     select: { id: true, name: true, email: true, role: true, passwordHash: true },
@@ -161,7 +163,7 @@ export async function exportUserData(userId: number) {
     where: { senderId: userId }, select: { orderId: true, text: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 5000,
   }), prisma.productReport.findMany({
     // "Report this product" notices the user sent (2.12)
-    where: { reporterId: userId }, select: { productId: true, reason: true, details: true, status: true, createdAt: true }, take: 1000,
+    where: { reporterId: userId }, select: { productId: true, reason: true, details: true, ipNotice: true, status: true, createdAt: true }, take: 1000,
   }), prisma.liveMessage.findMany({
     // Messages written in stores' live streams (2.15), kept 30 days after each live
     where: { userId }, select: { liveId: true, text: true, hidden: true, createdAt: true }, orderBy: { id: "desc" }, take: 5000,
@@ -176,6 +178,7 @@ function exportUser(userId: number) {
       id: true, email: true, name: true, phone: true, role: true, avatarUrl: true, googleSub: true,
       address: true, latitude: true, longitude: true, createdAt: true, updatedAt: true,
       locale: true, termsAcceptedAt: true, termsVersion: true, totpEnabledAt: true,
+      ageConfirmedAt: true, emailMarketingOptOutAt: true,
       // Every agreement version accepted, with time, method, truncated address and app version (2.11)
       agreementAcceptances: { select: { doc: true, version: true, acceptedAt: true, method: true, ip: true, userAgent: true, appVersion: true } },
       blocks: { select: { blockedId: true, createdAt: true } },
@@ -273,6 +276,10 @@ export async function deleteUserAccount(userId: number) {
     await tx.liveBan.deleteMany({ where: { userId } });
     await tx.userBlock.deleteMany({ where: { OR: [{ blockerId: userId }, { blockedId: userId }] } });
     await tx.reviewReport.deleteMany({ where: { reporterId: userId } });
+    // Copyright / trademark notices (2.16) keep the claim (work, location, statement) but drop the person's name and email
+    await tx.$executeRaw`UPDATE "ProductReport" SET "ipNotice" = "ipNotice" - 'name' - 'email' - 'onBehalfOf' WHERE "reporterId" = ${userId} AND "ipNotice" IS NOT NULL`;
+    await tx.$executeRaw`UPDATE "DropReport" SET "ipNotice" = "ipNotice" - 'name' - 'email' - 'onBehalfOf' WHERE "reporterId" = ${userId} AND "ipNotice" IS NOT NULL`;
+    await tx.$executeRaw`UPDATE "DropCommentReport" SET "ipNotice" = "ipNotice" - 'name' - 'email' - 'onBehalfOf' WHERE "reporterId" = ${userId} AND "ipNotice" IS NOT NULL`;
     // Product reports stay (product-safety notices must be processed) but no longer point at the person
     await tx.productReport.updateMany({ where: { reporterId: userId }, data: { reporterId: null, reporterEmail: null } });
     await tx.review.updateMany({ where: { userId }, data: { comment: null } });

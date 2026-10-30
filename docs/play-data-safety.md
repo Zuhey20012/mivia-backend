@@ -1,7 +1,7 @@
 # Google Play Data safety answers
 
 One form per app: Play Console → app → **Policy and programs → App content → Data safety**.
-These answers come from the code (checked 2026-10-15) and `legal/privacy_policy.md`. Where the two disagree, the list at the end says what to fix.
+These answers come from the code (checked 2026-10-15; crash reporting added 2026-10-30) and `legal/privacy_policy.md`. Where the two disagree, the list at the end says what to fix.
 
 ## Words Google uses (read this first)
 
@@ -25,7 +25,20 @@ These answers come from the code (checked 2026-10-15) and `legal/privacy_policy.
 | Advertising or marketing purpose? | Never. No ads SDK, no `AD_ID`. |
 | Independent security review / Families badge | No |
 
-Service providers (not "sharing"): Stripe Payments Europe (payments, Stripe Connect payouts), Cloudinary (photos and videos), Google Firebase (sign-in, push), Render (hosting, Frankfurt), Twilio (SMS codes), [EMAIL PROVIDER] (email).
+Service providers (not "sharing"): Stripe Payments Europe (payments, Stripe Connect payouts), Cloudinary (photos and videos), Google Firebase (sign-in, push, Crashlytics crash reports), Render (hosting, Frankfurt), Twilio (SMS codes), [EMAIL PROVIDER] (email).
+
+### Crash logs and diagnostics (all three apps)
+
+Every app includes Firebase Crashlytics (`firebase_crashlytics`, set up in `packages/malvoya_core/lib/src/crash/` and each app's `lib/main.dart`; owner steps in `docs/release/crashlytics.md`). Add these two rows to each app's form:
+
+| Data type (Play name) | Collected | Shared | Ephemeral | Required / optional | Purposes | What it is in Malvoya |
+|---|---|---|---|---|---|---|
+| **App info and performance → Crash logs** | Yes | No (Google is a service provider) | No | Required | Analytics | Crash and error reports: error type, cleaned message, stack trace, app version, role (customer/store/courier), numeric Malvoya user id when signed in. Also non-fatal reports for API answers 5xx and unreadable bodies (method, path without ids or query, status only). No names, emails, phone numbers, tokens or request bodies. Kept 90 days by Firebase. |
+| **App info and performance → Diagnostics** | Yes | No | No | Required | Analytics | Device model, OS version, free memory and disk, orientation, that Crashlytics adds to each report |
+
+- **Not used for advertising or marketing**, and not sold. Play's "Analytics" purpose covers monitoring app health and fixing crashes.
+- Crashlytics also sends a random **Crashlytics installation id**: it is in the "Device or other IDs" row of each app below.
+- Reports are sent only from release builds (`kReleaseMode`); debug builds switch collection off. An iPhone build without `GoogleService-Info.plist` does not start Crashlytics at all.
 
 ---
 
@@ -35,7 +48,7 @@ Service providers (not "sharing"): Stripe Payments Europe (payments, Stripe Conn
 |---|---|---|---|---|---|---|
 | **Personal info → Name** | Yes | Yes (the store of the order; courier after accepting) | No | Required | App functionality, Account management | Account name; first name shown on comments and reviews |
 | **Personal info → Email address** | Yes | No | No | Required | Account management, App functionality | Sign-in, receipts |
-| **Personal info → User IDs** | Yes | No | No | Required | Account management | Malvoya user id, Firebase user id, Google account id (`googleSub`) |
+| **Personal info → User IDs** | Yes | No | No | Required | Account management, Analytics | Malvoya user id (also on crash reports), Firebase user id, Google account id (`googleSub`) |
 | **Personal info → Address** | Yes | Yes (store, courier after accepting) | No | Optional (pickup orders need none) | App functionality | Delivery address and order notes |
 | **Personal info → Phone number** | Yes | No | No | Optional | Account management, App functionality | Phone sign-in and SMS codes (Firebase, Twilio) |
 | **Location → Precise location** | Yes | No | No | Optional | App functionality | The map pin of the delivery address (sent to rank stores, price delivery, place orders) and the "notify me when Malvoya opens near me" pin. Not read from GPS. |
@@ -45,9 +58,11 @@ Service providers (not "sharing"): Stripe Payments Europe (payments, Stripe Conn
 | **App activity → App interactions** | Yes | No | No | Optional | App functionality | Drop likes, views (one per day), favourites, store follows |
 | **App activity → In-app search history** | Yes | No | Yes | Optional | App functionality | Search words are sent to the API to search; not saved to the account |
 | **App activity → Other user-generated content** | Yes | No (posting publicly is user-started) | No | Optional | App functionality | Reviews (public with first name), drop comments, reports |
-| **Device or other IDs** | Yes | No | No | Required | App functionality, Fraud prevention, security and compliance | FCM push token, Firebase installation id, device data Stripe's SDK collects against fraud |
+| **Device or other IDs** | Yes | No | No | Required | App functionality, Analytics, Fraud prevention, security and compliance | FCM push token, Firebase installation id, Crashlytics installation id, device data Stripe's SDK collects against fraud |
 
-Not collected: approximate location (not separate from the pin), photos/videos, audio, files, contacts, calendar, health, web browsing, crash logs (no Crashlytics), installed apps.
+Also collected: crash logs and diagnostics (see "Crash logs and diagnostics" above).
+
+Not collected: approximate location (not separate from the pin), photos/videos, audio, files, contacts, calendar, health, web browsing, installed apps.
 
 **Deletion:**
 - In the app: **Profile → Privacy → Your data → Delete my account** (`Malvoya_customer/lib/screens/profile.dart:626`, button in `screens/privacy_gdpr_screen.dart:477-484`, calls `DELETE /auth/me`).
@@ -61,7 +76,7 @@ Not collected: approximate location (not separate from the pin), photos/videos, 
 |---|---|---|---|---|---|
 | **Personal info → Name** | Yes | Yes (shown to customers as the seller) | Required | App functionality, Account management | Account name; store name (for a private seller this is a person's data) |
 | **Personal info → Email address** | Yes | No | Required | Account management, Developer communications | Sign-in; store email |
-| **Personal info → User IDs** | Yes | No | Required | Account management | As customer |
+| **Personal info → User IDs** | Yes | No | Required | Account management, Analytics | As customer |
 | **Personal info → Address** | Yes | Yes (customers see it for pickup; couriers for collection) | Required | App functionality | Pickup address of the store |
 | **Personal info → Phone number** | Yes | Yes (couriers and customers of an order see the store phone) | Optional | App functionality, Account management | Store phone, phone sign-in |
 | **Personal info → Other info** | Yes | No | Required for business sellers | Fraud prevention, security and compliance | Seller type and Y-tunnus (business ID) for Omnibus/DSA/DAC7 checks |
@@ -73,7 +88,7 @@ Not collected: approximate location (not separate from the pin), photos/videos, 
 | **Files and docs** | Yes | No | Optional | App functionality | CSV file chosen for catalogue import |
 | **Messages → Other in-app messages** | Yes | No | Optional | App functionality, Developer communications | Support requests; replies to drop comments |
 | **App activity → Other user-generated content** | Yes | No | Optional | App functionality | Product texts, drop captions |
-| **Device or other IDs** | Yes | No | Required | App functionality | FCM token, Firebase installation id |
+| **Device or other IDs** | Yes | No | Required | App functionality, Analytics | FCM token, Firebase installation id, Crashlytics installation id |
 
 **Deletion:**
 - In the app: **Store tab → Delete account** (bottom of the list; `malvoya_vendor/lib/screens/vendor_dashboard.dart:978`, `core/delete_account_tile.dart`).
@@ -88,14 +103,14 @@ Not collected: approximate location (not separate from the pin), photos/videos, 
 |---|---|---|---|---|---|---|
 | **Personal info → Name** | Yes | Yes (customer and store of an order) | No | Required | App functionality, Account management | |
 | **Personal info → Email address** | Yes | No | No | Required | Account management | |
-| **Personal info → User IDs** | Yes | No | No | Required | Account management | |
+| **Personal info → User IDs** | Yes | No | No | Required | Account management, Analytics | Malvoya user id (also on crash reports) |
 | **Personal info → Phone number** | Yes | No | No | Optional | Account management, App functionality | |
 | **Location → Precise location** | Yes | **Yes** (customer and store of the order being carried) | No (latest position stored while online) | Required to work | App functionality, Fraud prevention, security and compliance | GPS while online (foreground service). Deleted on going offline. Handover position kept 30 days. Distance at acceptance used for pay. |
 | **Location → Approximate location** | Yes | No | No | Required to work | App functionality | Same stream, used for "nearest first" offers. Tick it too: Play treats them as separate types. |
 | **Financial info → Other financial info** | Yes | No | No | Required to get paid | App functionality | Earnings, tips, pay breakdowns, payouts. Bank and KYC data on Stripe's pages, not in the app. |
 | **Photos and videos → Photos** | Yes | Yes (the customer of that order) | No | Optional (only door drop-offs) | App functionality, Fraud prevention, security and compliance | Delivery proof photo, private, deleted after 30 days |
 | **Messages → Other in-app messages** | Yes | No | Partly | Optional | App functionality, Developer communications | Order chat (not stored) and Help messages (stored) |
-| **Device or other IDs** | Yes | No | No | Required | App functionality | FCM token, Firebase installation id |
+| **Device or other IDs** | Yes | No | No | Required | App functionality, Analytics | FCM token, Firebase installation id, Crashlytics installation id |
 
 **Deletion:**
 - In the app: **Earnings tab → Delete account** (below "Help and contact"; `malvoya_courier/lib/screens/courier_dashboard.dart:1658`).
@@ -177,9 +192,9 @@ Fix these before publishing; Play compares the Data safety form, the privacy pol
 
 ## Sources
 
-- Data safety definitions (collection, sharing, service providers, ephemeral, SDK data counts): https://support.google.com/googleplay/android-developer/answer/10787469 (read 2026-10-15)
+- Data safety definitions (collection, sharing, service providers, ephemeral, SDK data counts, the Analytics purpose): https://support.google.com/googleplay/android-developer/answer/10787469 (read 2026-10-15)
 - Account deletion requirements (in-app path + web link, what the page must contain, retention): https://support.google.com/googleplay/android-developer/answer/13327111 (read 2026-10-15)
-- Firebase data disclosure (Auth: email, phone, IP, user id; FCM: installation id, tokens): https://firebase.google.com/docs/android/play-data-disclosure (read 2026-10-15)
+- Firebase data disclosure (Auth: email, phone, IP, user id; FCM: installation id, tokens; Crashlytics: crash logs, diagnostics, installation UUID): https://firebase.google.com/docs/android/play-data-disclosure (read 2026-10-15; Crashlytics rows added 2026-10-30)
 - Stripe mobile SDK data (payment info, device characteristics for fraud, analytics): https://support.stripe.com/questions/stripe-mobile-sdk-privacy-details and the Play SDK Index entry https://play.google.com/sdks/details/com-stripe-stripe-android (read 2026-10-15)
 - Google Pay data disclosure for apps: https://developers.google.com/pay/api/android/guides/resources/google-pay-disclosure-requirements (found 2026-10-15)
 - Nominatim usage policy: https://operations.osmfoundation.org/policies/nominatim/ ; tile policy: https://operations.osmfoundation.org/policies/tiles/ (read 2026-10-15)

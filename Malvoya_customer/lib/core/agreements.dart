@@ -20,6 +20,9 @@ class AgreementPrompt {
   final bool isUpdate;
   /// Orders are refused until it is accepted (false for the Privacy Policy, an acknowledgement).
   final bool blocking;
+  /// The account has not confirmed being 18 or older (Google, phone and Apple sign-ups; API 2.16):
+  /// the sheet also asks "I am 18 or older" and accepts with `ageConfirmed: true`.
+  final bool ageRequired;
 
   const AgreementPrompt({
     required this.doc,
@@ -31,6 +34,7 @@ class AgreementPrompt {
     this.pending = false,
     this.isUpdate = false,
     this.blocking = true,
+    this.ageRequired = false,
   });
 
   bool get isPrivacy => doc == 'privacy';
@@ -51,6 +55,8 @@ class Agreements extends ChangeNotifier {
 
   List<Map<String, dynamic>> required = const [];
   List<Map<String, dynamic>> history = const [];
+  /// "I am 18 or older" still to be confirmed (GET /me/agreements → ageConfirmationRequired).
+  bool ageConfirmationRequired = false;
   bool loaded = false;
   bool loading = false;
   String? error;
@@ -82,6 +88,7 @@ class Agreements extends ChangeNotifier {
   void _reset() {
     required = const [];
     history = const [];
+    ageConfirmationRequired = false;
     loaded = false;
     error = null;
     notifyListeners();
@@ -107,6 +114,7 @@ class Agreements extends ChangeNotifier {
     }
     required = [for (final d in state.required) d.raw];
     history = state.history;
+    ageConfirmationRequired = state.ageConfirmationRequired;
     loaded = true;
     error = null;
     notifyListeners();
@@ -122,10 +130,15 @@ class Agreements extends ChangeNotifier {
 
   bool _acceptedEarlier(String doc, String version) => history.any((h) => h['doc'] == doc && h['version'] != version);
 
-  /// The first blocking document whose version in force is not accepted.
+  /// The first blocking document whose version in force is not accepted, or the Terms of Service
+  /// again (already accepted) when only the age confirmation is missing.
   AgreementPrompt? get missingBlocking {
     for (final r in required) {
       if (r['blocking'] == true && r['accepted'] != true) return promptFor(r);
+    }
+    if (ageConfirmationRequired) {
+      final terms = itemFor('terms');
+      if (terms != null) return promptFor(terms);
     }
     return null;
   }
@@ -152,6 +165,7 @@ class Agreements extends ChangeNotifier {
       pending: pending,
       isUpdate: pending || _acceptedEarlier(doc, version),
       blocking: item['blocking'] == true,
+      ageRequired: ageConfirmationRequired && doc == 'terms' && !pending,
     );
   }
 
@@ -193,7 +207,8 @@ class Agreements extends ChangeNotifier {
       // Knowing the history tells "new terms" from "changed terms"
       await load(auth);
       final item = itemFor(doc);
-      if (item != null && item['currentVersion'] == version && item['accepted'] == true) return true;
+      final ageRequired = data['ageConfirmationRequired'] == true || ageConfirmationRequired;
+      if (item != null && item['currentVersion'] == version && item['accepted'] == true && !ageRequired) return true;
       if (!context.mounted) return false;
       final prompt = AgreementPrompt(
         doc: doc,
@@ -202,6 +217,7 @@ class Agreements extends ChangeNotifier {
         url: (data['url'] ?? item?['url'])?.toString(),
         isUpdate: _acceptedEarlier(doc, version),
         blocking: true,
+        ageRequired: ageRequired,
       );
       return await _show(context, prompt);
     } catch (_) {

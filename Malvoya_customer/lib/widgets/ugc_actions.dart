@@ -17,8 +17,15 @@ const _shortReasons = {
   'OTHER': ['Something else', 'Jokin muu'],
 };
 
+/// Copyright and trademark (comments only; they need the notice form, API 2.16)
+const _ipReasons = {
+  'COPYRIGHT': ['Copyright: uses my work', 'Tekijänoikeus: käyttää teostani'],
+  'TRADEMARK': ['Trademark: uses my brand', 'Tavaramerkki: käyttää tavaramerkkiäni'],
+};
+
 /// Asks why the content is reported. Returns the reason key, or null if the customer cancelled.
-Future<String?> pickReportReason(BuildContext context, {required String title}) {
+/// [includeIp] adds copyright and trademark (drop comments).
+Future<String?> pickReportReason(BuildContext context, {required String title, bool includeIp = false}) {
   return showMSheet<String>(context, builder: (ctx) {
       String? selected;
       return StatefulBuilder(
@@ -48,7 +55,7 @@ Future<String?> pickReportReason(BuildContext context, {required String title}) 
                   onChanged: (v) => setSheet(() => selected = v),
                   child: Column(
                     children: [
-                      for (final e in _shortReasons.entries)
+                      for (final e in {..._shortReasons, if (includeIp) ..._ipReasons}.entries)
                         RadioListTile<String>(
                           value: e.key,
                           title: Text(isFinnish(ctx) ? e.value[1] : e.value[0]),

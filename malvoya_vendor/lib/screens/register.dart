@@ -19,6 +19,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _loading = false;
   bool _obscurePass = true;
   bool _acceptTerms = false;
+  /// "I am 18 or older" (Seller Terms §2; required by the server)
+  bool _ageConfirmed = false;
   String? _error;
 
   @override
@@ -42,6 +44,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
       setState(() => _error = tr(context, 'Accept the Seller Terms to create a store account.', 'Hyväksy myyjän ehdot luodaksesi kauppatilin.'));
       return;
     }
+    if (!_ageConfirmed) {
+      setState(() => _error = tr(context, 'Please confirm that you are 18 or older.', 'Vahvista, että olet vähintään 18-vuotias.'));
+      return;
+    }
     setState(() { _loading = true; _error = null; });
     final auth = Provider.of<AuthService>(context, listen: false);
     final err = await auth.register(
@@ -49,6 +55,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _emailCtrl.text.trim(),
       _passCtrl.text,
       acceptTerms: _acceptTerms,
+      ageConfirmed: _ageConfirmed,
     );
 
     // On success the app's home switches to the welcome screen by itself and closes this one
@@ -164,6 +171,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                   ),
                 ]),
+              ),
+              const SizedBox(height: MSpace.sm),
+              // Required: stores are run by adults (Seller Terms §2)
+              Container(
+                decoration: BoxDecoration(color: AppTheme.sand, borderRadius: BorderRadius.circular(AppTheme.radiusMd)),
+                child: CheckboxListTile(
+                  key: const Key('register-age-confirm'),
+                  value: _ageConfirmed,
+                  onChanged: (v) => setState(() {
+                    _ageConfirmed = v ?? false;
+                    _error = null;
+                  }),
+                  controlAffinity: ListTileControlAffinity.leading,
+                  minTileHeight: 56,
+                  title: Text(tr(context, 'I am 18 or older', 'Olen vähintään 18-vuotias'),
+                      style: const TextStyle(fontSize: MTextSize.bodyL, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+                ),
               ),
 
               if (_error != null) ...[

@@ -101,7 +101,7 @@ contactRoutes.post("/contact", limiter, urlencoded({ extended: false, limit: "16
       data: { userId: null, email: body.data.email, app: "web", topic, message: body.data.message, orderId: orderId || null },
     });
     const text = `Contact form #${request.id}\nFrom: ${body.data.email}\n${orderId ? `Order: #${orderId}\n` : ""}Topic: ${topic}\n\n${body.data.message}`;
-    if (SUPPORT_EMAIL) sendEmail(SUPPORT_EMAIL, `Malvoya contact #${request.id}: ${topic}`, `<pre style="font-family:inherit;white-space:pre-wrap">${escapeHtml(text)}</pre>`, text).catch(() => {});
+    if (SUPPORT_EMAIL) sendEmail(SUPPORT_EMAIL, `Malvoya contact #${request.id}: ${topic}`, `<pre style="font-family:inherit;white-space:pre-wrap">${escapeHtml(text)}</pre>`, text, { kind: "internal" }).catch(() => {});
     sendSupportAck(body.data.email, request.id, locale).catch(() => {});
     res.status(201).type("html").send(page(locale, `<h1>${pick(locale, "Thank you", "Kiitos")}</h1>
 <p>${pick(locale, `We received your message (#${request.id}) and will reply to ${escapeHtml(body.data.email)}.`,

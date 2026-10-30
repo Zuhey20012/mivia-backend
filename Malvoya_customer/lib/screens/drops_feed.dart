@@ -15,6 +15,7 @@ import '../core/delivery_location.dart';
 import '../core/network_status.dart';
 import '../core/media_sound.dart';
 import '../core/report_reasons.dart';
+import '../widgets/ip_notice_form.dart';
 import '../core/sign_in.dart';
 import '../widgets/add_to_bag_sheet.dart';
 import '../widgets/drop_comments_sheet.dart';
@@ -886,8 +887,14 @@ class _DropsFeedScreenState extends State<DropsFeedScreen> with WidgetsBindingOb
                 title: Text(isFinnish(context) ? e.value[1] : e.value[0]),
                 onTap: () async {
                   Navigator.pop(ctx);
+                  Map<String, dynamic>? notice;
+                  if (isIpReportReason(e.key)) {
+                    notice = await showIpNoticeForm(context, reason: e.key);
+                    if (notice == null || !mounted) return;
+                  }
+                  if (!mounted) return;
                   final res = await ApiClient(Provider.of<AuthService>(context, listen: false))
-                      .post('/drops/${drop['id']}/report', {'reason': e.key});
+                      .post('/drops/${drop['id']}/report', {'reason': e.key, if (notice != null) 'ipNotice': notice});
                   if (mounted) {
                     _snack(res.ok ? tr(context, 'Thanks — we will review it.', 'Kiitos — tarkistamme sen.') : res.errorText(context)!);
                   }

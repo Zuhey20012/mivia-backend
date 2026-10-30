@@ -197,19 +197,26 @@ model User {
 
   // Language for push notifications and emails ("fi" | "en"), from the apps' Accept-Language or PATCH /me.
   // null = never told: messages go out in English.
-  locale               String?
+  locale                 String?
   // Access tokens issued before this moment are refused (a password reset signs every device out)
-  tokensValidAfter     DateTime?
+  tokensValidAfter       DateTime?
   // Agreement accepted at registration (customer terms / seller terms / courier agreement) and its version
-  termsAcceptedAt      DateTime?
-  termsVersion         String?
+  termsAcceptedAt        DateTime?
+  termsVersion           String?
   // Users this user blocked (their comments and reviews are hidden for this user), and who blocked this user
-  blocks               UserBlock[]           @relation("Blocker")
-  blockedBy            UserBlock[]           @relation("Blocked")
+  blocks                 UserBlock[]           @relation("Blocker")
+  blockedBy              UserBlock[]           @relation("Blocked")
   // Every agreement version the user accepted, with proof (since 2.11.0)
-  agreementAcceptances AgreementAcceptance[]
+  agreementAcceptances   AgreementAcceptance[]
   // Known or likely under 18 (since 2.12.0): never gets profiling-based recommendations (DSA Art. 28)
-  isMinor              Boolean               @default(false)
+  isMinor                Boolean               @default(false)
+  // The account holder confirmed being 18 or older (since 2.16.0): at /auth/register (required for every role) or, for
+  // Google/phone/Apple/code accounts, with POST /me/agreements/accept {ageConfirmed: true}. Null = not confirmed yet
+  // (orders, selling and going online answer 428 AGREEMENT_REQUIRED with ageConfirmationRequired until then).
+  ageConfirmedAt         DateTime?
+  // Optional emails (launch alerts and any future referral or promo message; since 2.16.0): set by the signed
+  // unsubscribe link (one click, RFC 8058) or PATCH /me {emailMarketing: false}. Transactional emails ignore it.
+  emailMarketingOptOutAt DateTime?
 
   // Two-step sign-in with an authenticator app (since 2.13.0; admins). The secret is AES-256-GCM encrypted (key derived
   // from JWT_SECRET); it is set by setup and counts only once totpEnabledAt is set. Never returned by any query by default.
@@ -733,12 +740,17 @@ model Return {
   courierId Int?
   courier   Courier? @relation(fields: [courierId], references: [id])
 
-  reason         ReturnReason
-  conditionNote  String? // the customer's note on the return; the store may add to it on receipt
-  storeNote      String? // the store's reason or notes (required when it rejects), shown to the customer
-  refundCents    Int? // calculated after inspection
-  damageDedCents Int?         @default(0) // deducted if damaged
-  sealIntact     Boolean? // the customer's answer for hygiene-sealed items (null = no sealed item, or a fault reason)
+  reason               ReturnReason
+  conditionNote        String? // the customer's note on the return; the store may add to it on receipt
+  storeNote            String? // the store's reason or notes (required when it rejects), shown to the customer
+  refundCents          Int? // calculated after inspection
+  damageDedCents       Int?         @default(0) // deducted if damaged
+  sealIntact           Boolean? // the customer's answer for hygiene-sealed items (null = no sealed item, or a fault reason)
+  // Made with the in-app withdrawal function (KSL 6:14 a, CRD Art. 11a; since 2.16.0): the time of the withdrawal is
+  // createdAt; the acknowledgement on a durable medium (email, or SMS for phone-only accounts) is recorded here.
+  withdrawal           Boolean      @default(false)
+  withdrawalAckSentAt  DateTime?
+  withdrawalAckChannel String? // "email" | "sms" | null (no deliverable address: the app shows the acknowledgement)
 
   status ReturnStatus @default(REQUESTED)
 
@@ -981,6 +993,8 @@ model DropReport {
   reporterId   Int?
   reason       String
   details      String?
+  // Copyright / trademark notices (DSA Art. 16(2); since 2.16.0): {name, email, work, location, goodFaith, at}
+  ipNotice     Json?
   status       ReportStatus @default(OPEN)
   resolvedById Int?
   resolvedAt   DateTime?
@@ -1020,6 +1034,7 @@ model DropCommentReport {
   comment    DropComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
   reporterId Int
   reason     String
+  ipNotice   Json? // copyright / trademark notices (since 2.16.0), as on DropReport
   createdAt  DateTime    @default(now())
 
   @@id([commentId, reporterId])
@@ -1499,8 +1514,9 @@ model ProductReport {
   product        Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
   reporterId     Int?
   reporterEmail  String?
-  reason         String // unsafe | counterfeit | illegal | misleading | other
+  reason         String // unsafe | counterfeit | illegal | misleading | copyright | trademark | other
   details        String?
+  ipNotice       Json? // copyright / trademark notices (since 2.16.0): {name, email, work, location, goodFaith, at}
   status         ReportStatus @default(OPEN)
   resolution     String? // "dismissed" | "listing_removed"
   resolutionNote String?

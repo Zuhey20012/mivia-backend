@@ -20,6 +20,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _loading = false;
   bool _obscurePass = true;
   bool _agreeToTerms = false;
+  /// "I am 18 or older" (Terms of Service §3; the server refuses registration without it)
+  bool _ageConfirmed = false;
   String? _error;
 
   @override
@@ -53,6 +55,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
       setState(() => _error = l10n.translate('acceptTermsPrompt'));
       return;
     }
+    if (!_ageConfirmed) {
+      setState(() => _error = _agePrompt(context));
+      return;
+    }
     setState(() { _loading = true; _error = null; });
     final auth = Provider.of<AuthService>(context, listen: false);
     final err = await auth.register(
@@ -60,6 +66,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _emailCtrl.text.trim(),
       _passCtrl.text,
       'CUSTOMER',
+      _ageConfirmed,
     );
     if (!mounted) return;
     if (err != null) {
@@ -73,6 +80,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
       Navigator.pop(context);
     }
   }
+
+  String _agePrompt(BuildContext context) =>
+      tr(context, 'Please confirm that you are 18 or older.', 'Vahvista, että olet vähintään 18-vuotias.');
 
   void _showLanguageSelector(BuildContext context) {
     final cardBg = AppTheme.cardBackground(context);
@@ -364,6 +374,33 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
               ),
 
+              const SizedBox(height: MSpace.sm),
+              // "I am 18 or older": required (Terms of Service §3); people under 18 can still browse without an account
+              Material(
+                color: Colors.transparent,
+                child: CheckboxListTile(
+                  key: const Key('register-age-confirm'),
+                  value: _ageConfirmed,
+                  onChanged: (v) => setState(() {
+                    _ageConfirmed = v ?? false;
+                    if (_ageConfirmed && _error == _agePrompt(context)) _error = null;
+                  }),
+                  controlAffinity: ListTileControlAffinity.leading,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 2),
+                  activeColor: AppTheme.primary,
+                  checkColor: AppTheme.onBrand,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(MRadius.md)),
+                  title: Text(
+                    tr(context, 'I am 18 or older', 'Olen vähintään 18-vuotias'),
+                    style: TextStyle(
+                      fontSize: MTextSize.label,
+                      color: isDark ? MPalette.birch : MPalette.ink,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+
               // The documents being accepted, readable before accepting
               Wrap(
                 spacing: 4,
@@ -381,7 +418,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 label: l10n.translate('createAccount'),
                 expand: true,
                 loading: _loading,
-                variant: _agreeToTerms ? MButtonVariant.primary : MButtonVariant.secondary,
+                variant: _agreeToTerms && _ageConfirmed ? MButtonVariant.primary : MButtonVariant.secondary,
                 onPressed: _handleRegister,
               ),
 

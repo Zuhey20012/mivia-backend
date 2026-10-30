@@ -230,7 +230,7 @@ export async function notifyLegalChange(versionId: number) {
 ${x.terminate ? `<p>${escapeHtml(x.terminate)}</p>` : ""}
 <p style="color:#5b5363;font-size:13px">${escapeHtml(fi ? "Sovellus pyytää sinua hyväksymään uuden version." : "The app will ask you to accept the new version.")}</p></div>`;
       const plain = [x.title, "", `${x.when} ${x.law}`.trim(), "", x.summary, "", x.url, x.terminate].filter((l) => l !== undefined).join("\n");
-      const r = await sendEmail(u.email, `Malvoya – ${x.title}`, html, plain).catch(() => ({ delivered: false }));
+      const r = await sendEmail(u.email, `Malvoya – ${x.title}`, html, plain, { kind: "legal", locale: fi ? "fi" : "en" }).catch(() => ({ delivered: false }));
       if (r.delivered) sent++;
     }
   }

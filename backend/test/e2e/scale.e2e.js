@@ -90,7 +90,7 @@ async function call(base, method, p, body, token, headers = {}) {
 const uniq = Date.now();
 async function register(base, name, role) {
   const r = await call(base, "POST", "/auth/register", {
-    name, email: `${name.toLowerCase()}${uniq}@scale.invalid`, password: "strong-pass-123", ...(role ? { role } : {}),
+    name, email: `${name.toLowerCase()}${uniq}@scale.invalid`, password: "strong-pass-123", ...(role ? { role } : {}), ageConfirmed: true,
     ...(role === "VENDOR" || role === "COURIER" ? { acceptTerms: true } : {}),
   });
   return r.body;

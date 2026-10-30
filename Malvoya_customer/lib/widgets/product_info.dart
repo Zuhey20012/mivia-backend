@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'ip_notice_form.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:malvoya_core/malvoya_core.dart';
@@ -788,6 +789,8 @@ Future<void> showReportProductSheet(BuildContext context, int productId) async {
     'counterfeit': tr(context, 'Counterfeit', 'Väärennös'),
     'misleading': tr(context, 'Misleading information', 'Harhaanjohtavat tiedot'),
     'illegal': tr(context, 'Other illegal product', 'Muu laiton tuote'),
+    'copyright': tr(context, 'Copyright: uses my photo or text', 'Tekijänoikeus: käyttää kuvaani tai tekstiäni'),
+    'trademark': tr(context, 'Trademark: uses my brand', 'Tavaramerkki: käyttää tavaramerkkiäni'),
     'other': tr(context, 'Something else', 'Jokin muu'),
   };
   String? reason;
@@ -829,12 +832,19 @@ Future<void> showReportProductSheet(BuildContext context, int productId) async {
               onPressed: reason == null || needsDetails
                   ? null
                   : () async {
+                      // Copyright and trademark: the notice details first (DSA Art. 16(2), API 2.16)
+                      Map<String, dynamic>? notice;
+                      if (isIpReportReason(reason)) {
+                        notice = await showIpNoticeForm(ctx, reason: reason!);
+                        if (notice == null || !ctx.mounted) return;
+                      }
                       setSheet(() {
                         sending = true;
                         error = null;
                       });
                       final res = await ApiClient(auth).post('/products/$productId/report', {
                         'reason': reason,
+                        if (notice != null) 'ipNotice': notice,
                         if (details.text.trim().isNotEmpty) 'details': details.text.trim(),
                         if (!auth.isAuthenticated && email.text.trim().isNotEmpty) 'email': email.text.trim(),
                       });

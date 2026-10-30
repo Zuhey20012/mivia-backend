@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
+import '../crash/crash_reporting.dart';
 import '../i18n/app_language.dart';
 import '../i18n/server_messages.dart';
 
@@ -163,10 +164,15 @@ class ApiClient {
     }
 
     Map<String, dynamic> data = {};
+    var parseFailed = false;
     try {
       final decoded = jsonDecode(utf8.decode(res.bodyBytes));
       if (decoded is Map<String, dynamic>) data = decoded;
-    } catch (_) {}
+    } catch (_) {
+      parseFailed = res.bodyBytes.isNotEmpty;
+    }
+    // Non-fatal crash report for 5xx answers and unreadable 2xx bodies only (never 4xx, no body)
+    CrashReporting.instance.recordApiFault(method, path, res.statusCode, parseFailed: parseFailed);
 
     if (res.statusCode >= 200 && res.statusCode < 300) return ApiResult(res.statusCode, data, null);
     final result = ApiResult(res.statusCode, data, messageFor(res.statusCode, data));

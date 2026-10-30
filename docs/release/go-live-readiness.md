@@ -1,6 +1,6 @@
 # Go-live readiness: everything needed for Malvoya to work from day one
 
-Checked 29 Oct 2026 against the live API (2.12.0, Render Frankfurt), apps 1.8.0+10, the website and the admin panel.
+Checked 29 Oct 2026 against the live API (2.15.0, Render Frankfurt), apps 1.8.0+10, the website and the admin panel. Work from the parallel session is included: admin two-step sign-in, "Test connections" on the System page, live shopping, reels tools, and the GitHub release workflows with Firebase App Distribution (`docs/release/README.md`). Store commission is now 0 % by default, so every delivered order loses money until prices are set.
 
 **Priority:** **P0** = nothing works for real customers without it · **P1** = needed before the public launch · **P2** = within the first months.
 **Status:** ✅ done · 🟡 partly · ❌ not done.
@@ -56,7 +56,7 @@ Secrets: **paste them yourself, never send them in chat.**
 | `MIN_BUILD_*`, `MAINTENANCE_MESSAGE` | when needed | force old apps to update, or pause ordering | set only when needed |
 
 ### 2c. After setting them
-Open **admin → System**. It lists everything still blocking real orders in plain language. When it says **"Ready for orders"**, the server side is complete.
+Open **admin → System** and press **Test connections**: it proves each key works. The page also lists everything still blocking real orders in plain language. When it says **"Ready for orders"**, the server side is complete.
 
 ## 3. Firebase (project `mivia-4f159`)
 | Step | Priority | Status |

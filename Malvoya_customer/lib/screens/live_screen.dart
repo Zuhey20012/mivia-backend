@@ -547,7 +547,8 @@ class _LiveScreenState extends State<LiveScreen> with WidgetsBindingObserver {
                 style: TextStyle(color: AppTheme.secondaryText(ctx), fontSize: MTextSize.label),
               ),
             ),
-            for (final e in reportReasons.entries)
+            // Copyright and trademark notices are made on products, drops and comments (they need the notice form)
+            for (final e in reportReasons.entries.where((e) => e.key != 'COPYRIGHT' && e.key != 'TRADEMARK'))
               ListTile(
                 title: Text(isFinnish(ctx) ? e.value[1] : e.value[0]),
                 onTap: () async {

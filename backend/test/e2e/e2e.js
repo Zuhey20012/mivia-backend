@@ -1,4 +1,4 @@
-// End-to-end test for API v2.15 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
+// End-to-end test for API v2.16 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
 const { execSync, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -146,7 +146,8 @@ async function register(name, role, extra = {}) {
   // Everyone accepts their agreement at sign-up (stores and couriers must, 2.10; customers too, since 2.11 orders need it)
   const terms = extra.acceptTerms === false ? {} : { acceptTerms: true };
   if (extra.acceptTerms === false) { extra = { ...extra }; delete extra.acceptTerms; }
-  const r = await call("POST", "/auth/register", { name, email: `${name.toLowerCase().replace(/\W/g, "")}${uniq}@example.fi`, password: "strong-pass-123", ...(role ? { role } : {}), ...terms, ...extra });
+  // Everyone confirms being 18 or older at sign-up (2.16)
+  const r = await call("POST", "/auth/register", { name, email: `${name.toLowerCase().replace(/\W/g, "")}${uniq}@example.fi`, password: "strong-pass-123", ...(role ? { role } : {}), ...terms, ageConfirmed: true, ...extra });
   return r.body;
 }
 
@@ -170,9 +171,9 @@ function ean13(d12) {
 
 (async () => {
   console.log("\n— Auth");
-  const regA = await call("POST", "/auth/register", { name: "Aino Korhonen", email: `aino${uniq}@example.fi`, password: "correct-horse-1", acceptTerms: true });
+  const regA = await call("POST", "/auth/register", { ageConfirmed: true, name: "Aino Korhonen", email: `aino${uniq}@example.fi`, password: "correct-horse-1", acceptTerms: true });
   check("customer can register", regA.status === 201 && regA.body.accessToken, regA);
-  const takeover = await call("POST", "/auth/register", { name: "Evil", email: `aino${uniq}@example.fi`, password: "whatever12", role: "VENDOR", acceptTerms: true });
+  const takeover = await call("POST", "/auth/register", { ageConfirmed: true, name: "Evil", email: `aino${uniq}@example.fi`, password: "whatever12", role: "VENDOR", acceptTerms: true });
   check("register with existing email is refused and returns no tokens", takeover.status === 409 && !takeover.body.accessToken, takeover);
   check("cannot self-register as ADMIN", (await call("POST", "/auth/register", { name: "X", email: `x${uniq}@example.fi`, password: "whatever12", role: "ADMIN" })).status === 400);
   check("wrong password rejected", (await call("POST", "/auth/login", { email: `aino${uniq}@example.fi`, password: "wrong-password" })).status === 401);
@@ -192,7 +193,7 @@ function ean13(d12) {
   const preHijackEmail = await call("POST", "/auth/otp/verify", { target: `aino${uniq}@example.fi`, code: "123456" });
   check("code sign-in does not open a registered account (unproven email)", preHijackEmail.status === 409 && !preHijackEmail.body.accessToken, preHijackEmail);
   const phoneP = `+35840${String(uniq).slice(-7)}`;
-  await call("POST", "/auth/register", { name: "Pre Hijacker", email: `prehijack${uniq}@example.fi`, phone: phoneP, password: "strong-pass-123" });
+  await call("POST", "/auth/register", { ageConfirmed: true, name: "Pre Hijacker", email: `prehijack${uniq}@example.fi`, phone: phoneP, password: "strong-pass-123" });
   plantCode(phoneP, "654321");
   const preHijackPhone = await call("POST", "/auth/otp/verify", { phone: phoneP, code: "654321" });
   check("code sign-in does not open a registered account (unproven phone)", preHijackPhone.status === 409 && !preHijackPhone.body.accessToken, preHijackPhone);
@@ -212,7 +213,7 @@ function ean13(d12) {
   check("sessions say whether the account has a password", regA.body.user?.hasPassword === true && codeNew.body.user?.hasPassword === false, [regA.body.user, codeNew.body.user]);
   const meA = await call("GET", "/me", null, tokenA);
   check("GET /me returns the account with hasPassword and googleLinked", meA.status === 200 && meA.body.user?.hasPassword === true && meA.body.user.googleLinked === false && !("passwordHash" in meA.body.user), meA.body);
-  const reija = await call("POST", "/auth/register", { name: "Reija Reset", email: `reija${uniq}@example.fi`, password: "old-password-1" });
+  const reija = await call("POST", "/auth/register", { ageConfirmed: true, name: "Reija Reset", email: `reija${uniq}@example.fi`, password: "old-password-1" });
   const reijaLogin2 = await call("POST", "/auth/login", { email: `reija${uniq}@example.fi`, password: "old-password-1" }); // "another device"
   const resetTarget = `pwreset:reija${uniq}@example.fi`;
   const resetRow = () => sql(`select count(*) from "OtpCode" where target = '${resetTarget}'`);
@@ -256,12 +257,12 @@ function ean13(d12) {
   check("an account without a password cannot 'change' one", (await call("POST", "/auth/password/change", { currentPassword: "x", newPassword: "whatever-123" }, codeNew.body.accessToken)).status === 400);
 
   console.log("\n— Agreements and language (2.10)");
-  const noTermsV = await call("POST", "/auth/register", { name: "No Terms", email: `noterms${uniq}@example.fi`, password: "strong-pass-123", role: "VENDOR" });
-  const noTermsC = await call("POST", "/auth/register", { name: "No Terms C", email: `notermsc${uniq}@example.fi`, password: "strong-pass-123", role: "COURIER" });
+  const noTermsV = await call("POST", "/auth/register", { ageConfirmed: true, name: "No Terms", email: `noterms${uniq}@example.fi`, password: "strong-pass-123", role: "VENDOR" });
+  const noTermsC = await call("POST", "/auth/register", { ageConfirmed: true, name: "No Terms C", email: `notermsc${uniq}@example.fi`, password: "strong-pass-123", role: "COURIER" });
   check("store and courier registration require accepting the agreement (400)", noTermsV.status === 400 && noTermsC.status === 400 && /Seller Terms/.test(noTermsV.body.error || ""), [noTermsV.body.error, noTermsC.body.error]);
   const withTerms = await register("Terhi", "VENDOR");
   check("accepting stores the time and the agreement version (seller terms)", sql(`select ("termsAcceptedAt" is not null) || '|' || "termsVersion" from "User" where id = ${withTerms.user.id}`).match(/^true\|vendor_terms@[0-9a-f]{12}$/) !== null, sql(`select coalesce("termsVersion", '-') from "User" where id = ${withTerms.user.id}`));
-  const custTerms = await call("POST", "/auth/register", { name: "Cecilia", email: `cecilia${uniq}@example.fi`, password: "strong-pass-123", acceptTerms: true });
+  const custTerms = await call("POST", "/auth/register", { ageConfirmed: true, name: "Cecilia", email: `cecilia${uniq}@example.fi`, password: "strong-pass-123", acceptTerms: true });
   check("a customer who accepts gets the customer terms version", custTerms.status === 201 && /^terms_of_service@[0-9a-f]{12}$/.test(sql(`select "termsVersion" from "User" where id = ${custTerms.body.user.id}`)));
   const fiTok = custTerms.body.accessToken;
   await call("GET", "/me", null, fiTok, { headers: { "Accept-Language": "fi-FI,fi;q=0.9,en;q=0.5" } });
@@ -993,7 +994,7 @@ function ean13(d12) {
   }));
 
   const sysDefault = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.15.0", sysDefault.pricing);
+  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.16.0", sysDefault.pricing);
   const stockBeforeQuote = stockOf(productId);
   const ordersBeforeQuote = sql(`select count(*) from "Order" where "userId"=${otherCust.user.id}`);
   const q0 = await quote(quoteBody, otherCust.accessToken);
@@ -1963,7 +1964,7 @@ function ean13(d12) {
   check("the public page shows the version in force", (await (await fetch(`${BASE}/legal/terms`)).text()).includes(verTerms.currentVersion));
 
   // Registration writes the acceptance records (customer: terms + privacy acknowledgement)
-  const lauriReg = await call("POST", "/auth/register", { name: "Lauri", email: `lauri${uniq}@example.fi`, password: "strong-pass-123", acceptTerms: true }, null, { headers: { "X-App-Version": "1.8.0+10", "User-Agent": "MalvoyaCustomer/1.8.0 " + "x".repeat(300) } });
+  const lauriReg = await call("POST", "/auth/register", { ageConfirmed: true, name: "Lauri", email: `lauri${uniq}@example.fi`, password: "strong-pass-123", acceptTerms: true }, null, { headers: { "X-App-Version": "1.8.0+10", "User-Agent": "MalvoyaCustomer/1.8.0 " + "x".repeat(300) } });
   const lauri = lauriReg.body;
   const lauriAg = (await call("GET", "/me/agreements", null, lauri.accessToken)).body;
   check("registering with acceptTerms records terms + privacy for a customer", lauriAg.ok && lauriAg.required.map((r) => r.doc).join(",") === "terms,privacy" && lauriAg.required.every((r) => r.accepted && r.acceptedAt && r.currentVersion && r.url && r.title?.fi) && lauriAg.history.length === 2 && lauriAg.history.every((h) => h.method === "register"), lauriAg);
@@ -2069,7 +2070,7 @@ function ean13(d12) {
   cob = (await call("GET", "/courier/me/onboarding", null, onni.accessToken)).body;
   check("courier ready for approval when everything but approval is done", cob.readyForApproval === true && cob.approved === false && cob.percent === 83 && sql(`select "readyForApprovalAt" is not null from "Courier" where "userId"=${onni.user.id}`) === "t", cob);
   const sys211 = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("System lists them as ready for approval", sys211.version === "2.15.0" && sys211.attention.some((a) => a.includes(`(#${pekkaStore.id}) is ready for approval`)) && sys211.attention.some((a) => a.includes("Courier \"Onni\"") && a.includes("ready for approval")) && sys211.readyForApproval?.stores?.some((s) => s.id === pekkaStore.id), sys211.attention);
+  check("System lists them as ready for approval", sys211.version === "2.16.0" && sys211.attention.some((a) => a.includes(`(#${pekkaStore.id}) is ready for approval`)) && sys211.attention.some((a) => a.includes("Courier \"Onni\"") && a.includes("ready for approval")) && sys211.readyForApproval?.stores?.some((s) => s.id === pekkaStore.id), sys211.attention);
   check("admin courier list shows vehicle, disclosure and readiness", (await call("GET", "/admin/couriers", null, adminToken)).body.couriers?.find((c) => c.user?.id === onni.user.id)?.vehicleType === "ebike");
 
   // Publishing changes (second instance reading a copy of the legal texts, same database)
@@ -2533,7 +2534,7 @@ function ean13(d12) {
     const stepNow = () => Math.floor(Date.now() / 30000);
     const jwtBody = (tok) => JSON.parse(Buffer.from(tok.split(".")[1], "base64url").toString());
     const a2Email = `admin2fa${uniq}@example.fi`;
-    const a2 = (await call("POST", "/auth/register", { name: "Admin Kaksi", email: a2Email, password: "strong-pass-123" })).body;
+    const a2 = (await call("POST", "/auth/register", { name: "Admin Kaksi", email: a2Email, password: "strong-pass-123", ageConfirmed: true })).body;
     sql(`update "User" set role='ADMIN' where id=${a2.user.id}`);
     const login = () => call("POST", "/auth/login", { email: a2Email, password: "strong-pass-123" });
     let a2Token = (await login()).body.accessToken;
@@ -2823,6 +2824,130 @@ function ean13(d12) {
   check("…and System says LiveKit is not set up", (await callAt(FEE_API, "GET", "/admin/system", null, adminToken)).body.integrations?.live?.configured === false);
   feeApi.kill(); feeApi = null;
 
+  console.log("\n— Age confirmation (2.16)");
+  // Fresh sessions (access tokens live 15 minutes); the admin token from the start is the fallback if sign-in needs a second step
+  const n_admin = (await call("POST", "/auth/login", { email: `admin${uniq}@example.fi`, password: "strong-pass-123" })).body.accessToken || adminToken;
+  const n_vendor = (await call("POST", "/auth/login", { email: `vera${uniq}@example.fi`, password: "strong-pass-123" })).body.accessToken || vendor.accessToken;
+  const ag_noAge = await call("POST", "/auth/register", { name: "Under Age", email: `noage${uniq}@example.fi`, password: "strong-pass-123", acceptTerms: true });
+  const ag_falseAge = await call("POST", "/auth/register", { name: "No Age", email: `falseage${uniq}@example.fi`, password: "strong-pass-123", acceptTerms: true, ageConfirmed: false });
+  const ag_vendorNoAge = await call("POST", "/auth/register", { name: "Store No Age", email: `vnoage${uniq}@example.fi`, password: "strong-pass-123", role: "VENDOR", acceptTerms: true });
+  const ag_courierNoAge = await call("POST", "/auth/register", { name: "Courier No Age", email: `cnoage${uniq}@example.fi`, password: "strong-pass-123", role: "COURIER", acceptTerms: true });
+  check("registration without ageConfirmed: true is 400 for every role, with a message in both languages", [ag_noAge, ag_falseAge, ag_vendorNoAge, ag_courierNoAge].every((r) => r.status === 400 && /18 or older/.test(r.body.error || "") && /vähintään 18-vuotias/.test(r.body.error || "") && !r.body.accessToken), [ag_noAge.body, ag_vendorNoAge.body]);
+  check("…and no account was made", sql(`select count(*) from "User" where email in ('noage${uniq}@example.fi','falseage${uniq}@example.fi','vnoage${uniq}@example.fi','cnoage${uniq}@example.fi')`) === "0");
+  const ag_reg = await register("Aada Adult");
+  const ag_regMe = (await call("GET", "/me", null, ag_reg.accessToken)).body.user;
+  check("registering with ageConfirmed stores the time; GET /me says ageConfirmed", sql(`select "ageConfirmedAt" is not null from "User" where id=${ag_reg.user.id}`) === "t" && ag_regMe?.ageConfirmed === true && !!ag_regMe.ageConfirmedAt, ag_regMe);
+  check("guests can still browse without an account", (await call("GET", "/products/search?q=coat")).status === 200 && (await call("GET", "/stores")).status === 200);
+  const ag_social = require(path.join(__dirname, "..", "..", "dist", "modules", "auth", "social.service.js"));
+  const ag_apple = await ag_social.signInWithAppleClaims({ email: `apple-age${uniq}@example.fi`, email_verified: true, firebase: { identities: { "apple.com": [`age.${uniq}`] } } }, "CUSTOMER", "Alva Apple");
+  const ag_tok = ag_apple.accessToken;
+  const ag_agr = (await call("GET", "/me/agreements", null, ag_tok)).body;
+  check("a social sign-up has not confirmed its age: GET /me/agreements says ageConfirmationRequired", ag_agr.ageConfirmationRequired === true && ag_agr.ageConfirmedAt === null && sql(`select "ageConfirmedAt" is null from "User" where id=${ag_apple.user.id}`) === "t", ag_agr);
+  const ag_o1 = await call("POST", "/orders", {}, ag_tok);
+  check("ordering is 428 AGREEMENT_REQUIRED with ageConfirmationRequired (terms not accepted either)", ag_o1.status === 428 && ag_o1.body.code === "AGREEMENT_REQUIRED" && ag_o1.body.ageConfirmationRequired === true && ag_o1.body.doc === "terms", ag_o1.body);
+  const ag_termsV = ag_agr.required.find((d) => d.doc === "terms")?.currentVersion;
+  const ag_acc1 = await call("POST", "/me/agreements/accept", { doc: "terms", version: ag_termsV }, ag_tok);
+  check("accepting the terms without the age box records the terms only (ageConfirmed: false)", ag_acc1.status === 201 && ag_acc1.body.ageConfirmed === false, ag_acc1.body);
+  const ag_o2 = await call("POST", "/orders", {}, ag_tok, { headers: { "Accept-Language": "fi" } });
+  check("…ordering is still 428 until the age is confirmed (role's own doc and version, Finnish message)", ag_o2.status === 428 && ag_o2.body.code === "AGREEMENT_REQUIRED" && ag_o2.body.ageConfirmationRequired === true && ag_o2.body.doc === "terms" && ag_o2.body.version === ag_termsV && /18-vuotias/.test(ag_o2.body.error || ""), ag_o2.body);
+  check("an accept with neither a document nor the age box is 400", (await call("POST", "/me/agreements/accept", {}, ag_tok)).status === 400 && (await call("POST", "/me/agreements/accept", { ageConfirmed: false }, ag_tok)).status === 400);
+  const ag_acc2 = await call("POST", "/me/agreements/accept", { doc: "terms", version: ag_termsV, ageConfirmed: true }, ag_tok);
+  check("accepting again with ageConfirmed: true stores the confirmation (idempotent for the terms)", ag_acc2.status === 200 && ag_acc2.body.alreadyAccepted === true && ag_acc2.body.ageConfirmed === true && sql(`select "ageConfirmedAt" is not null from "User" where id=${ag_apple.user.id}`) === "t", ag_acc2.body);
+  const ag_o3 = await call("POST", "/orders", {}, ag_tok);
+  check("…after which ordering passes the agreement gate (400 for the empty basket, not 428)", ag_o3.status === 400, ag_o3);
+  check("GET /me/agreements and GET /me show it confirmed", (await call("GET", "/me/agreements", null, ag_tok)).body.ageConfirmationRequired === false && (await call("GET", "/me", null, ag_tok)).body.user?.ageConfirmed === true);
+  const ag_courier = await ag_social.signInWithAppleClaims({ email: `apple-courier${uniq}@example.fi`, email_verified: true, firebase: { identities: { "apple.com": [`agec.${uniq}`] } } }, "COURIER", "Kalle Courier");
+  const ag_online = await call("POST", "/courier/status", { isOnline: true }, ag_courier.accessToken);
+  check("a social courier going online gets 428 with ageConfirmationRequired", ag_online.status === 428 && ag_online.body.ageConfirmationRequired === true && ag_online.body.doc === "courier-agreement", ag_online.body);
+  const ag_ageOnly = await call("POST", "/me/agreements/accept", { ageConfirmed: true }, ag_courier.accessToken);
+  check("the age can also be confirmed on its own; the courier agreement is still required (428 without the age flag)", ag_ageOnly.status === 200 && ag_ageOnly.body.ageConfirmed === true && (await call("POST", "/courier/status", { isOnline: true }, ag_courier.accessToken)).body.ageConfirmationRequired === false);
+  check("courier onboarding counts the agreement step done only with the age confirmed", (await call("GET", "/courier/me/onboarding", null, ag_courier.accessToken)).body.steps?.find((s) => s.key === "agreement")?.done === false);
+  check("the minor flag (DSA Art. 28) is still separate from the age confirmation", sql(`select "isMinor" from "User" where id=${ag_apple.user.id}`) === "f");
+  check("data export includes the age confirmation", !!(await call("GET", "/auth/me/data", null, ag_tok)).body.data?.ageConfirmedAt);
+
+  console.log("\n— Unsubscribe from optional emails (2.16)");
+  const un_mod = require(path.join(__dirname, "..", "..", "dist", "lib", "unsubscribe.js"));
+  const un_mail = require(path.join(__dirname, "..", "..", "dist", "services", "notificationDeliveryService.js"));
+  const un_user = await register("Ulla Unsub");
+  const un_tok = un_mod.unsubscribeToken(un_user.user.id);
+  const un_hdr = un_mod.unsubscribeHeaders(un_user.user.id);
+  check("optional emails carry List-Unsubscribe (https link with the signed token) and List-Unsubscribe-Post: List-Unsubscribe=One-Click (RFC 8058)", un_hdr["List-Unsubscribe"] === `<${BASE}/email/unsubscribe?t=${encodeURIComponent(un_tok)}>` && un_hdr["List-Unsubscribe-Post"] === "List-Unsubscribe=One-Click", un_hdr);
+  check("the token is an HMAC of the user id: another id with the same signature is not valid", un_mod.verifyUnsubscribeToken(un_tok) === un_user.user.id && un_mod.verifyUnsubscribeToken(`${un_user.user.id + 1}.${un_tok.split(".")[1]}`) === null && un_mod.verifyUnsubscribeToken("1.abc") === null);
+  check("GET /me says optional emails are on by default", (await call("GET", "/me", null, un_user.accessToken)).body.user?.emailMarketing === true);
+  const un_send1 = await un_mail.sendOptionalEmail(un_user.user.id, "test", "Test", ["Optional"]);
+  check("an optional email is sent while the account has not opted out", un_send1.delivered === true && !un_send1.skipped, un_send1);
+  const un_bad = await fetch(`${BASE}/email/unsubscribe?t=${encodeURIComponent(`${un_user.user.id}.${"A".repeat(43)}`)}`);
+  check("a wrong token shows the bilingual 'link is not valid' page (400)", un_bad.status === 400 && /This link is not valid/.test(await un_bad.text()));
+  const un_page = await fetch(`${BASE}/email/unsubscribe?t=${encodeURIComponent(un_tok)}`);
+  const un_html = await un_page.text();
+  check("GET shows a bilingual confirmation page with one button and changes nothing", un_page.status === 200 && /<form method="post"/.test(un_html) && /Peru tilaus \/ Unsubscribe/.test(un_html) && /form-action 'self'/.test(un_page.headers.get("content-security-policy") || "") && sql(`select "emailMarketingOptOutAt" is null from "User" where id=${un_user.user.id}`) === "t");
+  const un_post = await fetch(`${BASE}/email/unsubscribe?t=${encodeURIComponent(un_tok)}`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "List-Unsubscribe=One-Click" });
+  check("one-click POST unsubscribes (200) and stores the time", un_post.status === 200 && /You are unsubscribed/.test(await un_post.text()) && sql(`select "emailMarketingOptOutAt" is not null from "User" where id=${un_user.user.id}`) === "t");
+  const un_send2 = await un_mail.sendOptionalEmail(un_user.user.id, "test", "Test", ["Optional"]);
+  check("optional emails are no longer sent to the account (opted_out)", un_send2.delivered === false && un_send2.skipped === "opted_out", un_send2);
+  check("GET /me shows emailMarketing: false; a second POST is harmless", (await call("GET", "/me", null, un_user.accessToken)).body.user?.emailMarketing === false && (await fetch(`${API}/email/unsubscribe?t=${encodeURIComponent(un_tok)}`, { method: "POST" })).status === 200);
+  check("a POST with a wrong token is 400 and changes nothing for others", (await fetch(`${BASE}/email/unsubscribe?t=nope`, { method: "POST" })).status === 400);
+  const un_on = await call("PATCH", "/me", { emailMarketing: true }, un_user.accessToken);
+  check("PATCH /me {emailMarketing: true} switches optional emails back on; false switches them off", un_on.status === 200 && un_on.body.user?.emailMarketing === true && sql(`select "emailMarketingOptOutAt" is null from "User" where id=${un_user.user.id}`) === "t" && (await call("PATCH", "/me", { emailMarketing: false }, un_user.accessToken)).body.user?.emailMarketing === false && (await call("PATCH", "/me", { emailMarketing: "no" }, un_user.accessToken)).status === 400);
+  const un_send3 = await un_mail.sendOptionalEmail(un_user.user.id, "test", "Test", ["Optional"]);
+  const un_tx = await un_mail.sendApprovalEmail(un_user.user.email, "store", "en");
+  check("opting out stops optional emails only; transactional emails are still sent", un_send3.skipped === "opted_out" && un_tx.delivered === true);
+  check("transactional emails say why they were sent (footer line, both languages when unknown)", /concerns an order you placed/.test(un_mail.whyText("order", "en")) && /tilausta/.test(un_mail.whyText("order", "fi")) && / \/ /.test(un_mail.whyText("report")) && un_mail.whyText("internal") === null);
+
+  console.log("\n— Withdrawal function (2.16)");
+  const wd_cust = await register("Wilma Withdraw");
+  const wd_mkOrder = (store, daysAgo) => Number(sql(`insert into "Order" ("userId","storeId","status","subtotalCents","deliveryFeeCents","courierFeeCents","commissionCents","sellerPayoutCents","totalCents","stripePaymentIntentId","paymentStatus","paidAt","deliveredAt","deliveryAddress","updatedAt") values (${wd_cust.user.id},${store},'DELIVERED',8000,300,300,0,8000,8300,'pi_wd_${uniq}_${store}_${daysAgo}','SUCCEEDED',now(),now() - interval '${daysAgo} days','Aleksanterinkatu 5, Helsinki',now()) returning id`).split("\n")[0]);
+  const wd_line = (orderId, qty) => Number(sql(`insert into "OrderItem" ("orderId","productId","quantity","unitCents") values (${orderId},${productId},${qty},4000) returning id`).split("\n")[0]);
+  const wd_biz = wd_mkOrder(storeId, 1);
+  const wd_l1 = wd_line(wd_biz, 2);
+  const wd_priv = wd_mkOrder(privSeller.body.store.id, 1);
+  wd_line(wd_priv, 1);
+  const wd_old = wd_mkOrder(storeId, 20);
+  wd_line(wd_old, 1);
+  const wd_bizView = (await call("GET", `/orders/${wd_biz}`, null, wd_cust.accessToken)).body.order;
+  check("a delivered order from a business seller offers the withdrawal function until the period ends", wd_bizView?.withdrawal?.available === true && wd_bizView.withdrawal.sellerType === "BUSINESS" && wd_bizView.store?.sellerType === "BUSINESS" && Math.abs(new Date(wd_bizView.withdrawal.until) - (new Date(wd_bizView.deliveredAt).getTime() + 14 * 86400000)) < 1000, wd_bizView?.withdrawal);
+  const wd_privView = (await call("GET", `/orders/${wd_priv}`, null, wd_cust.accessToken)).body.order;
+  const wd_oldView = (await call("GET", `/orders/${wd_old}`, null, wd_cust.accessToken)).body.order;
+  check("…not for a private seller (reason private_seller) or after the period (period_ended); the order list says the same", wd_privView?.withdrawal?.available === false && wd_privView.withdrawal.reason === "private_seller" && wd_oldView?.withdrawal?.reason === "period_ended" && (await call("GET", "/orders", null, wd_cust.accessToken)).body.orders?.find((o) => o.id === wd_biz)?.withdrawal?.available === true, [wd_privView?.withdrawal, wd_oldView?.withdrawal]);
+  const wd_privTry = await call("POST", "/returns", { orderId: wd_priv, withdrawal: true }, wd_cust.accessToken);
+  check("withdrawing from a private seller's order is refused (422 WITHDRAWAL_NOT_APPLICABLE, plain words in both languages)", wd_privTry.status === 422 && wd_privTry.body.code === "WITHDRAWAL_NOT_APPLICABLE" && /private person/.test(wd_privTry.body.reason?.en || "") && /yksityishenkilö/.test(wd_privTry.body.reason?.fi || "") && sql(`select count(*) from "Return" where "orderId"=${wd_priv}`) === "0", wd_privTry.body);
+  check("a withdrawal is not a fault return: WRONG_ITEM with withdrawal is 400; after the period it is refused", (await call("POST", "/returns", { orderId: wd_biz, withdrawal: true, reason: "WRONG_ITEM" }, wd_cust.accessToken)).status === 400 && (await call("POST", "/returns", { orderId: wd_old, withdrawal: true }, wd_cust.accessToken)).status === 400);
+  const wd_ret = await call("POST", "/returns", { orderId: wd_biz, withdrawal: true, items: [{ orderItemId: wd_l1, quantity: 1 }], conditionNote: "Too small" }, wd_cust.accessToken);
+  check("Confirm withdrawal: the return is created (no reason needed → CHANGED_MIND) and marked withdrawal: true", wd_ret.status === 201 && wd_ret.body.return?.withdrawal === true && wd_ret.body.return.reason === "CHANGED_MIND" && wd_ret.body.return.status === "REQUESTED" && wd_ret.body.return.items?.[0]?.quantity === 1, wd_ret.body);
+  check("the acknowledgement email is sent at once and recorded (time and channel) before the shop has done anything", wd_ret.body.return?.withdrawalAckChannel === "email" && !!wd_ret.body.return.withdrawalAckSentAt && sql(`select withdrawal || '|' || ("withdrawalAckSentAt" is not null) || '|' || "withdrawalAckChannel" || '|' || status from "Return" where id=${wd_ret.body.return?.id}`) === "true|true|email|REQUESTED", wd_ret.body.return);
+  check("the store sees the return marked as a withdrawal", (await call("GET", "/returns", null, n_vendor)).body.returns?.find((r) => r.id === wd_ret.body.return?.id)?.withdrawal === true);
+  const wd_plain = await call("POST", "/returns", { orderId: wd_biz, reason: "CHANGED_MIND" }, wd_cust.accessToken);
+  check("an ordinary return still works as before (withdrawal: false, no acknowledgement row)", wd_plain.status === 201 && wd_plain.body.return?.withdrawal === false && wd_plain.body.return.withdrawalAckSentAt === null, wd_plain.body);
+
+  console.log("\n— Copyright and trademark notices (2.16)");
+  const ip_rep = await register("Iida Rights");
+  const ip_notice = { name: "Iida Oikeus", email: `rights${uniq}@example.fi`, work: "My photograph 'Kallio at dusk' (2025)", location: "The first product photo", goodFaith: true };
+  const ip_p0 = await call("POST", `/products/${productId}/report`, { reason: "copyright" }, ip_rep.accessToken);
+  const ip_p1 = await call("POST", `/products/${productId}/report`, { reason: "copyright", ipNotice: { ...ip_notice, goodFaith: false } }, ip_rep.accessToken);
+  const ip_p2 = await call("POST", `/products/${productId}/report`, { reason: "trademark", ipNotice: { ...ip_notice, work: "" } }, ip_rep.accessToken);
+  check("a copyright or trademark product report needs the notice fields and the good-faith statement (400 IP_NOTICE_REQUIRED, both languages)", [ip_p0, ip_p1, ip_p2].every((r) => r.status === 400 && r.body.code === "IP_NOTICE_REQUIRED" && /good-faith/.test(r.body.error) && /vilpittömän/.test(r.body.error)), [ip_p0.body, ip_p1.body]);
+  const ip_p3 = await call("POST", `/products/${productId}/report`, { reason: "copyright", details: "Used without permission", ipNotice: ip_notice });
+  check("with the fields it is accepted (also signed out) and stored with the time of the statement", ip_p3.status === 201 && sql(`select "ipNotice"->>'name' || '|' || ("ipNotice"->>'goodFaith') || '|' || ("ipNotice"->>'at' is not null) || '|' || "reporterEmail" from "ProductReport" where id=${ip_p3.body.report?.id}`) === `Iida Oikeus|true|true|rights${uniq}@example.fi`, ip_p3.body);
+  const ip_q = (await call("GET", "/admin/product-reports", null, n_admin)).body.reports?.find((r) => r.id === ip_p3.body.report?.id);
+  check("admins see the notice in the product report queue", ip_q?.reason === "copyright" && ip_q.ipNotice?.work === ip_notice.work && ip_q.ipNotice.location === ip_notice.location, ip_q);
+  const ip_drop = (await call("GET", `/stores/${storeId}/drops`)).body.drops?.[0]?.id;
+  const ip_d0 = await call("POST", `/drops/${ip_drop}/report`, { reason: "COPYRIGHT" }, ip_rep.accessToken);
+  const ip_d1 = await call("POST", `/drops/${ip_drop}/report`, { reason: "TRADEMARK", details: "Our logo", ipNotice: { ...ip_notice, work: "EU trade mark 018000000 TESTI" } }, ip_rep.accessToken);
+  check("drops: COPYRIGHT/TRADEMARK need the notice (400), and are accepted with it", ip_d0.status === 400 && ip_d0.body.code === "IP_NOTICE_REQUIRED" && ip_d1.status === 200 && ip_d1.body.received === true, [ip_d0.body, ip_d1.body]);
+  check("admins see it in the drop report queue", (await call("GET", "/admin/reports", null, n_admin)).body.reports?.some((r) => r.reason === "TRADEMARK" && r.ipNotice?.work === "EU trade mark 018000000 TESTI"));
+  const ip_author = await register("Cora Comment");
+  const ip_cm = await call("POST", `/drops/${ip_drop}/comments`, { body: "My own photo of this" }, ip_author.accessToken);
+  const ip_c0 = await call("POST", `/drops/${ip_drop}/comments/${ip_cm.body.comment?.id}/report`, { reason: "COPYRIGHT" }, ip_rep.accessToken);
+  const ip_c1 = await call("POST", `/drops/${ip_drop}/comments/${ip_cm.body.comment?.id}/report`, { reason: "COPYRIGHT", ipNotice: { ...ip_notice, location: "The comment text" } }, ip_rep.accessToken);
+  check("comments: a COPYRIGHT report needs the notice (400) and is accepted with it", ip_cm.status === 201 && ip_c0.status === 400 && ip_c0.body.code === "IP_NOTICE_REQUIRED" && ip_c1.status === 200, [ip_c0.body, ip_c1.body]);
+  check("admins see it in the reported comments queue", (await call("GET", "/admin/comments/reported", null, n_admin)).body.comments?.find((c) => c.id === ip_cm.body.comment?.id)?.reports?.[0]?.ipNotice?.location === "The comment text");
+  check("other reasons need no notice (as before)", (await call("POST", `/drops/${ip_drop}/report`, { reason: "SCAM" })).body.received === true);
+  const ip_page = await fetch(`${BASE}/legal/ip-notice`);
+  const ip_html = await ip_page.text();
+  check("/legal/ip-notice explains reporting, the counter-notice and repeat infringers, and says the DMCA does not apply", ip_page.status === 200 && /counter-notice/i.test(ip_html) && /Repeat infringers/.test(ip_html) && /DMCA/.test(ip_html) && (await fetch(`${BASE}/legal/copyright`)).status === 200);
+  check("every legal page links to it", /href="\/legal\/ip-notice"/.test(await (await fetch(`${BASE}/legal/terms`)).text()));
+  check("deleting the reporter's account keeps the notice but removes their name and email", (await call("DELETE", "/auth/me", null, ip_rep.accessToken)).status === 200 && sql(`select ("ipNotice" ? 'name') || '|' || ("ipNotice" ? 'email') || '|' || ("ipNotice" ? 'work') from "DropReport" where "reporterId"=${ip_rep.user.id} and reason='TRADEMARK'`) === "false|false|true");
+
   console.log("\n— Background jobs and input hardening");
   const leaseSql = `INSERT INTO "JobLease" ("name","lockedUntil") VALUES ('t${uniq}', now() + interval '1 minute') ON CONFLICT ("name") DO UPDATE SET "lockedUntil" = now() + interval '1 minute' WHERE "JobLease"."lockedUntil" < now() RETURNING "name"`;
   const firstLine = (q) => sql(q).split(/\r?\n/)[0];
@@ -2833,7 +2958,7 @@ function ean13(d12) {
   check("huge search input rejected", (await call("GET", `/products/search?q=${"a".repeat(200)}`)).status === 400);
   const cors = await fetch(`${API}/stores`, { headers: { Origin: "https://evil.example" } });
   check("CORS does not allow unknown origins", !cors.headers.get("access-control-allow-origin"));
-  check("health reports v2.15.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.15.0");
+  check("health reports v2.16.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.16.0");
 
   [vendorSock, custSock, otherSock, c1Sock, c2Sock].forEach((s) => s.close());
   console.log(`\n${pass} passed, ${fail} failed`);
