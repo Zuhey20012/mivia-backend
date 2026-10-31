@@ -5,7 +5,7 @@ import { mediaConfigured } from "../lib/cloudinary";
 import { processDuePayouts } from "../modules/payouts/payouts.service";
 import { checkProcessingDrops } from "../modules/drops/drops.service";
 import { checkProcessingProductVideos } from "../modules/products/productVideos";
-import { purgeOldDeliveryProofs } from "../modules/orders/orders.service";
+import { expireStaleCourierPositions, purgeDeliveryProofsAndLocations, purgeExpiredCredentials, purgeOldContactMessages, purgeOldDropViews } from "./privacyRetention";
 import { runOrderWatchdog } from "./orderWatchdog";
 import { failStaleImports } from "../modules/imports/imports.service";
 import { purgeOldMessages } from "../modules/orders/chat";
@@ -24,7 +24,15 @@ const jobs: Job[] = [
   { name: "payouts", everyMs: 10 * 60_000, enabled: () => !!env.stripeSecretKey, run: processDuePayouts },
   { name: "drop-processing", everyMs: 2 * 60_000, enabled: mediaConfigured, run: checkProcessingDrops },
   { name: "product-video-processing", everyMs: 2 * 60_000, enabled: mediaConfigured, run: checkProcessingProductVideos },
-  { name: "delivery-proof-purge", everyMs: 6 * 60 * 60_000, enabled: mediaConfigured, run: purgeOldDeliveryProofs },
+  // Handover positions and delivery pins 30 days after delivery/closing, for every order (2.16.1: always runs);
+  // the delivery photos at Cloudinary only when Cloudinary is configured
+  { name: "delivery-proof-purge", everyMs: 6 * 60 * 60_000, enabled: () => true, run: () => purgeDeliveryProofsAndLocations() },
+  // A courier position without an update for COURIER_POSITION_TTL_MINUTES (15) is cleared; idle couriers go offline
+  { name: "courier-position-expiry", everyMs: 60_000, enabled: () => true, run: () => expireStaleCourierPositions() },
+  // Drop view rows only de-duplicate views within a day: deleted after 2 days (the totals stay on the drop)
+  { name: "drop-view-purge", everyMs: 24 * 60 * 60_000, enabled: () => true, run: () => purgeOldDropViews() },
+  // Contact-form (no account) support messages: 24 months after the last change
+  { name: "contact-message-retention", everyMs: 24 * 60 * 60_000, enabled: () => true, run: () => purgeOldContactMessages() },
   { name: "import-watchdog", everyMs: 5 * 60_000, enabled: () => true, run: failStaleImports },
   // Order chat is kept 30 days after the order is completed or cancelled
   { name: "chat-purge", everyMs: 6 * 60 * 60_000, enabled: () => true, run: purgeOldMessages },
@@ -37,11 +45,12 @@ const jobs: Job[] = [
     name: "agreement-retention", everyMs: 24 * 60 * 60_000, enabled: () => true,
     run: () => prisma.agreementAcceptance.deleteMany({ where: { user: { deletedAt: { lt: new Date(Date.now() - 10 * 365.25 * 86_400_000) } } } }),
   },
-  {
-    name: "expired-sign-in-codes", everyMs: 60 * 60_000, enabled: () => true,
-    run: () => prisma.otpCode.deleteMany({ where: { expiresAt: { lt: new Date() } } }),
-  },
+  // Expired sign-in/reset codes and expired refresh tokens of every user (2.16.1: also users who never sign in again)
+  { name: "expired-sign-in-codes", everyMs: 60 * 60_000, enabled: () => true, run: () => purgeExpiredCredentials() },
 ];
+
+/** The job list, read-only (the e2e test checks which jobs run without Cloudinary). */
+export const scheduledJobs: ReadonlyArray<Readonly<Job>> = jobs;
 
 /**
  * Takes a time-limited lease on the job. A row lock survives connection pooling (unlike

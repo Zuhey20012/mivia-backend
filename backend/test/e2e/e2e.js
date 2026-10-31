@@ -1,4 +1,4 @@
-// End-to-end test for API v2.16 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
+// End-to-end test for API v2.16.1 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
 const { execSync, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -557,10 +557,13 @@ function ean13(d12) {
   check("drop shows it is liked by the viewer", (await call("GET", `/drops/${d1}`, null, otherCust.accessToken)).body.drop.likedByMe === true);
   check("unlike", (await call("DELETE", `/drops/${d1}/like`, null, otherCust.accessToken)).body.likeCount === 0);
   check("anonymous users cannot like", (await call("POST", `/drops/${d1}/like`)).status === 401);
-  await call("POST", `/drops/${d1}/view`, { installId: "install-abc-123", watchedSec: 5, completed: false });
-  await call("POST", `/drops/${d1}/view`, { installId: "install-abc-123", watchedSec: 21, completed: true });
-  await call("POST", `/drops/${d1}/view`, { installId: "install-abc-123", watchedSec: 21, completed: true });
-  check("repeat views from one device count once; completion counted once", sql(`select "viewCount" || '|' || "completeCount" from "Drop" where id=${d1}`) === "1|1");
+  // Signed-out views are keyed by a daily hash of the address only (2.16.1): an old build's install id is ignored
+  const sameViewer = { headers: { "X-Forwarded-For": "10.77.0.1" } };
+  await call("POST", `/drops/${d1}/view`, { installId: "install-abc-123", watchedSec: 5, completed: false }, null, sameViewer);
+  await call("POST", `/drops/${d1}/view`, { installId: "install-abc-123", watchedSec: 21, completed: true }, null, sameViewer);
+  await call("POST", `/drops/${d1}/view`, { watchedSec: 21, completed: true }, null, sameViewer);
+  check("repeat views from one signed-out viewer count once a day; completion counted once", sql(`select "viewCount" || '|' || "completeCount" from "Drop" where id=${d1}`) === "1|1");
+  check("an old app's install id is accepted but never stored: only the daily address hash is kept", sql(`select count(*) filter (where "viewerKey" like 'd:%') || '|' || count(*) filter (where "viewerKey" like 'i:%') from "DropView" where "dropId"=${d1}`) === "0|1");
   check("watch time is capped at the video length", Number(sql(`select "watchSeconds" from "Drop" where id=${d1}`)) <= 21.5);
   const sh = await call("POST", `/drops/${d1}/share`);
   check("share returns a public link", (sh.body.shareUrl || "").endsWith(`/d/${d1}`) && sh.body.shareCount === 1, sh.body);
@@ -994,7 +997,7 @@ function ean13(d12) {
   }));
 
   const sysDefault = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.16.0", sysDefault.pricing);
+  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.16.1", sysDefault.pricing);
   const stockBeforeQuote = stockOf(productId);
   const ordersBeforeQuote = sql(`select count(*) from "Order" where "userId"=${otherCust.user.id}`);
   const q0 = await quote(quoteBody, otherCust.accessToken);
@@ -2070,7 +2073,7 @@ function ean13(d12) {
   cob = (await call("GET", "/courier/me/onboarding", null, onni.accessToken)).body;
   check("courier ready for approval when everything but approval is done", cob.readyForApproval === true && cob.approved === false && cob.percent === 83 && sql(`select "readyForApprovalAt" is not null from "Courier" where "userId"=${onni.user.id}`) === "t", cob);
   const sys211 = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("System lists them as ready for approval", sys211.version === "2.16.0" && sys211.attention.some((a) => a.includes(`(#${pekkaStore.id}) is ready for approval`)) && sys211.attention.some((a) => a.includes("Courier \"Onni\"") && a.includes("ready for approval")) && sys211.readyForApproval?.stores?.some((s) => s.id === pekkaStore.id), sys211.attention);
+  check("System lists them as ready for approval", sys211.version === "2.16.1" && sys211.attention.some((a) => a.includes(`(#${pekkaStore.id}) is ready for approval`)) && sys211.attention.some((a) => a.includes("Courier \"Onni\"") && a.includes("ready for approval")) && sys211.readyForApproval?.stores?.some((s) => s.id === pekkaStore.id), sys211.attention);
   check("admin courier list shows vehicle, disclosure and readiness", (await call("GET", "/admin/couriers", null, adminToken)).body.couriers?.find((c) => c.user?.id === onni.user.id)?.vehicleType === "ebike");
 
   // Publishing changes (second instance reading a copy of the legal texts, same database)
@@ -2948,6 +2951,190 @@ function ean13(d12) {
   check("every legal page links to it", /href="\/legal\/ip-notice"/.test(await (await fetch(`${BASE}/legal/terms`)).text()));
   check("deleting the reporter's account keeps the notice but removes their name and email", (await call("DELETE", "/auth/me", null, ip_rep.accessToken)).status === 200 && sql(`select ("ipNotice" ? 'name') || '|' || ("ipNotice" ? 'email') || '|' || ("ipNotice" ? 'work') from "DropReport" where "reporterId"=${ip_rep.user.id} and reason='TRADEMARK'`) === "false|false|true");
 
+  // "Your data, explained / Tietosi selkokielellä" (legal/data_explained.md): one bilingual page, Finnish first
+  const dx_pages = await Promise.all(["/legal/data-explained", "/legal/tietosi"].map(async (p) => { const r = await fetch(`${BASE}${p}`); return { status: r.status, html: await r.text() }; }));
+  check("/legal/data-explained and /legal/tietosi answer 200 with the page in Finnish (first) and English", dx_pages.every((p) => p.status === 200 && p.html.includes("Tietosi selkokielellä") && p.html.includes("Your data, explained") && p.html.indexOf("Mitä emme koskaan kerää") < p.html.indexOf("What we never collect") && p.html.includes("tietosuoja.fi")), dx_pages.map((p) => p.status));
+  const dx_privacy = await (await fetch(`${BASE}/legal/privacy`)).text();
+  check("every legal page lists it in its navigation, and the privacy policy text links to it", /href="\/legal\/data-explained"/.test(await (await fetch(`${BASE}/legal/terms`)).text()) && /href="\/legal\/data-explained"/.test(dx_privacy) && /href="https:\/\/[^"]+\/legal\/data-explained"/.test(dx_privacy));
+
+  console.log("\n— Privacy fixes from the data audit (2.16.1): C1–C10");
+  // The retention jobs run here, in this process, against the same database (as the chat purge and live watchdog do)
+  Object.assign(process.env, testEnv, { DISABLE_SCHEDULER: "true" });
+  delete process.env.COURIER_POSITION_TTL_MINUTES; // test.env sets 600 for the API; here the default (15 min) applies
+  const pv_ret = require(path.join(__dirname, "..", "..", "dist", "services", "privacyRetention.js"));
+  const pv_sched = require(path.join(__dirname, "..", "..", "dist", "services", "scheduler.js"));
+  const pv_id = (q) => Number(sql(q).split(/\r?\n/)[0]);
+  const pv_order = (userId, status, set = "") => {
+    const id = pv_id(`insert into "Order" ("userId","storeId","status","subtotalCents","deliveryFeeCents","courierFeeCents","commissionCents","sellerPayoutCents","totalCents","paymentStatus","deliveryAddress","deliveryLat","deliveryLng","updatedAt") values (${userId},${storeId},'${status}',2000,290,650,0,2000,2290,'SUCCEEDED','Testikatu 1, Helsinki',60.181,24.951,now()) returning id`);
+    if (set) sql(`update "Order" set ${set} where id=${id}`);
+    return id;
+  };
+  const pv_pos = (o) => (o ? [o.courier?.name, o.courier?.latitude, o.courier?.longitude] : "missing");
+  const pv_get = async (id, tok) => (await call("GET", `/orders/${id}`, null, tok)).body?.order;
+  const pv_audits = (action, entityId) => sql(`select count(*) from "AdminAuditLog" where action='${action}' and "entityId"=${entityId} and "adminId"=${adminUser.user.id}`);
+
+  const pv_cust = await register("Pvcust");
+  const pv_other = await register("Pvother");
+  const pv_cour = await register("Pvcourier", "COURIER");
+  const pv_courId = Number(sql(`select id from "Courier" where "userId"=${pv_cour.user.id}`));
+  const pv_appr = await call("PATCH", `/admin/couriers/${pv_courId}/approve`, null, adminToken);
+  check("C10: approving a courier is written to the audit log", pv_appr.status === 200 && pv_audits("courier.approve", pv_courId) === "1", pv_appr.body);
+  await call("POST", "/courier/status", { isOnline: true, latitude: 60.175, longitude: 24.945 }, pv_cour.accessToken);
+
+  // C2: the courier's live position only on an active, assigned order, only for its customer and store (and admins)
+  const pv_active = pv_order(pv_cust.user.id, "CONFIRMED", `"courierId"=${pv_courId}, "acceptedAt"=now(), "confirmedAt"=now()`);
+  sql(`update "Courier" set "currentOrderId"=${pv_active} where id=${pv_courId}`);
+  const pv_done = pv_order(pv_cust.user.id, "DELIVERED", `"courierId"=${pv_courId}, "deliveredAt"=now() - interval '1 hour', "handoverMethod"='IN_PERSON'`);
+  const pv_cancel = pv_order(pv_cust.user.id, "CANCELLED", `"courierId"=${pv_courId}, "cancelledAt"=now()`);
+  const pv_cA = await pv_get(pv_active, pv_cust.accessToken);
+  const pv_sA = await pv_get(pv_active, vendor.accessToken);
+  const pv_lA = (await call("GET", "/orders", null, vendor.accessToken)).body.orders?.find((o) => o.id === pv_active);
+  check("C2: the customer and the store of an active, assigned order see the courier's live position (order and the store's list)",
+    pv_cA?.courier?.latitude === 60.175 && pv_cA.courier.longitude === 24.945 && pv_sA?.courier?.latitude === 60.175 && pv_lA?.courier?.longitude === 24.945, [pv_pos(pv_cA), pv_pos(pv_sA), pv_pos(pv_lA)]);
+  sql(`update "Order" set status='SHIPPED', "pickedUpAt"=now() where id=${pv_active}`);
+  check("C2: …also after pickup (SHIPPED); admins see it", (await pv_get(pv_active, pv_cust.accessToken))?.courier?.latitude === 60.175 && (await pv_get(pv_active, adminToken))?.courier?.latitude === 60.175);
+  const pv_own = await pv_get(pv_active, pv_cour.accessToken);
+  check("C2: nobody else: the courier's own order payload carries no coordinates, an unrelated customer gets 404",
+    pv_own?.courier?.name === "Pvcourier" && pv_own.courier.latitude === null && pv_own.courier.longitude === null && (await call("GET", `/orders/${pv_active}`, null, pv_other.accessToken)).status === 404, pv_pos(pv_own));
+  const pv_cD = await pv_get(pv_done, pv_cust.accessToken);
+  const pv_cC = await pv_get(pv_cancel, pv_cust.accessToken);
+  const pv_sD = await pv_get(pv_done, vendor.accessToken);
+  const pv_list = (await call("GET", "/orders", null, vendor.accessToken)).body.orders || [];
+  const pv_lD = pv_list.find((o) => o.id === pv_done), pv_lC = pv_list.find((o) => o.id === pv_cancel);
+  check("C2: never on a delivered or cancelled order, nor in the store's list of past orders (the courier's name stays)",
+    pv_cD?.courier?.name === "Pvcourier" && pv_cD.courier.latitude === null && pv_cC?.courier?.latitude === null && pv_sD?.courier?.longitude === null
+      && pv_lD?.courier?.name === "Pvcourier" && pv_lD.courier.latitude === null && pv_lD.courier.longitude === null && pv_lC?.courier?.latitude === null,
+    [pv_pos(pv_cD), pv_pos(pv_cC), pv_pos(pv_sD), pv_pos(pv_lD), pv_pos(pv_lC)]);
+  check("C2: no finished order in the store's list carries a courier position",
+    pv_list.length > 0 && pv_list.filter((o) => !["CONFIRMED", "PROCESSING", "SHIPPED"].includes(o.status)).every((o) => !o.courier || (o.courier.latitude === null && o.courier.longitude === null)));
+
+  // C3: positions without an update for 15 minutes (configurable) are cleared
+  const pv_idle = await register("Pvidle", "COURIER");
+  const pv_idleId = Number(sql(`select id from "Courier" where "userId"=${pv_idle.user.id}`));
+  await call("PATCH", `/admin/couriers/${pv_idleId}/approve`, null, adminToken);
+  await call("POST", "/courier/status", { isOnline: true, latitude: 60.19, longitude: 24.96 }, pv_idle.accessToken);
+  sql(`update "Courier" set "locationAt"=now() - interval '16 minutes' where id=${pv_courId}; update "Courier" set "locationAt"=now() - interval '14 minutes' where id=${pv_idleId}`);
+  await pv_ret.expireStaleCourierPositions();
+  check("C3: a courier carrying an order: after 15 min without an update the position is cleared and the time recorded; the job carries on",
+    sql(`select (latitude is null and longitude is null and "locationAt" is null and "locationExpiredAt" is not null and "isActive" and "currentOrderId"=${pv_active})::text from "Courier" where id=${pv_courId}`) === "true"
+      && sql(`select status || '|' || "courierId" from "Order" where id=${pv_active}`) === `SHIPPED|${pv_courId}`);
+  check("C3: an idle courier whose last update is 14 min old is left alone", sql(`select ("isActive" and latitude is not null and "locationExpiredAt" is null)::text from "Courier" where id=${pv_idleId}`) === "true");
+  const pv_admC = (await call("GET", "/admin/couriers", null, adminToken)).body.couriers || [];
+  const pv_admO = (await call("GET", "/admin/orders", null, adminToken)).body.orders?.find((o) => o.id === pv_active);
+  const pv_cNow = await pv_get(pv_active, pv_cust.accessToken);
+  check("C3: admin sees \"no position\" and when it was cleared (couriers and the order); the customer still sees the courier, without coordinates",
+    pv_admC.find((c) => c.id === pv_courId)?.position?.status === "none" && !!pv_admC.find((c) => c.id === pv_courId)?.position?.clearedAt
+      && pv_admC.find((c) => c.id === pv_idleId)?.position?.status === "stale" && pv_admO?.courier?.position?.status === "none" && !("latitude" in (pv_admO?.courier || {}))
+      && pv_cNow?.courier?.name === "Pvcourier" && pv_cNow.courier.latitude === null,
+    [pv_admC.find((c) => c.id === pv_courId)?.position, pv_admO?.courier, pv_pos(pv_cNow)]);
+  const pv_tel = await call("POST", "/courier/telemetry", { latitude: 60.177, longitude: 24.947, orderId: pv_active }, pv_cour.accessToken);
+  check("C3: the next position update restores tracking and clears the marker",
+    pv_tel.status === 200 && sql(`select ("locationExpiredAt" is null and latitude = 60.177)::text from "Courier" where id=${pv_courId}`) === "true"
+      && (await call("GET", "/admin/couriers", null, adminToken)).body.couriers?.find((c) => c.id === pv_courId)?.position?.status === "live"
+      && (await pv_get(pv_active, pv_cust.accessToken))?.courier?.latitude === 60.177, pv_tel.body);
+  sql(`update "Courier" set "locationAt"=now() - interval '16 minutes' where id=${pv_idleId}`);
+  process.env.COURIER_POSITION_TTL_MINUTES = "30";
+  await pv_ret.expireStaleCourierPositions();
+  const pv_keptAt30 = sql(`select ("isActive" and latitude is not null)::text from "Courier" where id=${pv_idleId}`);
+  delete process.env.COURIER_POSITION_TTL_MINUTES;
+  check("C3: the period is configurable (COURIER_POSITION_TTL_MINUTES=30 keeps a 16-minute-old position)", pv_keptAt30 === "true");
+  await pv_ret.expireStaleCourierPositions();
+  const pv_idleMe = (await call("GET", "/courier/me", null, pv_idle.accessToken)).body.courier;
+  check("C3: an idle courier with no update for 15 min is marked offline and the position cleared (telemetry then answers 409)",
+    sql(`select (not "isActive" and latitude is null and "locationAt" is null and "locationExpiredAt" is not null)::text from "Courier" where id=${pv_idleId}`) === "true"
+      && pv_idleMe?.isOnline === false && (await call("POST", "/courier/telemetry", { latitude: 60.19, longitude: 24.96 }, pv_idle.accessToken)).status === 409, pv_idleMe);
+  const pv_job = (n) => pv_sched.scheduledJobs.find((j) => j.name === n);
+  check("scheduler: the delivery-location purge never depends on Cloudinary; position expiry runs every minute; drop views, contact messages and expired credentials have jobs",
+    pv_job("delivery-proof-purge")?.enabled() === true && !/mediaConfigured/.test(pv_job("delivery-proof-purge").enabled.toString())
+      && pv_job("courier-position-expiry")?.everyMs === 60_000 && pv_job("courier-position-expiry").enabled() === true
+      && !!pv_job("drop-view-purge") && !!pv_job("contact-message-retention") && !!pv_job("expired-sign-in-codes"));
+
+  // C1: handover positions and delivery pins are purged 30 days after delivery/closing, whatever the handover method
+  const pv_old = pv_order(pv_cust.user.id, "DELIVERED", `"courierId"=${pv_courId}, "deliveredAt"=now() - interval '31 days', "handoverMethod"='IN_PERSON', "deliveredLat"=60.181, "deliveredLng"=24.951`);
+  const pv_recent = pv_order(pv_cust.user.id, "DELIVERED", `"courierId"=${pv_courId}, "deliveredAt"=now() - interval '29 days', "handoverMethod"='IN_PERSON', "deliveredLat"=60.181, "deliveredLng"=24.951`);
+  const pv_oldCancel = pv_order(pv_cust.user.id, "CANCELLED", `"cancelledAt"=now() - interval '31 days'`);
+  const pv_photo = pv_order(pv_cust.user.id, "DELIVERED", `"courierId"=${pv_courId}, "deliveredAt"=now() - interval '31 days', "handoverMethod"='PHOTO', "deliveredLat"=60.181, "deliveredLng"=24.951, "deliveryProofPublicId"='malvoya/proofs/o${pv_done}/pv-${uniq}'`);
+  const pv_coords = (id) => sql(`select concat_ws('|', "deliveredLat", "deliveredLng", "deliveryLat", "deliveryLng") || '#' || coalesce("deliveryAddress", '') from "Order" where id=${id}`);
+  const pv_r1 = await pv_ret.purgeDeliveryProofsAndLocations({ media: false });
+  check("C1: 30 days after delivery the handover position and the delivery pin are purged, in-person deliveries too; the address stays; a 29-day-old one is kept",
+    pv_coords(pv_old) === "#Testikatu 1, Helsinki" && pv_coords(pv_recent) === "60.181|24.951|60.181|24.951#Testikatu 1, Helsinki", [pv_coords(pv_old), pv_coords(pv_recent)]);
+  check("C1: …and 30 days after a cancellation", pv_coords(pv_oldCancel) === "#Testikatu 1, Helsinki", pv_coords(pv_oldCancel));
+  check("C1: without Cloudinary the positions are still purged; the photo waits until Cloudinary is configured",
+    pv_coords(pv_photo) === "#Testikatu 1, Helsinki" && sql(`select "deliveryProofPublicId" is not null from "Order" where id=${pv_photo}`) === "t" && pv_r1.photos === 0 && pv_r1.locations >= 3, pv_r1);
+  await pv_ret.purgeDeliveryProofsAndLocations({ media: true });
+  check("C1: with Cloudinary the old delivery photo is deleted too", sql(`select "deliveryProofPublicId" is null from "Order" where id=${pv_photo}`) === "t");
+
+  // C4: drop views
+  const pv_drop = Number(sql(`select id from "Drop" where status='READY' order by id limit 1`) || 0);
+  const pv_view = await call("POST", `/drops/${pv_drop}/view`, { watchedSec: 3, completed: false }, pv_cust.accessToken);
+  const pv_vc = sql(`select "viewCount" from "Drop" where id=${pv_drop}`);
+  sql(`insert into "DropView" ("dropId","viewerKey","day","completed") values (${pv_drop},'i:pv-old-${uniq}',current_date - 2,false),(${pv_drop},'i:pv-yday-${uniq}',current_date - 1,false),(${pv_drop},'d:pv-legacy-${uniq}',current_date - 30,true)`);
+  await pv_ret.purgeOldDropViews();
+  check("C4: drop view rows older than yesterday are deleted (old install-id rows too); today's and yesterday's stay; the drop's counts do not change",
+    pv_drop > 0 && pv_view.status === 200 && sql(`select count(*) from "DropView" where "viewerKey" in ('i:pv-old-${uniq}','d:pv-legacy-${uniq}')`) === "0"
+      && sql(`select count(*) from "DropView" where "dropId"=${pv_drop} and "viewerKey" in ('i:pv-yday-${uniq}','u:${pv_cust.user.id}')`) === "2"
+      && sql(`select "viewCount" from "Drop" where id=${pv_drop}`) === pv_vc, pv_view.body);
+
+  // C4/C7: the export
+  await call("POST", `/drops/${pv_drop}/report`, { reason: "SCAM", details: "pv test" }, pv_cust.accessToken);
+  const pv_exp = (await call("GET", "/auth/me/data", null, pv_cust.accessToken)).body?.data;
+  check("C4/C7: the export has the user's drop views, the drop/comment/review/live reports they made, recall notices, appleSub and isMinor",
+    pv_exp?.dropViews?.length === 1 && pv_exp.dropViews[0].dropId === pv_drop && pv_exp.dropReports?.length === 1 && Array.isArray(pv_exp.commentReports)
+      && Array.isArray(pv_exp.reviewReports) && Array.isArray(pv_exp.liveReports) && Array.isArray(pv_exp.recallNotices) && "appleSub" in pv_exp && pv_exp.isMinor === false,
+    pv_exp && Object.keys(pv_exp));
+  sql(`insert into "Payout" ("orderId","party","courierId","amountCents","status","releaseAt","paidAt","updatedAt") values (${pv_done},'COURIER',${pv_courId},650,'PAID',now(),now(),now())`);
+  sql(`insert into "Review" ("orderId","userId","storeId","courierId","storeRating","courierRating") values (${pv_done},${pv_cust.user.id},${storeId},${pv_courId},5,4)`);
+  const pv_cexp = (await call("GET", "/auth/me/data", null, pv_cour.accessToken)).body?.data;
+  const pv_j = pv_cexp?.courierJobs?.find((j) => j.id === pv_done);
+  check("C7: a courier's export has their jobs (pay breakdown, rating), payouts, vehicle and disclosure, but not the customers' names, addresses or notes",
+    pv_j?.courierFeeCents === 650 && pv_j.store?.id === storeId && "courierPay" in pv_j && pv_j.review?.courierRating === 4
+      && pv_cexp.courierPayouts?.some((p) => p.orderId === pv_done && p.amountCents === 650) && "vehicleType" in (pv_cexp.courier || {}) && "locationDisclosureAt" in pv_cexp.courier
+      && !("user" in pv_j) && !("deliveryAddress" in pv_j) && !JSON.stringify(pv_cexp.courierJobs).includes("Testikatu"), pv_j);
+  const pv_sexp = (await call("GET", "/auth/me/data", null, vendor.accessToken)).body?.data;
+  check("C7: a store owner's export has the store's payouts", Array.isArray(pv_sexp?.storePayouts) && pv_sexp.storePayouts.length >= 1 && !("courierJobs" in pv_sexp), pv_sexp?.storePayouts);
+
+  // C5: contact-form messages
+  const pv_sr = (ago, userId) => pv_id(`insert into "SupportRequest" ("userId","email","app","topic","message","createdAt","updatedAt") values (${userId ?? "null"},'pv${uniq}@example.fi','web','general','pv test',now() - interval '${ago}',now() - interval '${ago}') returning id`);
+  const pv_srOld = pv_sr("25 months"), pv_srNew = pv_sr("23 months"), pv_srAcct = pv_sr("25 months", pv_other.user.id);
+  await pv_ret.purgeOldContactMessages();
+  check("C5: contact-form messages (no account) are deleted 24 months after the last change; newer ones and requests from an account stay",
+    sql(`select count(*) from "SupportRequest" where id=${pv_srOld}`) === "0" && sql(`select count(*) from "SupportRequest" where id in (${pv_srNew},${pv_srAcct})`) === "2");
+
+  // C9: expired refresh tokens of every user
+  sql(`insert into "RefreshToken" ("token","userId","expiresAt") values ('pv-expired-${uniq}',${pv_other.user.id},now() - interval '1 hour'),('pv-valid-${uniq}',${pv_other.user.id},now() + interval '1 day')`);
+  sql(`insert into "OtpCode" ("target","codeHash","expiresAt") values ('pv-${uniq}@example.fi','x',now() - interval '1 minute')`);
+  await pv_ret.purgeExpiredCredentials();
+  check("C9: expired refresh tokens are removed for every user (not only at their next sign-in), with expired codes; valid tokens stay",
+    sql(`select count(*) from "RefreshToken" where token='pv-expired-${uniq}'`) === "0" && sql(`select count(*) from "RefreshToken" where token='pv-valid-${uniq}'`) === "1"
+      && sql(`select count(*) from "OtpCode" where target='pv-${uniq}@example.fi'`) === "0");
+
+  // C10: audit log
+  const pv_ban = await register("Pvban");
+  const pv_banRes = await call("DELETE", `/admin/users/${pv_ban.user.id}`, null, adminToken);
+  check("C10: a ban is written to the audit log", pv_banRes.status === 200 && pv_audits("user.ban", pv_ban.user.id) === "1");
+  const pv_sv = await register("Pvseller", "VENDOR");
+  const pv_st = (await call("POST", "/stores", { name: `Pv closet ${uniq}`, category: "THRIFT", sellerType: "PRIVATE" }, pv_sv.accessToken)).body.store;
+  const pv_stAppr = await call("PATCH", `/admin/vendors/${pv_st?.id}/approve`, null, adminToken);
+  check("C10: a store approval is written to the audit log", pv_stAppr.status === 200 && pv_audits("store.approve", pv_st?.id) === "1", pv_stAppr.body);
+  const pv_susp = await call("PATCH", `/admin/couriers/${pv_idleId}/suspend`, null, adminToken);
+  check("C10: a courier suspension is written to the audit log", pv_susp.status === 200 && pv_audits("courier.suspend", pv_idleId) === "1");
+  const pv_y = new Date().getUTCFullYear();
+  const pv_d7before = [pv_audits("dac7.view", pv_y), pv_audits("dac7.export", pv_y)].map(Number);
+  const pv_d7 = await call("GET", `/admin/dac7?year=${pv_y}`, null, adminToken);
+  const pv_d7csv = await fetch(`${API}/admin/dac7.csv?year=${pv_y}`, { headers: { Authorization: `Bearer ${adminToken}` } });
+  check("C10: opening the DAC7 report and downloading its CSV (tax IDs decrypted) are audited with the year",
+    pv_d7.status === 200 && pv_d7csv.status === 200 && Number(pv_audits("dac7.view", pv_y)) === pv_d7before[0] + 1 && Number(pv_audits("dac7.export", pv_y)) === pv_d7before[1] + 1);
+
+  // C4/C8: account deletion
+  sql(`update "Order" set status='DELIVERED', "deliveredAt"=now(), "deliveryProblemNote"='Rang twice, no answer', "deliveredLat"=60.18, "deliveredLng"=24.95 where id=${pv_active}; update "Courier" set "currentOrderId"=null where id=${pv_courId}`);
+  const pv_retn = pv_id(`insert into "Return" ("orderId","userId","reason","conditionNote","storeNote","updatedAt") values (${pv_done},${pv_cust.user.id},'CHANGED_MIND','Worn once, call me at home','Checked on arrival',now()) returning id`);
+  const pv_del = await call("DELETE", "/auth/me", null, pv_cust.accessToken);
+  check("C4: deleting the account deletes the user's drop view rows", pv_del.status === 200 && sql(`select count(*) from "DropView" where "viewerKey"='u:${pv_cust.user.id}'`) === "0", pv_del.body);
+  check("C8: …and blanks the customer's return note, the courier's delivery-problem note and the handover position; the store's note and the amounts stay",
+    sql(`select (r."conditionNote" is null and r."storeNote" = 'Checked on arrival')::text from "Return" r where r.id=${pv_retn}`) === "true"
+      && sql(`select ("deliveryProblemNote" is null and "deliveredLat" is null and "totalCents" = 2290)::text from "Order" where id=${pv_active}`) === "true");
+  await call("POST", "/courier/status", { isOnline: false }, pv_cour.accessToken);
+
   console.log("\n— Background jobs and input hardening");
   const leaseSql = `INSERT INTO "JobLease" ("name","lockedUntil") VALUES ('t${uniq}', now() + interval '1 minute') ON CONFLICT ("name") DO UPDATE SET "lockedUntil" = now() + interval '1 minute' WHERE "JobLease"."lockedUntil" < now() RETURNING "name"`;
   const firstLine = (q) => sql(q).split(/\r?\n/)[0];
@@ -2958,7 +3145,7 @@ function ean13(d12) {
   check("huge search input rejected", (await call("GET", `/products/search?q=${"a".repeat(200)}`)).status === 400);
   const cors = await fetch(`${API}/stores`, { headers: { Origin: "https://evil.example" } });
   check("CORS does not allow unknown origins", !cors.headers.get("access-control-allow-origin"));
-  check("health reports v2.16.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.16.0");
+  check("health reports v2.16.1", (await (await fetch(`${BASE}/health`)).json()).version === "2.16.1");
 
   [vendorSock, custSock, otherSock, c1Sock, c2Sock].forEach((s) => s.close());
   console.log(`\n${pass} passed, ${fail} failed`);

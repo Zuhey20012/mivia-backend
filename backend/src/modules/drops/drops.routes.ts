@@ -148,7 +148,8 @@ router.delete("/drops/:id(\\d+)/not-interested", auth, async (req: AuthRequest, 
 });
 
 const viewSchema = z.object({
-  installId: z.string().min(8).max(100).optional(),
+  // Sent by old app builds; accepted so they get no 400, but ignored (2.16.1): nothing tied to the phone is stored
+  installId: z.string().max(100).optional(),
   watchedSec: z.number().min(0).max(3600).default(0),
   completed: z.boolean().default(false),
 });
@@ -157,7 +158,8 @@ router.post("/drops/:id(\\d+)/view", optionalAuth, async (req: AuthRequest, res:
   const body = viewSchema.safeParse(req.body ?? {});
   if (!body.success) return res.status(400).json({ ok: false, error: "Invalid request" });
   try {
-    res.json({ ok: true, ...(await drops.recordView(Number(req.params.id), req.user, { ...body.data, ip: req.ip })) });
+    const { installId: _ignored, ...view } = body.data;
+    res.json({ ok: true, ...(await drops.recordView(Number(req.params.id), req.user, { ...view, ip: req.ip })) });
   } catch (e) { sendError(res, e); }
 });
 

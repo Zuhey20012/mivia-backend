@@ -796,6 +796,9 @@ model Courier {
   latitude   Float?
   longitude  Float?
   locationAt DateTime? // when latitude/longitude were last reported; older than 2 minutes = position unknown
+  // Privacy (2.16.1): set when the "courier-position-expiry" job cleared a position that had not been updated for
+  // COURIER_POSITION_TTL_MINUTES (default 15); reset by the next position. The admin panel shows "no position".
+  locationExpiredAt DateTime?
 
   // Current assignment tracking
   currentOrderId  Int?
@@ -978,7 +981,10 @@ model DropLike {
 model DropView {
   dropId    Int
   drop      Drop     @relation(fields: [dropId], references: [id], onDelete: Cascade)
-  viewerKey String // "u:<userId>" or "d:<sha256 of the install id>"
+  // "u:<userId>" (signed in) or "i:<sha256 of IP + day>" (signed out). "d:<sha256 of an install id>" came from old
+  // app builds and is no longer written (2.16.1). Rows only de-duplicate views within a day (the totals are on Drop),
+  // so the "drop-view-purge" job deletes them after 2 days; a user's rows go with the account and are in the export.
+  viewerKey String
   day       DateTime @db.Date
   completed Boolean  @default(false)
 

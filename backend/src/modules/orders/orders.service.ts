@@ -14,7 +14,7 @@ import { authenticatedImageUrl, destroyResource } from "../../lib/cloudinary";
 import { estimateDelivery } from "../../utils/distance";
 import { verifyOwnedUpload, UploadProof } from "../media/media.service";
 import { adjustStorePayoutForRefund, createCourierPayoutForReturnedOrder, createPayoutsForOrder } from "../payouts/payouts.service";
-import { Actor, getCourierForUser, getOrderRelation } from "./access";
+import { Actor, getCourierForUser, getOrderRelation, OrderRelation } from "./access";
 import { storeAvailability } from "../../utils/openingHours";
 import { ApiError } from "../../lib/errors";
 import { checkPromo, normalizeCode } from "../promos/promos.service";
@@ -907,7 +907,11 @@ export async function getDeliveryProof(orderId: number, actor: Actor) {
   };
 }
 
-/** Delivery photos are kept 30 days, long enough to settle "where is my parcel" questions. */
+/**
+ * Delivery photos are kept 30 days, long enough to settle "where is my parcel" questions. Only runs when Cloudinary is
+ * configured; the handover positions of every order (photo or not) are purged by
+ * services/privacyRetention.ts#purgeOldDeliveryLocations, which always runs.
+ */
 export async function purgeOldDeliveryProofs() {
   const old = await prisma.order.findMany({
     where: { deliveryProofPublicId: { not: null }, deliveredAt: { lt: new Date(Date.now() - 30 * 86_400_000) } },
@@ -925,6 +929,23 @@ export async function purgeOldDeliveryProofs() {
 
 const courierPublic = { select: { id: true, name: true, latitude: true, longitude: true } };
 
+/** From the courier's acceptance until delivery or return to the shop (which cancels the order). */
+const COURIER_TRACKING_STATUSES: readonly OrderStatus[] = ["CONFIRMED", "PROCESSING", "SHIPPED"];
+
+/**
+ * Privacy (2.16.1, audit C2): the courier's live latitude/longitude is shown only while the order is active and
+ * assigned, and only to that order's customer and store (admins always). On finished, cancelled or unassigned orders,
+ * and for anyone else, the courier keeps only id and name; the coordinates are null.
+ */
+export function withCourierPosition<T extends { status: OrderStatus; courierId: number | null; courier?: { latitude: number | null; longitude: number | null } | null }>(
+  order: T, relation: OrderRelation,
+): T {
+  if (!order.courier) return order;
+  const tracking = order.courierId !== null && COURIER_TRACKING_STATUSES.includes(order.status);
+  const allowed = relation === "admin" || ((relation === "customer" || relation === "vendor") && tracking);
+  return allowed ? order : { ...order, courier: { ...order.courier, latitude: null, longitude: null } };
+}
+
 const orderDetailInclude = {
   items: { include: { product: { select: { id: true, name: true, images: true } }, variant: { select: { size: true, color: true } } } },
   courier: courierPublic,
@@ -941,11 +962,11 @@ export async function getOrder(id: number, actor: Actor) {
   const relation = await getOrderRelation(id, actor);
   if (!relation) throw new OrderError("Order not found", 404);
   if (relation === "customer") {
-    const order = withPickupCode(await prisma.order.findUniqueOrThrow({ where: { id }, omit: { pickupCode: false }, include: orderDetailInclude }));
+    const order = withCourierPosition(withPickupCode(await prisma.order.findUniqueOrThrow({ where: { id }, omit: { pickupCode: false }, include: orderDetailInclude })), relation);
     // The withdrawal function's availability (2.16.0): business sellers only, within the withdrawal period
     return { ...order, withdrawal: withdrawalInfo(order) };
   }
-  return prisma.order.findUniqueOrThrow({ where: { id }, include: orderDetailInclude });
+  return withCourierPosition(await prisma.order.findUniqueOrThrow({ where: { id }, include: orderDetailInclude }), relation);
 }
 
 /** The same endpoint serves every app; what you get depends on your role. */
@@ -964,13 +985,14 @@ export async function listOrdersFor(actor: Actor, page: ListPage = {}) {
   if (actor.role === "VENDOR") {
     const store = await prisma.store.findUnique({ where: { ownerId: actor.id }, select: { id: true } });
     if (!store) return [];
-    // Unpaid orders are invisible to stores
-    return prisma.order.findMany({
+    // Unpaid orders are invisible to stores; the courier's position only on its active, assigned orders (2.16.1)
+    const orders = await prisma.order.findMany({
       where: { storeId: store.id, paymentStatus: { in: ["SUCCEEDED", "REFUNDED"] }, ...beforeId(page) },
       include: { ...include, courier: courierPublic },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: pageTake(page, 200),
     });
+    return orders.map((o) => withCourierPosition(o, "vendor"));
   }
   if (actor.role === "COURIER") return listCourierOrders(actor.id, page);
 
@@ -1177,7 +1199,8 @@ export async function markRentalPaid(rentalId: number, paymentIntentId: string, 
 export async function getRental(id: number, userId: number) {
   const rental = await prisma.rental.findUnique({
     where: { id },
-    include: { items: { include: { product: true } }, courier: courierPublic },
+    // No courier position on rentals (2.16.1): rentals have no live tracking
+    include: { items: { include: { product: true } }, courier: { select: { id: true, name: true } } },
   });
   if (!rental || rental.userId !== userId) throw new OrderError("Rental not found", 404);
   return rental;

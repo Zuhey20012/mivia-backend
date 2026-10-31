@@ -51,10 +51,10 @@ Every app includes Firebase Crashlytics (`firebase_crashlytics`, set up in `pack
 | **Personal info → User IDs** | Yes | No | No | Required | Account management, Analytics | Malvoya user id (also on crash reports), Firebase user id, Google account id (`googleSub`) |
 | **Personal info → Address** | Yes | Yes (store, courier after accepting) | No | Optional (pickup orders need none) | App functionality | Delivery address and order notes |
 | **Personal info → Phone number** | Yes | No | No | Optional | Account management, App functionality | Phone sign-in and SMS codes (Firebase, Twilio) |
-| **Location → Precise location** | Yes | No | No | Optional | App functionality | The map pin of the delivery address (sent to rank stores, price delivery, place orders) and the "notify me when Malvoya opens near me" pin. Not read from GPS. |
+| **Location → Precise location** | Yes | No | No | Optional | App functionality | The map pin of the delivery address (sent to rank stores, price delivery, place orders) and the "notify me when Malvoya opens near me" pin. GPS is read once only when the customer taps "Use my location" in the address picker (`core/current_position.dart`), to place the pin. |
 | **Financial info → User payment info** | Yes (Stripe SDK) | No (Stripe is a service provider) | No | Optional (only to buy) | App functionality, Fraud prevention, security and compliance | Card or bank details typed into Stripe's PaymentSheet. They go to Stripe; Malvoya never receives them. |
 | **Financial info → Purchase history** | Yes | Yes (the store of the order) | No | Required to order | App functionality, Fraud prevention, security and compliance | Orders, refunds, returns, tips, promo/referral use. Kept 6 years (Accounting Act). |
-| **Messages → Other in-app messages** | Yes | No | Partly | Optional | App functionality, Developer communications | Order chat with the courier (relayed live, **not stored** = ephemeral) and "Message our team" support requests (stored) |
+| **Messages → Other in-app messages** | Yes | No | No | Optional | App functionality, Developer communications | Order chat with the courier (stored since 2.10, deleted 30 days after delivery/cancellation by the `chat-purge` job), live-stream chat (stored, deleted 30 days after the live ended) and "Message our team" support requests (stored) |
 | **App activity → App interactions** | Yes | No | No | Optional | App functionality | Drop likes, views (one per day), favourites, store follows |
 | **App activity → In-app search history** | Yes | No | Yes | Optional | App functionality | Search words are sent to the API to search; not saved to the account |
 | **App activity → Other user-generated content** | Yes | No (posting publicly is user-started) | No | Optional | App functionality | Reviews (public with first name), drop comments, reports |
@@ -109,7 +109,7 @@ Not collected: approximate location (not separate from the pin), photos/videos, 
 | **Location → Approximate location** | Yes | No | No | Required to work | App functionality | Same stream, used for "nearest first" offers. Tick it too: Play treats them as separate types. |
 | **Financial info → Other financial info** | Yes | No | No | Required to get paid | App functionality | Earnings, tips, pay breakdowns, payouts. Bank and KYC data on Stripe's pages, not in the app. |
 | **Photos and videos → Photos** | Yes | Yes (the customer of that order) | No | Optional (only door drop-offs) | App functionality, Fraud prevention, security and compliance | Delivery proof photo, private, deleted after 30 days |
-| **Messages → Other in-app messages** | Yes | No | Partly | Optional | App functionality, Developer communications | Order chat (not stored) and Help messages (stored) |
+| **Messages → Other in-app messages** | Yes | No | No | Optional | App functionality, Developer communications | Order chat (stored, deleted 30 days after delivery/cancellation) and Help messages (stored) |
 | **Device or other IDs** | Yes | No | No | Required | App functionality, Analytics | FCM token, Firebase installation id, Crashlytics installation id |
 
 **Deletion:**

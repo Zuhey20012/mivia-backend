@@ -12,7 +12,7 @@ import {
  */
 const router = Router();
 
-// Pages: the four versioned documents (what is in force comes from LegalVersion) and the account-deletion help page
+// Pages: the four versioned documents (what is in force comes from LegalVersion) and the help pages read from legal/*.md
 const PAGES: Record<string, { title: string; doc?: LegalDoc; file?: string }> = {
   privacy: { title: "Privacy Policy", doc: "privacy" },
   terms: { title: "Terms of Service", doc: "terms" },
@@ -21,10 +21,13 @@ const PAGES: Record<string, { title: string; doc?: LegalDoc; file?: string }> = 
   "delete-account": { title: "Delete your account", file: "account_deletion.md" },
   // How rights holders report copyright / trademark infringement, sellers' counter-notice, repeat infringers (2.16.0)
   "ip-notice": { title: "Copyright & trademark", file: "ip_notice.md" },
+  // Plain-language "Your data, explained / Tietosi selkokielellä" (Finnish first, then English); the privacy policy stays the binding text
+  "data-explained": { title: "Your data, explained", file: "data_explained.md" },
 };
 // Other names the apps use for the same pages
 const ALIASES: Record<string, string> = {
   "vendor-terms": "sellers", "seller-terms": "sellers", "courier-agreement": "couriers", "account-deletion": "delete-account", "copyright": "ip-notice", "ip": "ip-notice",
+  "tietosi": "data-explained", "your-data": "data-explained",
 };
 
 const fileCache = new Map<string, string>();

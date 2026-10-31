@@ -7,7 +7,7 @@ The public site for Malvoya's three audiences, in Finnish (at `/`) and English (
 | Home (shoppers) | `/` | `/en/` |
 | For shops | `/kauppiaille/` | `/en/sell/` |
 | For couriers | `/lahetiksi/` | `/en/deliver/` |
-| Help centre + 7 articles | `/apua/`, `/apua/<slug>/` | `/en/help/`, `/en/help/<slug>/` |
+| Help centre + 8 articles (incl. "What data we collect and why") | `/apua/`, `/apua/<slug>/` | `/en/help/`, `/en/help/<slug>/` |
 | Download | `/lataa/` | `/en/download/` |
 | Legal (links to the live API pages) | `/ehdot/` | `/en/legal/` |
 | Cookies (none) | `/evasteet/` | `/en/cookies/` |

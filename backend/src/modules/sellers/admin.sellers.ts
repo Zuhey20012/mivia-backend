@@ -3,10 +3,18 @@ import { prisma } from "../../lib/prisma";
 import { ApiError, positiveId, sendError } from "../../lib/errors";
 import { dac7Csv, dac7Report, parseYear } from "./dac7";
 import { currentMonth, storeStatement } from "./statements";
+import { auditAdmin } from "../admin/admin.controller";
 
+/**
+ * Opening the DAC7 report decrypts sellers' tax identification numbers, so every view and CSV export is written to
+ * the admin audit log (2.16.1, audit C10): who, when, which year.
+ */
 export async function adminDac7(req: Request, res: Response) {
   try {
-    res.json({ ok: true, ...(await dac7Report(parseYear(req.query.year))) });
+    const year = parseYear(req.query.year);
+    const report = await dac7Report(year);
+    await auditAdmin(req, "dac7.view", "Dac7Report", year, null, { year });
+    res.json({ ok: true, ...report });
   } catch (e) { sendError(res, e); }
 }
 
@@ -14,6 +22,7 @@ export async function adminDac7Csv(req: Request, res: Response) {
   try {
     const year = parseYear(req.query.year);
     const csv = await dac7Csv(year);
+    await auditAdmin(req, "dac7.export", "Dac7Report", year, null, { year, format: "csv" });
     res.set("Cache-Control", "private, no-store");
     res.set("Content-Disposition", `attachment; filename="malvoya-dac7-${year}.csv"`);
     res.type("text/csv; charset=utf-8").send(`﻿${csv}`); // BOM: spreadsheet programs then read UTF-8 names right

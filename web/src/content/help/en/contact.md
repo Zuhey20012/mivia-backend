@@ -1,6 +1,6 @@
 ---
 key: contact
-order: 7
+order: 8
 title: Contact us
 description: Contact the Malvoya team through the app. This is how your message reaches us fastest.
 ---

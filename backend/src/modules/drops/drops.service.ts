@@ -293,15 +293,15 @@ async function likeState(dropId: number, liked: boolean) {
 
 /**
  * A view counts once per viewer per day; watch time and completion are recorded for ranking.
- * Anonymous viewers are identified by a hash of an install id the app generates (never an ad id).
+ * Signed-out viewers are identified only by a hash of the IP address and the day (it changes every day). Since 2.16.1
+ * an install id from old app builds is ignored, so nothing tied to the phone is stored. The rows only de-duplicate
+ * within a day (totals are on Drop) and are deleted after 2 days (services/privacyRetention.ts#purgeOldDropViews).
  */
-export async function recordView(dropId: number, viewer: Viewer, input: { installId?: string; watchedSec: number; completed: boolean; ip?: string }) {
+export async function recordView(dropId: number, viewer: Viewer, input: { watchedSec: number; completed: boolean; ip?: string }) {
   const drop = await readyDrop(dropId);
   const viewerKey = viewer
     ? `u:${viewer.id}`
-    : input.installId
-      ? `d:${crypto.createHash("sha256").update(input.installId).digest("hex").slice(0, 32)}`
-      : `i:${crypto.createHash("sha256").update(`${input.ip ?? ""}:${new Date().toISOString().slice(0, 10)}`).digest("hex").slice(0, 32)}`;
+    : `i:${crypto.createHash("sha256").update(`${input.ip ?? ""}:${new Date().toISOString().slice(0, 10)}`).digest("hex").slice(0, 32)}`;
   const day = new Date(new Date().toISOString().slice(0, 10));
   const watched = Math.max(0, Math.min(input.watchedSec, drop.durationSec ?? 60, 180));
   const key = { dropId_viewerKey_day: { dropId, viewerKey, day } };
