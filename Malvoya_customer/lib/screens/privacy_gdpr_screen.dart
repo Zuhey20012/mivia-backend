@@ -415,6 +415,14 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                         ),
                         Divider(height: 1, indent: 56, color: dividerColor),
                         ListTile(
+                          leading: const Icon(Icons.help_outline_rounded, color: AppTheme.primary),
+                          title: Text(tr(context, 'Read what is in your download', 'Lue, mitä latauksesi sisältää'),
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyM, color: textPrimary)),
+                          trailing: Icon(Icons.open_in_new_rounded, color: AppTheme.secondaryText(context), size: 18),
+                          onTap: () => openLegal('data-explained'),
+                        ),
+                        Divider(height: 1, indent: 56, color: dividerColor),
+                        ListTile(
                           leading: const Icon(Icons.edit_location_alt_outlined, color: MPalette.green),
                           title: Text(l10n.translate('rightToRectificationArt16'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyM, color: textPrimary)),
                           subtitle: Text(l10n.translate('rightToRectificationArt16Sub'), style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
@@ -452,6 +460,17 @@ class _PrivacyGdprScreenState extends State<PrivacyGdprScreen> {
                               style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyM, color: textPrimary)),
                           trailing: const Icon(Icons.open_in_new_rounded, size: 18),
                           onTap: () => openLegal('privacy'),
+                        ),
+                        Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
+                        ListTile(
+                          key: const Key('privacy-data-explained'),
+                          leading: const Icon(Icons.menu_book_outlined, color: AppTheme.primary),
+                          title: Text(tr(context, 'Your data, explained', 'Tietosi selkokielellä'),
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: MTextSize.bodyM, color: textPrimary)),
+                          subtitle: Text(tr(context, 'What we collect, why, and how long we keep it', 'Mitä keräämme, miksi ja kuinka kauan säilytämme'),
+                              style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
+                          trailing: const Icon(Icons.open_in_new_rounded, size: 18),
+                          onTap: () => openLegal('data-explained'),
                         ),
                         if (auth.isAuthenticated) ...[
                           Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),

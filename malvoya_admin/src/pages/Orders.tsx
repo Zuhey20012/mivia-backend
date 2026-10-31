@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Search, ShoppingBag, RefreshCw } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../utils/api';
+import { CourierPositionBadge, type CourierPosition } from '../components/CourierPositionBadge';
 
 interface Order {
   id: number; status: string; totalCents: number; paymentStatus: string;
@@ -13,6 +14,8 @@ interface Order {
   cancelReason?: string | null;
   user: { name: string; email: string };
   store: { name: string };
+  /** The assigned courier with their position status (API 2.16.1); never coordinates */
+  courier?: { id: number; name: string; position?: CourierPosition } | null;
   items: { quantity: number; product: { name: string } }[];
 }
 
@@ -46,6 +49,21 @@ function DeliveryCell({ o }: { o: Order }) {
         <p style={{ color:'#8E8E93',fontSize:'0.75rem',marginTop:'0.25rem' }}>
           Taken back to the shop {hel(o.returnedToStoreAt)} · {o.returnReceivedAt ? `store got it ${hel(o.returnReceivedAt)}` : 'store has not confirmed yet'}
         </p>
+      )}
+    </div>
+  );
+}
+
+const ACTIVE = ['CONFIRMED', 'PROCESSING', 'SHIPPED'];
+
+/** The assigned courier, and while the order is under way, whether their position is live, stale or gone. */
+function CourierCell({ o }: { o: Order }) {
+  if (!o.courier) return <span style={{ color:'#C7C7CC' }}>{o.fulfilment === 'PICKUP' ? 'No courier' : '—'}</span>;
+  return (
+    <div>
+      <p style={{ color:'#3C3C43' }}>{o.courier.name}</p>
+      {ACTIVE.includes(o.status) && o.courier.position && (
+        <div style={{ marginTop:'0.25rem' }}><CourierPositionBadge position={o.courier.position} /></div>
       )}
     </div>
   );
@@ -119,7 +137,7 @@ export default function Orders() {
           <table style={{ width:'100%',fontSize:'0.875rem',borderCollapse:'collapse' }}>
             <thead>
               <tr style={{ borderBottom:'1px solid #F5F5F7' }}>
-                {['Order #','Customer','Vendor','Items','Delivery','Total','Payment','Status','Date'].map(h => (
+                {['Order #','Customer','Vendor','Items','Delivery','Courier','Total','Payment','Status','Date'].map(h => (
                   <th key={h} style={{ textAlign:'left',padding:'1rem 1.5rem',fontSize:'0.6875rem',fontWeight:500,color:'#8E8E93',textTransform:'uppercase',letterSpacing:'0.05em' }}>{h}</th>
                 ))}
               </tr>
@@ -135,6 +153,7 @@ export default function Orders() {
                   <td style={{ padding:'1rem 1.5rem',color:'#3C3C43' }}>{o.store.name}</td>
                   <td style={{ padding:'1rem 1.5rem',color:'#3C3C43' }}>{o.items.reduce((s,i)=>s+i.quantity,0)}</td>
                   <td style={{ padding:'1rem 1.5rem' }}><DeliveryCell o={o} /></td>
+                  <td style={{ padding:'1rem 1.5rem' }}><CourierCell o={o} /></td>
                   <td style={{ padding:'1rem 1.5rem',fontWeight:600 }}>{(o.totalCents/100).toFixed(2).replace('.', ',')} €</td>
                   <td style={{ padding:'1rem 1.5rem' }}>
                     <span className={o.paymentStatus === 'SUCCEEDED' ? 'badge-green' : o.paymentStatus === 'FAILED' ? 'badge-red' : 'badge-yellow'}>

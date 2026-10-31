@@ -20,6 +20,7 @@ import '../core/screen_awake.dart';
 import '../core/media_upload.dart';
 import '../core/push_service.dart';
 import '../core/delete_account_tile.dart';
+import '../core/download_data_tile.dart';
 import '../core/location_disclosure.dart';
 import '../services/courier_telemetry_service.dart';
 import '../services/socket_service.dart';
@@ -135,6 +136,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     socket.onOrderStatus = (_) => _loadMine();
     socket.onChatMessage = _onChatMessage;
     socket.onOfferClosed = _onOfferClosed;
+    socket.onCourierStatus = _onServerStatus;
     socket.onChatHistory = (orderId, messages) {
       if (!mounted || orderId != _chatOrderId) return;
       _chatStored.value = true;
@@ -164,6 +166,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     socket.onOrderStatus = null;
     socket.onChatMessage = null;
     socket.onOfferClosed = null;
+    socket.onCourierStatus = null;
     socket.onChatHistory = null;
     _chat.dispose();
     _chatStored.dispose();
@@ -181,6 +184,14 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     _syncPolling();
     // Back in the app: catch up on anything missed while it was in the background
     if (foreground && _meLoaded) {
+      final notice = _pendingOfflineNotice;
+      if (notice != null) {
+        _pendingOfflineNotice = null;
+        _showOfflineNotice(noPosition: notice);
+      } else if (_online) {
+        // The live connection may have missed it while the app was in the background
+        unawaited(_checkStillOnline());
+      }
       _loadMine();
       if (_online) _loadJobs();
       // e.g. back from Stripe's payout pages
@@ -208,12 +219,78 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     if (!_meLoaded) return _init();
     await _loadMine();
     if (!mounted) return;
+    if (_online && !await _checkStillOnline()) return;
+    if (!mounted) return;
     if (_online) {
       final token = _auth.accessToken ?? '';
       CourierSocketService().ensureConnected(token);
       CourierTelemetryService().resume(token);
     }
     await Future.wait([_loadJobs(), _loadEarnings()]);
+  }
+
+  // The server set this courier offline while the app was in the background: shown on return
+  // (true = because no position arrived, false = reason not known)
+  bool? _pendingOfflineNotice;
+
+  /// `courier:status` (API 2.16.1). `{isOnline: false, reason: "no_position"}`: no position reached
+  /// the server for 15 minutes while online without a job, so it set the courier offline and
+  /// cleared the stored position (couriers carrying a job are never set offline by this).
+  void _onServerStatus(Map<String, dynamic> data) {
+    if (!mounted || data['isOnline'] != false) return;
+    _wentOfflineOnServer(noPosition: data['reason'] == 'no_position');
+  }
+
+  /// Online here but not on the server (e.g. the `courier:status` event was missed while the live
+  /// connection was down): treated like the event. False when the courier is offline now.
+  Future<bool> _checkStillOnline() async {
+    final me = await _api.get('/courier/me');
+    if (!mounted || !me.ok || !_online || _switching) return true;
+    final courier = me.data['courier'];
+    if (courier is! Map || courier['isOnline'] != false) return true;
+    _wentOfflineOnServer(noPosition: false);
+    return false;
+  }
+
+  /// The server says this courier is offline: location sharing stops cleanly (GPS stream, HTTP
+  /// fallback and the foreground notification), the switch shows offline, and the courier is told why.
+  void _wentOfflineOnServer({required bool noPosition}) {
+    CourierTelemetryService().stop();
+    if (!_online) return;
+    setState(() {
+      _online = false;
+      _switching = false;
+    });
+    _syncPolling();
+    _syncAwake();
+    _loadJobs();
+    _loadMine();
+    if (_foreground) {
+      _showOfflineNotice(noPosition: noPosition);
+    } else {
+      _pendingOfflineNotice = noPosition;
+    }
+  }
+
+  Future<void> _showOfflineNotice({required bool noPosition}) async {
+    HapticFeedback.mediumImpact();
+    final goOnline = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.location_off_outlined, color: AppTheme.primary, size: 32),
+        title: Text(tr(ctx, 'You are offline', 'Olet poissa linjoilta')),
+        content: Text(noPosition
+            ? tr(ctx, "You were set offline because your location stopped updating. Go online again when you're ready.",
+                'Sinut asetettiin pois linjoilta, koska sijaintisi lakkasi päivittymästä. Mene linjoille uudelleen, kun olet valmis.')
+            : tr(ctx, "Malvoya has set you offline, so your location is no longer shared. Go online again when you're ready.",
+                'Malvoya asetti sinut pois linjoilta, joten sijaintiasi ei enää jaeta. Mene linjoille uudelleen, kun olet valmis.')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(ctx, 'OK', 'OK'))),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(tr(ctx, 'Go online', 'Mene linjoille'))),
+        ],
+      ),
+    );
+    if (goOnline == true && mounted && !_online) await _onSwitch();
   }
 
   Future<void> _init() async {
@@ -453,6 +530,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
               },
             ),
             const Divider(height: 16),
+            const DownloadDataTile(),
             const DeleteAccountTile(),
             const SizedBox(height: MSpace.md),
             SizedBox(

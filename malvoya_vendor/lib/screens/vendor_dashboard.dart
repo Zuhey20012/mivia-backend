@@ -13,6 +13,7 @@ import '../core/connectivity.dart';
 import '../core/images.dart';
 import '../core/strings.dart';
 import '../core/delete_account_tile.dart';
+import '../core/download_data_tile.dart';
 import '../services/socket_service.dart';
 import '../core/push_service.dart';
 import '../widgets/language_sheet.dart';
@@ -2058,6 +2059,8 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
             const Divider(height: 1),
             tile(Icons.code_rounded, tr(context, 'Open-source licences', 'Avoimen lähdekoodin lisenssit'), tr(context, 'Software this app is built with', 'Ohjelmistot, joilla sovellus on tehty'),
                 () => showLicensePage(context: context, applicationName: 'Malvoya Store', applicationLegalese: '© Malvoya')),
+            const Divider(height: 1),
+            const DownloadDataTile(leading: CircleAvatar(backgroundColor: AppTheme.primaryLight, child: Icon(Icons.download_rounded, color: AppTheme.primary))),
             const Divider(height: 1),
             const DeleteAccountTile(leading: CircleAvatar(backgroundColor: MPalette.redLight, child: Icon(Icons.delete_forever_rounded, color: MPalette.red))),
           ]),

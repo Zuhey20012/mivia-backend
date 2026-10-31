@@ -92,6 +92,7 @@ Not collected: approximate location (not separate from the pin), photos/videos, 
 
 **Deletion:**
 - In the app: **Store tab → Delete account** (bottom of the list; `malvoya_vendor/lib/screens/vendor_dashboard.dart:978`, `core/delete_account_tile.dart`).
+- Export (since the 2.16.1 app round): **Store tab → Download my data** and the account sheet (`core/download_data_tile.dart`, `GET /auth/me/data`, JSON file through the share menu or copied).
 - Gap: straight after registering, the app pushes `PendingApprovalScreen` (`screens/register.dart:49`), which only has "Sign out". After a restart the dashboard (with Delete account) opens. Add the delete tile to `screens/pending_approval.dart` to be safe.
 - On the web: **missing**.
 
@@ -114,6 +115,7 @@ Not collected: approximate location (not separate from the pin), photos/videos, 
 
 **Deletion:**
 - In the app: **Earnings tab → Delete account** (below "Help and contact"; `malvoya_courier/lib/screens/courier_dashboard.dart:1658`).
+- Export (since the 2.16.1 app round): **Download my data** in the account sheet and on the pending-approval screen (`core/download_data_tile.dart`, `GET /auth/me/data`, JSON file through the share menu or copied).
 - **Gap (blocker):** a courier who is not approved yet only sees `screens/pending_approval.dart`, which has "Check status" and "Sign out" but **no Delete account**. Couriers wait there until an admin approves them, so they cannot delete their account in the app. Add `DeleteAccountTile` to that screen.
 - On the web: **missing**.
 

@@ -165,6 +165,12 @@ class _HelpScreenState extends State<HelpScreen> {
             icon: const Icon(Icons.gavel_rounded),
             label: Text(tr(context, 'Read the courier agreement', 'Lue lähettisopimus')),
           ),
+          TextButton.icon(
+            key: const Key('help-data-explained'),
+            onPressed: () => openLegal('data-explained'),
+            icon: const Icon(Icons.menu_book_outlined),
+            label: Text(tr(context, 'Your data, explained', 'Tietosi selkokielellä')),
+          ),
         ],
       ),
     );
