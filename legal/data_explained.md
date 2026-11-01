@@ -277,7 +277,7 @@ Katso kohta **Sijainti tarkemmin** alempana.
 - **Missä se on:** palvelimellamme.
 - **Miten se on suojattu:** vain sinä näet oman palkkioerittelysi.
 - **Kuinka kauan:** 6 vuotta tilikauden päättymisestä (kirjanpitolaki).
-- **Miten hallitset:** pyydä kopio tuelta (latauspainiketta ei vielä ole Courier-sovelluksessa): kopiossa ovat keikkasi palkkioerittelyineen, saamasi tähdet ja tilityksesi; pyydä ihmistä selittämään tai tarkistamaan mikä tahansa päätös.
+- **Miten hallitset:** lataa tietosi Courier-sovelluksesta (Tili → Lataa tietoni; versiosta 1.9.1 alkaen, vanhemmissa versioissa pyydä kopio tuelta): tiedostossa ovat keikkasi palkkioerittelyineen, saamasi tähdet ja tilityksesi; pyydä ihmistä selittämään tai tarkistamaan mikä tahansa päätös.
 
 #### Tilitykset
 
@@ -374,7 +374,7 @@ Katso kohta **Sijainti tarkemmin** alempana.
 
 | Oikeus | Mitä se tarkoittaa | Miten käytät sitä |
 |---|---|---|
-| Pääsy tietoihin (15 art.) | Saat tietää ja saada kopion tiedoistasi | Malvoya: Profiili → Tietosuoja → Tietosi → Lataa tietosi. Store ja Courier: tuen tai lomakkeen kautta |
+| Pääsy tietoihin (15 art.) | Saat tietää ja saada kopion tiedoistasi | Malvoya: Profiili → Tietosuoja → Tietosi → Lataa tietosi. Store: Kauppa-välilehti → Lataa tietoni. Courier: Tili → Lataa tietoni (versiosta 1.9.1; vanhemmissa tuen kautta) |
 | Oikaisu (16 art.) | Korjaamme väärät tiedot | Nimi profiilin asetuksissa, osoitteet profiilissa, muu tuen kautta |
 | Poistaminen (17 art.) | Poistamme tilisi ja tietosi; laki voi velvoittaa säilyttämään osan ilman nimeäsi | Malvoya: Profiili → Tietosuoja → Tietosi → Poista tilini. Store ja Courier: tilivalikko → Poista tili |
 | Käsittelyn rajoittaminen (18 art.) | Tietoja säilytetään mutta ei käytetä | Tuen tai lomakkeen kautta |
@@ -677,7 +677,7 @@ See **Location in detail** below.
 - **Where it is stored:** on our server.
 - **How it is protected:** only you see your own pay breakdown.
 - **How long we keep it:** 6 years from the end of the financial year (Accounting Act).
-- **How you control it:** ask Help for a copy (the Courier app has no download button yet): it contains your jobs with their pay breakdown, the stars you got and your payouts; ask a person to explain or review any decision.
+- **How you control it:** download your data in the Courier app (Account → Download my data; from version 1.9.1, on older versions ask Help for a copy): the file contains your jobs with their pay breakdown, the stars you got and your payouts; ask a person to explain or review any decision.
 
 #### Payouts
 
@@ -774,7 +774,7 @@ See **Location in detail** below.
 
 | Right | What it means | How to use it |
 |---|---|---|
-| Access (Art. 15) | Know and get a copy of your data | Malvoya: Profile → Privacy → Your data → Download your data. Store and Courier: through Help or the contact form |
+| Access (Art. 15) | Know and get a copy of your data | Malvoya: Profile → Privacy → Your data → Download your data. Store: Store tab → Download my data. Courier: Account → Download my data (from version 1.9.1; older versions through Help) |
 | Rectification (Art. 16) | We correct wrong data | Name in the profile settings, addresses in your profile, anything else through Help |
 | Erasure (Art. 17) | We delete your account and data; the law may require us to keep some of it without your name | Malvoya: Profile → Privacy → Your data → Delete my account. Store and Courier: account menu → Delete account |
 | Restriction (Art. 18) | Data is kept but not used | Through Help or the contact form |

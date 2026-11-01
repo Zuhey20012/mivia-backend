@@ -138,7 +138,7 @@ Our servers and database are hosted by Render in Frankfurt, Germany (EU). Some p
 ## 8. Your rights
 
 You can:
-- **access** your data and **export** it in a machine-readable file (Malvoya app: Profile → Privacy → Your data → Download your data). The Malvoya Store and Malvoya Courier apps do not have this button yet: ask through Help in the app or the contact form, and we send you the same file (for couriers it includes your jobs with their pay breakdown, the ratings you got and your payouts; for stores the payouts);
+- **access** your data and **export** it in a machine-readable file (Malvoya app: Profile → Privacy → Your data → Download your data). The Malvoya Store app (Store tab → Download my data) and the Malvoya Courier app (Account → Download my data) have the same button from version 1.9.1; on older versions ask through Help in the app or the contact form, and we send you the same file (for couriers it includes your jobs with their pay breakdown, the ratings you got and your payouts; for stores the payouts);
 - **correct** your data (your name in the app's profile settings; your email address, phone number or anything else through Help or the contact form);
 - **delete** your account (Profile → Privacy → Your data → Delete my account; how in each app: [malvoya-api-eu.onrender.com/legal/delete-account](https://malvoya-api-eu.onrender.com/legal/delete-account)). Order records we must keep by law are anonymised rather than deleted. Your sign-in record at Google Firebase and, for a store, its photos and videos at Cloudinary are deleted too;
 - **object** to processing based on legitimate interest (for example crash reports);
