@@ -25,7 +25,8 @@ async function callAt(api, method, path, body, token, raw) {
     headers: {
       "Content-Type": "application/json",
       // Different client address per call, so the strict sign-in limiter does not trip during the test
-      "X-Forwarded-For": `10.9.${Math.floor(ipSeq / 250)}.${ipSeq++ % 250}`,
+      // (wraps into the next /16 after 62 500 calls, so the address stays valid in long runs)
+      "X-Forwarded-For": `10.${9 + (Math.floor(ipSeq / 62500) % 200)}.${Math.floor(ipSeq / 250) % 250}.${ipSeq++ % 250}`,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(raw?.headers || {}),
     },
