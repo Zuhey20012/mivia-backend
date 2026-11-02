@@ -12,6 +12,7 @@ import { disconnectUser, leaveCourierRooms } from "../../lib/socket";
 import { localeOfUser, t } from "../../lib/i18n";
 import { sendApprovalEmail } from "../../services/notificationDeliveryService";
 import { businessCheckOf, runBusinessCheck } from "../stores/businessCheck";
+import { POSITION_FRESH_MS } from "../../utils/courierPosition";
 
 /** "You're approved": push and email, sent on the first approval only (never on a repeated click). */
 async function tellApproved(userId: number, kind: "store" | "courier") {
@@ -34,6 +35,23 @@ async function tellApproved(userId: number, kind: "store" | "courier") {
 function idParam(req: Request) {
   const id = Number(req.params.id);
   return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+/** Admin actions on people are written to the audit log (2.16.1, audit C10): bans, approvals, suspensions. */
+export function auditAdmin(req: Request, action: string, entity: string, entityId: number, oldValue?: unknown, newValue?: unknown) {
+  return prisma.adminAuditLog.create({
+    data: { adminId: (req as AuthRequest).user!.id, action, entity, entityId, oldValue: oldValue as any, newValue: newValue as any },
+  });
+}
+
+/**
+ * What the admin panel shows about a courier's position (2.16.1): "live" (reported within 2 minutes), "stale" (older,
+ * counts as unknown), or "none" (offline, never sent, or cleared by the courier-position-expiry job: then
+ * `clearedAt` says when). The coordinates themselves are not listed.
+ */
+export function courierPositionStatus(c: { locationAt: Date | null; locationExpiredAt: Date | null }) {
+  const status = !c.locationAt ? "none" : Date.now() - c.locationAt.getTime() <= POSITION_FRESH_MS ? "live" : "stale";
+  return { status, reportedAt: c.locationAt, clearedAt: status === "none" ? c.locationExpiredAt : null };
 }
 
 // ─── Overview Stats ────────────────────────────────────────────────────────────
@@ -103,11 +121,12 @@ export async function banUser(req: Request, res: Response) {
   if (user.role === "ADMIN") return res.status(400).json({ ok: false, error: "Admins cannot be banned here" });
 
   await prisma.user.update({ where: { id }, data: { isActive: false } });
-  await prisma.courier.updateMany({ where: { userId: id }, data: { isActive: false, isApproved: false } });
+  await prisma.courier.updateMany({ where: { userId: id }, data: { isActive: false, isApproved: false, latitude: null, longitude: null, locationAt: null } });
   await prisma.store.updateMany({ where: { ownerId: id }, data: { isVerified: false } });
   await revokeAllSessions(id);
   forgetSessionState(id);
   disconnectUser(id); // open app connections end too (no more offers, chat or tracking)
+  await auditAdmin(req, "user.ban", "User", id, { isActive: user.isActive }, { isActive: false });
   res.json({ ok: true, message: "User deactivated" });
 }
 
@@ -151,6 +170,7 @@ export async function approveVendor(req: Request, res: Response) {
   const before = await prisma.store.findUnique({ where: { id }, select: { isVerified: true } });
   if (!before) return res.status(404).json({ ok: false, error: "Store not found" });
   const store = await prisma.store.update({ where: { id }, data: { isVerified: true } });
+  await auditAdmin(req, "store.approve", "Store", id, { isVerified: before.isVerified }, { isVerified: true });
   // First time live: tell customers who asked to hear when Malvoya opens near them
   const notified = before.isVerified ? 0 : await notifyLaunchAlertsNear(store).catch(() => 0);
   if (!before.isVerified) tellApproved(store.ownerId, "store").catch(() => {});
@@ -235,13 +255,14 @@ export async function getCouriers(req: Request, res: Response) {
     select: {
       id: true, name: true, phone: true, email: true, isApproved: true, isActive: true, currentOrderId: true, createdAt: true,
       vehicleType: true, locationDisclosureAt: true, payoutsEnabled: true, readyForApprovalAt: true,
+      locationAt: true, locationExpiredAt: true,
       user: { select: { id: true, email: true, isActive: true } },
       _count: { select: { orders: true } },
     },
     orderBy: { createdAt: "desc" },
     take: 500, // bounded like the user and vendor lists
   });
-  res.json({ ok: true, couriers });
+  res.json({ ok: true, couriers: couriers.map((c) => ({ ...c, position: courierPositionStatus(c) })) });
 }
 
 export async function approveCourier(req: Request, res: Response) {
@@ -250,6 +271,7 @@ export async function approveCourier(req: Request, res: Response) {
   const before = await prisma.courier.findUnique({ where: { id }, select: { isApproved: true } });
   if (!before) return res.status(404).json({ ok: false, error: "Courier not found" });
   const courier = await prisma.courier.update({ where: { id }, data: { isApproved: true } });
+  await auditAdmin(req, "courier.approve", "Courier", id, { isApproved: before.isApproved }, { isApproved: true });
   if (!before.isApproved && courier.userId) tellApproved(courier.userId, "courier").catch(() => {});
   res.json({ ok: true, courier, approvalSent: !before.isApproved && !!courier.userId });
 }
@@ -259,9 +281,10 @@ export async function suspendCourier(req: Request, res: Response) {
   if (!id) return res.status(404).json({ ok: false, error: "Courier not found" });
   const courier = await prisma.courier.update({
     where: { id },
-    data: { isApproved: false, isActive: false, latitude: null, longitude: null },
+    data: { isApproved: false, isActive: false, latitude: null, longitude: null, locationAt: null },
   }).catch(() => null);
   if (!courier) return res.status(404).json({ ok: false, error: "Courier not found" });
+  await auditAdmin(req, "courier.suspend", "Courier", id, null, { isApproved: false });
   if (courier.userId) leaveCourierRooms(courier.userId, courier.id);
   res.json({ ok: true, courier });
 }
@@ -273,12 +296,18 @@ export async function getOrders(_req: Request, res: Response) {
     include: {
       user:  { select: { name: true, email: true } },
       store: { select: { name: true } },
-      courier: { select: { id: true, name: true } },
+      courier: { select: { id: true, name: true, locationAt: true, locationExpiredAt: true } },
       items: { include: { product: { select: { name: true } } } },
     },
     // scheduledStart/scheduledEnd (delivery window) and deliveryProblemAt/Reason/Note, returnedToStoreAt are columns
     orderBy: { createdAt: "desc" },
     take: 200,
   });
-  res.json({ ok: true, orders });
+  // The courier's position status ("none" after the courier-position-expiry job cleared it), never the coordinates
+  res.json({
+    ok: true,
+    orders: orders.map((o) => o.courier
+      ? { ...o, courier: { id: o.courier.id, name: o.courier.name, position: courierPositionStatus(o.courier) } }
+      : o),
+  });
 }

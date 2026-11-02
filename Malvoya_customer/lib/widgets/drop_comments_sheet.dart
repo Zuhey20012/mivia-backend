@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'ip_notice_form.dart';
 import 'package:provider/provider.dart';
 import 'package:malvoya_core/malvoya_core.dart';
 import 'package:malvoya_ui/malvoya_ui.dart';
@@ -123,9 +124,14 @@ class _DropCommentsState extends State<_DropComments> {
   }
 
   Future<void> _report(Map<String, dynamic> c) async {
-    final reason = await pickReportReason(context, title: tr(context, 'Report this comment', 'Ilmoita kommentista'));
+    final reason = await pickReportReason(context, title: tr(context, 'Report this comment', 'Ilmoita kommentista'), includeIp: true);
     if (reason == null || !mounted) return;
-    final res = await _api.post('$_base/${c['id']}/report', {'reason': reason});
+    Map<String, dynamic>? notice;
+    if (isIpReportReason(reason)) {
+      notice = await showIpNoticeForm(context, reason: reason);
+      if (notice == null || !mounted) return;
+    }
+    final res = await _api.post('$_base/${c['id']}/report', {'reason': reason, if (notice != null) 'ipNotice': notice});
     if (mounted) _snack(res.ok ? tr(context, 'Thanks — we will review it.', 'Kiitos — tarkistamme sen.') : res.errorText(context)!);
   }
 

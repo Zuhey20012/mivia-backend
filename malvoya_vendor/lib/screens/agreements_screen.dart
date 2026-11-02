@@ -106,6 +106,12 @@ class _AgreementsScreenState extends State<AgreementsScreen> {
                   if (_error == null && !_supported) ..._olderServer(),
                   if (_error == null && _supported) ...[
                     for (final item in _required) _statusCard(item),
+                    Container(
+                      margin: const EdgeInsets.only(top: MSpace.xs),
+                      decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppTheme.divider)),
+                      clipBehavior: Clip.antiAlias,
+                      child: _dataExplainedTile(),
+                    ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(MSpace.xs, MSpace.md, MSpace.xs, MSpace.sm),
                       child: Text(tr(context, 'What you have accepted', 'Hyväksymäsi'), style: AppTheme.display(size: 18)),
@@ -168,9 +174,22 @@ class _AgreementsScreenState extends State<AgreementsScreen> {
               trailing: const Icon(Icons.open_in_new_rounded),
               onTap: () => openLegal('privacy'),
             ),
+            const Divider(height: 1),
+            _dataExplainedTile(),
           ]),
         ),
       ];
+
+  /// The plain-language data page (`/legal/data-explained`, bilingual, outside the versioned texts).
+  Widget _dataExplainedTile() => ListTile(
+        key: const Key('agreements-data-explained'),
+        minTileHeight: 56,
+        leading: const Icon(Icons.menu_book_outlined, color: AppTheme.primary),
+        title: Text(tr(context, 'Your data, explained', 'Tietosi selkokielellä'), style: const TextStyle(fontWeight: FontWeight.w600)),
+        subtitle: Text(tr(context, 'Shops: what we keep about you and your customers', 'Kaupoille: mitä säilytämme sinusta ja asiakkaistasi')),
+        trailing: const Icon(Icons.open_in_new_rounded),
+        onTap: () => openLegal('data-explained'),
+      );
 
   Widget _statusCard(Map item) {
     final doc = '${item['doc']}';

@@ -8,7 +8,7 @@ You can delete your account yourself in any Malvoya app, at any time. It takes e
 
 | App | Where |
 |---|---|
-| **Malvoya** (shopping) | Profile → Privacy → Delete account |
+| **Malvoya** (shopping) | Profile → Privacy → Your data → Delete my account |
 | **Malvoya Store** (sellers) | the account menu (your store's settings or the account sheet) → Delete account |
 | **Malvoya Courier** | the account menu on the main screen (also while you wait for approval) → Delete account |
 
@@ -22,7 +22,8 @@ Write to us through the contact form at https://malvoya-api-eu.onrender.com/cont
 
 - your name, email address, phone number, saved address and profile picture;
 - your password and every signed-in session;
-- favourites, likes, follows, comments on drops, chat messages, blocks and reports you made, push-notification tokens, support requests and your "tell me when Malvoya opens near me" alert;
+- favourites, likes, follows, drop views, comments on drops, chat messages, blocks and reports you made, push-notification tokens, support requests and your "tell me when Malvoya opens near me" alert;
+- from your orders: the delivery address, map pin and notes, the handover position, a courier's note about a failed delivery, and the notes you wrote on returns;
 - the text of your reviews (the star rating stays, shown as "Former customer");
 - your sign-in record at Google Firebase (phone or Apple sign-in), when you used one;
 - for a store: the store stops selling at once, its products are hidden, and its product photos, videos, store pictures and drops are deleted from our media storage (Cloudinary).
@@ -31,9 +32,14 @@ Write to us through the contact form at https://malvoya-api-eu.onrender.com/cont
 
 - **Order records** (what was bought, prices, payments and refunds) are kept for 6 years from the end of the financial year, as the Finnish Accounting Act (Kirjanpitolaki 2:10) requires. They are anonymised: they are no longer linked to your name or contact details, and delivery addresses and notes are removed.
 - **Sellers' tax details (DAC7)** are kept for 10 years after the year they were reported for, as EU law requires, also after the store's account is deleted.
+- **A store's name, address and business ID** stay on the store record, because the store is the seller on past orders; its phone number and email address are removed.
+- **Records of the agreements you accepted** (which version, when, a shortened network address) are kept for 10 years after the deletion, as proof of the contract, and then deleted automatically.
+- **Reports you made about a product, and copyright or trademark notices**, are kept as a record of the notice and its decision, without your name, email address or account.
+- **Delivery photos** are deleted on their normal schedule, 30 days after the delivery; **chat messages others sent you** 30 days after the order or live stream ended.
+- **Backups** of the database are kept for [7] days, so deleted data disappears from them within that time.
 
-Apart from short-lived security logs, nothing else is kept. See the [Privacy Policy](https://malvoya-api-eu.onrender.com/legal/privacy) for details.
+Apart from these and short-lived technical logs, nothing else is kept. See the [Privacy Policy](https://malvoya-api-eu.onrender.com/legal/privacy) and [Your data, explained](https://malvoya-api-eu.onrender.com/legal/data-explained) for details.
 
 ## Lyhyesti suomeksi
 
-Voit poistaa tilisi itse missä tahansa Malvoya-sovelluksessa: Malvoya (Profiili → Tietosuoja → Poista tili), Malvoya Store (tilivalikko → Poista tili) ja Malvoya Courier (tilivalikko → Poista tili). Jos et pääse sovellukseen, lähetä pyyntö yhteydenottolomakkeella https://malvoya-api-eu.onrender.com/contact?lang=fi (aihe "Tietosuojapyyntö (GDPR)") ja kerro tilisi sähköpostiosoite. Poistamme nimesi, yhteystietosi, salasanasi, suosikkisi, kommenttisi, viestisi ja kirjautumistietosi; kaupan kuvat ja videot poistetaan. Kirjanpitolaki velvoittaa säilyttämään tilaustiedot 6 vuotta anonymisoituina, ja myyjien verotiedot (DAC7) säilytetään 10 vuotta.
+Voit poistaa tilisi itse missä tahansa Malvoya-sovelluksessa: Malvoya (Profiili → Tietosuoja → Tietosi → Poista tilini), Malvoya Store (tilivalikko → Poista tili) ja Malvoya Courier (tilivalikko → Poista tili). Jos et pääse sovellukseen, lähetä pyyntö yhteydenottolomakkeella https://malvoya-api-eu.onrender.com/contact?lang=fi (aihe "Tietosuojapyyntö (GDPR)") ja kerro tilisi sähköpostiosoite. Poistamme nimesi, yhteystietosi, salasanasi, suosikkisi, kommenttisi, viestisi ja kirjautumistietosi; kaupan kuvat ja videot poistetaan. Kirjanpitolaki velvoittaa säilyttämään tilaustiedot 6 vuotta anonymisoituina, ja myyjien verotiedot (DAC7) säilytetään 10 vuotta.

@@ -10,6 +10,7 @@
 
 ## 2. Seller identity and status
 
+- The person who creates and runs a store must be **at least 18 years old** and confirms this when creating the account (or, after signing up with Google, Apple or a phone number, before selling). For a business seller, that person must also be authorised to act for the business.
 - Business sellers provide their company name, Y-tunnus, address and VAT status.
 - Private individuals selling their own used items provide their name, address and date of birth.
 - Customers are shown whether each store is a **business** or a **private seller**, as marketplace law requires.
@@ -24,6 +25,8 @@
 ## 3. Listings
 
 The Seller is responsible for accurate descriptions, prices including VAT, product safety and the legality of the items. Malvoya may remove unlawful listings, and will tell the Seller why.
+
+**Rights in photos and texts.** The Seller may only upload photos, videos, texts, logos and brand names that it owns or is licensed to use for selling on Malvoya (for example its own photos, or material the brand or photographer has authorised in writing). The Seller must not sell counterfeit goods or use another's trademark in a way that suggests a connection that does not exist. The "I have the right to use these photos and texts" confirmation the Seller gives before each catalogue import is a binding statement under these terms. If a rights holder reports a listing, drop or comment, Malvoya handles it as described at [malvoya-api-eu.onrender.com/legal/ip-notice](https://malvoya-api-eu.onrender.com/legal/ip-notice): the Seller is told what was reported and why, can respond (counter-notice), and repeated infringement can lead to suspension (section 8). The Seller is responsible towards the rights holder for content it uploaded.
 
 ### 3a. Product safety
 
@@ -67,7 +70,7 @@ The Seller may import listings from their own online shop or a CSV file. Before 
 
 ## 5. Returns
 
-Business sellers must honour the customer's 14-day right of withdrawal and defect rights under the Consumer Protection Act. Returns are processed in the app. A hygiene-sealed item (section 3b) whose seal the customer says is opened cannot be returned under the right of withdrawal; the Seller may reject such a return on receipt if the seal is in fact broken, with the reason. Faulty items can always be returned. Any deduction for diminished value must be justified in writing. When the Seller rejects a return it must give the reason, which is shown to the customer.
+Business sellers must honour the customer's 14-day right of withdrawal and defect rights under the Consumer Protection Act. Returns are processed in the app. Customers of business sellers can withdraw with the withdrawal function in the Malvoya app ("Withdraw from contract here", Consumer Protection Act chapter 6 §14 a); Malvoya sends the customer the acknowledgement on the Seller's behalf at once, and the Seller sees the withdrawal in the store app as a return marked "Withdrawal". The withdrawal period runs from delivery or collection. A hygiene-sealed item (section 3b) whose seal the customer says is opened cannot be returned under the right of withdrawal; the Seller may reject such a return on receipt if the seal is in fact broken, with the reason. Faulty items can always be returned. Any deduction for diminished value must be justified in writing. When the Seller rejects a return it must give the reason, which is shown to the customer.
 
 ## 6. Fees and payouts
 

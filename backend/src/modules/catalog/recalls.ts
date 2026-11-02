@@ -135,7 +135,7 @@ async function notifyShop(recallId: number, s: { ownerId: number; name: string; 
     const text = fi
       ? `Lukitsimme seuraavat tuotteesi tuoteturvallisuuteen liittyvän takaisinvedon vuoksi: ${list}. Syy ja ohjeet: ${url}. Tuotteita ei voi enää julkaista. Ota yhteyttä Malvoyan tukeen, jos tämä on mielestäsi virhe.`
       : `We locked these listings because of a product safety recall: ${list}. Reason and instructions: ${url}. They can no longer be published. Contact Malvoya support if you think this is a mistake.`;
-    await sendEmail(owner.email, `Malvoya – ${fi ? RECALL_HEADLINE.fi : RECALL_HEADLINE.en}`, `<p>${escapeHtml(text)}</p>`, text);
+    await sendEmail(owner.email, `Malvoya – ${fi ? RECALL_HEADLINE.fi : RECALL_HEADLINE.en}`, `<p>${escapeHtml(text)}</p>`, text, { kind: "recall", locale: fi ? "fi" : "en" });
   }
 }
 
@@ -229,7 +229,7 @@ export async function notifyRecallBuyers(recallId: number) {
       await prisma.recallNotification.create({ data: { recallId, userId: u.id, channel: "push", delivered: pushConfigured() && u._count.devices > 0, locale: L } }).catch(() => {});
     }
     if (!sent.has("email")) {
-      const res = await sendEmail(u.email, notice.subject, `<div style="font-family:-apple-system,system-ui,'Segoe UI',sans-serif;max-width:640px;margin:0 auto;color:#17131C;line-height:1.55">${notice.html}</div>`, notice.text);
+      const res = await sendEmail(u.email, notice.subject, `<div style="font-family:-apple-system,system-ui,'Segoe UI',sans-serif;max-width:640px;margin:0 auto;color:#17131C;line-height:1.55">${notice.html}</div>`, notice.text, { kind: "recall", locale: L as "fi" | "en" });
       await prisma.recallNotification.create({ data: { recallId, userId: u.id, channel: "email", delivered: res.delivered, locale: L } }).catch(() => {});
     }
     notified++;

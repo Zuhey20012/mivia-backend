@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Search, CheckCircle, XCircle, MapPin } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../utils/api';
+import { CourierPositionBadge, type CourierPosition } from '../components/CourierPositionBadge';
 
 type Courier = {
   id: number;
@@ -14,6 +15,8 @@ type Courier = {
   createdAt: string;
   user: { id: number; email: string; isActive: boolean } | null;
   _count: { orders: number };
+  /** Position status (API 2.16.1); never coordinates */
+  position?: CourierPosition;
 };
 
 export default function Couriers() {
@@ -98,7 +101,7 @@ export default function Couriers() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">
-                {['Courier', 'Contact', 'Deliveries', 'Status', 'Actions'].map(h => (
+                {['Courier', 'Contact', 'Deliveries', 'Position', 'Status', 'Actions'].map(h => (
                   <th key={h} className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase tracking-wider">{h}</th>
                 ))}
               </tr>
@@ -125,6 +128,9 @@ export default function Couriers() {
                     <p className="text-gray-400 text-xs">{c.email ?? c.user?.email ?? '—'}</p>
                   </td>
                   <td className="px-6 py-4 text-gray-600">{c._count.orders}</td>
+                  <td className="px-6 py-4">
+                    {c.position ? <CourierPositionBadge position={c.position} /> : <span className="text-gray-400">—</span>}
+                  </td>
                   <td className="px-6 py-4">
                     {c.isApproved
                       ? <span className="badge-green"><CheckCircle className="w-3 h-3 mr-1" />Approved</span>

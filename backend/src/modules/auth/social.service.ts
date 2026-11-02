@@ -5,7 +5,7 @@ import crypto from "crypto";
 import { prisma } from "../../lib/prisma";
 import { env } from "../../config/env";
 import { issueSession } from "./session";
-import { AuthError, assertAgeConfirmed, assertSignupsOpen, assertVerifiedSignInAllowed, phoneToSyntheticEmail } from "./auth.service";
+import { AuthError, assertSignupsOpen, assertVerifiedSignInAllowed, phoneToSyntheticEmail } from "./auth.service";
 
 const googleClient = new OAuth2Client(env.googleClientId);
 
@@ -25,15 +25,15 @@ export type SignupOptions = { ageConfirmed?: boolean };
 
 /**
  * The role only applies when a new account is created; existing accounts keep theirs. A new account needs
- * "I am 18 or older" (400 AGE_CONFIRMATION_REQUIRED, 2.16) and is refused while sign-ups are paused.
+ * "I am 18 or older" when the app sent ageConfirmed (otherwise the agreements flow asks before the first order,
+ * sale or shift: 428) and is refused while sign-ups are paused.
  */
 async function createSocialUser(data: { email: string; name: string; phone?: string; googleSub?: string; appleSub?: string }, role: SignupRole, opts: SignupOptions) {
-  assertAgeConfirmed(opts.ageConfirmed);
   await assertSignupsOpen();
   const user = await prisma.user.create({
     data: {
       email: data.email, name: data.name, phone: data.phone ?? null, googleSub: data.googleSub ?? null, appleSub: data.appleSub ?? null,
-      passwordHash: unusablePasswordHash(), role, ageConfirmedAt: new Date(),
+      passwordHash: unusablePasswordHash(), role, ageConfirmedAt: opts.ageConfirmed ? new Date() : null,
     },
   });
   if (role === "COURIER") {

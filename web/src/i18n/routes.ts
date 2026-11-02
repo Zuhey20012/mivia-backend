@@ -24,6 +24,7 @@ export const HELP_ARTICLES = [
   { key: "refunds", fi: "hyvitykset", en: "refunds" },
   { key: "account", fi: "tili-ja-salasana", en: "account-and-password" },
   { key: "privacy", fi: "tietosuoja-ja-tiedot", en: "privacy-and-your-data" },
+  { key: "data", fi: "mita-tietoja-keraamme", en: "what-data-we-collect" },
   { key: "contact", fi: "ota-yhteytta", en: "contact" },
 ] as const;
 

@@ -5,11 +5,12 @@ import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/delete_account_tile.dart';
+import '../core/download_data_tile.dart';
 import '../screens/chatbot.dart';
 import '../screens/signed_in_devices_screen.dart';
 import '../screens/two_step_screen.dart';
 
-/// Help, sign out and delete account, for screens shown before the store exists (the dashboard has
+/// Help, sign out, your data (the plain-language page and a download) and delete account, for screens shown before the store exists (the dashboard has
 /// the same entries in its Store tab). Google Play requires account deletion to be reachable in the app.
 Future<void> showAccountSheet(BuildContext context) {
   return showMSheet<void>(context, builder: (ctx) => SafeArea(
@@ -53,6 +54,14 @@ Future<void> showAccountSheet(BuildContext context) {
               Provider.of<AuthService>(context, listen: false).logout();
             },
           ),
+          ListTile(
+            leading: const CircleAvatar(backgroundColor: AppTheme.primaryLight, child: Icon(Icons.menu_book_outlined, color: AppTheme.primary)),
+            title: Text(tr(ctx, 'Your data', 'Tietosi'), style: const TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: Text(tr(ctx, 'Shops: what we keep about you and your customers', 'Kaupoille: mitä säilytämme sinusta ja asiakkaistasi')),
+            trailing: const Icon(Icons.open_in_new_rounded, size: 18),
+            onTap: () => openLegal('data-explained'),
+          ),
+          const DownloadDataTile(leading: CircleAvatar(backgroundColor: AppTheme.primaryLight, child: Icon(Icons.download_rounded, color: AppTheme.primary))),
           const DeleteAccountTile(leading: CircleAvatar(backgroundColor: MPalette.redLight, child: Icon(Icons.delete_forever_rounded, color: MPalette.red))),
         ]),
       ),

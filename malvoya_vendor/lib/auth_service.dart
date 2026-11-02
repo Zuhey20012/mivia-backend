@@ -343,7 +343,7 @@ class AuthService extends ChangeNotifier implements ApiSession, GoogleLinkAccoun
   }
 
   /// [acceptTerms]: the person ticked "I accept the Seller Terms" (the server records when and which version).
-  /// [ageConfirmed]: the person ticked "I am 18 or older" (API 2.16; required for new accounts).
+  /// [ageConfirmed]: "I am 18 or older" (API 2.16 refuses registration without it).
   Future<String?> register(String name, String email, String password, {bool acceptTerms = false, bool ageConfirmed = false}) async {
     try {
       final res = await http

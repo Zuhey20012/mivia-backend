@@ -14,7 +14,9 @@ import '../core/sign_in.dart';
 class ReturnsScreen extends StatefulWidget {
   /// Opens the return sheet for this order straight away (from the order page).
   final Map<String, dynamic>? order;
-  const ReturnsScreen({super.key, this.order});
+  /// Opens it as the withdrawal function ("Withdraw from contract here", KSL 6:14 a, API 2.16).
+  final bool withdrawal;
+  const ReturnsScreen({super.key, this.order, this.withdrawal = false});
 
   @override
   State<ReturnsScreen> createState() => _ReturnsScreenState();
@@ -59,7 +61,7 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
     // After the first frame: the messages are localised, which needs the context
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _load();
-      if (mounted && widget.order != null && _error == null) _startReturn(preselected: widget.order);
+      if (mounted && widget.order != null && _error == null) _startReturn(preselected: widget.order, withdrawal: widget.withdrawal);
     });
   }
 
@@ -148,6 +150,14 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
 
   bool _hasSomethingLeft(Map<String, dynamic> order) => _remaining(order).values.any((q) => q > 0);
 
+  /// The withdrawal function is offered (business seller, within the withdrawal period). The server
+  /// says so in `withdrawal.available` (API 2.16); older payloads fall back to the seller type.
+  static bool withdrawalAvailable(Map<String, dynamic> order) {
+    final w = order['withdrawal'];
+    if (w is Map) return w['available'] == true;
+    return order['store'] is Map && order['store']['sellerType'] == 'BUSINESS';
+  }
+
   /// Delivered orders still inside the 14-day window with something left to return, newest first.
   Future<(List<Map<String, dynamic>>, String?)> _eligibleOrders() async {
     final res = await _api.get('/orders');
@@ -191,19 +201,22 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
 
   // ── Start a return ─────────────────────────────────────────────────────
 
-  Future<void> _startReturn({Map<String, dynamic>? preselected}) async {
+  /// [withdrawal]: the withdrawal function. Only orders from business sellers within the withdrawal
+  /// period; no reason is asked (an optional note instead) and the button says "Confirm withdrawal".
+  Future<void> _startReturn({Map<String, dynamic>? preselected, bool withdrawal = false}) async {
     final auth = Provider.of<AuthService>(context, listen: false);
     if (!auth.isAuthenticated) return;
     Haptics.selection();
 
     List<Map<String, dynamic>> orders;
     String? loadError;
-    if (preselected != null && _hasSomethingLeft(preselected)) {
+    if (preselected != null && _hasSomethingLeft(preselected) && (!withdrawal || withdrawalAvailable(preselected))) {
       orders = [preselected];
     } else if (preselected != null) {
       orders = [];
     } else {
       (orders, loadError) = await _eligibleOrders();
+      if (withdrawal) orders = orders.where(withdrawalAvailable).toList();
     }
     if (!mounted) return;
 
@@ -225,7 +238,13 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
               padding: const EdgeInsets.fromLTRB(MSpace.xxl, MSpace.sm, MSpace.xxl, MSpace.x3l),
               child: Text(
                 loadError ??
-                    (preselected != null
+                    (withdrawal && preselected != null && !withdrawalAvailable(preselected)
+                        ? _privateSellerText(context)
+                        : withdrawal && preselected == null
+                        ? tr(context,
+                            'You have no delivered orders from business sellers within the 14-day withdrawal period with items left. Purchases from private sellers are not covered by the right of withdrawal; you can still send them a return request.',
+                            'Sinulla ei ole 14 päivän peruuttamisajan sisällä toimitettuja yritysmyyjien tilauksia, joista voisi vielä perua tuotteita. Yksityismyyjiltä tehtyjä ostoja peruuttamisoikeus ei koske; voit silti lähettää heille palautuspyynnön.')
+                        : preselected != null
                         ? tr(context, 'Everything from this order is already in a return.', 'Kaikki tämän tilauksen tuotteet ovat jo palautuksessa.')
                         : tr(
                             context,
@@ -299,7 +318,17 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                   shrinkWrap: true,
                   padding: const EdgeInsets.fromLTRB(MSpace.xl, 0, MSpace.xl, MSpace.xxl),
                   children: [
-                    Text(tr(context, 'Start a return', 'Aloita palautus'), style: AppTheme.display(context, size: 20)),
+                    Text(withdrawal ? tr(context, 'Withdraw from contract', 'Sopimuksen peruminen') : tr(context, 'Start a return', 'Aloita palautus'),
+                        style: AppTheme.display(context, size: 20)),
+                    if (withdrawal) ...[
+                      const SizedBox(height: MSpace.xs),
+                      Text(
+                        tr(context,
+                            'Choose the items you withdraw from. You do not need to give a reason. When you confirm, we email you an acknowledgement with the date and time at once.',
+                            'Valitse tuotteet, joiden oston perut. Syytä ei tarvitse kertoa. Kun vahvistat, lähetämme sinulle heti sähköpostitse vahvistuksen, jossa on päivämäärä ja kellonaika.'),
+                        style: TextStyle(fontSize: MTextSize.label, height: 1.4, color: AppTheme.secondaryText(context)),
+                      ),
+                    ],
                     const SizedBox(height: MSpace.lg),
                     if (orders.length > 1) ...[
                       DropdownButtonFormField<int>(
@@ -326,7 +355,7 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                             style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primaryText(context))),
                       ),
                     Row(children: [
-                      Expanded(child: Text(tr(context, 'What are you returning?', 'Mitä palautat?'), style: AppTheme.display(context, size: 16))),
+                      Expanded(child: Text(withdrawal ? tr(context, 'Which items?', 'Mitkä tuotteet?') : tr(context, 'What are you returning?', 'Mitä palautat?'), style: AppTheme.display(context, size: 16))),
                       if (perItem)
                         TextButton(
                           onPressed: () {
@@ -388,15 +417,16 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                       ]),
                     ),
                     const SizedBox(height: MSpace.lg),
-                    DropdownButtonFormField<String>(
-                      initialValue: reason,
-                      decoration: InputDecoration(labelText: tr(context, 'Reason', 'Syy')),
-                      items: _reasons(context).entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
-                      onChanged: (v) => setSheet(() {
-                        reason = v ?? reason;
-                        sealRefusal = null;
-                      }),
-                    ),
+                    if (!withdrawal)
+                      DropdownButtonFormField<String>(
+                        initialValue: reason,
+                        decoration: InputDecoration(labelText: tr(context, 'Reason', 'Syy')),
+                        items: _reasons(context).entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
+                        onChanged: (v) => setSheet(() {
+                          reason = v ?? reason;
+                          sealRefusal = null;
+                        }),
+                      ),
                     // Sealed items returned under the right of withdrawal: is the seal unbroken?
                     if (sealAsked) ...[
                       const SizedBox(height: MSpace.md),
@@ -418,10 +448,15 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                       controller: noteCtrl,
                       maxLength: 500,
                       maxLines: 3,
-                      decoration: InputDecoration(labelText: tr(context, 'Details (optional)', 'Lisätiedot (valinnainen)')),
+                      decoration: InputDecoration(
+                          labelText: withdrawal ? tr(context, 'Reason (optional)', 'Syy (valinnainen)') : tr(context, 'Details (optional)', 'Lisätiedot (valinnainen)')),
                     ),
                     Text(
-                      tr(
+                      withdrawal
+                          ? tr(context,
+                              'After confirming, return the items to the shop within 14 days. The shop refunds what you paid for them, and the standard delivery fee when you return the whole order, within 14 days; it may wait until the items are back.',
+                              'Vahvistuksen jälkeen palauta tuotteet kauppaan 14 päivän kuluessa. Kauppa palauttaa niistä maksamasi summan, ja koko tilauksen palauttaessasi myös tavallisen toimitusmaksun, 14 päivän kuluessa; se voi odottaa, kunnes tuotteet ovat palanneet.')
+                          : tr(
                           context,
                           'From a business seller: no reason is needed. The refund goes to your original payment method within 14 days, but it may wait until the item is back with the seller. From a private seller: there is no legal right of withdrawal, so the seller decides.',
                           'Yritysmyyjältä: syytä ei tarvitse kertoa. Hyvitys tehdään alkuperäiselle maksutavalle 14 päivän kuluessa, mutta se voi odottaa, kunnes tuote on palannut myyjälle. Yksityismyyjältä: lakisääteistä peruuttamisoikeutta ei ole, joten myyjä päättää.'),
@@ -435,7 +470,12 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                     SizedBox(
                       width: double.infinity,
                       height: 54,
-                      child: MButton(label: everything
+                      child: MButton(
+                        key: withdrawal ? const Key('confirm-withdrawal') : null,
+                        label: withdrawal
+                            // Wording of the confirmation step (KSL 6:14 a; [LAWYER: confirm the Finnish label])
+                            ? tr(context, 'Confirm withdrawal', 'Vahvista peruminen')
+                            : everything
                                 ? tr(context, 'Return everything', 'Palauta kaikki')
                                 : tr(context, 'Return $pickedQty ${pickedQty == 1 ? 'item' : 'items'}',
                                     'Palauta $pickedQty ${pickedQty == 1 ? 'tuote' : 'tuotetta'}'), loading: submitting, onPressed: submitting || pickedQty == 0 || (sealAsked && sealIntact == null)
@@ -453,7 +493,7 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                                 ];
                                 final res = await _api.post('/returns', {
                                   'orderId': asInt(order['id']),
-                                  'reason': reason,
+                                  if (withdrawal) 'withdrawal': true else 'reason': reason,
                                   if (noteCtrl.text.trim().isNotEmpty) 'conditionNote': noteCtrl.text.trim(),
                                   if (perItem && !everything) 'items': lines,
                                   if (sealAsked && sealIntact != null) 'sealIntact': sealIntact,
@@ -462,7 +502,17 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                                 if (res.ok) {
                                   if (ctx.mounted) Navigator.pop(ctx);
                                   _load();
-                                  MSnack.success(context, tr(context, 'Return request sent to the store.', 'Palautuspyyntö lähetetty kaupalle.'));
+                                  if (withdrawal) {
+                                    final ret = res.data['return'];
+                                    await _showWithdrawalDone(ret is Map ? Map<String, dynamic>.from(ret) : const {});
+                                  } else {
+                                    MSnack.success(context, tr(context, 'Return request sent to the store.', 'Palautuspyyntö lähetetty kaupalle.'));
+                                  }
+                                } else if (res.data['code'] == 'WITHDRAWAL_NOT_APPLICABLE') {
+                                  setSheet(() {
+                                    submitting = false;
+                                    sheetError = localized(context, res.data['reason']) ?? _privateSellerText(context);
+                                  });
                                 } else if (res.data['code'] == 'SEAL_STATUS_REQUIRED') {
                                   // The server knows these lines are sealed: ask the question
                                   setSheet(() {
@@ -557,6 +607,63 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
     );
   }
 
+  /// Why there is no withdrawal function for a private seller's order (plain words).
+  static String _privateSellerText(BuildContext context) => tr(context,
+      'This seller is a private person, not a business. The legal right of withdrawal applies only to purchases from businesses, so there is no withdrawal function for this order. You can still send the seller a return request, and contact Help if the item is not as described.',
+      'Myyjä on yksityishenkilö eikä yritys. Lakisääteinen peruuttamisoikeus koskee vain ostoja yrityksiltä, joten tähän tilaukseen ei ole peruuttamistoimintoa. Voit silti lähettää myyjälle palautuspyynnön ja ottaa yhteyttä tukeen, jos tuote ei vastaa kuvausta.');
+
+  /// After "Confirm withdrawal": when it was received and how the acknowledgement was sent.
+  Future<void> _showWithdrawalDone(Map<String, dynamic> ret) async {
+    final at = DateTime.tryParse('${ret['createdAt'] ?? ''}')?.toLocal() ?? DateTime.now();
+    final when = '${dateText(context, at)} ${TimeOfDay.fromDateTime(at).format(context)}';
+    final channel = ret['withdrawalAckChannel'];
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(tr(ctx, 'Withdrawal received', 'Peruminen vastaanotettu')),
+        content: Text([
+          tr(ctx, 'We received your withdrawal on $when.', 'Perumisesi vastaanotettiin $when.'),
+          channel == 'email'
+              ? tr(ctx, 'An acknowledgement with the details has been emailed to you.', 'Vahvistus tietoineen on lähetetty sähköpostiisi.')
+              : channel == 'sms'
+                  ? tr(ctx, 'An acknowledgement has been sent to you by text message.', 'Vahvistus on lähetetty sinulle tekstiviestinä.')
+                  : tr(ctx, 'Keep this screen: we could not send an email or text message to your account.', 'Tallenna tämä näkymä: emme voineet lähettää tilillesi sähköpostia tai tekstiviestiä.'),
+          tr(ctx, 'Next, return the items to the shop within 14 days. You can follow it here in Returns.', 'Palauta seuraavaksi tuotteet kauppaan 14 päivän kuluessa. Voit seurata sitä täällä Palautuksissa.'),
+        ].join('\n\n')),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr(ctx, 'OK', 'OK')))],
+      ),
+    );
+  }
+
+  /// The withdrawal function in the Returns hub (KSL 6:14 a): clearly labelled, always visible while signed in.
+  Widget _withdrawalCard() {
+    final c = context.mColors;
+    return Container(
+      padding: const EdgeInsets.all(MSpace.lg),
+      decoration: BoxDecoration(color: c.surface, borderRadius: MRadius.brMd, border: Border.all(color: c.outline)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(tr(context, 'Changed your mind?', 'Muutitko mielesi?'), style: MType.title.copyWith(color: c.onSurface)),
+        const SizedBox(height: MSpace.xs),
+        Text(
+          tr(context, 'For orders from business sellers you can withdraw within 14 days of delivery, without a reason.',
+              'Yritysmyyjien tilauksista voit perua oston 14 päivän kuluessa toimituksesta syytä kertomatta.'),
+          style: MType.bodyM.copyWith(color: c.onSurfaceVariant),
+        ),
+        const SizedBox(height: MSpace.md),
+        SizedBox(
+          width: double.infinity,
+          child: MButton(
+            key: const Key('withdraw-here'),
+            // Label required by KSL 6:14 a / CRD Art. 11a ([LAWYER: confirm the Finnish label])
+            label: tr(context, 'Withdraw from contract here', 'Peru sopimus tästä'),
+            expand: true,
+            onPressed: () => _startReturn(withdrawal: true),
+          ),
+        ),
+      ]),
+    );
+  }
+
   // ── UI ──────────────────────────────────────────────────────────────────
 
   Widget _rules() {
@@ -638,6 +745,10 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                 title: tr(context, 'Sign in to return an item', 'Kirjaudu palauttaaksesi tuotteen'),
                 message: tr(context, 'Your orders and returns are kept in your account.', 'Tilauksesi ja palautuksesi ovat tililläsi.'),
               ),
+              const SizedBox(height: MSpace.lg),
+            ],
+            if (signedIn) ...[
+              _withdrawalCard(),
               const SizedBox(height: MSpace.lg),
             ],
             _rules(),
@@ -806,7 +917,17 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
             ],
           ),
           const SizedBox(height: 6),
-          Text(_reasons(context)[r['reason']] ?? '${r['reason'] ?? ''}', style: TextStyle(color: secondary, fontSize: MTextSize.label)),
+          Text(
+              r['withdrawal'] == true
+                  ? tr(context, 'Withdrawal (withdrawal function)', 'Peruminen (peruuttamistoiminto)')
+                  : _reasons(context)[r['reason']] ?? '${r['reason'] ?? ''}',
+              style: TextStyle(color: secondary, fontSize: MTextSize.label)),
+          if (r['withdrawal'] == true && parseApiDate(r['withdrawalAckSentAt']) != null)
+            Text(
+              tr(context, 'Acknowledgement sent ${dateText(context, parseApiDate(r['withdrawalAckSentAt'])!, short: true)}',
+                  'Vahvistus lähetetty ${dateText(context, parseApiDate(r['withdrawalAckSentAt'])!, short: true)}'),
+              style: MType.caption.copyWith(color: secondary),
+            ),
           const SizedBox(height: MSpace.sm),
           _progress(status),
           if (r['sealIntact'] == true)

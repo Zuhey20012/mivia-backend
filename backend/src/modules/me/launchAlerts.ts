@@ -5,6 +5,7 @@ import { auth, AuthRequest } from "../../middleware/auth";
 import { sendError } from "../../lib/errors";
 import { prisma } from "../../lib/prisma";
 import { pushToUsers } from "../../lib/push";
+import { sendOptionalEmail } from "../../services/notificationDeliveryService";
 import { t } from "../../lib/i18n";
 import { haversineKm } from "../../utils/distance";
 
@@ -73,6 +74,18 @@ export async function notifyLaunchAlertsNear(store: { id: number; name: string; 
     body: t(`${store.name} now delivers to your area. Take a look!`, `${store.name} toimittaa nyt alueellesi. Käy katsomassa!`),
     data: { type: "store", storeId: String(store.id) },
   }).catch((e) => logger.error({ err: e?.message }, "Launch alert push failed"));
+  // The same news by email: an optional email (unsubscribe link + one-click headers), skipped for accounts that
+  // switched optional emails off (2.16.0)
+  for (const a of near) {
+    await sendOptionalEmail(a.userId,
+      t("open near you", "avattu lähelläsi"),
+      t("Malvoya is open near you", "Malvoya on avattu lähelläsi"),
+      [
+        t(`${store.name} now delivers to your area. Open the Malvoya app to take a look.`, `${store.name} toimittaa nyt alueellesi. Avaa Malvoya-sovellus ja käy katsomassa.`),
+        t("You asked us to tell you once Malvoya opens near you, so this is the only launch email you will get for this place.",
+          "Pyysit meitä kertomaan, kun Malvoya avautuu lähelläsi, joten tämä on ainoa tätä paikkaa koskeva avausviesti."),
+      ]).catch((e) => logger.error({ err: e?.message }, "Launch alert email failed"));
+  }
   logger.info({ storeId: store.id, notified: near.length }, "Launch alerts sent");
   return near.length;
 }

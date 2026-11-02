@@ -36,18 +36,29 @@ router.patch("/me/profile", auth, async (req: AuthRequest, res: Response) => {
 const meSchema = z.object({
   locale: z.enum(["fi", "en"]).optional(),
   name: z.string().trim().min(1).max(80).optional(),
-}).strict().refine((d) => d.locale !== undefined || d.name !== undefined, { message: "Nothing to change" });
+  // Optional emails (launch alerts, referral and promo messages; 2.16.0). Service emails cannot be switched off.
+  emailMarketing: z.boolean().optional(),
+}).strict().refine((d) => d.locale !== undefined || d.name !== undefined || d.emailMarketing !== undefined, { message: "Nothing to change" });
 
 /** The signed-in account, as in the session payload plus phone and language. */
 router.get("/me", auth, async (req: AuthRequest, res: Response) => {
   try {
     const u = await prisma.user.findUnique({
       where: { id: req.user!.id },
-      select: { id: true, name: true, email: true, phone: true, role: true, locale: true, googleSub: true, passwordHash: true, termsAcceptedAt: true, termsVersion: true },
+      select: {
+        id: true, name: true, email: true, phone: true, role: true, locale: true, googleSub: true, passwordHash: true, termsAcceptedAt: true, termsVersion: true,
+        ageConfirmedAt: true, emailMarketingOptOutAt: true,
+      },
     });
     if (!u) throw new ApiError("Account not found", 404);
-    const { googleSub, passwordHash, ...user } = u;
-    res.json({ ok: true, user: { ...user, googleLinked: !!googleSub, hasPassword: hasPassword(passwordHash) } });
+    const { googleSub, passwordHash, emailMarketingOptOutAt, ...user } = u;
+    res.json({
+      ok: true,
+      user: {
+        ...user, googleLinked: !!googleSub, hasPassword: hasPassword(passwordHash),
+        ageConfirmed: !!user.ageConfirmedAt, emailMarketing: !emailMarketingOptOutAt,
+      },
+    });
   } catch (e) { sendError(res, e); }
 });
 
@@ -55,13 +66,18 @@ router.patch("/me", auth, async (req: AuthRequest, res: Response) => {
   const body = meSchema.safeParse(req.body);
   if (!body.success) return res.status(400).json({ ok: false, error: "Send locale (fi or en) and/or a name of 1–80 characters" });
   try {
-    const user = await prisma.user.update({
+    const { emailMarketing, ...rest } = body.data;
+    const u = await prisma.user.update({
       where: { id: req.user!.id },
-      data: body.data,
-      select: { id: true, name: true, email: true, phone: true, role: true, locale: true },
+      data: {
+        ...rest,
+        ...(emailMarketing === undefined ? {} : { emailMarketingOptOutAt: emailMarketing ? null : new Date() }),
+      },
+      select: { id: true, name: true, email: true, phone: true, role: true, locale: true, emailMarketingOptOutAt: true },
     });
     forgetSessionState(req.user!.id); // the next request reads the new language
-    res.json({ ok: true, user });
+    const { emailMarketingOptOutAt, ...user } = u;
+    res.json({ ok: true, user: { ...user, emailMarketing: !emailMarketingOptOutAt } });
   } catch (e) { sendError(res, e); }
 });
 

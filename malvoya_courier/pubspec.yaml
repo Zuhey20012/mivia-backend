@@ -1,7 +1,7 @@
 name: malvoya_courier
 description: Malvoya Courier - Premium Delivery App
 publish_to: "none"
-version: 1.8.0+10
+version: 1.9.1+12
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -17,6 +17,8 @@ dependencies:
     sdk: flutter
   flutter_native_splash: ^2.4.7
   firebase_core: ^3.15.2
+  # Crash reports (release builds only; see docs/release/crashlytics.md). 4.x pairs with firebase_core 3.x
+  firebase_crashlytics: ^4.3.10
   google_sign_in: ^6.2.1
   sign_in_with_apple: ^7.0.1
   http: ^1.2.2
@@ -26,6 +28,7 @@ dependencies:
   flutter_secure_storage: ^11.2.0
   shimmer: ^3.0.0
   url_launcher: ^6.3.1
+  share_plus: ^13.0.0 # Download my data: the JSON file goes to the phone's share menu (same version as the customer app)
   socket_io_client: ^3.0.2
   firebase_auth: ^5.7.0
   geolocator: ^13.0.2

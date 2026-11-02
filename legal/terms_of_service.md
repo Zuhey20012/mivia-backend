@@ -18,7 +18,8 @@ Malvoya arranges payment and local delivery by independent couriers.
 
 ## 3. Account
 
-- You must be at least 18 years old.
+- You must be at least 18 years old. You confirm this when you create your account ("I am 18 or older"); if you sign up with Google, Apple or your phone number, the app asks you to confirm it before your first order. You can browse without an account.
+- **Emails.** We send service messages about your orders, returns, account and agreements; they always say why you got them. Optional emails (for example "Malvoya is open near you") have an unsubscribe link, and you can switch them off at any time in the app (Profile → Privacy → Email preferences). Push notifications for launch news can be switched off in the same place.
 - Keep your sign-in details secret. If you forget your password, you can set a new one with a code we email to you ("Forgot password?" in the app). Setting a new password signs you out on all your other devices.
 - You can delete your account at any time in the app. How, and what happens to your data, is explained at [malvoya-api-eu.onrender.com/legal/delete-account](https://malvoya-api-eu.onrender.com/legal/delete-account).
 - When you create an account you accept these terms and confirm you have read the Privacy Policy. We record when you accepted, which version, how (when signing up or in the app), your network address shortened to its first part, your app or browser type and the app version, and we email you a copy of the text you accepted. You can open that copy in the app at any time.
@@ -38,7 +39,8 @@ Malvoya arranges payment and local delivery by independent couriers.
 - **Drops** are short videos and photos posted by stores. How the feed is ranked is explained in the app ("Why am I seeing this?") and in the Privacy Policy. You can switch to the chronological "Latest" view.
 - **Reviews** can only be written by customers whose order was delivered, once per order, within 30 days. We do not edit reviews or pay for them. Reviews that break the law are hidden, which also removes them from the store's rating.
 - **Reporting:** you can report any drop that you think is illegal or breaks these terms, also without an account. A person reviews every report. Three reports from different users hide the drop until it has been reviewed. You can also report a comment or a review; a person on the Malvoya team decides whether to hide it.
-- **Reporting a product:** every product has "Report this product" (unsafe, counterfeit, illegal, misleading or other), also without an account; you may leave an email address to hear the outcome. Product-safety reports are reviewed within three working days.
+- **Reporting a product:** every product has "Report this product" (unsafe, counterfeit, illegal, misleading, copyright, trademark or other), also without an account; you may leave an email address to hear the outcome. Product-safety reports are reviewed within three working days.
+- **Copyright and trademark:** rights holders can report a product, drop or comment that infringes their copyright or trademark. How, what a notice must contain, how sellers can respond and what happens to repeat infringers: [malvoya-api-eu.onrender.com/legal/ip-notice](https://malvoya-api-eu.onrender.com/legal/ip-notice).
 - **Blocking:** you can block another user. Their comments and reviews are then hidden for you. They are not told. You can unblock them at any time.
 
 ## 5a. Delivery
@@ -72,7 +74,8 @@ A checkout you did not pay for is cancelled automatically after 30 minutes, or a
 ## 7. Right of withdrawal (14 days) — business sellers
 
 - You may withdraw from a purchase within **14 days of receiving the item**, without giving a reason (Consumer Protection Act, chapter 6).
-- Start the return in the app (Profile → Returns) or send an unambiguous statement through the contact form at https://malvoya-api-eu.onrender.com/contact (topic "Withdrawal or return of an order").
+- **Withdrawal function.** Each delivered order from a business seller shows **"Withdraw from contract here"** in the app (on the order and in Profile → Returns) for the whole withdrawal period. Choose the items, optionally say why, and press **"Confirm withdrawal"**. We email you at once an acknowledgement with the date and time of your withdrawal, the order and the items, and what happens next (Consumer Protection Act chapter 6 §14 a). You can also send an unambiguous statement through the contact form at https://malvoya-api-eu.onrender.com/contact (topic "Withdrawal or return of an order").
+- Purchases from **private sellers** are not covered by the statutory right of withdrawal; the app says so on those orders.
 - We refund the price and the original standard delivery fee (and any service or small-order fee, less a promo discount) within 14 days of receiving your withdrawal. The refund goes to your original payment method.
 - You can also return only some of the items. Then we refund the price of those items, less the matching share of any promo discount. The delivery fee and any service or small-order fee are refunded when the whole order has been returned.
 - A refund may be delayed until the item has been received back.

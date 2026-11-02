@@ -35,6 +35,15 @@ function minutes(name: string, fallback: number) {
 /** Any positive number of hours (decimals allowed); anything else falls back to the default. */
 const hours = minutes;
 
+/**
+ * Privacy (2.16.1): a courier's stored position is cleared when no update has arrived for this long, and an idle
+ * courier is then marked offline (scheduler job "courier-position-expiry"). Read at call time, so it can be changed
+ * without a restart of the test harness; default 15 minutes.
+ */
+export function courierPositionTtlMinutes() {
+  return minutes("COURIER_POSITION_TTL_MINUTES", 15);
+}
+
 /** Non-negative whole cents from the environment; anything else falls back to the default (0 = off). */
 function cents(name: string, fallback = 0) {
   const v = Number(process.env[name]);

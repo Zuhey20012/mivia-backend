@@ -65,7 +65,11 @@ export const createRentalSchema = z.object({
 export const createReturnSchema = z.object({
   orderId:  z.number().int().positive().optional(),
   rentalId: z.number().int().positive().optional(),
-  reason:   z.enum(["WRONG_ITEM","DAMAGED_ON_ARRIVAL","NOT_AS_DESCRIBED","CHANGED_MIND","RENTAL_RETURN","OTHER"]),
+  // Optional for a withdrawal (a consumer need not give a reason): it is then CHANGED_MIND
+  reason:   z.enum(["WRONG_ITEM","DAMAGED_ON_ARRIVAL","NOT_AS_DESCRIBED","CHANGED_MIND","RENTAL_RETURN","OTHER"]).optional(),
+  // Made with the withdrawal function ("Withdraw from contract here" -> "Confirm withdrawal"; KSL 6:14 a, 2.16.0):
+  // only for business sellers, acknowledged at once by email (or SMS) with the date and time of the withdrawal
+  withdrawal: z.boolean().optional(),
   conditionNote: z.string().max(500).optional(),
   // Hygiene-sealed items returned under the right of withdrawal: the customer says whether the seal is unbroken (2.12)
   sealIntact: z.boolean().optional(),
@@ -76,6 +80,12 @@ export const createReturnSchema = z.object({
   })).min(1).max(50).optional(),
 }).refine(d => d.orderId || d.rentalId, {
   message: "Must provide either orderId or rentalId",
+}).refine(d => d.reason || d.withdrawal, {
+  message: "Choose a reason",
+}).refine(d => !(d.withdrawal && d.rentalId), {
+  message: "The withdrawal function is for orders",
+}).refine(d => !(d.withdrawal && d.reason && !["CHANGED_MIND", "OTHER"].includes(d.reason)), {
+  message: "A withdrawal needs no reason; for a faulty, wrong or damaged item make an ordinary return instead",
 }).refine(d => !(d.orderId && d.rentalId), {
   message: "Cannot provide both orderId and rentalId",
 });

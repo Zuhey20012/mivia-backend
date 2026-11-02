@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:malvoya_core/malvoya_core.dart';
+import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 
@@ -68,12 +69,22 @@ class LocationDisclosure {
         icon: const Icon(Icons.location_on_outlined, color: AppTheme.primary, size: 32),
         title: Text(tr(ctx, 'Share your location while you are online', 'Sijaintisi jaetaan, kun olet linjoilla')),
         content: SingleChildScrollView(
-          child: Text(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(
             tr(ctx,
                 'Malvoya Courier collects your precise location while you are online and during an active delivery, even when the app is closed or not in use, in the background or with the screen off. It is used to offer you delivery jobs near you, check that you are at the store, calculate your pay for the ride to the store, and show your position to the customer so they can follow the delivery.\n\nYour location is shared only with the customer and the store of the order you are delivering. A notification shows the whole time. Sharing stops when you go offline.\n\nMalvoya keeps only your latest position and deletes it when you go offline; the position where you hand over an order is kept with that order for 30 days as proof of delivery. Your location is not used for ads.',
                 'Malvoya Courier kerää tarkan sijaintisi, kun olet linjoilla ja kun sinulla on toimitus kesken, myös silloin kun sovellus on suljettu tai ei käytössä, taustalla tai näyttö pois päältä. Sijaintia käytetään lähellä olevien keikkojen tarjoamiseen, sen tarkistamiseen, että olet kaupalla, kauppaan ajon palkkion laskemiseen ja sijaintisi näyttämiseen asiakkaalle, jotta hän voi seurata toimitusta.\n\nSijaintisi jaetaan vain toimittamasi tilauksen asiakkaalle ja kaupalle. Ilmoitus näkyy koko ajan. Jakaminen loppuu, kun poistut linjoilta.\n\nMalvoya säilyttää vain viimeisimmän sijaintisi ja poistaa sen, kun poistut linjoilta; luovutuspaikan sijainti säilytetään tilauksen yhteydessä 30 päivää toimituksen todisteena. Sijaintia ei käytetä mainontaan.'),
             style: const TextStyle(height: 1.45),
           ),
+            const SizedBox(height: MSpace.sm),
+            TextButton.icon(
+              key: const Key('disclosure-data-explained'),
+              style: TextButton.styleFrom(minimumSize: const Size(48, 48), padding: const EdgeInsets.symmetric(horizontal: MSpace.sm)),
+              onPressed: () => openLegal('data-explained'),
+              icon: const Icon(Icons.menu_book_outlined, size: 18),
+              label: Text(tr(ctx, 'How we use your location', 'Miten käytämme sijaintiasi')),
+            ),
+          ]),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(ctx, 'Not now', 'Ei nyt'))),

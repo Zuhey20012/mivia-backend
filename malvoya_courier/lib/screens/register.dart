@@ -20,7 +20,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _loading = false;
   bool _obscurePass = true;
   bool _agreed = false;
-  bool _adult = false;
+  /// "I am 18 or older" (Courier Agreement §3; required by the server)
+  bool _ageConfirmed = false;
   String? _error;
 
   @override
@@ -40,12 +41,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
       setState(() => _error = tr(context, 'Use a password of at least $kMinPasswordLength characters.', 'Käytä vähintään $kMinPasswordLength merkin salasanaa.'));
       return;
     }
-    if (!_adult) {
-      setState(() => _error = tr(context, 'Couriers must be 18 or older. Confirm your age to send your application.', 'Lähettien on oltava vähintään 18-vuotiaita. Vahvista ikäsi lähettääksesi hakemuksen.'));
-      return;
-    }
     if (!_agreed) {
       setState(() => _error = tr(context, 'Accept the courier agreement to send your application.', 'Hyväksy lähettisopimus lähettääksesi hakemuksen.'));
+      return;
+    }
+    if (!_ageConfirmed) {
+      setState(() => _error = tr(context, 'Please confirm that you are 18 or older.', 'Vahvista, että olet vähintään 18-vuotias.'));
       return;
     }
     setState(() { _loading = true; _error = null; });
@@ -55,7 +56,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _emailCtrl.text.trim(),
       _passCtrl.text,
       acceptTerms: _agreed,
-      ageConfirmed: _adult,
+      ageConfirmed: _ageConfirmed,
     );
     // On success the app closes this screen itself and its home shows the pending-approval screen
     if (mounted && err != null) setState(() { _error = err; _loading = false; });
@@ -148,8 +149,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ],
 
               const SizedBox(height: MSpace.xl),
-              // Required for every new account (API 2.16); never pre-ticked
-              AgeCheckbox(value: _adult, onChanged: _loading ? null : (v) => setState(() { _adult = v; if (v) _error = null; })),
               // Required: the application records that the courier accepted the agreement
               CheckboxListTile(
                 value: _agreed,
@@ -162,6 +161,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   style: const TextStyle(fontSize: MTextSize.bodyL, fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
                 ),
               ),
+              // Required: couriers must be adults (Courier Agreement §3)
+              CheckboxListTile(
+                key: const Key('register-age-confirm'),
+                value: _ageConfirmed,
+                onChanged: _loading ? null : (v) => setState(() { _ageConfirmed = v ?? false; if (_ageConfirmed) _error = null; }),
+                controlAffinity: ListTileControlAffinity.leading,
+                contentPadding: EdgeInsets.zero,
+                activeColor: AppTheme.primary,
+                title: Text(
+                  tr(context, 'I am 18 or older', 'Olen vähintään 18-vuotias'),
+                  style: const TextStyle(fontSize: MTextSize.bodyL, fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
+                ),
+              ),
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
@@ -171,7 +183,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
               ),
               const SizedBox(height: MSpace.xl),
-              MButton(label: tr(context, 'Send application', 'Lähetä hakemus'), expand: true, loading: _loading, onPressed: _agreed && _adult ? _handleRegister : null),
+              MButton(label: tr(context, 'Send application', 'Lähetä hakemus'), expand: true, loading: _loading, onPressed: _agreed && _ageConfirmed ? _handleRegister : null),
               const SizedBox(height: MSpace.x3l),
             ],
           ),

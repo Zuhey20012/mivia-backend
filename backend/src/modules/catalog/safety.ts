@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { readIpNotice } from "../../lib/ipNotice";
 import { Router, Response } from "express";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { z } from "zod";
@@ -178,7 +179,8 @@ safetyRoutes.delete("/stores/my/certificates/:id(\\d+)", ...vendor, async (req: 
 
 // ─── Report this product ─────────────────────────────────────────────────────
 
-export const REPORT_REASONS = ["unsafe", "counterfeit", "illegal", "misleading", "other"] as const;
+// copyright / trademark (2.16.0) need the DSA Art. 16(2) notice fields (lib/ipNotice.ts)
+export const REPORT_REASONS = ["unsafe", "counterfeit", "illegal", "misleading", "copyright", "trademark", "other"] as const;
 
 /** Due date of a notice: product-safety notices within three working days (GPSR Art. 22(8)); Mon–Fri, holidays ignored. */
 export function workingDaysAfter(from: Date, days: number) {
@@ -197,6 +199,7 @@ const reportSchema = z.object({
   details: z.string().trim().max(2000).optional(),
   // Signed-out reporters may leave an address to hear the outcome (DSA Art. 16(5)); optional
   email: z.string().trim().email().max(200).optional(),
+  ipNotice: z.unknown().optional(),
 }).refine((d) => d.reason !== "other" || (d.details?.length ?? 0) >= 5, { message: "Tell us what is wrong", path: ["details"] });
 
 /** 5 reports per hour per account, or per network address when signed out. */
@@ -212,7 +215,9 @@ const reportLimiter = rateLimit({
 
 safetyRoutes.post("/products/:id(\\d+)/report", optionalAuth, reportLimiter, async (req: AuthRequest, res: Response) => {
   const body = reportSchema.safeParse(req.body);
-  if (!body.success) return res.status(400).json({ ok: false, error: body.error.issues[0]?.message ?? "Give a reason: unsafe, counterfeit, illegal, misleading or other" });
+  if (!body.success) return res.status(400).json({ ok: false, error: body.error.issues[0]?.message ?? "Give a reason: unsafe, counterfeit, illegal, misleading, copyright, trademark or other" });
+  const ip = readIpNotice(body.data.reason, body.data.ipNotice);
+  if (!ip.ok) return res.status(400).json({ ok: false, code: "IP_NOTICE_REQUIRED", error: ip.error });
   try {
     const product = await prisma.product.findFirst({ where: { id: positiveId(req.params.id)!, deletedAt: null }, select: { id: true } });
     if (!product) throw new ApiError("Product not found", 404);
@@ -222,7 +227,10 @@ safetyRoutes.post("/products/:id(\\d+)/report", optionalAuth, reportLimiter, asy
       if (open) return res.json({ ok: true, alreadyReported: true, report: { id: open.id, status: open.status, reason: open.reason, dueBy: workingDaysAfter(open.createdAt, 3) } });
     }
     const row = await prisma.productReport.create({
-      data: { productId: product.id, reporterId, reporterEmail: reporterId ? null : body.data.email ?? null, reason: body.data.reason, details: body.data.details ?? null },
+      data: {
+        productId: product.id, reporterId, reporterEmail: reporterId ? null : body.data.email ?? ip.value?.email ?? null, reason: body.data.reason, details: body.data.details ?? null,
+        ...(ip.value ? { ipNotice: ip.value } : {}),
+      },
     });
     res.status(201).json({ ok: true, alreadyReported: false, report: { id: row.id, status: row.status, reason: row.reason, dueBy: workingDaysAfter(row.createdAt, 3) } });
   } catch (e) { sendError(res, e); }

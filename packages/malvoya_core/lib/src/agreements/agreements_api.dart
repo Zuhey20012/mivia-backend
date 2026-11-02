@@ -30,7 +30,7 @@ abstract final class AgreementDocs {
 @immutable
 class AgreementRequired {
   /// Creates the requirement.
-  const AgreementRequired({required this.doc, required this.version, this.title, this.url, this.message});
+  const AgreementRequired({required this.doc, required this.version, this.title, this.url, this.message, this.ageConfirmationRequired = false});
 
   /// The document, e.g. "seller-terms".
   final String doc;
@@ -47,6 +47,10 @@ class AgreementRequired {
   /// The server's own sentence ("Please read and accept …"), in the app language.
   final String? message;
 
+  /// The account has not confirmed being 18 or older yet (API 2.16): the sheet must also ask
+  /// "I am 18 or older" and accept with `ageConfirmed: true`. [doc] may then already be accepted.
+  final bool ageConfirmationRequired;
+
   /// The requirement in [res], or null when [res] is anything else.
   static AgreementRequired? from(ApiResult res) {
     if (!res.agreementRequired) return null;
@@ -59,6 +63,7 @@ class AgreementRequired {
       title: res.data['title'] is Map ? res.data['title'] as Map : null,
       url: res.data['url'] is String ? res.data['url'] as String : null,
       message: res.error,
+      ageConfirmationRequired: res.data['ageConfirmationRequired'] == true,
     );
   }
 }
@@ -125,7 +130,7 @@ class AgreementDoc {
 @immutable
 class AgreementState {
   /// Creates the state.
-  const AgreementState({required this.status, this.error, this.required = const [], this.history = const []});
+  const AgreementState({required this.status, this.error, this.required = const [], this.history = const [], this.ageConfirmationRequired = false});
 
   /// HTTP status: 0 = no connection, 404 = a server without agreements (before 2.11).
   final int status;
@@ -138,6 +143,10 @@ class AgreementState {
 
   /// Acceptance records `{id, doc, version, acceptedAt, …}`, newest first.
   final List<Map<String, dynamic>> history;
+
+  /// The account has not confirmed being 18 or older (API 2.16; Google, phone and Apple sign-ups and
+  /// older accounts). Orders, selling and going online answer 428 until it is confirmed.
+  final bool ageConfirmationRequired;
 
   /// True when it loaded.
   bool get ok => error == null;
@@ -233,6 +242,7 @@ class AgreementsApi {
       status: res.status,
       required: _maps(res.data['required']).map(AgreementDoc.new).toList(),
       history: _maps(res.data['history']),
+      ageConfirmationRequired: res.data['ageConfirmationRequired'] == true,
     );
   }
 
@@ -243,9 +253,14 @@ class AgreementsApi {
     return _maps(res.data['versions']).map(AgreementVersion.new).toList();
   }
 
-  /// Accepts [version] of [doc] (the version in force or the announced one; idempotent).
-  Future<AgreementAcceptResult> accept(String doc, String version) async =>
-      AgreementAcceptResult(await client.post('/me/agreements/accept', {'doc': doc, 'version': version}));
+  /// Accepts [version] of [doc] (the version in force or the announced one; idempotent). With
+  /// [ageConfirmed] it also records "I am 18 or older" (API 2.16).
+  Future<AgreementAcceptResult> accept(String doc, String version, {bool ageConfirmed = false}) async =>
+      AgreementAcceptResult(await client.post('/me/agreements/accept', {
+        'doc': doc,
+        'version': version,
+        if (ageConfirmed) 'ageConfirmed': true,
+      }));
 
   /// A 10-minute signed link to the copy of acceptance [id], or the failed result.
   Future<(Uri?, ApiResult)> copyLink(int id) async {

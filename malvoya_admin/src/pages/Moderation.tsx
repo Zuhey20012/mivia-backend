@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Flag, Play, EyeOff, RotateCcw, MessageSquare, Star } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../utils/api';
+import IpNoticeBox, { type IpNotice } from '../components/IpNoticeBox';
 
 type Drop = {
   id: number;
@@ -21,6 +22,7 @@ type Report = {
   id: number;
   reason: string;
   details: string | null;
+  ipNotice?: IpNotice;
   createdAt: string;
   reporterId: number | null;
   drop: { id: number; status: string; caption: string | null; store: { name: string } };
@@ -34,7 +36,7 @@ type ReportedComment = {
   reportCount: number;
   createdAt: string;
   user: { id: number; name: string };
-  reports: { reason: string; createdAt: string }[];
+  reports: { reason: string; ipNotice?: IpNotice; createdAt: string }[];
 };
 
 type ReportedReview = {
@@ -131,6 +133,7 @@ export default function Moderation() {
                   <td className="py-3 pr-4">
                     <p className="font-medium">Drop #{r.drop.id} · {r.drop.store.name}</p>
                     <p className="text-gray-400 text-xs">{r.details ?? r.drop.caption ?? ''}</p>
+                    <IpNoticeBox notice={r.ipNotice} />
                   </td>
                   <td className="py-3 pr-4 text-gray-400 text-xs">{new Date(r.createdAt).toLocaleString('fi-FI')}{r.reporterId ? '' : ' · anonymous'}</td>
                   <td className="py-3 text-right whitespace-nowrap">
@@ -158,6 +161,7 @@ export default function Moderation() {
                   <td className="py-3 pr-4">
                     <p className="font-medium">{c.body}</p>
                     <p className="text-gray-400 text-xs">Drop #{c.dropId} · by user #{c.user.id} · {c.reportCount} reports · {c.status === 'HIDDEN' ? 'hidden' : 'visible'}</p>
+                    {c.reports.filter(r => r.ipNotice).map((r, i) => <IpNoticeBox key={i} notice={r.ipNotice} />)}
                   </td>
                   <td className="py-3 pr-4 text-gray-400 text-xs">{new Date(c.createdAt).toLocaleString('fi-FI')}</td>
                   <td className="py-3 text-right whitespace-nowrap">

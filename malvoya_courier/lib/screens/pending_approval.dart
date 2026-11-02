@@ -6,6 +6,7 @@ import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
 import '../core/delete_account_tile.dart';
+import '../core/download_data_tile.dart';
 import '../core/push_service.dart';
 import '../widgets/onboarding_checklist.dart';
 import 'agreements_screen.dart';
@@ -147,6 +148,15 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> with Widg
                       label: Text(tr(context, 'Read the courier agreement', 'Lue lähettisopimus')),
                     ),
                   ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                      onPressed: () => openLegal('data-explained'),
+                      icon: const Icon(Icons.menu_book_outlined),
+                      label: Text(tr(context, 'Your data, explained', 'Tietosi selkokielellä')),
+                    ),
+                  ),
                 ]),
               ),
               const SizedBox(height: MSpace.xxl),
@@ -188,6 +198,16 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> with Widg
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AgreementsScreen())),
                   ),
+                  const Divider(height: 1),
+                  ListTile(
+                    key: const Key('pending-data-explained'),
+                    leading: const Icon(Icons.menu_book_outlined),
+                    title: Text(tr(context, 'Your data, explained', 'Tietosi selkokielellä'), style: const TextStyle(fontWeight: FontWeight.w600)),
+                    trailing: const Icon(Icons.open_in_new_rounded, size: 18),
+                    onTap: () => openLegal('data-explained'),
+                  ),
+                  const Divider(height: 1),
+                  const DownloadDataTile(),
                   const Divider(height: 1),
                   const DeleteAccountTile(),
                 ]),

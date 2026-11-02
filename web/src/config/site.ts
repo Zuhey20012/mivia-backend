@@ -11,9 +11,12 @@ export const API_BASE = "https://malvoya-api-eu.onrender.com";
 export const LEGAL = {
   terms: `${API_BASE}/legal/terms`,
   privacy: `${API_BASE}/legal/privacy`,
+  /** Plain-language "Tietosi selkokielellä / Your data, explained" (one bilingual page, Finnish first) */
+  dataExplained: `${API_BASE}/legal/data-explained`,
   sellers: `${API_BASE}/legal/sellers`,
   couriers: `${API_BASE}/legal/couriers`,
   deleteAccount: `${API_BASE}/legal/delete-account`,
+  ipNotice: `${API_BASE}/legal/ip-notice`,
   recalls: `${API_BASE}/recalls`,
 } as const;
 

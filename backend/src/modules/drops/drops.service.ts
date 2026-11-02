@@ -25,8 +25,10 @@ const MAX_DROPS_PER_DAY = 20;
 const FEED_WINDOW_DAYS = 60;
 const AUTO_HIDE_REPORTS = 3;
 
+// COPYRIGHT / TRADEMARK (2.16.0) need the DSA Art. 16(2) notice fields (lib/ipNotice.ts); IP_INFRINGEMENT is kept for
+// older app builds and works as before.
 export const REPORT_REASONS = [
-  "ILLEGAL_PRODUCT", "COUNTERFEIT", "SCAM", "NUDITY", "VIOLENCE", "HATE", "HARASSMENT", "IP_INFRINGEMENT", "MINOR_SAFETY", "OTHER",
+  "ILLEGAL_PRODUCT", "COUNTERFEIT", "SCAM", "NUDITY", "VIOLENCE", "HATE", "HARASSMENT", "IP_INFRINGEMENT", "COPYRIGHT", "TRADEMARK", "MINOR_SAFETY", "OTHER",
 ] as const;
 
 // ─── Presentation ───────────────────────────────────────────────────────────
@@ -291,15 +293,15 @@ async function likeState(dropId: number, liked: boolean) {
 
 /**
  * A view counts once per viewer per day; watch time and completion are recorded for ranking.
- * Anonymous viewers are identified by a hash of an install id the app generates (never an ad id).
+ * Signed-out viewers are identified only by a hash of the IP address and the day (it changes every day). Since 2.16.1
+ * an install id from old app builds is ignored, so nothing tied to the phone is stored. The rows only de-duplicate
+ * within a day (totals are on Drop) and are deleted after 2 days (services/privacyRetention.ts#purgeOldDropViews).
  */
-export async function recordView(dropId: number, viewer: Viewer, input: { installId?: string; watchedSec: number; completed: boolean; ip?: string }) {
+export async function recordView(dropId: number, viewer: Viewer, input: { watchedSec: number; completed: boolean; ip?: string }) {
   const drop = await readyDrop(dropId);
   const viewerKey = viewer
     ? `u:${viewer.id}`
-    : input.installId
-      ? `d:${crypto.createHash("sha256").update(input.installId).digest("hex").slice(0, 32)}`
-      : `i:${crypto.createHash("sha256").update(`${input.ip ?? ""}:${new Date().toISOString().slice(0, 10)}`).digest("hex").slice(0, 32)}`;
+    : `i:${crypto.createHash("sha256").update(`${input.ip ?? ""}:${new Date().toISOString().slice(0, 10)}`).digest("hex").slice(0, 32)}`;
   const day = new Date(new Date().toISOString().slice(0, 10));
   const watched = Math.max(0, Math.min(input.watchedSec, drop.durationSec ?? 60, 180));
   const key = { dropId_viewerKey_day: { dropId, viewerKey, day } };
@@ -391,14 +393,14 @@ export async function unhide(dropId: number, userId: number) {
 }
 
 /** Notice-and-action (DSA Art. 16). Three independent reports hide the drop until a person reviews it. */
-export async function report(dropId: number, reporterId: number | null, reason: string, details?: string) {
+export async function report(dropId: number, reporterId: number | null, reason: string, details?: string, ipNotice?: object | null) {
   const drop = await prisma.drop.findUnique({ where: { id: dropId }, select: { id: true, status: true } });
   if (!drop) throw new ApiError("Drop not found", 404);
   if (reporterId) {
     const dup = await prisma.dropReport.findFirst({ where: { dropId, reporterId, status: "OPEN" } });
     if (dup) return { received: true };
   }
-  await prisma.dropReport.create({ data: { dropId, reporterId, reason, details: details?.slice(0, 1000) } });
+  await prisma.dropReport.create({ data: { dropId, reporterId, reason, details: details?.slice(0, 1000), ...(ipNotice ? { ipNotice } : {}) } });
 
   const distinct = await prisma.dropReport.groupBy({ by: ["reporterId"], where: { dropId, status: "OPEN", reporterId: { not: null } } });
   if (drop.status === "READY" && distinct.length >= AUTO_HIDE_REPORTS) {

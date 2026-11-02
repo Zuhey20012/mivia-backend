@@ -23,12 +23,6 @@ export class AuthError extends Error {
   }
 }
 
-export const AGE_REQUIRED = "Confirm that you are 18 or older";
-/** New accounts (register, social or code sign-up) need "I am 18 or older" (2.16); existing accounts never do. */
-export function assertAgeConfirmed(ageConfirmed: unknown) {
-  if (ageConfirmed !== true) throw new AuthError(AGE_REQUIRED, 400, "AGE_CONFIRMATION_REQUIRED");
-}
-
 /** Admin switch "Pause new accounts" (2.16): 503 SIGNUPS_PAUSED for new accounts only. */
 export async function assertSignupsOpen() {
   const message = await blocked("signupsPaused");
@@ -93,7 +87,6 @@ export async function registerUser(input: RegisterInput, ctx: AcceptContext = { 
   });
   // Never hand out a session for an existing account from the register endpoint.
   if (existing) throw new AuthError("An account with this email or phone already exists. Please sign in.", 409);
-  assertAgeConfirmed(input.ageConfirmed);
   await assertSignupsOpen();
   await assertPasswordNotBreached(input.password);
 
@@ -104,7 +97,9 @@ export async function registerUser(input: RegisterInput, ctx: AcceptContext = { 
   const now = new Date();
   const user = await prisma.user.create({
     data: {
-      name: input.name, email, phone, passwordHash, role: input.role, ageConfirmedAt: now,
+      name: input.name, email, phone, passwordHash, role: input.role,
+      // The schema refuses registration without ageConfirmed: true (2.16.0)
+      ageConfirmedAt: now,
       ...(input.acceptTerms ? { termsAcceptedAt: now, termsVersion: main?.version ?? null } : {}),
     },
     select: { id: true, name: true, email: true, role: true, passwordHash: true },
@@ -216,27 +211,74 @@ export async function logoutUser(refreshToken: string) {
 // ─── GDPR: access (Art. 15/20) and erasure (Art. 17) ────────────────────────
 
 export async function exportUserData(userId: number) {
-  const [user, supportRequests, chatMessages, productReports, liveMessages] = await Promise.all([exportUser(userId), prisma.supportRequest.findMany({
+  const [user, supportRequests, chatMessages, productReports, liveMessages, more] = await Promise.all([exportUser(userId), prisma.supportRequest.findMany({
     where: { userId }, select: { id: true, topic: true, message: true, status: true, createdAt: true },
   }), prisma.orderMessage.findMany({
     where: { senderId: userId }, select: { orderId: true, text: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 5000,
   }), prisma.productReport.findMany({
     // "Report this product" notices the user sent (2.12)
-    where: { reporterId: userId }, select: { productId: true, reason: true, details: true, status: true, createdAt: true }, take: 1000,
+    where: { reporterId: userId }, select: { productId: true, reason: true, details: true, ipNotice: true, status: true, createdAt: true }, take: 1000,
   }), prisma.liveMessage.findMany({
     // Messages written in stores' live streams (2.15), kept 30 days after each live
     where: { userId }, select: { liveId: true, text: true, hidden: true, createdAt: true }, orderBy: { id: "desc" }, take: 5000,
-  })]);
-  return user && { ...user, supportRequests, chatMessages, productReports, liveMessages };
+  }), exportMore(userId)]);
+  return user && { ...user, supportRequests, chatMessages, productReports, liveMessages, ...more };
 }
+
+/**
+ * Added by the data audit (2.16.1, C4/C7): drop views, reports made, recall notices, and for couriers their jobs with
+ * the pay breakdown, the ratings they got and their payouts; for stores their payouts. Courier jobs carry no customer
+ * name, address or notes (other people's data): order number, store, times, status and pay only.
+ */
+async function exportMore(userId: number) {
+  const [courier, store] = await Promise.all([
+    prisma.courier.findUnique({ where: { userId }, select: { id: true } }),
+    prisma.store.findUnique({ where: { ownerId: userId }, select: { id: true } }),
+  ]);
+  const [dropViews, dropReports, commentReports, reviewReports, liveReports, recallNotices, courierJobs, courierPayouts, storePayouts] = await Promise.all([
+    // Signed-in drop views (kept 2 days, only to count one view a day)
+    prisma.dropView.findMany({ where: { viewerKey: `u:${userId}` }, select: { dropId: true, day: true, completed: true } }),
+    prisma.dropReport.findMany({ where: { reporterId: userId }, select: { dropId: true, reason: true, details: true, ipNotice: true, status: true, createdAt: true }, take: 1000 }),
+    prisma.dropCommentReport.findMany({ where: { reporterId: userId }, select: { commentId: true, reason: true, ipNotice: true, createdAt: true }, take: 1000 }),
+    prisma.reviewReport.findMany({ where: { reporterId: userId }, select: { reviewId: true, reason: true, resolution: true, resolvedAt: true, createdAt: true }, take: 1000 }),
+    prisma.liveReport.findMany({ where: { reporterId: userId }, select: { liveId: true, reason: true, details: true, status: true, createdAt: true }, take: 1000 }),
+    prisma.recallNotification.findMany({
+      where: { userId }, select: { channel: true, delivered: true, sentAt: true, recall: { select: { id: true, title: true } } }, take: 1000,
+    }).catch(() => []),
+    courier
+      ? prisma.order.findMany({
+        where: { courierId: courier.id },
+        select: {
+          id: true, status: true, store: { select: { id: true, name: true } }, acceptedAt: true, courierArrivedAt: true, pickedUpAt: true,
+          deliveredAt: true, cancelledAt: true, returnedToStoreAt: true, handoverMethod: true, deliveryProblemReason: true,
+          courierFeeCents: true, tipCents: true, courierPay: true, review: { select: { courierRating: true, createdAt: true } },
+        },
+        orderBy: { id: "desc" },
+        take: 5000,
+      })
+      : [],
+    courier ? prisma.payout.findMany({ where: { courierId: courier.id, party: "COURIER" }, select: payoutExportSelect, orderBy: { id: "desc" }, take: 5000 }) : [],
+    store ? prisma.payout.findMany({ where: { storeId: store.id, party: "STORE" }, select: payoutExportSelect, orderBy: { id: "desc" }, take: 5000 }) : [],
+  ]);
+  return {
+    dropViews, dropReports, commentReports, reviewReports, liveReports, recallNotices,
+    ...(courier ? { courierJobs, courierPayouts } : {}),
+    ...(store ? { storePayouts } : {}),
+  };
+}
+
+const payoutExportSelect = {
+  orderId: true, amountCents: true, status: true, releaseAt: true, paidAt: true, stripeTransferId: true, failureReason: true, createdAt: true,
+} as const;
 
 function exportUser(userId: number) {
   return prisma.user.findUnique({
     where: { id: userId },
     select: {
-      id: true, email: true, name: true, phone: true, role: true, avatarUrl: true, googleSub: true,
+      id: true, email: true, name: true, phone: true, role: true, avatarUrl: true, googleSub: true, appleSub: true, isMinor: true,
       address: true, latitude: true, longitude: true, createdAt: true, updatedAt: true,
       locale: true, termsAcceptedAt: true, termsVersion: true, totpEnabledAt: true,
+      ageConfirmedAt: true, emailMarketingOptOutAt: true,
       // Every agreement version accepted, with time, method, truncated address and app version (2.11)
       agreementAcceptances: { select: { doc: true, version: true, acceptedAt: true, method: true, ip: true, userAgent: true, appVersion: true } },
       blocks: { select: { blockedId: true, createdAt: true } },
@@ -253,7 +295,14 @@ function exportUser(userId: number) {
           taxInfo: { select: { legalName: true, dateOfBirth: true, vatNumber: true, addressLine: true, postalCode: true, city: true, country: true, createdAt: true, updatedAt: true } },
         },
       },
-      courier: { select: { id: true, name: true, phone: true, email: true, isApproved: true, createdAt: true, rating: true } },
+      courier: {
+        select: {
+          id: true, name: true, phone: true, email: true, isApproved: true, createdAt: true, rating: true, totalRatings: true,
+          // Onboarding, payout account and the stored position (2.16.1)
+          vehicleType: true, locationDisclosureAt: true, readyForApprovalAt: true, stripeAccountId: true, payoutsEnabled: true,
+          isActive: true, latitude: true, longitude: true, locationAt: true, locationExpiredAt: true,
+        },
+      },
       favorites: { select: { productId: true, createdAt: true } },
       dropLikes: { select: { dropId: true, createdAt: true } },
       // Saved drops and "Not interested" marks (2.14)
@@ -291,11 +340,16 @@ export async function deleteUserAccount(userId: number) {
   const before = await prisma.user.findUnique({ where: { id: userId }, select: { email: true, phone: true, store: { select: { id: true } } } });
 
   await prisma.$transaction(async (tx) => {
-    // Delivery addresses and notes are not needed for bookkeeping once an order is closed
+    // Delivery addresses and notes are not needed for bookkeeping once an order is closed. The courier's note about
+    // a failed handover ("customer not available …") and the handover position are about this customer too (2.16.1)
     await tx.order.updateMany({
       where: { userId },
-      data: { deliveryAddress: null, deliveryLat: null, deliveryLng: null, notes: null },
+      data: { deliveryAddress: null, deliveryLat: null, deliveryLng: null, notes: null, deliveryProblemNote: null, deliveredLat: null, deliveredLng: null },
     });
+    // The customer's free-text note on their returns (2.16.1, audit C8); amounts, reasons and the store's own note stay
+    await tx.return.updateMany({ where: { userId }, data: { conditionNote: null } });
+    // Signed-in drop views (2.16.1, audit C4); the drops' totals are plain numbers and stay as they are
+    await tx.dropView.deleteMany({ where: { viewerKey: `u:${userId}` } });
 
     const store = await tx.store.findUnique({ where: { ownerId: userId } });
     if (store) {
@@ -334,6 +388,10 @@ export async function deleteUserAccount(userId: number) {
     await tx.liveBan.deleteMany({ where: { userId } });
     await tx.userBlock.deleteMany({ where: { OR: [{ blockerId: userId }, { blockedId: userId }] } });
     await tx.reviewReport.deleteMany({ where: { reporterId: userId } });
+    // Copyright / trademark notices (2.16) keep the claim (work, location, statement) but drop the person's name and email
+    await tx.$executeRaw`UPDATE "ProductReport" SET "ipNotice" = "ipNotice" - 'name' - 'email' - 'onBehalfOf' WHERE "reporterId" = ${userId} AND "ipNotice" IS NOT NULL`;
+    await tx.$executeRaw`UPDATE "DropReport" SET "ipNotice" = "ipNotice" - 'name' - 'email' - 'onBehalfOf' WHERE "reporterId" = ${userId} AND "ipNotice" IS NOT NULL`;
+    await tx.$executeRaw`UPDATE "DropCommentReport" SET "ipNotice" = "ipNotice" - 'name' - 'email' - 'onBehalfOf' WHERE "reporterId" = ${userId} AND "ipNotice" IS NOT NULL`;
     // Product reports stay (product-safety notices must be processed) but no longer point at the person
     await tx.productReport.updateMany({ where: { reporterId: userId }, data: { reporterId: null, reporterEmail: null } });
     await tx.review.updateMany({ where: { userId }, data: { comment: null } });
@@ -343,7 +401,7 @@ export async function deleteUserAccount(userId: number) {
 
     await tx.courier.updateMany({
       where: { userId },
-      data: { name: "Deleted courier", phone: null, email: null, passwordHash: null, isActive: false, isApproved: false, latitude: null, longitude: null },
+      data: { name: "Deleted courier", phone: null, email: null, passwordHash: null, isActive: false, isApproved: false, latitude: null, longitude: null, locationAt: null, locationExpiredAt: null },
     });
 
     await tx.user.update({

@@ -3,7 +3,7 @@ import pino from "pino";
 import { prisma } from "../../lib/prisma";
 import { sendVerificationCode } from "../../services/notificationDeliveryService";
 import { issueSession } from "./session";
-import { AuthError, assertAgeConfirmed, assertSignupsOpen, assertVerifiedSignInAllowed, phoneToSyntheticEmail } from "./auth.service";
+import { AuthError, assertSignupsOpen, assertVerifiedSignInAllowed, phoneToSyntheticEmail } from "./auth.service";
 import { bump, clear, hashKey, helsinkiDay } from "../../lib/counters";
 import { Locale } from "../../lib/i18n";
 import { RESET_TARGET_PREFIX } from "./passwordReset";
@@ -96,16 +96,12 @@ export async function verifyOtp(rawTarget: string, code: string, opts: { ageConf
   const isEmailTarget = target.includes("@");
   const accountEmail = isEmailTarget ? target : phoneToSyntheticEmail(target);
   const accountPhone = isEmailTarget ? undefined : target;
-  // A code that would create a new account needs "I am 18 or older" first; checked before the code is touched, so the
-  // app can ask and send the same code again (2.16)
+  // A code that would create a new account is refused while sign-ups are paused; checked before the code is touched
   const existingAccount = await prisma.user.findFirst({
     where: { OR: [{ email: { equals: accountEmail, mode: "insensitive" } }, ...(accountPhone ? [{ phone: accountPhone }] : [])] },
     select: { id: true },
   });
-  if (!existingAccount) {
-    assertAgeConfirmed(opts.ageConfirmed);
-    await assertSignupsOpen();
-  }
+  if (!existingAccount) await assertSignupsOpen();
   const stored = await prisma.otpCode.findUnique({ where: { target } });
   if (!stored || Date.now() > stored.expiresAt.getTime()) {
     await prisma.otpCode.deleteMany({ where: { target } });
@@ -155,7 +151,7 @@ export async function verifyOtp(rawTarget: string, code: string, opts: { ageConf
         phone,
         passwordHash: `OTP:${crypto.randomBytes(24).toString("hex")}`,
         role: "CUSTOMER",
-        ageConfirmedAt: new Date(),
+        ageConfirmedAt: opts.ageConfirmed ? new Date() : null,
       },
     });
   }

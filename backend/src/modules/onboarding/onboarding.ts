@@ -27,7 +27,10 @@ function summary(steps: Step[], approved: boolean, approvalKey?: string) {
   };
 }
 
+/** The agreement step: the version in force accepted and (since 2.16.0) the "18 or older" confirmation given. */
 async function acceptedCurrent(userId: number, doc: "seller-terms" | "courier-agreement") {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { ageConfirmedAt: true } });
+  if (!user?.ageConfirmedAt) return false;
   const { current } = await legalState(doc);
   if (!current) return true; // no text on the server: nothing to accept
   return !!(await prisma.agreementAcceptance.findUnique({ where: { userId_doc_version: { userId, doc, version: current.version } }, select: { id: true } }));
@@ -97,7 +100,7 @@ async function tellAdmins(what: string, path: string) {
   if (!admins.length) return;
   await pushToUsers(admins.map((a) => a.id), { title: "Ready for approval", body: what, data: { type: "ready_for_approval" } }).catch(() => {});
   for (const a of admins) {
-    await sendEmail(a.email, `Malvoya – ${what}`, `<p>${escapeHtml(what)}</p><p>Admin panel → ${escapeHtml(path)}</p>`, `${what}\nAdmin panel → ${path}`).catch(() => {});
+    await sendEmail(a.email, `Malvoya – ${what}`, `<p>${escapeHtml(what)}</p><p>Admin panel → ${escapeHtml(path)}</p>`, `${what}\nAdmin panel → ${path}`, { kind: "internal" }).catch(() => {});
   }
 }
 

@@ -4,6 +4,7 @@ import Layout from '../components/Layout';
 import OrderDrawer from '../components/OrderDrawer';
 import { ErrorBox } from '../components/Dialog';
 import api from '../utils/api';
+import { CourierPositionBadge, type CourierPosition } from '../components/CourierPositionBadge';
 import { type Raw, num, str, obj, arr, firstList, euro, errorText, ShapeError } from '../utils/parse';
 
 // GET /admin/orders?q=&status=&before= (2.16, contract C13): newest first, paged with `nextBefore`.
@@ -21,6 +22,8 @@ interface Order {
   customer: { name: string; email: string };
   storeName: string;
   courierName: string | null;
+  /** Position status of the assigned courier (API 2.16.1); never coordinates */
+  courierPosition: CourierPosition | null;
   itemCount: number | null;
 }
 
@@ -44,6 +47,7 @@ function toOrder(r: Raw): Order {
     customer: { name: str(user.name) ?? str(r.customerName) ?? '—', email: str(user.email) ?? str(r.customerEmail) ?? '' },
     storeName: str(store.name) ?? str(r.storeName) ?? '—',
     courierName: courier ? str(courier.name) ?? str(obj(courier.user).name) ?? `#${num(courier.id) ?? '?'}` : null,
+    courierPosition: courier && courier.position ? (courier.position as unknown as CourierPosition) : null,
     itemCount: items ? items.reduce((s, i) => s + (num(i.quantity) ?? 1), 0) : num(r.itemCount),
   };
 }
@@ -79,6 +83,21 @@ function DeliveryCell({ o }: { o: Order }) {
         <p style={{ color:'#8E8E93',fontSize:'0.75rem',marginTop:'0.25rem' }}>
           Taken back to the shop {hel(o.returnedToStoreAt)} · {o.returnReceivedAt ? `store got it ${hel(o.returnReceivedAt)}` : 'store has not confirmed yet'}
         </p>
+      )}
+    </div>
+  );
+}
+
+const ACTIVE = ['CONFIRMED', 'PROCESSING', 'SHIPPED'];
+
+/** The assigned courier, and while the order is under way, whether their position is live, stale or gone. */
+function CourierCell({ o }: { o: Order }) {
+  if (!o.courierName) return <span style={{ color:'#C7C7CC' }}>{o.fulfilment === 'PICKUP' ? 'No courier' : '—'}</span>;
+  return (
+    <div>
+      <p style={{ color:'#3C3C43' }}>{o.courierName}</p>
+      {ACTIVE.includes(o.status) && o.courierPosition && (
+        <div style={{ marginTop:'0.25rem' }}><CourierPositionBadge position={o.courierPosition} /></div>
       )}
     </div>
   );
@@ -216,7 +235,7 @@ export default function Orders() {
           <table style={{ width:'100%',fontSize:'0.875rem',borderCollapse:'collapse' }}>
             <thead>
               <tr style={{ borderBottom:'1px solid #F5F5F7' }}>
-                {['Order #','Customer','Vendor','Items','Delivery','Total','Payment','Status','Date'].map(h => (
+                {['Order #','Customer','Vendor','Items','Delivery','Courier','Total','Payment','Status','Date'].map(h => (
                   <th key={h} style={{ textAlign:'left',padding:'1rem 1.5rem',fontSize:'0.6875rem',fontWeight:500,color:'#8E8E93',textTransform:'uppercase',letterSpacing:'0.05em' }}>{h}</th>
                 ))}
               </tr>
@@ -233,6 +252,7 @@ export default function Orders() {
                   <td style={{ padding:'1rem 1.5rem',color:'#3C3C43' }}>{o.storeName}</td>
                   <td style={{ padding:'1rem 1.5rem',color:'#3C3C43' }}>{o.itemCount ?? '—'}</td>
                   <td style={{ padding:'1rem 1.5rem' }}><DeliveryCell o={o} /></td>
+                  <td style={{ padding:'1rem 1.5rem' }}><CourierCell o={o} /></td>
                   <td style={{ padding:'1rem 1.5rem',fontWeight:600,whiteSpace:'nowrap' }}>{euro(o.totalCents)}</td>
                   <td style={{ padding:'1rem 1.5rem' }}>
                     <span className={o.paymentStatus === 'SUCCEEDED' ? 'badge-green' : o.paymentStatus === 'FAILED' ? 'badge-red' : 'badge-yellow'}>

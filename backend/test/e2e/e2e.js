@@ -1,4 +1,4 @@
-// End-to-end test for API v2.15 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
+// End-to-end test for API v2.16.1 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
 const { execSync, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -146,7 +146,8 @@ async function register(name, role, extra = {}) {
   // Everyone accepts their agreement at sign-up (stores and couriers must, 2.10; customers too, since 2.11 orders need it)
   const terms = extra.acceptTerms === false ? {} : { acceptTerms: true };
   if (extra.acceptTerms === false) { extra = { ...extra }; delete extra.acceptTerms; }
-  const r = await call("POST", "/auth/register", { ageConfirmed: true, name, email: `${name.toLowerCase().replace(/\W/g, "")}${uniq}@example.fi`, password: "strong-pass-123", ...(role ? { role } : {}), ...terms, ...extra });
+  // Everyone confirms being 18 or older at sign-up (2.16)
+  const r = await call("POST", "/auth/register", { name, email: `${name.toLowerCase().replace(/\W/g, "")}${uniq}@example.fi`, password: "strong-pass-123", ...(role ? { role } : {}), ...terms, ageConfirmed: true, ...extra });
   return r.body;
 }
 
@@ -556,10 +557,13 @@ function ean13(d12) {
   check("drop shows it is liked by the viewer", (await call("GET", `/drops/${d1}`, null, otherCust.accessToken)).body.drop.likedByMe === true);
   check("unlike", (await call("DELETE", `/drops/${d1}/like`, null, otherCust.accessToken)).body.likeCount === 0);
   check("anonymous users cannot like", (await call("POST", `/drops/${d1}/like`)).status === 401);
-  await call("POST", `/drops/${d1}/view`, { installId: "install-abc-123", watchedSec: 5, completed: false });
-  await call("POST", `/drops/${d1}/view`, { installId: "install-abc-123", watchedSec: 21, completed: true });
-  await call("POST", `/drops/${d1}/view`, { installId: "install-abc-123", watchedSec: 21, completed: true });
-  check("repeat views from one device count once; completion counted once", sql(`select "viewCount" || '|' || "completeCount" from "Drop" where id=${d1}`) === "1|1");
+  // Signed-out views are keyed by a daily hash of the address only (2.16.1): an old build's install id is ignored
+  const sameViewer = { headers: { "X-Forwarded-For": "10.77.0.1" } };
+  await call("POST", `/drops/${d1}/view`, { installId: "install-abc-123", watchedSec: 5, completed: false }, null, sameViewer);
+  await call("POST", `/drops/${d1}/view`, { installId: "install-abc-123", watchedSec: 21, completed: true }, null, sameViewer);
+  await call("POST", `/drops/${d1}/view`, { watchedSec: 21, completed: true }, null, sameViewer);
+  check("repeat views from one signed-out viewer count once a day; completion counted once", sql(`select "viewCount" || '|' || "completeCount" from "Drop" where id=${d1}`) === "1|1");
+  check("an old app's install id is accepted but never stored: only the daily address hash is kept", sql(`select count(*) filter (where "viewerKey" like 'd:%') || '|' || count(*) filter (where "viewerKey" like 'i:%') from "DropView" where "dropId"=${d1}`) === "0|1");
   check("watch time is capped at the video length", Number(sql(`select "watchSeconds" from "Drop" where id=${d1}`)) <= 21.5);
   const sh = await call("POST", `/drops/${d1}/share`);
   check("share returns a public link", (sh.body.shareUrl || "").endsWith(`/d/${d1}`) && sh.body.shareCount === 1, sh.body);
@@ -993,7 +997,7 @@ function ean13(d12) {
   }));
 
   const sysDefault = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.15.0", sysDefault.pricing);
+  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.16.1", sysDefault.pricing);
   const stockBeforeQuote = stockOf(productId);
   const ordersBeforeQuote = sql(`select count(*) from "Order" where "userId"=${otherCust.user.id}`);
   const q0 = await quote(quoteBody, otherCust.accessToken);
@@ -2069,7 +2073,7 @@ function ean13(d12) {
   cob = (await call("GET", "/courier/me/onboarding", null, onni.accessToken)).body;
   check("courier ready for approval when everything but approval is done", cob.readyForApproval === true && cob.approved === false && cob.percent === 83 && sql(`select "readyForApprovalAt" is not null from "Courier" where "userId"=${onni.user.id}`) === "t", cob);
   const sys211 = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("System lists them as ready for approval", sys211.version === "2.15.0" && sys211.attention.some((a) => a.includes(`(#${pekkaStore.id}) is ready for approval`)) && sys211.attention.some((a) => a.includes("Courier \"Onni\"") && a.includes("ready for approval")) && sys211.readyForApproval?.stores?.some((s) => s.id === pekkaStore.id), sys211.attention);
+  check("System lists them as ready for approval", sys211.version === "2.16.1" && sys211.attention.some((a) => a.includes(`(#${pekkaStore.id}) is ready for approval`)) && sys211.attention.some((a) => a.includes("Courier \"Onni\"") && a.includes("ready for approval")) && sys211.readyForApproval?.stores?.some((s) => s.id === pekkaStore.id), sys211.attention);
   check("admin courier list shows vehicle, disclosure and readiness", (await call("GET", "/admin/couriers", null, adminToken)).body.couriers?.find((c) => c.user?.id === onni.user.id)?.vehicleType === "ebike");
 
   // Publishing changes (second instance reading a copy of the legal texts, same database)
@@ -2533,7 +2537,7 @@ function ean13(d12) {
     const stepNow = () => Math.floor(Date.now() / 30000);
     const jwtBody = (tok) => JSON.parse(Buffer.from(tok.split(".")[1], "base64url").toString());
     const a2Email = `admin2fa${uniq}@example.fi`;
-    const a2 = (await call("POST", "/auth/register", { ageConfirmed: true, name: "Admin Kaksi", email: a2Email, password: "strong-pass-123" })).body;
+    const a2 = (await call("POST", "/auth/register", { name: "Admin Kaksi", email: a2Email, password: "strong-pass-123", ageConfirmed: true })).body;
     sql(`update "User" set role='ADMIN' where id=${a2.user.id}`);
     const login = () => call("POST", "/auth/login", { email: a2Email, password: "strong-pass-123" });
     let a2Token = (await login()).body.accessToken;
@@ -2823,6 +2827,314 @@ function ean13(d12) {
   check("…and System says LiveKit is not set up", (await callAt(FEE_API, "GET", "/admin/system", null, adminToken)).body.integrations?.live?.configured === false);
   feeApi.kill(); feeApi = null;
 
+  console.log("\n— Age confirmation (2.16)");
+  // Fresh sessions (access tokens live 15 minutes); the admin token from the start is the fallback if sign-in needs a second step
+  const n_admin = (await call("POST", "/auth/login", { email: `admin${uniq}@example.fi`, password: "strong-pass-123" })).body.accessToken || adminToken;
+  const n_vendor = (await call("POST", "/auth/login", { email: `vera${uniq}@example.fi`, password: "strong-pass-123" })).body.accessToken || vendor.accessToken;
+  const ag_noAge = await call("POST", "/auth/register", { name: "Under Age", email: `noage${uniq}@example.fi`, password: "strong-pass-123", acceptTerms: true });
+  const ag_falseAge = await call("POST", "/auth/register", { name: "No Age", email: `falseage${uniq}@example.fi`, password: "strong-pass-123", acceptTerms: true, ageConfirmed: false });
+  const ag_vendorNoAge = await call("POST", "/auth/register", { name: "Store No Age", email: `vnoage${uniq}@example.fi`, password: "strong-pass-123", role: "VENDOR", acceptTerms: true });
+  const ag_courierNoAge = await call("POST", "/auth/register", { name: "Courier No Age", email: `cnoage${uniq}@example.fi`, password: "strong-pass-123", role: "COURIER", acceptTerms: true });
+  check("registration without ageConfirmed: true is 400 for every role, with a message in both languages", [ag_noAge, ag_falseAge, ag_vendorNoAge, ag_courierNoAge].every((r) => r.status === 400 && /18 or older/.test(r.body.error || "") && /vähintään 18-vuotias/.test(r.body.error || "") && !r.body.accessToken), [ag_noAge.body, ag_vendorNoAge.body]);
+  check("…and no account was made", sql(`select count(*) from "User" where email in ('noage${uniq}@example.fi','falseage${uniq}@example.fi','vnoage${uniq}@example.fi','cnoage${uniq}@example.fi')`) === "0");
+  const ag_reg = await register("Aada Adult");
+  const ag_regMe = (await call("GET", "/me", null, ag_reg.accessToken)).body.user;
+  check("registering with ageConfirmed stores the time; GET /me says ageConfirmed", sql(`select "ageConfirmedAt" is not null from "User" where id=${ag_reg.user.id}`) === "t" && ag_regMe?.ageConfirmed === true && !!ag_regMe.ageConfirmedAt, ag_regMe);
+  check("guests can still browse without an account", (await call("GET", "/products/search?q=coat")).status === 200 && (await call("GET", "/stores")).status === 200);
+  const ag_social = require(path.join(__dirname, "..", "..", "dist", "modules", "auth", "social.service.js"));
+  const ag_apple = await ag_social.signInWithAppleClaims({ email: `apple-age${uniq}@example.fi`, email_verified: true, firebase: { identities: { "apple.com": [`age.${uniq}`] } } }, "CUSTOMER", "Alva Apple");
+  const ag_tok = ag_apple.accessToken;
+  const ag_agr = (await call("GET", "/me/agreements", null, ag_tok)).body;
+  check("a social sign-up has not confirmed its age: GET /me/agreements says ageConfirmationRequired", ag_agr.ageConfirmationRequired === true && ag_agr.ageConfirmedAt === null && sql(`select "ageConfirmedAt" is null from "User" where id=${ag_apple.user.id}`) === "t", ag_agr);
+  const ag_o1 = await call("POST", "/orders", {}, ag_tok);
+  check("ordering is 428 AGREEMENT_REQUIRED with ageConfirmationRequired (terms not accepted either)", ag_o1.status === 428 && ag_o1.body.code === "AGREEMENT_REQUIRED" && ag_o1.body.ageConfirmationRequired === true && ag_o1.body.doc === "terms", ag_o1.body);
+  const ag_termsV = ag_agr.required.find((d) => d.doc === "terms")?.currentVersion;
+  const ag_acc1 = await call("POST", "/me/agreements/accept", { doc: "terms", version: ag_termsV }, ag_tok);
+  check("accepting the terms without the age box records the terms only (ageConfirmed: false)", ag_acc1.status === 201 && ag_acc1.body.ageConfirmed === false, ag_acc1.body);
+  const ag_o2 = await call("POST", "/orders", {}, ag_tok, { headers: { "Accept-Language": "fi" } });
+  check("…ordering is still 428 until the age is confirmed (role's own doc and version, Finnish message)", ag_o2.status === 428 && ag_o2.body.code === "AGREEMENT_REQUIRED" && ag_o2.body.ageConfirmationRequired === true && ag_o2.body.doc === "terms" && ag_o2.body.version === ag_termsV && /18-vuotias/.test(ag_o2.body.error || ""), ag_o2.body);
+  check("an accept with neither a document nor the age box is 400", (await call("POST", "/me/agreements/accept", {}, ag_tok)).status === 400 && (await call("POST", "/me/agreements/accept", { ageConfirmed: false }, ag_tok)).status === 400);
+  const ag_acc2 = await call("POST", "/me/agreements/accept", { doc: "terms", version: ag_termsV, ageConfirmed: true }, ag_tok);
+  check("accepting again with ageConfirmed: true stores the confirmation (idempotent for the terms)", ag_acc2.status === 200 && ag_acc2.body.alreadyAccepted === true && ag_acc2.body.ageConfirmed === true && sql(`select "ageConfirmedAt" is not null from "User" where id=${ag_apple.user.id}`) === "t", ag_acc2.body);
+  const ag_o3 = await call("POST", "/orders", {}, ag_tok);
+  check("…after which ordering passes the agreement gate (400 for the empty basket, not 428)", ag_o3.status === 400, ag_o3);
+  check("GET /me/agreements and GET /me show it confirmed", (await call("GET", "/me/agreements", null, ag_tok)).body.ageConfirmationRequired === false && (await call("GET", "/me", null, ag_tok)).body.user?.ageConfirmed === true);
+  const ag_courier = await ag_social.signInWithAppleClaims({ email: `apple-courier${uniq}@example.fi`, email_verified: true, firebase: { identities: { "apple.com": [`agec.${uniq}`] } } }, "COURIER", "Kalle Courier");
+  const ag_online = await call("POST", "/courier/status", { isOnline: true }, ag_courier.accessToken);
+  check("a social courier going online gets 428 with ageConfirmationRequired", ag_online.status === 428 && ag_online.body.ageConfirmationRequired === true && ag_online.body.doc === "courier-agreement", ag_online.body);
+  const ag_ageOnly = await call("POST", "/me/agreements/accept", { ageConfirmed: true }, ag_courier.accessToken);
+  check("the age can also be confirmed on its own; the courier agreement is still required (428 without the age flag)", ag_ageOnly.status === 200 && ag_ageOnly.body.ageConfirmed === true && (await call("POST", "/courier/status", { isOnline: true }, ag_courier.accessToken)).body.ageConfirmationRequired === false);
+  check("courier onboarding counts the agreement step done only with the age confirmed", (await call("GET", "/courier/me/onboarding", null, ag_courier.accessToken)).body.steps?.find((s) => s.key === "agreement")?.done === false);
+  check("the minor flag (DSA Art. 28) is still separate from the age confirmation", sql(`select "isMinor" from "User" where id=${ag_apple.user.id}`) === "f");
+  check("data export includes the age confirmation", !!(await call("GET", "/auth/me/data", null, ag_tok)).body.data?.ageConfirmedAt);
+
+  console.log("\n— Unsubscribe from optional emails (2.16)");
+  const un_mod = require(path.join(__dirname, "..", "..", "dist", "lib", "unsubscribe.js"));
+  const un_mail = require(path.join(__dirname, "..", "..", "dist", "services", "notificationDeliveryService.js"));
+  const un_user = await register("Ulla Unsub");
+  const un_tok = un_mod.unsubscribeToken(un_user.user.id);
+  const un_hdr = un_mod.unsubscribeHeaders(un_user.user.id);
+  check("optional emails carry List-Unsubscribe (https link with the signed token) and List-Unsubscribe-Post: List-Unsubscribe=One-Click (RFC 8058)", un_hdr["List-Unsubscribe"] === `<${BASE}/email/unsubscribe?t=${encodeURIComponent(un_tok)}>` && un_hdr["List-Unsubscribe-Post"] === "List-Unsubscribe=One-Click", un_hdr);
+  check("the token is an HMAC of the user id: another id with the same signature is not valid", un_mod.verifyUnsubscribeToken(un_tok) === un_user.user.id && un_mod.verifyUnsubscribeToken(`${un_user.user.id + 1}.${un_tok.split(".")[1]}`) === null && un_mod.verifyUnsubscribeToken("1.abc") === null);
+  check("GET /me says optional emails are on by default", (await call("GET", "/me", null, un_user.accessToken)).body.user?.emailMarketing === true);
+  const un_send1 = await un_mail.sendOptionalEmail(un_user.user.id, "test", "Test", ["Optional"]);
+  check("an optional email is sent while the account has not opted out", un_send1.delivered === true && !un_send1.skipped, un_send1);
+  const un_bad = await fetch(`${BASE}/email/unsubscribe?t=${encodeURIComponent(`${un_user.user.id}.${"A".repeat(43)}`)}`);
+  check("a wrong token shows the bilingual 'link is not valid' page (400)", un_bad.status === 400 && /This link is not valid/.test(await un_bad.text()));
+  const un_page = await fetch(`${BASE}/email/unsubscribe?t=${encodeURIComponent(un_tok)}`);
+  const un_html = await un_page.text();
+  check("GET shows a bilingual confirmation page with one button and changes nothing", un_page.status === 200 && /<form method="post"/.test(un_html) && /Peru tilaus \/ Unsubscribe/.test(un_html) && /form-action 'self'/.test(un_page.headers.get("content-security-policy") || "") && sql(`select "emailMarketingOptOutAt" is null from "User" where id=${un_user.user.id}`) === "t");
+  const un_post = await fetch(`${BASE}/email/unsubscribe?t=${encodeURIComponent(un_tok)}`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "List-Unsubscribe=One-Click" });
+  check("one-click POST unsubscribes (200) and stores the time", un_post.status === 200 && /You are unsubscribed/.test(await un_post.text()) && sql(`select "emailMarketingOptOutAt" is not null from "User" where id=${un_user.user.id}`) === "t");
+  const un_send2 = await un_mail.sendOptionalEmail(un_user.user.id, "test", "Test", ["Optional"]);
+  check("optional emails are no longer sent to the account (opted_out)", un_send2.delivered === false && un_send2.skipped === "opted_out", un_send2);
+  check("GET /me shows emailMarketing: false; a second POST is harmless", (await call("GET", "/me", null, un_user.accessToken)).body.user?.emailMarketing === false && (await fetch(`${API}/email/unsubscribe?t=${encodeURIComponent(un_tok)}`, { method: "POST" })).status === 200);
+  check("a POST with a wrong token is 400 and changes nothing for others", (await fetch(`${BASE}/email/unsubscribe?t=nope`, { method: "POST" })).status === 400);
+  const un_on = await call("PATCH", "/me", { emailMarketing: true }, un_user.accessToken);
+  check("PATCH /me {emailMarketing: true} switches optional emails back on; false switches them off", un_on.status === 200 && un_on.body.user?.emailMarketing === true && sql(`select "emailMarketingOptOutAt" is null from "User" where id=${un_user.user.id}`) === "t" && (await call("PATCH", "/me", { emailMarketing: false }, un_user.accessToken)).body.user?.emailMarketing === false && (await call("PATCH", "/me", { emailMarketing: "no" }, un_user.accessToken)).status === 400);
+  const un_send3 = await un_mail.sendOptionalEmail(un_user.user.id, "test", "Test", ["Optional"]);
+  const un_tx = await un_mail.sendApprovalEmail(un_user.user.email, "store", "en");
+  check("opting out stops optional emails only; transactional emails are still sent", un_send3.skipped === "opted_out" && un_tx.delivered === true);
+  check("transactional emails say why they were sent (footer line, both languages when unknown)", /concerns an order you placed/.test(un_mail.whyText("order", "en")) && /tilausta/.test(un_mail.whyText("order", "fi")) && / \/ /.test(un_mail.whyText("report")) && un_mail.whyText("internal") === null);
+
+  console.log("\n— Withdrawal function (2.16)");
+  const wd_cust = await register("Wilma Withdraw");
+  const wd_mkOrder = (store, daysAgo) => Number(sql(`insert into "Order" ("userId","storeId","status","subtotalCents","deliveryFeeCents","courierFeeCents","commissionCents","sellerPayoutCents","totalCents","stripePaymentIntentId","paymentStatus","paidAt","deliveredAt","deliveryAddress","updatedAt") values (${wd_cust.user.id},${store},'DELIVERED',8000,300,300,0,8000,8300,'pi_wd_${uniq}_${store}_${daysAgo}','SUCCEEDED',now(),now() - interval '${daysAgo} days','Aleksanterinkatu 5, Helsinki',now()) returning id`).split("\n")[0]);
+  const wd_line = (orderId, qty) => Number(sql(`insert into "OrderItem" ("orderId","productId","quantity","unitCents") values (${orderId},${productId},${qty},4000) returning id`).split("\n")[0]);
+  const wd_biz = wd_mkOrder(storeId, 1);
+  const wd_l1 = wd_line(wd_biz, 2);
+  const wd_priv = wd_mkOrder(privSeller.body.store.id, 1);
+  wd_line(wd_priv, 1);
+  const wd_old = wd_mkOrder(storeId, 20);
+  wd_line(wd_old, 1);
+  const wd_bizView = (await call("GET", `/orders/${wd_biz}`, null, wd_cust.accessToken)).body.order;
+  check("a delivered order from a business seller offers the withdrawal function until the period ends", wd_bizView?.withdrawal?.available === true && wd_bizView.withdrawal.sellerType === "BUSINESS" && wd_bizView.store?.sellerType === "BUSINESS" && Math.abs(new Date(wd_bizView.withdrawal.until) - (new Date(wd_bizView.deliveredAt).getTime() + 14 * 86400000)) < 1000, wd_bizView?.withdrawal);
+  const wd_privView = (await call("GET", `/orders/${wd_priv}`, null, wd_cust.accessToken)).body.order;
+  const wd_oldView = (await call("GET", `/orders/${wd_old}`, null, wd_cust.accessToken)).body.order;
+  check("…not for a private seller (reason private_seller) or after the period (period_ended); the order list says the same", wd_privView?.withdrawal?.available === false && wd_privView.withdrawal.reason === "private_seller" && wd_oldView?.withdrawal?.reason === "period_ended" && (await call("GET", "/orders", null, wd_cust.accessToken)).body.orders?.find((o) => o.id === wd_biz)?.withdrawal?.available === true, [wd_privView?.withdrawal, wd_oldView?.withdrawal]);
+  const wd_privTry = await call("POST", "/returns", { orderId: wd_priv, withdrawal: true }, wd_cust.accessToken);
+  check("withdrawing from a private seller's order is refused (422 WITHDRAWAL_NOT_APPLICABLE, plain words in both languages)", wd_privTry.status === 422 && wd_privTry.body.code === "WITHDRAWAL_NOT_APPLICABLE" && /private person/.test(wd_privTry.body.reason?.en || "") && /yksityishenkilö/.test(wd_privTry.body.reason?.fi || "") && sql(`select count(*) from "Return" where "orderId"=${wd_priv}`) === "0", wd_privTry.body);
+  check("a withdrawal is not a fault return: WRONG_ITEM with withdrawal is 400; after the period it is refused", (await call("POST", "/returns", { orderId: wd_biz, withdrawal: true, reason: "WRONG_ITEM" }, wd_cust.accessToken)).status === 400 && (await call("POST", "/returns", { orderId: wd_old, withdrawal: true }, wd_cust.accessToken)).status === 400);
+  const wd_ret = await call("POST", "/returns", { orderId: wd_biz, withdrawal: true, items: [{ orderItemId: wd_l1, quantity: 1 }], conditionNote: "Too small" }, wd_cust.accessToken);
+  check("Confirm withdrawal: the return is created (no reason needed → CHANGED_MIND) and marked withdrawal: true", wd_ret.status === 201 && wd_ret.body.return?.withdrawal === true && wd_ret.body.return.reason === "CHANGED_MIND" && wd_ret.body.return.status === "REQUESTED" && wd_ret.body.return.items?.[0]?.quantity === 1, wd_ret.body);
+  check("the acknowledgement email is sent at once and recorded (time and channel) before the shop has done anything", wd_ret.body.return?.withdrawalAckChannel === "email" && !!wd_ret.body.return.withdrawalAckSentAt && sql(`select withdrawal || '|' || ("withdrawalAckSentAt" is not null) || '|' || "withdrawalAckChannel" || '|' || status from "Return" where id=${wd_ret.body.return?.id}`) === "true|true|email|REQUESTED", wd_ret.body.return);
+  check("the store sees the return marked as a withdrawal", (await call("GET", "/returns", null, n_vendor)).body.returns?.find((r) => r.id === wd_ret.body.return?.id)?.withdrawal === true);
+  const wd_plain = await call("POST", "/returns", { orderId: wd_biz, reason: "CHANGED_MIND" }, wd_cust.accessToken);
+  check("an ordinary return still works as before (withdrawal: false, no acknowledgement row)", wd_plain.status === 201 && wd_plain.body.return?.withdrawal === false && wd_plain.body.return.withdrawalAckSentAt === null, wd_plain.body);
+
+  console.log("\n— Copyright and trademark notices (2.16)");
+  const ip_rep = await register("Iida Rights");
+  const ip_notice = { name: "Iida Oikeus", email: `rights${uniq}@example.fi`, work: "My photograph 'Kallio at dusk' (2025)", location: "The first product photo", goodFaith: true };
+  const ip_p0 = await call("POST", `/products/${productId}/report`, { reason: "copyright" }, ip_rep.accessToken);
+  const ip_p1 = await call("POST", `/products/${productId}/report`, { reason: "copyright", ipNotice: { ...ip_notice, goodFaith: false } }, ip_rep.accessToken);
+  const ip_p2 = await call("POST", `/products/${productId}/report`, { reason: "trademark", ipNotice: { ...ip_notice, work: "" } }, ip_rep.accessToken);
+  check("a copyright or trademark product report needs the notice fields and the good-faith statement (400 IP_NOTICE_REQUIRED, both languages)", [ip_p0, ip_p1, ip_p2].every((r) => r.status === 400 && r.body.code === "IP_NOTICE_REQUIRED" && /good-faith/.test(r.body.error) && /vilpittömän/.test(r.body.error)), [ip_p0.body, ip_p1.body]);
+  const ip_p3 = await call("POST", `/products/${productId}/report`, { reason: "copyright", details: "Used without permission", ipNotice: ip_notice });
+  check("with the fields it is accepted (also signed out) and stored with the time of the statement", ip_p3.status === 201 && sql(`select "ipNotice"->>'name' || '|' || ("ipNotice"->>'goodFaith') || '|' || ("ipNotice"->>'at' is not null) || '|' || "reporterEmail" from "ProductReport" where id=${ip_p3.body.report?.id}`) === `Iida Oikeus|true|true|rights${uniq}@example.fi`, ip_p3.body);
+  const ip_q = (await call("GET", "/admin/product-reports", null, n_admin)).body.reports?.find((r) => r.id === ip_p3.body.report?.id);
+  check("admins see the notice in the product report queue", ip_q?.reason === "copyright" && ip_q.ipNotice?.work === ip_notice.work && ip_q.ipNotice.location === ip_notice.location, ip_q);
+  const ip_drop = (await call("GET", `/stores/${storeId}/drops`)).body.drops?.[0]?.id;
+  const ip_d0 = await call("POST", `/drops/${ip_drop}/report`, { reason: "COPYRIGHT" }, ip_rep.accessToken);
+  const ip_d1 = await call("POST", `/drops/${ip_drop}/report`, { reason: "TRADEMARK", details: "Our logo", ipNotice: { ...ip_notice, work: "EU trade mark 018000000 TESTI" } }, ip_rep.accessToken);
+  check("drops: COPYRIGHT/TRADEMARK need the notice (400), and are accepted with it", ip_d0.status === 400 && ip_d0.body.code === "IP_NOTICE_REQUIRED" && ip_d1.status === 200 && ip_d1.body.received === true, [ip_d0.body, ip_d1.body]);
+  check("admins see it in the drop report queue", (await call("GET", "/admin/reports", null, n_admin)).body.reports?.some((r) => r.reason === "TRADEMARK" && r.ipNotice?.work === "EU trade mark 018000000 TESTI"));
+  const ip_author = await register("Cora Comment");
+  const ip_cm = await call("POST", `/drops/${ip_drop}/comments`, { body: "My own photo of this" }, ip_author.accessToken);
+  const ip_c0 = await call("POST", `/drops/${ip_drop}/comments/${ip_cm.body.comment?.id}/report`, { reason: "COPYRIGHT" }, ip_rep.accessToken);
+  const ip_c1 = await call("POST", `/drops/${ip_drop}/comments/${ip_cm.body.comment?.id}/report`, { reason: "COPYRIGHT", ipNotice: { ...ip_notice, location: "The comment text" } }, ip_rep.accessToken);
+  check("comments: a COPYRIGHT report needs the notice (400) and is accepted with it", ip_cm.status === 201 && ip_c0.status === 400 && ip_c0.body.code === "IP_NOTICE_REQUIRED" && ip_c1.status === 200, [ip_c0.body, ip_c1.body]);
+  check("admins see it in the reported comments queue", (await call("GET", "/admin/comments/reported", null, n_admin)).body.comments?.find((c) => c.id === ip_cm.body.comment?.id)?.reports?.[0]?.ipNotice?.location === "The comment text");
+  check("other reasons need no notice (as before)", (await call("POST", `/drops/${ip_drop}/report`, { reason: "SCAM" })).body.received === true);
+  const ip_page = await fetch(`${BASE}/legal/ip-notice`);
+  const ip_html = await ip_page.text();
+  check("/legal/ip-notice explains reporting, the counter-notice and repeat infringers, and says the DMCA does not apply", ip_page.status === 200 && /counter-notice/i.test(ip_html) && /Repeat infringers/.test(ip_html) && /DMCA/.test(ip_html) && (await fetch(`${BASE}/legal/copyright`)).status === 200);
+  check("every legal page links to it", /href="\/legal\/ip-notice"/.test(await (await fetch(`${BASE}/legal/terms`)).text()));
+  check("deleting the reporter's account keeps the notice but removes their name and email", (await call("DELETE", "/auth/me", null, ip_rep.accessToken)).status === 200 && sql(`select ("ipNotice" ? 'name') || '|' || ("ipNotice" ? 'email') || '|' || ("ipNotice" ? 'work') from "DropReport" where "reporterId"=${ip_rep.user.id} and reason='TRADEMARK'`) === "false|false|true");
+
+  // "Your data, explained / Tietosi selkokielellä" (legal/data_explained.md): one bilingual page, Finnish first
+  const dx_pages = await Promise.all(["/legal/data-explained", "/legal/tietosi"].map(async (p) => { const r = await fetch(`${BASE}${p}`); return { status: r.status, html: await r.text() }; }));
+  check("/legal/data-explained and /legal/tietosi answer 200 with the page in Finnish (first) and English", dx_pages.every((p) => p.status === 200 && p.html.includes("Tietosi selkokielellä") && p.html.includes("Your data, explained") && p.html.indexOf("Mitä emme koskaan kerää") < p.html.indexOf("What we never collect") && p.html.includes("tietosuoja.fi")), dx_pages.map((p) => p.status));
+  const dx_privacy = await (await fetch(`${BASE}/legal/privacy`)).text();
+  check("every legal page lists it in its navigation, and the privacy policy text links to it", /href="\/legal\/data-explained"/.test(await (await fetch(`${BASE}/legal/terms`)).text()) && /href="\/legal\/data-explained"/.test(dx_privacy) && /href="https:\/\/[^"]+\/legal\/data-explained"/.test(dx_privacy));
+
+  console.log("\n— Privacy fixes from the data audit (2.16.1): C1–C10");
+  // The retention jobs run here, in this process, against the same database (as the chat purge and live watchdog do)
+  Object.assign(process.env, testEnv, { DISABLE_SCHEDULER: "true" });
+  delete process.env.COURIER_POSITION_TTL_MINUTES; // test.env sets 600 for the API; here the default (15 min) applies
+  const pv_ret = require(path.join(__dirname, "..", "..", "dist", "services", "privacyRetention.js"));
+  const pv_sched = require(path.join(__dirname, "..", "..", "dist", "services", "scheduler.js"));
+  const pv_id = (q) => Number(sql(q).split(/\r?\n/)[0]);
+  const pv_order = (userId, status, set = "") => {
+    const id = pv_id(`insert into "Order" ("userId","storeId","status","subtotalCents","deliveryFeeCents","courierFeeCents","commissionCents","sellerPayoutCents","totalCents","paymentStatus","deliveryAddress","deliveryLat","deliveryLng","updatedAt") values (${userId},${storeId},'${status}',2000,290,650,0,2000,2290,'SUCCEEDED','Testikatu 1, Helsinki',60.181,24.951,now()) returning id`);
+    if (set) sql(`update "Order" set ${set} where id=${id}`);
+    return id;
+  };
+  const pv_pos = (o) => (o ? [o.courier?.name, o.courier?.latitude, o.courier?.longitude] : "missing");
+  const pv_get = async (id, tok) => (await call("GET", `/orders/${id}`, null, tok)).body?.order;
+  const pv_audits = (action, entityId) => sql(`select count(*) from "AdminAuditLog" where action='${action}' and "entityId"=${entityId} and "adminId"=${adminUser.user.id}`);
+
+  const pv_cust = await register("Pvcust");
+  const pv_other = await register("Pvother");
+  const pv_cour = await register("Pvcourier", "COURIER");
+  const pv_courId = Number(sql(`select id from "Courier" where "userId"=${pv_cour.user.id}`));
+  const pv_appr = await call("PATCH", `/admin/couriers/${pv_courId}/approve`, null, adminToken);
+  check("C10: approving a courier is written to the audit log", pv_appr.status === 200 && pv_audits("courier.approve", pv_courId) === "1", pv_appr.body);
+  await call("POST", "/courier/status", { isOnline: true, latitude: 60.175, longitude: 24.945 }, pv_cour.accessToken);
+
+  // C2: the courier's live position only on an active, assigned order, only for its customer and store (and admins)
+  const pv_active = pv_order(pv_cust.user.id, "CONFIRMED", `"courierId"=${pv_courId}, "acceptedAt"=now(), "confirmedAt"=now()`);
+  sql(`update "Courier" set "currentOrderId"=${pv_active} where id=${pv_courId}`);
+  const pv_done = pv_order(pv_cust.user.id, "DELIVERED", `"courierId"=${pv_courId}, "deliveredAt"=now() - interval '1 hour', "handoverMethod"='IN_PERSON'`);
+  const pv_cancel = pv_order(pv_cust.user.id, "CANCELLED", `"courierId"=${pv_courId}, "cancelledAt"=now()`);
+  const pv_cA = await pv_get(pv_active, pv_cust.accessToken);
+  const pv_sA = await pv_get(pv_active, vendor.accessToken);
+  const pv_lA = (await call("GET", "/orders", null, vendor.accessToken)).body.orders?.find((o) => o.id === pv_active);
+  check("C2: the customer and the store of an active, assigned order see the courier's live position (order and the store's list)",
+    pv_cA?.courier?.latitude === 60.175 && pv_cA.courier.longitude === 24.945 && pv_sA?.courier?.latitude === 60.175 && pv_lA?.courier?.longitude === 24.945, [pv_pos(pv_cA), pv_pos(pv_sA), pv_pos(pv_lA)]);
+  sql(`update "Order" set status='SHIPPED', "pickedUpAt"=now() where id=${pv_active}`);
+  check("C2: …also after pickup (SHIPPED); admins see it", (await pv_get(pv_active, pv_cust.accessToken))?.courier?.latitude === 60.175 && (await pv_get(pv_active, adminToken))?.courier?.latitude === 60.175);
+  const pv_own = await pv_get(pv_active, pv_cour.accessToken);
+  check("C2: nobody else: the courier's own order payload carries no coordinates, an unrelated customer gets 404",
+    pv_own?.courier?.name === "Pvcourier" && pv_own.courier.latitude === null && pv_own.courier.longitude === null && (await call("GET", `/orders/${pv_active}`, null, pv_other.accessToken)).status === 404, pv_pos(pv_own));
+  const pv_cD = await pv_get(pv_done, pv_cust.accessToken);
+  const pv_cC = await pv_get(pv_cancel, pv_cust.accessToken);
+  const pv_sD = await pv_get(pv_done, vendor.accessToken);
+  const pv_list = (await call("GET", "/orders", null, vendor.accessToken)).body.orders || [];
+  const pv_lD = pv_list.find((o) => o.id === pv_done), pv_lC = pv_list.find((o) => o.id === pv_cancel);
+  check("C2: never on a delivered or cancelled order, nor in the store's list of past orders (the courier's name stays)",
+    pv_cD?.courier?.name === "Pvcourier" && pv_cD.courier.latitude === null && pv_cC?.courier?.latitude === null && pv_sD?.courier?.longitude === null
+      && pv_lD?.courier?.name === "Pvcourier" && pv_lD.courier.latitude === null && pv_lD.courier.longitude === null && pv_lC?.courier?.latitude === null,
+    [pv_pos(pv_cD), pv_pos(pv_cC), pv_pos(pv_sD), pv_pos(pv_lD), pv_pos(pv_lC)]);
+  check("C2: no finished order in the store's list carries a courier position",
+    pv_list.length > 0 && pv_list.filter((o) => !["CONFIRMED", "PROCESSING", "SHIPPED"].includes(o.status)).every((o) => !o.courier || (o.courier.latitude === null && o.courier.longitude === null)));
+
+  // C3: positions without an update for 15 minutes (configurable) are cleared
+  const pv_idle = await register("Pvidle", "COURIER");
+  const pv_idleId = Number(sql(`select id from "Courier" where "userId"=${pv_idle.user.id}`));
+  await call("PATCH", `/admin/couriers/${pv_idleId}/approve`, null, adminToken);
+  await call("POST", "/courier/status", { isOnline: true, latitude: 60.19, longitude: 24.96 }, pv_idle.accessToken);
+  sql(`update "Courier" set "locationAt"=now() - interval '16 minutes' where id=${pv_courId}; update "Courier" set "locationAt"=now() - interval '14 minutes' where id=${pv_idleId}`);
+  await pv_ret.expireStaleCourierPositions();
+  check("C3: a courier carrying an order: after 15 min without an update the position is cleared and the time recorded; the job carries on",
+    sql(`select (latitude is null and longitude is null and "locationAt" is null and "locationExpiredAt" is not null and "isActive" and "currentOrderId"=${pv_active})::text from "Courier" where id=${pv_courId}`) === "true"
+      && sql(`select status || '|' || "courierId" from "Order" where id=${pv_active}`) === `SHIPPED|${pv_courId}`);
+  check("C3: an idle courier whose last update is 14 min old is left alone", sql(`select ("isActive" and latitude is not null and "locationExpiredAt" is null)::text from "Courier" where id=${pv_idleId}`) === "true");
+  const pv_admC = (await call("GET", "/admin/couriers", null, adminToken)).body.couriers || [];
+  const pv_admO = (await call("GET", "/admin/orders", null, adminToken)).body.orders?.find((o) => o.id === pv_active);
+  const pv_cNow = await pv_get(pv_active, pv_cust.accessToken);
+  check("C3: admin sees \"no position\" and when it was cleared (couriers and the order); the customer still sees the courier, without coordinates",
+    pv_admC.find((c) => c.id === pv_courId)?.position?.status === "none" && !!pv_admC.find((c) => c.id === pv_courId)?.position?.clearedAt
+      && pv_admC.find((c) => c.id === pv_idleId)?.position?.status === "stale" && pv_admO?.courier?.position?.status === "none" && !("latitude" in (pv_admO?.courier || {}))
+      && pv_cNow?.courier?.name === "Pvcourier" && pv_cNow.courier.latitude === null,
+    [pv_admC.find((c) => c.id === pv_courId)?.position, pv_admO?.courier, pv_pos(pv_cNow)]);
+  const pv_tel = await call("POST", "/courier/telemetry", { latitude: 60.177, longitude: 24.947, orderId: pv_active }, pv_cour.accessToken);
+  check("C3: the next position update restores tracking and clears the marker",
+    pv_tel.status === 200 && sql(`select ("locationExpiredAt" is null and latitude = 60.177)::text from "Courier" where id=${pv_courId}`) === "true"
+      && (await call("GET", "/admin/couriers", null, adminToken)).body.couriers?.find((c) => c.id === pv_courId)?.position?.status === "live"
+      && (await pv_get(pv_active, pv_cust.accessToken))?.courier?.latitude === 60.177, pv_tel.body);
+  sql(`update "Courier" set "locationAt"=now() - interval '16 minutes' where id=${pv_idleId}`);
+  process.env.COURIER_POSITION_TTL_MINUTES = "30";
+  await pv_ret.expireStaleCourierPositions();
+  const pv_keptAt30 = sql(`select ("isActive" and latitude is not null)::text from "Courier" where id=${pv_idleId}`);
+  delete process.env.COURIER_POSITION_TTL_MINUTES;
+  check("C3: the period is configurable (COURIER_POSITION_TTL_MINUTES=30 keeps a 16-minute-old position)", pv_keptAt30 === "true");
+  await pv_ret.expireStaleCourierPositions();
+  const pv_idleMe = (await call("GET", "/courier/me", null, pv_idle.accessToken)).body.courier;
+  check("C3: an idle courier with no update for 15 min is marked offline and the position cleared (telemetry then answers 409)",
+    sql(`select (not "isActive" and latitude is null and "locationAt" is null and "locationExpiredAt" is not null)::text from "Courier" where id=${pv_idleId}`) === "true"
+      && pv_idleMe?.isOnline === false && (await call("POST", "/courier/telemetry", { latitude: 60.19, longitude: 24.96 }, pv_idle.accessToken)).status === 409, pv_idleMe);
+  const pv_job = (n) => pv_sched.scheduledJobs.find((j) => j.name === n);
+  check("scheduler: the delivery-location purge never depends on Cloudinary; position expiry runs every minute; drop views, contact messages and expired credentials have jobs",
+    pv_job("delivery-proof-purge")?.enabled() === true && !/mediaConfigured/.test(pv_job("delivery-proof-purge").enabled.toString())
+      && pv_job("courier-position-expiry")?.everyMs === 60_000 && pv_job("courier-position-expiry").enabled() === true
+      && !!pv_job("drop-view-purge") && !!pv_job("contact-message-retention") && !!pv_job("expired-sign-in-codes"));
+
+  // C1: handover positions and delivery pins are purged 30 days after delivery/closing, whatever the handover method
+  const pv_old = pv_order(pv_cust.user.id, "DELIVERED", `"courierId"=${pv_courId}, "deliveredAt"=now() - interval '31 days', "handoverMethod"='IN_PERSON', "deliveredLat"=60.181, "deliveredLng"=24.951`);
+  const pv_recent = pv_order(pv_cust.user.id, "DELIVERED", `"courierId"=${pv_courId}, "deliveredAt"=now() - interval '29 days', "handoverMethod"='IN_PERSON', "deliveredLat"=60.181, "deliveredLng"=24.951`);
+  const pv_oldCancel = pv_order(pv_cust.user.id, "CANCELLED", `"cancelledAt"=now() - interval '31 days'`);
+  const pv_photo = pv_order(pv_cust.user.id, "DELIVERED", `"courierId"=${pv_courId}, "deliveredAt"=now() - interval '31 days', "handoverMethod"='PHOTO', "deliveredLat"=60.181, "deliveredLng"=24.951, "deliveryProofPublicId"='malvoya/proofs/o${pv_done}/pv-${uniq}'`);
+  const pv_coords = (id) => sql(`select concat_ws('|', "deliveredLat", "deliveredLng", "deliveryLat", "deliveryLng") || '#' || coalesce("deliveryAddress", '') from "Order" where id=${id}`);
+  const pv_r1 = await pv_ret.purgeDeliveryProofsAndLocations({ media: false });
+  check("C1: 30 days after delivery the handover position and the delivery pin are purged, in-person deliveries too; the address stays; a 29-day-old one is kept",
+    pv_coords(pv_old) === "#Testikatu 1, Helsinki" && pv_coords(pv_recent) === "60.181|24.951|60.181|24.951#Testikatu 1, Helsinki", [pv_coords(pv_old), pv_coords(pv_recent)]);
+  check("C1: …and 30 days after a cancellation", pv_coords(pv_oldCancel) === "#Testikatu 1, Helsinki", pv_coords(pv_oldCancel));
+  check("C1: without Cloudinary the positions are still purged; the photo waits until Cloudinary is configured",
+    pv_coords(pv_photo) === "#Testikatu 1, Helsinki" && sql(`select "deliveryProofPublicId" is not null from "Order" where id=${pv_photo}`) === "t" && pv_r1.photos === 0 && pv_r1.locations >= 3, pv_r1);
+  await pv_ret.purgeDeliveryProofsAndLocations({ media: true });
+  check("C1: with Cloudinary the old delivery photo is deleted too", sql(`select "deliveryProofPublicId" is null from "Order" where id=${pv_photo}`) === "t");
+
+  // C4: drop views
+  const pv_drop = Number(sql(`select id from "Drop" where status='READY' order by id limit 1`) || 0);
+  const pv_view = await call("POST", `/drops/${pv_drop}/view`, { watchedSec: 3, completed: false }, pv_cust.accessToken);
+  const pv_vc = sql(`select "viewCount" from "Drop" where id=${pv_drop}`);
+  sql(`insert into "DropView" ("dropId","viewerKey","day","completed") values (${pv_drop},'i:pv-old-${uniq}',current_date - 2,false),(${pv_drop},'i:pv-yday-${uniq}',current_date - 1,false),(${pv_drop},'d:pv-legacy-${uniq}',current_date - 30,true)`);
+  await pv_ret.purgeOldDropViews();
+  check("C4: drop view rows older than yesterday are deleted (old install-id rows too); today's and yesterday's stay; the drop's counts do not change",
+    pv_drop > 0 && pv_view.status === 200 && sql(`select count(*) from "DropView" where "viewerKey" in ('i:pv-old-${uniq}','d:pv-legacy-${uniq}')`) === "0"
+      && sql(`select count(*) from "DropView" where "dropId"=${pv_drop} and "viewerKey" in ('i:pv-yday-${uniq}','u:${pv_cust.user.id}')`) === "2"
+      && sql(`select "viewCount" from "Drop" where id=${pv_drop}`) === pv_vc, pv_view.body);
+
+  // C4/C7: the export
+  await call("POST", `/drops/${pv_drop}/report`, { reason: "SCAM", details: "pv test" }, pv_cust.accessToken);
+  const pv_exp = (await call("GET", "/auth/me/data", null, pv_cust.accessToken)).body?.data;
+  check("C4/C7: the export has the user's drop views, the drop/comment/review/live reports they made, recall notices, appleSub and isMinor",
+    pv_exp?.dropViews?.length === 1 && pv_exp.dropViews[0].dropId === pv_drop && pv_exp.dropReports?.length === 1 && Array.isArray(pv_exp.commentReports)
+      && Array.isArray(pv_exp.reviewReports) && Array.isArray(pv_exp.liveReports) && Array.isArray(pv_exp.recallNotices) && "appleSub" in pv_exp && pv_exp.isMinor === false,
+    pv_exp && Object.keys(pv_exp));
+  sql(`insert into "Payout" ("orderId","party","courierId","amountCents","status","releaseAt","paidAt","updatedAt") values (${pv_done},'COURIER',${pv_courId},650,'PAID',now(),now(),now())`);
+  sql(`insert into "Review" ("orderId","userId","storeId","courierId","storeRating","courierRating") values (${pv_done},${pv_cust.user.id},${storeId},${pv_courId},5,4)`);
+  const pv_cexp = (await call("GET", "/auth/me/data", null, pv_cour.accessToken)).body?.data;
+  const pv_j = pv_cexp?.courierJobs?.find((j) => j.id === pv_done);
+  check("C7: a courier's export has their jobs (pay breakdown, rating), payouts, vehicle and disclosure, but not the customers' names, addresses or notes",
+    pv_j?.courierFeeCents === 650 && pv_j.store?.id === storeId && "courierPay" in pv_j && pv_j.review?.courierRating === 4
+      && pv_cexp.courierPayouts?.some((p) => p.orderId === pv_done && p.amountCents === 650) && "vehicleType" in (pv_cexp.courier || {}) && "locationDisclosureAt" in pv_cexp.courier
+      && !("user" in pv_j) && !("deliveryAddress" in pv_j) && !JSON.stringify(pv_cexp.courierJobs).includes("Testikatu"), pv_j);
+  const pv_sexp = (await call("GET", "/auth/me/data", null, vendor.accessToken)).body?.data;
+  check("C7: a store owner's export has the store's payouts", Array.isArray(pv_sexp?.storePayouts) && pv_sexp.storePayouts.length >= 1 && !("courierJobs" in pv_sexp), pv_sexp?.storePayouts);
+
+  // C5: contact-form messages
+  const pv_sr = (ago, userId) => pv_id(`insert into "SupportRequest" ("userId","email","app","topic","message","createdAt","updatedAt") values (${userId ?? "null"},'pv${uniq}@example.fi','web','general','pv test',now() - interval '${ago}',now() - interval '${ago}') returning id`);
+  const pv_srOld = pv_sr("25 months"), pv_srNew = pv_sr("23 months"), pv_srAcct = pv_sr("25 months", pv_other.user.id);
+  await pv_ret.purgeOldContactMessages();
+  check("C5: contact-form messages (no account) are deleted 24 months after the last change; newer ones and requests from an account stay",
+    sql(`select count(*) from "SupportRequest" where id=${pv_srOld}`) === "0" && sql(`select count(*) from "SupportRequest" where id in (${pv_srNew},${pv_srAcct})`) === "2");
+
+  // C9: expired refresh tokens of every user
+  sql(`insert into "RefreshToken" ("token","userId","expiresAt") values ('pv-expired-${uniq}',${pv_other.user.id},now() - interval '1 hour'),('pv-valid-${uniq}',${pv_other.user.id},now() + interval '1 day')`);
+  sql(`insert into "OtpCode" ("target","codeHash","expiresAt") values ('pv-${uniq}@example.fi','x',now() - interval '1 minute')`);
+  await pv_ret.purgeExpiredCredentials();
+  check("C9: expired refresh tokens are removed for every user (not only at their next sign-in), with expired codes; valid tokens stay",
+    sql(`select count(*) from "RefreshToken" where token='pv-expired-${uniq}'`) === "0" && sql(`select count(*) from "RefreshToken" where token='pv-valid-${uniq}'`) === "1"
+      && sql(`select count(*) from "OtpCode" where target='pv-${uniq}@example.fi'`) === "0");
+
+  // C10: audit log
+  const pv_ban = await register("Pvban");
+  const pv_banRes = await call("DELETE", `/admin/users/${pv_ban.user.id}`, null, adminToken);
+  check("C10: a ban is written to the audit log", pv_banRes.status === 200 && pv_audits("user.ban", pv_ban.user.id) === "1");
+  const pv_sv = await register("Pvseller", "VENDOR");
+  const pv_st = (await call("POST", "/stores", { name: `Pv closet ${uniq}`, category: "THRIFT", sellerType: "PRIVATE" }, pv_sv.accessToken)).body.store;
+  const pv_stAppr = await call("PATCH", `/admin/vendors/${pv_st?.id}/approve`, null, adminToken);
+  check("C10: a store approval is written to the audit log", pv_stAppr.status === 200 && pv_audits("store.approve", pv_st?.id) === "1", pv_stAppr.body);
+  const pv_susp = await call("PATCH", `/admin/couriers/${pv_idleId}/suspend`, null, adminToken);
+  check("C10: a courier suspension is written to the audit log", pv_susp.status === 200 && pv_audits("courier.suspend", pv_idleId) === "1");
+  const pv_y = new Date().getUTCFullYear();
+  const pv_d7before = [pv_audits("dac7.view", pv_y), pv_audits("dac7.export", pv_y)].map(Number);
+  const pv_d7 = await call("GET", `/admin/dac7?year=${pv_y}`, null, adminToken);
+  const pv_d7csv = await fetch(`${API}/admin/dac7.csv?year=${pv_y}`, { headers: { Authorization: `Bearer ${adminToken}` } });
+  check("C10: opening the DAC7 report and downloading its CSV (tax IDs decrypted) are audited with the year",
+    pv_d7.status === 200 && pv_d7csv.status === 200 && Number(pv_audits("dac7.view", pv_y)) === pv_d7before[0] + 1 && Number(pv_audits("dac7.export", pv_y)) === pv_d7before[1] + 1);
+
+  // C4/C8: account deletion
+  sql(`update "Order" set status='DELIVERED', "deliveredAt"=now(), "deliveryProblemNote"='Rang twice, no answer', "deliveredLat"=60.18, "deliveredLng"=24.95 where id=${pv_active}; update "Courier" set "currentOrderId"=null where id=${pv_courId}`);
+  const pv_retn = pv_id(`insert into "Return" ("orderId","userId","reason","conditionNote","storeNote","updatedAt") values (${pv_done},${pv_cust.user.id},'CHANGED_MIND','Worn once, call me at home','Checked on arrival',now()) returning id`);
+  const pv_del = await call("DELETE", "/auth/me", null, pv_cust.accessToken);
+  check("C4: deleting the account deletes the user's drop view rows", pv_del.status === 200 && sql(`select count(*) from "DropView" where "viewerKey"='u:${pv_cust.user.id}'`) === "0", pv_del.body);
+  check("C8: …and blanks the customer's return note, the courier's delivery-problem note and the handover position; the store's note and the amounts stay",
+    sql(`select (r."conditionNote" is null and r."storeNote" = 'Checked on arrival')::text from "Return" r where r.id=${pv_retn}`) === "true"
+      && sql(`select ("deliveryProblemNote" is null and "deliveredLat" is null and "totalCents" = 2290)::text from "Order" where id=${pv_active}`) === "true");
+  await call("POST", "/courier/status", { isOnline: false }, pv_cour.accessToken);
+
   console.log("\n— Background jobs and input hardening");
   const leaseSql = `INSERT INTO "JobLease" ("name","lockedUntil") VALUES ('t${uniq}', now() + interval '1 minute') ON CONFLICT ("name") DO UPDATE SET "lockedUntil" = now() + interval '1 minute' WHERE "JobLease"."lockedUntil" < now() RETURNING "name"`;
   const firstLine = (q) => sql(q).split(/\r?\n/)[0];
@@ -2833,7 +3145,7 @@ function ean13(d12) {
   check("huge search input rejected", (await call("GET", `/products/search?q=${"a".repeat(200)}`)).status === 400);
   const cors = await fetch(`${API}/stores`, { headers: { Origin: "https://evil.example" } });
   check("CORS does not allow unknown origins", !cors.headers.get("access-control-allow-origin"));
-  check("health reports v2.15.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.15.0");
+  check("health reports v2.16.1", (await (await fetch(`${BASE}/health`)).json()).version === "2.16.1");
 
   [vendorSock, custSock, otherSock, c1Sock, c2Sock].forEach((s) => s.close());
   console.log(`\n${pass} passed, ${fail} failed`);

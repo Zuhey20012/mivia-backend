@@ -21,6 +21,11 @@ class CourierSocketService extends ChangeNotifier {
   void Function(Map<String, dynamic>)? onChatMessage;
   /// An offered job is gone: `{orderId, reason: "taken" | "cancelled"}`.
   void Function(Map<String, dynamic>)? onOfferClosed;
+  /// The server changed this courier's online state (API 2.16.1, `courier:status`):
+  /// `{isOnline: false, reason: "no_position", ttlMinutes}` when no position arrived for
+  /// `ttlMinutes` (default 15) while online without a job, so the server set the courier offline
+  /// and cleared the stored position.
+  void Function(Map<String, dynamic>)? onCourierStatus;
   /// Stored chat history sent back when a chat room is joined (API 2.10; older servers send none).
   void Function(int orderId, List<Map<String, dynamic>> messages)? onChatHistory;
 
@@ -58,6 +63,9 @@ class CourierSocketService extends ChangeNotifier {
     });
     _socket!.on('courier:offer_closed', (data) {
       if (data is Map) onOfferClosed?.call(Map<String, dynamic>.from(data));
+    });
+    _socket!.on('courier:status', (data) {
+      if (data is Map) onCourierStatus?.call(Map<String, dynamic>.from(data));
     });
     _socket!.on('order:status', (data) {
       if (data is Map) onOrderStatus?.call(Map<String, dynamic>.from(data));

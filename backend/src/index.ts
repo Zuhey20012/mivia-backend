@@ -41,6 +41,7 @@ import { accountSecurityRoutes } from "./modules/auth/accountSecurity";
 import { noticeRoutes } from "./modules/me/notices";
 import { contactRoutes } from "./modules/support/contactPage";
 import { launchAlertRoutes } from "./modules/me/launchAlerts";
+import { unsubscribeRoutes } from "./modules/me/emailPreferences";
 import { safetyRoutes } from "./modules/me/safety";
 import referralRoutes from "./modules/referrals/referrals.routes";
 import { shareRoutes } from "./modules/share/share.routes";
@@ -131,6 +132,7 @@ app.use("/api/v1/admin",  adminRoutes);
 app.use(shareRouter); // public share pages: /d/:id
 app.use(shareRoutes); // /s/:storeId, /r/:code and /.well-known/assetlinks.json
 app.use(legalRoutes); // public legal pages: /legal/privacy, /legal/terms, …
+app.use(unsubscribeRoutes); // /email/unsubscribe?t=…: signed one-click unsubscribe from optional emails (2.16, RFC 8058)
 app.use(contactRoutes); // public contact form /contact (2.13): privacy, withdrawal, complaints, DSA point of contact
 app.use(recallPageRoutes); // public product safety recalls: /recalls, /recalls/:id
 

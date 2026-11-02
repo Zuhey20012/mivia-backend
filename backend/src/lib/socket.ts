@@ -102,7 +102,9 @@ export function initSocket(httpServer: HttpServer): SocketServer {
     });
 
     // ── Courier live location ──────────────────────────────────────────────
-    const verifiedCourierOrders = new Set<number>();
+    // orderId → when the assignment was last checked. Re-checked every minute (2.16.1), so a delivered, returned or
+    // reassigned order stops relaying this courier's position to its room within a minute.
+    const verifiedCourierOrders = new Map<number, number>();
     // Destination of each verified order, for the one-time "arriving" notification
     const destinations = new Map<number, { lat: number; lng: number; userId: number; notified: boolean; triedAt: number }>();
     let lastDbWrite = 0;
@@ -115,14 +117,14 @@ export function initSocket(httpServer: HttpServer): SocketServer {
       const lng = toCoord(data?.lng ?? data?.longitude, 180);
       if (!courierId || !orderId || lat === null || lng === null) return;
 
-      if (!verifiedCourierOrders.has(orderId)) {
+      if (Date.now() - (verifiedCourierOrders.get(orderId) ?? 0) > 60_000) {
         const order = await prisma.order.findFirst({
           where: { id: orderId, courierId, status: { in: ["CONFIRMED", "PROCESSING", "SHIPPED"] } },
           select: { id: true, userId: true, deliveryLat: true, deliveryLng: true, arrivingNotifiedAt: true },
         }).catch(() => null);
-        if (!order) return;
-        verifiedCourierOrders.add(orderId);
-        if (order.deliveryLat !== null && order.deliveryLng !== null) {
+        if (!order) { verifiedCourierOrders.delete(orderId); destinations.delete(orderId); return; }
+        verifiedCourierOrders.set(orderId, Date.now());
+        if (!destinations.has(orderId) && order.deliveryLat !== null && order.deliveryLng !== null) {
           destinations.set(orderId, { lat: order.deliveryLat, lng: order.deliveryLng, userId: order.userId, notified: !!order.arrivingNotifiedAt, triedAt: 0 });
         }
       }
@@ -159,7 +161,7 @@ export function initSocket(httpServer: HttpServer): SocketServer {
 
       if (Date.now() - lastDbWrite > LOCATION_DB_WRITE_INTERVAL_MS) {
         lastDbWrite = Date.now();
-        prisma.courier.update({ where: { id: courierId }, data: { latitude: lat, longitude: lng, locationAt: new Date() } }).catch(() => {});
+        prisma.courier.update({ where: { id: courierId }, data: { latitude: lat, longitude: lng, locationAt: new Date(), locationExpiredAt: null } }).catch(() => {});
       }
     };
     socket.on("courier:telemetry", handleLocation);

@@ -123,6 +123,8 @@ catalogAdminRoutes.get("/product-reports", async (req: AuthRequest, res: Respons
       ok: true,
       reports: rows.map((r) => ({
         id: r.id, reason: r.reason, details: r.details, status: r.status, createdAt: r.createdAt,
+        // Copyright / trademark notices (2.16.0): {name, email, work, location, onBehalfOf?, goodFaith, at}
+        ipNotice: r.ipNotice,
         // Product-safety notices are processed within three working days (GPSR Art. 22(8))
         dueBy: workingDaysAfter(r.createdAt, 3), overdue: r.status === "OPEN" && workingDaysAfter(r.createdAt, 3) < new Date(),
         reporter: { signedIn: r.reporterId !== null, userId: r.reporterId, email: r.reporterEmail },
@@ -163,14 +165,14 @@ catalogAdminRoutes.post("/product-reports/:id(\\d+)/resolve", async (req: AuthRe
         ? `Malvoya poisti tuotteesi "${r.product.name}" myynnistä ilmoituksen perusteella. Syy: ${body.data.note}. Voit pyytää päätöksen uudelleenarviointia vastaamalla Malvoyan tukeen.`
         : `Malvoya removed your listing "${r.product.name}" after a notice. Reason: ${body.data.note}. You can ask for the decision to be reviewed by contacting Malvoya support.`;
       pushToUser(r.product.store.ownerId, { title: { en: "Listing removed", fi: "Tuote poistettu myynnistä" }, body: { en: text, fi: text }, data: { type: "product", productId: String(r.productId) } }).catch(() => {});
-      if (owner?.email) sendEmail(owner.email, fi ? "Malvoya – tuote poistettu myynnistä" : "Malvoya – listing removed", `<p>${escapeHtml(text)}</p>`, text).catch(() => {});
+      if (owner?.email) sendEmail(owner.email, fi ? "Malvoya – tuote poistettu myynnistä" : "Malvoya – listing removed", `<p>${escapeHtml(text)}</p>`, text, { kind: "seller", locale: fi ? "fi" : "en" }).catch(() => {});
     }
     const reporterEmail = r.reporterEmail ?? (r.reporterId ? (await prisma.user.findUnique({ where: { id: r.reporterId }, select: { email: true } }))?.email : null);
     if (reporterEmail) {
       const text = remove
         ? `Thank you for your report about "${r.product.name}". We removed the listing. / Kiitos ilmoituksestasi tuotteesta "${r.product.name}". Poistimme tuotteen myynnistä.`
         : `Thank you for your report about "${r.product.name}". We checked it and kept the listing: ${body.data.note} / Kiitos ilmoituksestasi tuotteesta "${r.product.name}". Tarkistimme sen, ja tuote jäi myyntiin: ${body.data.note}`;
-      sendEmail(reporterEmail, "Malvoya – your report / ilmoituksesi", `<p>${escapeHtml(text)}</p>`, text).catch(() => {});
+      sendEmail(reporterEmail, "Malvoya – your report / ilmoituksesi", `<p>${escapeHtml(text)}</p>`, text, { kind: "report" }).catch(() => {});
     }
     res.json({ ok: true, status: remove ? "ACTIONED" : "DISMISSED" });
   } catch (e) { sendError(res, e); }

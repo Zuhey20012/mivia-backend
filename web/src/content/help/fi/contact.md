@@ -1,6 +1,6 @@
 ---
 key: contact
-order: 7
+order: 8
 title: Ota yhteyttä
 description: Ota yhteyttä Malvoyan tiimiin sovelluksen kautta. Näin viestisi menee perille nopeimmin.
 ---

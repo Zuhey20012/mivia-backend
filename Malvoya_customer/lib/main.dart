@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:malvoya_core/malvoya_core.dart';
 import 'package:malvoya_ui/malvoya_ui.dart';
@@ -73,6 +75,12 @@ void main() async {
   // The app version (X-App-Version) and the saved language, before the first request goes out
   await AppLanguage.loadAppVersion();
   AppLanguage.code = await LocaleProvider.savedCode() ?? AppLanguage.code;
+  // Crash reports (Firebase Crashlytics, docs/release/crashlytics.md): sent from release builds only,
+  // and only when Firebase started (an iPhone build without GoogleService-Info.plist skips them).
+  // Only the numeric user id, the app version and the role go with them.
+  await CrashReporting.instance.init(backend: SignInSetup.firebaseReady ? _crashlyticsBackend() : null, role: 'customer');
+  FlutterError.onError = CrashReporting.instance.recordFlutterFatalError;
+  PlatformDispatcher.instance.onError = CrashReporting.instance.recordPlatformError;
   await Onboarding.load();
   await DeliveryLocation.instance.load();
   unawaited(NetworkStatus.instance.start());
@@ -103,6 +111,18 @@ void main() async {
   runApp(const MalvoyaApp());
 }
 
+/// Firebase Crashlytics behind the shared [CrashReporting] (built only when Firebase started).
+CrashBackend _crashlyticsBackend() {
+  final c = FirebaseCrashlytics.instance;
+  return CallbackCrashBackend(
+    setCollectionEnabled: c.setCrashlyticsCollectionEnabled,
+    setUserIdentifier: c.setUserIdentifier,
+    setCustomKey: c.setCustomKey,
+    recordError: (e, s, {reason, fatal = false}) => c.recordError(e, s, reason: reason, fatal: fatal),
+    recordFlutterFatalError: c.recordFlutterFatalError,
+  );
+}
+
 class MalvoyaApp extends StatelessWidget {
   const MalvoyaApp({super.key});
 
@@ -112,6 +132,8 @@ class MalvoyaApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) {
           final auth = AuthService();
+          // Crash reports carry the signed-in account's numeric id; cleared on sign-out
+          CrashReporting.instance.followUser(auth, () => auth.isAuthenticated ? auth.currentUser?.id : null);
           PushService.instance.attach(auth);
           // The account's language for pushes and emails, saved after each sign-in
           AccountLanguage.attach(auth);

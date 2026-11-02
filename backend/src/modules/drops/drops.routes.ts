@@ -1,4 +1,5 @@
 import { Router, Response } from "express";
+import { readIpNotice } from "../../lib/ipNotice";
 import { z } from "zod";
 import { auth, optionalAuth, requireRole, AuthRequest } from "../../middleware/auth";
 import { sendError, positiveId } from "../../lib/errors";
@@ -147,7 +148,8 @@ router.delete("/drops/:id(\\d+)/not-interested", auth, async (req: AuthRequest, 
 });
 
 const viewSchema = z.object({
-  installId: z.string().min(8).max(100).optional(),
+  // Sent by old app builds; accepted so they get no 400, but ignored (2.16.1): nothing tied to the phone is stored
+  installId: z.string().max(100).optional(),
   watchedSec: z.number().min(0).max(3600).default(0),
   completed: z.boolean().default(false),
 });
@@ -156,7 +158,8 @@ router.post("/drops/:id(\\d+)/view", optionalAuth, async (req: AuthRequest, res:
   const body = viewSchema.safeParse(req.body ?? {});
   if (!body.success) return res.status(400).json({ ok: false, error: "Invalid request" });
   try {
-    res.json({ ok: true, ...(await drops.recordView(Number(req.params.id), req.user, { ...body.data, ip: req.ip })) });
+    const { installId: _ignored, ...view } = body.data;
+    res.json({ ok: true, ...(await drops.recordView(Number(req.params.id), req.user, { ...view, ip: req.ip })) });
   } catch (e) { sendError(res, e); }
 });
 
@@ -169,13 +172,16 @@ router.post("/drops/:id(\\d+)/share", optionalAuth, async (req: AuthRequest, res
 const reportSchema = z.object({
   reason: z.enum(drops.REPORT_REASONS),
   details: z.string().max(1000).optional(),
+  ipNotice: z.unknown().optional(),
 });
 
 router.post("/drops/:id(\\d+)/report", optionalAuth, async (req: AuthRequest, res: Response) => {
   const body = reportSchema.safeParse(req.body);
   if (!body.success) return res.status(400).json({ ok: false, error: "Choose a reason" });
+  const ip = readIpNotice(body.data.reason, body.data.ipNotice);
+  if (!ip.ok) return res.status(400).json({ ok: false, code: "IP_NOTICE_REQUIRED", error: ip.error });
   try {
-    res.json({ ok: true, ...(await drops.report(Number(req.params.id), req.user?.id ?? null, body.data.reason, body.data.details)) });
+    res.json({ ok: true, ...(await drops.report(Number(req.params.id), req.user?.id ?? null, body.data.reason, body.data.details, ip.value)) });
   } catch (e) { sendError(res, e); }
 });
 
