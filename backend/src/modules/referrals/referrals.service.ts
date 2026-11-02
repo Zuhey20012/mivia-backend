@@ -180,7 +180,9 @@ export async function rewardReferralForOrder(orderId: number) {
     return;
   }
   await prisma.referral.update({ where: { id: ref.id }, data: { rewardPromoCodeId: promo.id } });
-  pushToUser(ref.referrerId, {
+  // The reward code is always issued; the push only when the referrer wants reward notifications (2.17)
+  const wants = await prisma.user.findUnique({ where: { id: ref.referrerId }, select: { notifyReferralRewards: true } });
+  if (wants?.notifyReferralRewards !== false) pushToUser(ref.referrerId, {
     title: t(`You earned ${moneyEn(rewardCents)} off`, `Ansaitsit ${euros(rewardCents).fi} alennuksen`),
     body: t(`A friend you invited got their first Malvoya order. Use code ${promo.code} at checkout.`, `Kutsumasi kaveri sai ensimmäisen Malvoya-tilauksensa. Käytä koodia ${promo.code} kassalla.`),
     data: { type: "referral", code: promo.code },

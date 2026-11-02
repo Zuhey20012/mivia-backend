@@ -2,6 +2,14 @@ import { z } from "zod";
 import { openingHoursSchema } from "../../utils/openingHours";
 import { isValidYTunnus } from "./businessCheck";
 
+/**
+ * Stores are in Finland (2.17): coordinates outside its bounding box (incl. Åland) are refused, so a far-away pin
+ * cannot be used to place a "local" store or inflate courier pay.
+ */
+export const FINLAND_BBOX = { minLat: 59.3, maxLat: 70.2, minLng: 19.0, maxLng: 31.7 };
+const lat = z.number().min(FINLAND_BBOX.minLat, "The store must be in Finland").max(FINLAND_BBOX.maxLat, "The store must be in Finland");
+const lng = z.number().min(FINLAND_BBOX.minLng, "The store must be in Finland").max(FINLAND_BBOX.maxLng, "The store must be in Finland");
+
 // Availability: pause switch and weekly opening hours (Finnish time); null clears the hours (always open)
 const availability = {
   acceptingOrders: z.boolean().optional(),
@@ -23,8 +31,8 @@ export const createStoreSchema = z.object({
   }),
   isHomeBased:   z.boolean().default(false),
   address:       z.string().optional(),
-  latitude:      z.number().optional(),
-  longitude:     z.number().optional(),
+  latitude:      lat.optional(),
+  longitude:     lng.optional(),
   phone:         z.string().optional(),
   email:         z.string().email().optional(),
   logoUrl:       z.string().url().startsWith("https://").optional(),
@@ -45,8 +53,8 @@ export const updateStoreSchema = z.object({
   description: z.string().max(1000).optional(),
   isHomeBased: z.boolean().optional(),
   address:     z.string().optional(),
-  latitude:    z.number().optional(),
-  longitude:   z.number().optional(),
+  latitude:    lat.optional(),
+  longitude:   lng.optional(),
   phone:       z.string().optional(),
   email:       z.string().email().optional(),
   logoUrl:     z.string().url().startsWith("https://").optional(),

@@ -11,6 +11,7 @@ import { categoriesForQuery } from "../catalog/matcher";
 import { liveCertificateWhere } from "../catalog/certificates";
 import { PublishStore } from "../catalog/publish";
 import { collectionFilter } from "../catalog/collections";
+import { cityOf, sellerInfo } from "../stores/sellerInfo";
 
 type VariantInput = { id?: number; size?: string; color?: string; sku?: string; stock: number; priceAdjustCents: number } & Record<string, unknown>;
 
@@ -19,7 +20,15 @@ const publicStoreSelect = {
   businessId: true, address: true, isVerified: true,
 } as const;
 
-async function present<T extends Parameters<typeof presentProduct>[0]>(products: T[], opts: { owner?: boolean; store?: PublishStore } = {}) {
+/** A private seller's address is never public (2.17): city only. */
+function publicStoreOf<T>(p: T): T {
+  const st = (p as { store?: { sellerType?: string; address?: string | null } }).store;
+  if (!st || st.sellerType !== "PRIVATE") return p;
+  return { ...p, store: { ...st, address: null, city: cityOf(st.address) } } as T;
+}
+
+async function present<T extends Parameters<typeof presentProduct>[0]>(rawProducts: T[], opts: { owner?: boolean; store?: PublishStore } = {}) {
+  const products = rawProducts.map(publicStoreOf);
   const info = await priceInfoFor(products);
   // Owners also get the completeness meter: { ready, missing: [field issues], warnings }
   return products.map((p) => ({
@@ -64,7 +73,7 @@ export async function getProductsByStore(storeId: number, query: Record<string, 
     prisma.product.findMany({
       where, skip: (page - 1) * limit, take: limit,
       include: productInclude,
-      orderBy: [{ isFeatured: "desc" }, { createdAt: "desc" }],
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     }),
     prisma.product.count({ where }),
   ]);
@@ -74,15 +83,17 @@ export async function getProductsByStore(storeId: number, query: Record<string, 
 export async function getProductById(id: number, viewerId?: number) {
   const product = await prisma.product.findFirst({
     where: { id, deletedAt: null },
-    include: { ...productInclude, store: { select: { ...publicStoreSelect, ownerId: true } } },
+    include: { ...productInclude, store: { select: { ...publicStoreSelect, ownerId: true, phone: true, email: true } } },
   });
   const isOwner = !!product && product.store.ownerId === viewerId;
   // Hidden products (drafts, deleted) are for the owner only; a recalled one stays readable so buyers who open it from an
   // order see the recall banner (GPSR Art. 22(12), 35(4)), but it cannot be bought
   const recalled = !!product && product.recalls.length > 0;
   if (!product || ((!product.store.isVerified || !product.isAvailable) && !isOwner && !recalled)) throw new ApiError("Product not found", 404);
-  const { ownerId, ...store } = product.store;
-  const [presented] = await present([{ ...product, store }], { owner: isOwner });
+  const { ownerId, phone, email, ...store } = product.store;
+  // Trader information for the pre-contract box (2.17): business address/phone/email; private sellers' city only
+  const seller = await sellerInfo(product.store);
+  const [presented] = await present([{ ...product, store: { ...store, ...seller } }], { owner: isOwner });
   const favorite = viewerId
     ? !!(await prisma.favorite.findUnique({ where: { userId_productId: { userId: viewerId, productId: id } } }))
     : false;
@@ -180,7 +191,8 @@ export async function searchProducts(q: SearchQuery) {
     q.sort === "price_desc" ? [{ salePriceCents: "desc" }] :
     q.sort === "rating" ? [{ store: { rating: "desc" } }, { createdAt: "desc" }] :
     q.sort === "newest" ? [{ createdAt: "desc" }] :
-    [{ isFeatured: "desc" }, { createdAt: "desc" }];
+    // Default ("relevance" = newest first; see GET /products/ranking). The unused isFeatured flag no longer sorts (2.17)
+    [{ createdAt: "desc" }, { id: "desc" }];
 
   const where = { AND: and };
   const [products, total, categories] = await Promise.all([

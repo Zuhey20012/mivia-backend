@@ -8,6 +8,7 @@ import {
   getOrderPayment, reportDeliveryProblem, returnToStore, confirmReturnReceived,
 } from "./orders.controller";
 import { chatRoutes } from "./chat";
+import { confirmationRoutes } from "./confirmation";
 import { requireAgreement } from "../legal/agreements";
 import { checkoutIpLimiter, checkoutUserLimiter } from "../../middleware/rateLimiter";
 
@@ -40,6 +41,8 @@ router.post("/orders/:id(\\d+)/return-to-store",  auth, requireRole("COURIER"), 
 router.post("/orders/:id(\\d+)/returned-received", auth, requireRole("VENDOR"), confirmReturnReceived);
 // Order chat history (stored 30 days after the order is closed)
 router.use(chatRoutes);
+// Order confirmation page with a 10-minute signed link (2.17)
+router.use(confirmationRoutes);
 
 // Rentals
 router.post("/rentals",                       auth, requireRole("CUSTOMER"), requireAgreement(), createRental);

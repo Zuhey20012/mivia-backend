@@ -1,3 +1,6 @@
+import { env } from "../../config/env";
+import { t } from "../../lib/i18n";
+import { cityOf, sellerInfo } from "./sellerInfo";
 import { prisma } from "../../lib/prisma";
 import { Prisma, StoreCategory } from "@prisma/client";
 import { ApiError } from "../../lib/errors";
@@ -20,6 +23,24 @@ const publicStoreFields = {
   rating: true, totalReviews: true, sellerType: true, businessId: true, prepMinutes: true,
   acceptingOrders: true, openingHours: true,
 } as const;
+
+/**
+ * An approved store changing its name, address or map position (2.17): shown in System → attention until an admin
+ * approves it again; the store stays live meanwhile. Returns the changeReview payload for the app, or null.
+ */
+const REVIEWED_FIELDS = ["name", "address", "latitude", "longitude"] as const;
+async function flagApprovedChange(existing: { id: number; isVerified: boolean; changedFields: string[] } & Record<string, unknown>, data: Record<string, unknown>) {
+  if (!existing.isVerified) return null;
+  const changed = REVIEWED_FIELDS.filter((f) => data[f] !== undefined && data[f] !== existing[f]);
+  if (!changed.length) return null;
+  const fields = [...new Set([...existing.changedFields, ...changed])];
+  await prisma.store.update({ where: { id: existing.id }, data: { changedFields: fields, changedAfterApprovalAt: new Date() } });
+  return {
+    fields: changed,
+    message: t("Thanks. Malvoya checks changes to a store's name and address; your store stays open meanwhile.",
+      "Kiitos. Malvoya tarkistaa kaupan nimen ja osoitteen muutokset; kauppasi pysyy auki sillä välin."),
+  };
+}
 
 export function deliveryInfo(store: { latitude: number | null; longitude: number | null; prepMinutes?: number }, lat: number | null, lng: number | null) {
   let km: number | null = null;
@@ -57,7 +78,11 @@ export async function getStores(query: {
 
   const userLat = query.lat ? Number(query.lat) : null;
   const userLng = query.lng ? Number(query.lng) : null;
-  const enriched = stores.map((s) => ({ ...s, ...deliveryInfo(s, userLat, userLng), ...storeAvailability(s) }));
+  // A private seller's address is never public (2.17): city only
+  const enriched = stores.map((s) => ({
+    ...s, ...(s.sellerType === "PRIVATE" ? { address: null } : {}), city: cityOf(s.address),
+    ...deliveryInfo(s, userLat, userLng), ...storeAvailability(s),
+  }));
 
   if (userLat !== null && userLng !== null) {
     enriched.sort((a, b) => {
@@ -77,17 +102,24 @@ export async function getStoreById(id: number, viewerId?: number, lat: number | 
     where: { id },
     select: {
       ...publicStoreFields,
-      ownerId: true,
-      products: { where: { isAvailable: true, deletedAt: null }, take: 60, include: productInclude, orderBy: [{ isFeatured: "desc" }, { createdAt: "desc" }] },
+      ownerId: true, phone: true, email: true,
+      // Newest first (isFeatured no longer orders anything: nothing sets it, 2.17)
+      products: { where: { isAvailable: true, deletedAt: null }, take: 60, include: productInclude, orderBy: [{ createdAt: "desc" }, { id: "desc" }] },
     },
   });
   // Unverified stores are only visible to their owner
   if (!store || (!store.isVerified && store.ownerId !== viewerId)) throw new ApiError("Store not found", 404);
-  const { ownerId, products, ...publicStore } = store;
-  const [info, follow] = await Promise.all([priceInfoFor(products), followInfo(id, viewerId)]);
+  const { ownerId, products, phone, email, ...publicStore } = store;
+  const [info, follow, seller, mine] = await Promise.all([
+    priceInfoFor(products), followInfo(id, viewerId), sellerInfo(store),
+    viewerId ? prisma.storeFollow.findUnique({ where: { userId_storeId: { userId: viewerId, storeId: id } }, select: { muted: true } }) : null,
+  ]);
   return {
     ...publicStore,
     ...follow,
+    followMuted: !!mine?.muted,
+    // Trader information (2.17): business sellers' legal name, address, phone and email; private sellers their city only
+    ...seller,
     ...deliveryInfo(publicStore, lat, lng),
     ...storeAvailability(publicStore),
     products: products.map((p) => presentProduct(p, info.get(p.id))),
@@ -141,15 +173,17 @@ export async function createStore(ownerId: number, input: any) {
       where: { ownerId },
       data: existing.isVerified ? rest : { ...rest, ...(sellerType ? { sellerType } : {}), ...(businessId ? { businessId } : {}) },
     });
+    const changeReview = await flagApprovedChange(existing, rest);
     // A new or changed Y-tunnus is looked up in the PRH register in the background (it never approves anything)
     if (!existing.isVerified && businessId && (businessId !== existing.businessId || !existing.businessCheckedAt || existing.businessCheckStatus === "unavailable")) {
       runBusinessCheck(updated.id).catch(() => {});
     }
-    return updated;
+    return { ...updated, ...(changeReview ? { changeReview } : {}) };
   }
   const { logoUrl, bannerUrl, ...fields } = data; // pictures can only be added once the store exists
   // New stores start unverified and are reviewed by an admin before going live.
-  const created = await prisma.store.create({ data: { ...fields, ownerId, isVerified: false } });
+  // New stores get the default commission (DEFAULT_COMMISSION_RATE, 2.17); admins set per-store rates on Vendors
+  const created = await prisma.store.create({ data: { ...fields, ownerId, isVerified: false, commissionRate: env.defaultCommissionRate } });
   if (created.businessId) runBusinessCheck(created.id).catch(() => {});
   return created;
 }
@@ -160,5 +194,7 @@ export async function updateStore(id: number, ownerId: number, input: any) {
   if (!store) throw new ApiError("Store not found", 404);
   if (store.ownerId !== ownerId) throw new ApiError("Forbidden", 403);
   assertOwnStoreImages(data, id);
-  return prisma.store.update({ where: { id }, data });
+  const updated = await prisma.store.update({ where: { id }, data });
+  const changeReview = await flagApprovedChange(store, data);
+  return { ...updated, ...(changeReview ? { changeReview } : {}) };
 }

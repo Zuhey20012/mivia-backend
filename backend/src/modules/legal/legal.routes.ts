@@ -19,6 +19,8 @@ const PAGES: Record<string, { title: string; doc?: LegalDoc; file?: string }> = 
   sellers: { title: "Seller Terms", doc: "seller-terms" },
   couriers: { title: "Courier Agreement", doc: "courier-agreement" },
   "delete-account": { title: "Delete your account", file: "account_deletion.md" },
+  // Model withdrawal form (Directive 2011/83/EU Annex I(B), Kuluttajansuojalaki 6:9), fi + en (2.17)
+  "withdrawal-form": { title: "Withdrawal form", file: "withdrawal_form.md" },
   // How rights holders report copyright / trademark infringement, sellers' counter-notice, repeat infringers (2.16.0)
   "ip-notice": { title: "Copyright & trademark", file: "ip_notice.md" },
   // Plain-language "Your data, explained / Tietosi selkokielellä" (Finnish first, then English); the privacy policy stays the binding text

@@ -279,6 +279,10 @@ function exportUser(userId: number) {
       address: true, latitude: true, longitude: true, createdAt: true, updatedAt: true,
       locale: true, termsAcceptedAt: true, termsVersion: true, totpEnabledAt: true,
       ageConfirmedAt: true, emailMarketingOptOutAt: true,
+      // 2.17: optional-push settings, signed-in devices and in-app notices
+      notifyFollowedDrops: true, notifyLives: true, notifyReferralRewards: true, notifyLaunchAlerts: true,
+      sessions: { select: { device: true, createdAt: true, lastUsedAt: true, revokedAt: true }, orderBy: { id: "desc" }, take: 200 },
+      notices: { select: { kind: true, titleEn: true, bodyEn: true, createdAt: true, readAt: true }, orderBy: { id: "desc" }, take: 1000 },
       // Every agreement version accepted, with time, method, truncated address and app version (2.11)
       agreementAcceptances: { select: { doc: true, version: true, acceptedAt: true, method: true, ip: true, userAgent: true, appVersion: true } },
       blocks: { select: { blockedId: true, createdAt: true } },
@@ -311,7 +315,7 @@ function exportUser(userId: number) {
       reviews: { select: { orderId: true, storeRating: true, courierRating: true, comment: true, createdAt: true } },
       devices: { select: { platform: true, createdAt: true, updatedAt: true } },
       dropComments: { where: { status: { not: "REMOVED" } }, select: { dropId: true, body: true, status: true, createdAt: true } },
-      follows: { select: { storeId: true, createdAt: true } },
+      follows: { select: { storeId: true, muted: true, createdAt: true } },
       launchAlert: { select: { latitude: true, longitude: true, area: true, notifiedAt: true, createdAt: true } },
       referralCode: true,
       referralsMade: { select: { createdAt: true, rewardedAt: true } },
@@ -386,6 +390,9 @@ export async function deleteUserAccount(userId: number) {
     // Live chat messages and mutes (2.15)
     await tx.liveMessage.deleteMany({ where: { userId } });
     await tx.liveBan.deleteMany({ where: { userId } });
+    // Live chat reports and in-app notices (2.17)
+    await tx.liveMessageReport.deleteMany({ where: { reporterId: userId } });
+    await tx.userNotice.deleteMany({ where: { userId } });
     await tx.userBlock.deleteMany({ where: { OR: [{ blockerId: userId }, { blockedId: userId }] } });
     await tx.reviewReport.deleteMany({ where: { reporterId: userId } });
     // Copyright / trademark notices (2.16) keep the claim (work, location, statement) but drop the person's name and email
@@ -427,6 +434,7 @@ export async function deleteUserAccount(userId: number) {
   });
 
   await revokeAllSessions(userId);
+  await prisma.userSession.deleteMany({ where: { userId } }); // device names are personal data; the account is inactive anyway
   forgetSessionState(userId);
   disconnectUser(userId);
   // A store that was live stops at once (viewers are told the live ended)

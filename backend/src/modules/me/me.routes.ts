@@ -81,6 +81,46 @@ router.patch("/me", auth, async (req: AuthRequest, res: Response) => {
   } catch (e) { sendError(res, e); }
 });
 
+// ─── Notification settings (2.17) ───────────────────────────────────────────
+// Optional pushes only; service messages (orders, deliveries, payouts, security, recalls) are always sent.
+// Optional emails are master's email preferences (PATCH /me {emailMarketing}).
+
+const notifySelect = { notifyFollowedDrops: true, notifyLives: true, notifyReferralRewards: true, notifyLaunchAlerts: true } as const;
+const presentNotify = (u: { notifyFollowedDrops: boolean; notifyLives: boolean; notifyReferralRewards: boolean; notifyLaunchAlerts: boolean }) => ({
+  followedDrops: u.notifyFollowedDrops, lives: u.notifyLives, referralRewards: u.notifyReferralRewards, launchAlerts: u.notifyLaunchAlerts,
+});
+
+router.get("/me/notification-settings", auth, async (req: AuthRequest, res: Response) => {
+  try {
+    const u = await prisma.user.findUnique({ where: { id: req.user!.id }, select: notifySelect });
+    if (!u) throw new ApiError("Account not found", 404);
+    res.json({ ok: true, settings: presentNotify(u) });
+  } catch (e) { sendError(res, e); }
+});
+
+const notifySchema = z.object({
+  followedDrops: z.boolean().optional(), lives: z.boolean().optional(), referralRewards: z.boolean().optional(), launchAlerts: z.boolean().optional(),
+}).strict();
+
+router.patch("/me/notification-settings", auth, async (req: AuthRequest, res: Response) => {
+  const body = notifySchema.safeParse(req.body ?? {});
+  if (!body.success) return res.status(400).json({ ok: false, error: "Send followedDrops, lives, referralRewards and/or launchAlerts as true or false" });
+  try {
+    const d = body.data;
+    const u = await prisma.user.update({
+      where: { id: req.user!.id },
+      data: {
+        ...(d.followedDrops !== undefined ? { notifyFollowedDrops: d.followedDrops } : {}),
+        ...(d.lives !== undefined ? { notifyLives: d.lives } : {}),
+        ...(d.referralRewards !== undefined ? { notifyReferralRewards: d.referralRewards } : {}),
+        ...(d.launchAlerts !== undefined ? { notifyLaunchAlerts: d.launchAlerts } : {}),
+      },
+      select: notifySelect,
+    });
+    res.json({ ok: true, settings: presentNotify(u) });
+  } catch (e) { sendError(res, e); }
+});
+
 // ─── Favourites (wishlist) ──────────────────────────────────────────────────
 
 router.get("/me/favorites", auth, async (req: AuthRequest, res: Response) => {
@@ -182,6 +222,8 @@ router.post("/orders/:id(\\d+)/review", auth, async (req: AuthRequest, res: Resp
     const order = await prisma.order.findUnique({ where: { id: orderId }, select: { userId: true, storeId: true, courierId: true, status: true, deliveredAt: true } });
     if (!order || order.userId !== req.user!.id) throw new ApiError("Order not found", 404);
     if (order.status !== "DELIVERED" || !order.deliveredAt) throw new ApiError("You can review an order once it has been delivered", 409);
+    // A store never reviews itself (2.17): the reviewer may not be the store's owner
+    if ((await prisma.store.count({ where: { id: order.storeId, ownerId: req.user!.id } })) > 0) throw new ApiError("You cannot review your own store", 403);
     if (Date.now() - order.deliveredAt.getTime() > REVIEW_WINDOW_DAYS * 86_400_000) throw new ApiError("Reviews can be left within 30 days of delivery", 409);
 
     const review = await prisma.$transaction(async (tx) => {
