@@ -39,6 +39,7 @@ import liveRoutes     from "./modules/live/live.routes";
 import { mfaAuthRoutes, mfaMeRoutes } from "./modules/auth/mfa";
 import { accountSecurityRoutes } from "./modules/auth/accountSecurity";
 import { noticeRoutes } from "./modules/me/notices";
+import { incidentRoutes } from "./modules/orders/incidents";
 import { contactRoutes } from "./modules/support/contactPage";
 import { launchAlertRoutes } from "./modules/me/launchAlerts";
 import { unsubscribeRoutes } from "./modules/me/emailPreferences";
@@ -113,6 +114,7 @@ app.use("/api/v1/stores", sellerRoutes); // /stores/my/tax-info, /stores/my/stat
 app.use("/api/v1",        importRoutes); // /products/import/* (before /products/:id routes)
 app.use("/api/v1",        catalogRoutes); // /categories, /stores/my/{operators,certificates,safety-pledge}, /products/:id/report, /recalls (2.12)
 app.use("/api/v1",        productsRoutes);
+app.use("/api/v1",        incidentRoutes); // /courier/incident(s), /admin/incidents (2.17; before /admin)
 app.use("/api/v1",        courierRoutes);
 app.use("/api/v1",        ordersRoutes);
 app.use("/api/v1",        dropsRoutes);

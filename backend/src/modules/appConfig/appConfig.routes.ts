@@ -1,3 +1,4 @@
+import { allSwitches } from "../../lib/settings";
 import { Router, Request, Response } from "express";
 
 /**
@@ -30,12 +31,14 @@ export function appConfigSummary() {
 
 const router = Router();
 
-router.get("/app-config", (req: Request, res: Response) => {
+router.get("/app-config", async (req: Request, res: Response) => {
   const app = String(req.query.app || "") as AppName;
   if (!(app in APPS)) return res.status(400).json({ ok: false, error: "Unknown app" });
   const build = Number.parseInt(String(req.query.build ?? ""), 10);
   res.set("Cache-Control", "no-store");
-  res.json({ ok: true, ...appConfigFor(app, Number.isFinite(build) ? build : null) });
+  // Admin switches (2.17): what is paused right now, with the message to show; apps may hide the paused feature
+  const switches = Object.fromEntries((await allSwitches().catch(() => [])).map((s) => [s.key, { on: s.on, message: s.message }]));
+  res.json({ ok: true, ...appConfigFor(app, Number.isFinite(build) ? build : null), switches });
 });
 
 export default router;

@@ -12,6 +12,7 @@ import { purgeOldMessages } from "../modules/orders/chat";
 import { sendTaxInfoReminders } from "../modules/sellers/taxReminders";
 import { purgeOldLiveMessages, runLiveWatchdog } from "../modules/live/live.service";
 import { reportError } from "../lib/sentry";
+import { runOpsAlerts } from "./opsAlerts";
 
 const logger = pino({ name: "scheduler" });
 
@@ -47,6 +48,8 @@ const jobs: Job[] = [
   },
   // Expired sign-in/reset codes and expired refresh tokens of every user (2.16.1: also users who never sign in again)
   { name: "expired-sign-in-codes", everyMs: 60 * 60_000, enabled: () => true, run: () => purgeExpiredCredentials() },
+  // New System → attention items reach admins by push and email (2.17)
+  { name: "ops-alerts", everyMs: 5 * 60_000, enabled: () => process.env.OPS_ALERTS_DISABLED !== "true", run: () => runOpsAlerts() },
 ];
 
 /** The job list, read-only (the e2e test checks which jobs run without Cloudinary). */

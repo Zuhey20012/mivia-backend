@@ -1,3 +1,4 @@
+import { assertOpen } from "../../lib/settings";
 import { Router, Response } from "express";
 import { readIpNotice } from "../../lib/ipNotice";
 import { z } from "zod";
@@ -85,6 +86,7 @@ router.post("/drops", auth, requireRole("VENDOR"), async (req: AuthRequest, res:
   const body = createSchema.safeParse(req.body);
   if (!body.success) return res.status(400).json({ ok: false, errors: body.error.flatten() });
   try {
+    await assertOpen("dropsPostingEnabled"); // admin switch (2.17): 503 DROPS_PAUSED
     res.status(201).json({ ok: true, drop: await drops.createDrop(req.user!, body.data) });
   } catch (e) { sendError(res, e); }
 });

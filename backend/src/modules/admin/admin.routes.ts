@@ -4,9 +4,10 @@ import {
   getStats, getUsers, banUser,
   getVendors, approveVendor, rejectVendor, setVendorCommission, vendorCommissionHistory, rerunBusinessCheck,
   getCouriers, approveCourier, suspendCourier,
-  getOrders,
+  unbanUser,
 } from "./admin.controller";
 import moderationRoutes from "./moderation.routes";
+import orderConsoleRoutes from "./orderConsole";
 import promoRoutes from "../promos/promos.routes";
 import { getSystemStatus } from "./system";
 import { postConnectionCheck } from "./connectionCheck";
@@ -28,6 +29,7 @@ router.post("/system/check",          postConnectionCheck);
 router.get("/launch-demand",          launchDemand);
 router.get("/users",                  getUsers);
 router.delete("/users/:id",           banUser);
+router.patch("/users/:id/unban",      unbanUser); // audited (2.17)
 router.get("/vendors",                getVendors);
 router.patch("/vendors/:id/approve",  approveVendor);
 router.delete("/vendors/:id",         rejectVendor);
@@ -37,7 +39,8 @@ router.post("/vendors/:id/business-check", rerunBusinessCheck); // looks the Y-t
 router.get("/couriers",               getCouriers);
 router.patch("/couriers/:id/approve", approveCourier);
 router.patch("/couriers/:id/suspend", suspendCourier);
-router.get("/orders",                 getOrders);
+// Order console (2.17): /orders (search, paged), /orders/:id, cancel, refund, unassign-courier; /disputes, /audit, /settings
+router.use(orderConsoleRoutes);
 router.get("/analytics",              getAnalytics);          // ?from=YYYY-MM-DD&to=YYYY-MM-DD (Finnish days; default last 28)
 router.get("/dac7",                   adminDac7);             // ?year=YYYY: DAC7 seller report (TIN decrypted, admin only)
 router.get("/dac7.csv",               adminDac7Csv);

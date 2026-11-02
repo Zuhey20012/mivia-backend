@@ -1,3 +1,4 @@
+import { assertOpen } from "../../lib/settings";
 import pino from "pino";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
@@ -105,6 +106,7 @@ function endedError(row: { endedReason: string | null }) {
 
 export async function startLive(user: Actor, input: { title: string; productIds: number[] }) {
   if (!liveConfigured()) throw new LiveOffError();
+  await assertOpen("liveEnabled"); // admin switch (2.17): 503 LIVE_PAUSED
   const store = await prisma.store.findUnique({ where: { ownerId: user.id }, select: { id: true, name: true, isVerified: true } });
   if (!store) throw new ApiError("Create your store first", 409);
   if (!store.isVerified) throw new ApiError("Your store must be approved before you can go live", 403);

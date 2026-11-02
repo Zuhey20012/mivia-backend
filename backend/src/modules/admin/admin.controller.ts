@@ -37,6 +37,22 @@ function idParam(req: Request) {
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
+/**
+ * Lifts a ban (2.17): the account can sign in again. Stores and couriers stay unapproved until an admin approves them
+ * again. Deleted (anonymised) accounts cannot be restored. Audited.
+ */
+export async function unbanUser(req: Request, res: Response) {
+  const id = idParam(req);
+  if (!id) return res.status(404).json({ ok: false, error: "User not found" });
+  const user = await prisma.user.findUnique({ where: { id }, select: { isActive: true, deletedAt: true } });
+  if (!user) return res.status(404).json({ ok: false, error: "User not found" });
+  if (user.deletedAt) return res.status(409).json({ ok: false, error: "A deleted account cannot be restored" });
+  await prisma.user.update({ where: { id }, data: { isActive: true } });
+  forgetSessionState(id);
+  await auditAdmin(req, "user.unban", "User", id, { isActive: user.isActive }, { isActive: true });
+  res.json({ ok: true, message: "User reactivated" });
+}
+
 /** Admin actions on people are written to the audit log (2.16.1, audit C10): bans, approvals, suspensions. */
 export function auditAdmin(req: Request, action: string, entity: string, entityId: number, oldValue?: unknown, newValue?: unknown) {
   return prisma.adminAuditLog.create({
@@ -167,10 +183,11 @@ export async function rerunBusinessCheck(req: Request, res: Response) {
 export async function approveVendor(req: Request, res: Response) {
   const id = idParam(req);
   if (!id) return res.status(404).json({ ok: false, error: "Store not found" });
-  const before = await prisma.store.findUnique({ where: { id }, select: { isVerified: true } });
+  const before = await prisma.store.findUnique({ where: { id }, select: { isVerified: true, changedFields: true } });
   if (!before) return res.status(404).json({ ok: false, error: "Store not found" });
-  const store = await prisma.store.update({ where: { id }, data: { isVerified: true } });
-  await auditAdmin(req, "store.approve", "Store", id, { isVerified: before.isVerified }, { isVerified: true });
+  // Approving again also accepts a name/address change made after the last approval (2.17)
+  const store = await prisma.store.update({ where: { id }, data: { isVerified: true, changedAfterApprovalAt: null, changedFields: [] } });
+  await auditAdmin(req, "store.approve", "Store", id, { isVerified: before.isVerified, changedFields: before.changedFields }, { isVerified: true });
   // First time live: tell customers who asked to hear when Malvoya opens near them
   const notified = before.isVerified ? 0 : await notifyLaunchAlertsNear(store).catch(() => 0);
   if (!before.isVerified) tellApproved(store.ownerId, "store").catch(() => {});
@@ -232,8 +249,10 @@ export async function rejectVendor(req: Request, res: Response) {
   if (store._count.orders > 0) {
     await prisma.store.update({ where: { id }, data: { isVerified: false } });
     await prisma.product.updateMany({ where: { storeId: id }, data: { isAvailable: false } });
+    await auditAdmin(req, "store.suspend", "Store", id, { isVerified: store.isVerified }, { isVerified: false });
     return res.json({ ok: true, message: "Store suspended (it has order history, so it is kept)" });
   }
+  await auditAdmin(req, "store.reject", "Store", id, { name: store.name, isVerified: store.isVerified }, { deleted: true });
   await prisma.$transaction([
     // No orders means nothing to report under DAC7, so its tax data can go with it
     prisma.storeTaxInfo.deleteMany({ where: { storeId: id } }),
@@ -290,24 +309,4 @@ export async function suspendCourier(req: Request, res: Response) {
 }
 
 // ─── Orders ───────────────────────────────────────────────────────────────────
-export async function getOrders(_req: Request, res: Response) {
-  const orders = await prisma.order.findMany({
-    omit: { courierPay: false },
-    include: {
-      user:  { select: { name: true, email: true } },
-      store: { select: { name: true } },
-      courier: { select: { id: true, name: true, locationAt: true, locationExpiredAt: true } },
-      items: { include: { product: { select: { name: true } } } },
-    },
-    // scheduledStart/scheduledEnd (delivery window) and deliveryProblemAt/Reason/Note, returnedToStoreAt are columns
-    orderBy: { createdAt: "desc" },
-    take: 200,
-  });
-  // The courier's position status ("none" after the courier-position-expiry job cleared it), never the coordinates
-  res.json({
-    ok: true,
-    orders: orders.map((o) => o.courier
-      ? { ...o, courier: { id: o.courier.id, name: o.courier.name, position: courierPositionStatus(o.courier) } }
-      : o),
-  });
-}
+// GET /admin/orders: see orderConsole.ts (search, paging, detail and actions, 2.17)

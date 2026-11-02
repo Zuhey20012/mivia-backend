@@ -4,6 +4,7 @@ import { env } from "../../config/env";
 import { prisma } from "../../lib/prisma";
 import { getStripe } from "../../lib/stripe";
 import { markOrderPaid, markOrderPaymentFailed, markRentalPaid } from "../orders/orders.service";
+import { handleChargeRefunded, handleDispute } from "./disputes";
 
 const logger = pino({ name: "stripe-webhook" });
 const router = Router();
@@ -32,16 +33,21 @@ router.post("/payments/webhook", express.raw({ type: "application/json", limit: 
 
   try {
     if (event.type === "payment_intent.succeeded" || event.type === "payment_intent.payment_failed") {
-      const intent = event.data.object as { id: string; amount_received: number; metadata?: Record<string, string> };
+      const intent = event.data.object as { id: string; amount_received: number; metadata?: Record<string, string>; latest_charge?: unknown };
       const { type, orderId, rentalId } = intent.metadata ?? {};
 
       if (event.type === "payment_intent.succeeded") {
-        if (type === "ORDER" && orderId) await markOrderPaid(Number(orderId), intent.id, intent.amount_received);
+        if (type === "ORDER" && orderId) await markOrderPaid(Number(orderId), intent.id, intent.amount_received, { latestCharge: intent.latest_charge });
         if (type === "RENTAL" && rentalId) await markRentalPaid(Number(rentalId), intent.id, intent.amount_received);
       } else if (type === "ORDER" && orderId) {
         await markOrderPaymentFailed(Number(orderId), intent.id);
       }
     }
+    // Chargebacks and refunds made in the Stripe dashboard (2.17)
+    if (event.type === "charge.dispute.created" || event.type === "charge.dispute.updated" || event.type === "charge.dispute.closed") {
+      await handleDispute(event.type, event.data.object);
+    }
+    if (event.type === "charge.refunded") await handleChargeRefunded(event.data.object);
     await prisma.stripeEvent.create({ data: { id: event.id, type: event.type } });
     res.json({ received: true });
   } catch (err: any) {
