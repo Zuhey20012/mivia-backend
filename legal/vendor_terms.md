@@ -26,6 +26,17 @@
 
 The Seller is responsible for accurate descriptions, prices including VAT, product safety and the legality of the items. Malvoya may remove unlawful listings, and will tell the Seller why.
 
+**Prohibited goods.** Malvoya is a marketplace for clothing, shoes, accessories and beauty. The Seller must not offer, show in drops or lives, or import:
+- knives of any kind, including puukko, machetes, butterfly and switchblade knives;
+- gas and pepper sprays, tear gas, tasers and other self-defence weapons, brass knuckles and telescopic batons;
+- weapons, firearms, air guns and airsoft guns, their parts, and ammunition;
+- fireworks and other explosives, including sparklers;
+- e-cigarettes, vapes, refills, nicotine products, snus, nicotine pouches and tobacco;
+- alcoholic drinks;
+- medicines, medical devices, food supplements, biocides such as hand sanitiser, and classified chemicals such as nail glue and tattoo ink;
+- counterfeit goods, stolen goods, and anything else whose sale is unlawful in Finland.
+Imports that look like these goods are held automatically and cannot be published; listings that break this rule are removed, and repeated breaches lead to suspension.
+
 **Rights in photos and texts.** The Seller may only upload photos, videos, texts, logos and brand names that it owns or is licensed to use for selling on Malvoya (for example its own photos, or material the brand or photographer has authorised in writing). The Seller must not sell counterfeit goods or use another's trademark in a way that suggests a connection that does not exist. The "I have the right to use these photos and texts" confirmation the Seller gives before each catalogue import is a binding statement under these terms. If a rights holder reports a listing, drop or comment, Malvoya handles it as described at [malvoya-api-eu.onrender.com/legal/ip-notice](https://malvoya-api-eu.onrender.com/legal/ip-notice): the Seller is told what was reported and why, can respond (counter-notice), and repeated infringement can lead to suspension (section 8). The Seller is responsible towards the rights holder for content it uploaded.
 
 ### 3a. Product safety
@@ -74,7 +85,8 @@ Business sellers must honour the customer's 14-day right of withdrawal and defec
 
 ## 6. Fees and payouts
 
-- Commission: none. Malvoya charges the Seller no commission and no monthly fee; the Seller receives the full item price of each sale. Malvoya's income is the fees customers pay (such as the delivery fee). If Malvoya ever wants to charge Sellers, it will announce the change at least 15 days in advance, and the Seller may end this agreement before it takes effect.
+- **Commission: 15 % of the item price (excluding the delivery fee), unless agreed otherwise in writing.** The rate that applies to the Seller's store is shown in the store app, and each order keeps the rate in force when it was placed. There is no monthly fee. The commission is deducted from the payout and shown on the monthly statement. A change to the rate is announced at least 15 days in advance (section 7a), and the Seller may end this agreement before it takes effect.
+- **Payment agent.** Malvoya receives payments from customers as the Seller's commercial agent, through Stripe. A customer's payment to Malvoya discharges the customer's obligation to pay the Seller for that order. Malvoya passes the money on to the Seller as set out below, less the commission and any refunds.
 - Payouts are made through Stripe Connect to the Seller's own Stripe account, 15 days after delivery (after the 14-day return window), with refunds deducted. Stripe verifies the Seller's identity and bank account on its own pages.
 - Malvoya provides a monthly statement in the store app listing each order delivered or collected in the month with its sales, refunds and payout (and commission, for orders placed before commission ended), and the month's totals (it can be printed). The statement is a summary for the Seller's records, not a VAT invoice. Discounts from Malvoya's promo and invite codes are paid by Malvoya and do not reduce the Seller's sales or payout.
 
@@ -82,9 +94,33 @@ Business sellers must honour the customer's 14-day right of withdrawal and defec
 
 The Seller may post short videos and photos ("drops") of their own products. The Seller must hold the rights to everything shown (music, logos, people). Malvoya may remove drops that are illegal or break these terms and always tells the Seller why and how to object (Digital Services Act Art. 17).
 
+**Content licence.** The Seller keeps all rights to its photos, videos, texts and other content. It gives Malvoya a non-exclusive, royalty-free, worldwide licence, for as long as the content is on Malvoya and a reasonable time after, to host, copy, resize, transcode, display and share it in the Malvoya apps, on Malvoya's share pages and in links shared by users, and to use it to show the Seller's store and products. Malvoya does not sell the content and does not use it in advertising outside Malvoya without the Seller's consent.
+
+## 6b. Live shopping
+
+Approved stores may go live with their phone camera to show their own products for sale. Lives are not recorded; live-chat messages are kept for 30 days after the live ends. During a live the Seller must:
+- show only its own products that are on sale in the app, at the **same price** as in the app; spoken or shown prices must match;
+- for any reduction it mentions, follow the 30-day rule: the "before" price is the lowest price of the 30 days before the reduction, as shown in the app;
+- not create false urgency (for example invented stock levels, "only today" offers that are not true, or fake countdowns);
+- label paid cooperation and gifts as advertising ("mainos", "yhteistyössä");
+- show minors or other people only with their (or their guardians') consent, and avoid filming bystanders;
+- play music only when it holds a licence that covers online streaming (a licence for a shop's background music does not);
+- run giveaways only under written rules that it shows in the live, that do not require a purchase where the law forbids it, and that comply with Finnish lottery law;
+- moderate the chat: it can hide messages and mute viewers; Malvoya's word filter refuses some abusive words, and three reports from different viewers hide a message until Malvoya decides.
+Malvoya may end a live that breaks these rules or the law, and always tells the Seller why and how to object.
+
+## 6c. Data access
+
+The Seller sees in the store app the data of its own orders that it needs to fulfil them (items, the delivery status and, for its returns, the customer's notes), its products, reviews, statements, payouts, drops and lives. The Seller does not get customers' contact details, delivery addresses beyond what the courier needs, or payment details. Malvoya keeps aggregated marketplace data (for example sales and return rates across stores) and uses it to run and improve the service; it does not give one Seller's data to another Seller. The Seller can export its own data in the app (Account → Download my data) and gets its statements at any time (EU Platform-to-Business Regulation, Art. 9).
+
 ## 7. Ranking
 
-Stores are listed by distance to the customer (when location is shared) and by rating. Malvoya does not sell better placement. [UPDATE IF PAID PLACEMENT IS INTRODUCED.]
+The main parameters that decide where a Seller appears (EU Platform-to-Business Regulation, Art. 5):
+- **Store lists:** stores open now come first, then by distance to the customer's delivery location (when shared), otherwise by the store's rating.
+- **Search results:** newest listing first by default; the customer may sort by price or by store rating. Only products of approved stores within the customer's delivery reach (10 km) are shown, and only products that can be bought.
+- **Drops feed ("For you"):** how new the drop is, how people respond to it (likes, shares, views watched to the end), the distance of the store and the store's rating; "Latest" and "Following" are purely chronological. Nothing is personalised from customers' profiles.
+- **Lives:** lives of stores within reach, most viewers first.
+Malvoya does not sell better placement and no Seller pays to rank higher. If paid placement is ever introduced, these terms will say so in advance.
 
 ## 7a. Accepting these terms and changes to them
 
@@ -98,7 +134,7 @@ Stores are listed by distance to the customer (when location is shared) and by r
 
 - Malvoya gives 30 days' notice before ending the agreement, and immediate suspension only for serious breach or unlawful content.
 - Reasons are always given in writing, and the Seller can use the internal complaint process through the contact form at https://malvoya-api-eu.onrender.com/contact (topic "Seller complaint") or Support in the store app.
-- Mediation is available through [MEDIATOR].
+- Mediation: as a micro or small enterprise, Malvoya is not required to name mediators (EU Platform-to-Business Regulation, Art. 12(7)). If Malvoya chooses to offer mediation, it will be named here: [MEDIATOR — optional, the owner's choice].
 
 ## 9. Law
 

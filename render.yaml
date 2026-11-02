@@ -78,6 +78,19 @@ services:
         sync: false
       - key: LIVEKIT_API_SECRET
         sync: false
+      # 2.17 pricing (the owner's values are set on Render): free delivery from this item subtotal in cents (8000),
+      # and the commission new stores get (0.15); existing stores keep their own rate
+      - key: FREE_DELIVERY_THRESHOLD_CENTS
+        sync: false
+      - key: DEFAULT_COMMISSION_RATE
+        sync: false
+      # 2.17 SMS limits: allowed country prefixes (default +358) and the daily total (default 300)
+      - key: SMS_ALLOWED_PREFIXES
+        sync: false
+      - key: SMS_DAILY_CAP
+        sync: false
+      # Optional (2.17): HANDOVER_PIN_MIN_CENTS (8000), CHECKOUT_USER_LIMIT_PER_HOUR (10), CHECKOUT_IP_LIMIT_PER_HOUR (30),
+      # LIVE_CHAT_BLOCKED_WORDS (comma-separated; replaces the built-in list), HIBP_DISABLED (tests only), OPS_ALERTS_DISABLED
       # Optional: farthest delivery from a store in km (default 10, the catalogue reach)
       # DELIVERY_MAX_KM
       # Optional order-watchdog timers in minutes (defaults shown in the admin panel → System):

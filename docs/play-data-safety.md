@@ -1,7 +1,9 @@
 # Google Play Data safety answers
 
 One form per app: Play Console → app → **Policy and programs → App content → Data safety**.
-These answers come from the code (checked 2026-10-15; crash reporting added 2026-10-30) and `legal/privacy_policy.md`. Where the two disagree, the list at the end says what to fix.
+These answers come from the code (checked 2026-10-15; crash reporting added 2026-10-30; 2.17 additions 2026-11-02) and `legal/privacy_policy.md`. Where the two disagree, the list at the end says what to fix.
+
+> **2.17.0 (read first):** order chat **is stored** (30 days after the order closes) and live chat too (30 days after the live); the **web deletion page exists** at `https://malvoya-api-eu.onrender.com/legal/delete-account` (web requests through `/contact`); **live shopping**: the store app streams **camera video and microphone audio** through LiveKit (relayed, never recorded); **target audience 18+** (every account confirms "I am 18 or older"); new security data: signed-in device names, card fingerprints for fraud checks, courier incident reports from the Help button. The rows below are updated for this.
 
 ## Words Google uses (read this first)
 
@@ -20,7 +22,8 @@ These answers come from the code (checked 2026-10-15; crash reporting added 2026
 | Is all of the user data collected by your app encrypted in transit? | **Yes.** The API, sockets, Stripe, Cloudinary, Firebase and OpenStreetMap are all `https`/`wss`. No `http://` URL and no `usesCleartextTraffic` in the apps. |
 | Which account creation methods does your app support? | Username/password **and** other authentication (Google sign-in, phone number with SMS code). Sign in with Apple exists in code but is for iOS. |
 | Do you provide a way for users to request that their data is deleted? | **Yes** |
-| Delete account URL | **Does not exist yet.** See "Web deletion page" below. It is required. |
+| Delete account URL | `https://malvoya-api-eu.onrender.com/legal/delete-account` (exists since 2.10; web requests through `https://malvoya-api-eu.onrender.com/contact`, topic "Privacy (GDPR) request"). Use the same URL in all three forms. |
+| Target audience (App content → Target audience and content) | **18 and over only.** Every account confirms "I am 18 or older" (2.16); not designed for children; no Families programme. |
 | Data is sold? | No |
 | Advertising or marketing purpose? | Never. No ads SDK, no `AD_ID`. |
 | Independent security review / Families badge | No |
@@ -110,7 +113,7 @@ Not collected: approximate location (not separate from the pin), photos/videos, 
 | **Location → Approximate location** | Yes | No | No | Required to work | App functionality | Same stream, used for "nearest first" offers. Tick it too: Play treats them as separate types. |
 | **Financial info → Other financial info** | Yes | No | No | Required to get paid | App functionality | Earnings, tips, pay breakdowns, payouts. Bank and KYC data on Stripe's pages, not in the app. |
 | **Photos and videos → Photos** | Yes | Yes (the customer of that order) | No | Optional (only door drop-offs) | App functionality, Fraud prevention, security and compliance | Delivery proof photo, private, deleted after 30 days |
-| **Messages → Other in-app messages** | Yes | No | No | Optional | App functionality, Developer communications | Order chat (stored, deleted 30 days after delivery/cancellation) and Help messages (stored) |
+| **Messages → Other in-app messages** | Yes | No | No | Optional | App functionality, Developer communications | Order chat (stored, deleted 30 days after delivery/cancellation), Help messages and **incident reports** from the Help button (2.17: type, note, optional position; stored) |
 | **Device or other IDs** | Yes | No | No | Required | App functionality, Analytics | FCM token, Firebase installation id, Crashlytics installation id |
 
 **Deletion:**
@@ -200,3 +203,11 @@ Fix these before publishing; Play compares the Data safety form, the privacy pol
 - Stripe mobile SDK data (payment info, device characteristics for fraud, analytics): https://support.stripe.com/questions/stripe-mobile-sdk-privacy-details and the Play SDK Index entry https://play.google.com/sdks/details/com-stripe-stripe-android (read 2026-10-15)
 - Google Pay data disclosure for apps: https://developers.google.com/pay/api/android/guides/resources/google-pay-disclosure-requirements (found 2026-10-15)
 - Nominatim usage policy: https://operations.osmfoundation.org/policies/nominatim/ ; tile policy: https://operations.osmfoundation.org/policies/tiles/ (read 2026-10-15)
+
+
+## 2.17 additions per app
+
+- **All apps:** "App info and performance → Other" — signed-in device names (from the User-Agent, never the IP address), failed sign-in counters; purpose: Fraud prevention, security and compliance. "Financial info → Other financial info" — Stripe's card fingerprint (not the card number) for fraud checks, customer app; purpose: Fraud prevention.
+- **Store app:** "Photos and videos → Videos" and "Audio → Voice or sound recordings" now include **live video and audio from the camera and microphone** while the store is live (streamed through LiveKit to viewers, **not recorded** = processed ephemerally), besides drop videos and voice-overs (stored). Declare the **CAMERA** and **RECORD_AUDIO** permissions (Play → App content → Permissions where asked); they are requested only when the feature is used.
+- **Customer app:** live chat messages are stored 30 days after the live; watching a live sends no camera or microphone data.
+- **Status of the "Web deletion page" section below:** done since 2.10 (`legal/account_deletion.md` served at `/legal/delete-account`).
