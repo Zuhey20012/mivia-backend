@@ -35,7 +35,7 @@ class _ForgotPasswordSheet extends StatefulWidget {
 class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
   static const _codeLength = 6;
   static const _resendSeconds = 60;
-  static const _minPassword = 8;
+  static const _minPassword = 10; // API 2.16
   static const _maxPassword = 72; // the server's limit (bcrypt uses the first 72 bytes)
   static const _red = MPalette.red;
 
@@ -171,7 +171,11 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
       return;
     }
     if (!res.ok) {
-      final passwordProblem = res.data['errors']?['fieldErrors']?['password'] != null;
+      // A refused password (too short, or found in data breaches: API 2.16) keeps the code and asks
+      // for another password; the server's message is shown as it is
+      final passwordProblem = res.data['errors']?['fieldErrors']?['password'] != null ||
+          '${res.data['code'] ?? ''}'.contains('PASSWORD') ||
+          (res.rawError ?? '').toLowerCase().contains('password');
       setState(() {
         _busy = false;
         _error = res.errorMessage;

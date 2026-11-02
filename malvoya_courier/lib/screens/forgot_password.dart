@@ -6,6 +6,7 @@ import 'package:malvoya_core/malvoya_core.dart';
 import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
+import '../core/account_security.dart';
 import 'help_screen.dart';
 
 enum _Step { email, code, password, unavailable }
@@ -171,7 +172,7 @@ class _ForgotPasswordSheetState extends State<ForgotPasswordSheet> {
     });
   }
 
-  bool get _longEnough => _password.text.length >= 8;
+  bool get _longEnough => _password.text.length >= kMinPasswordLength;
   bool get _notTooLong => _password.text.length <= 72;
   bool get _notBlank => _password.text.trim().isNotEmpty;
   bool get _passwordOk => _longEnough && _notTooLong && _notBlank;
@@ -421,7 +422,7 @@ class _ForgotPasswordSheetState extends State<ForgotPasswordSheet> {
         ),
       ),
       const SizedBox(height: 6),
-      rule(_longEnough, tr(context, 'At least 8 characters', 'Vähintään 8 merkkiä')),
+      rule(_longEnough, tr(context, 'At least $kMinPasswordLength characters', 'Vähintään $kMinPasswordLength merkkiä')),
       if (!_notTooLong) rule(false, tr(context, 'At most 72 characters', 'Enintään 72 merkkiä')),
       if (typed && !_notBlank) rule(false, tr(context, 'Not only spaces', 'Ei pelkkiä välilyöntejä')),
       _message(),

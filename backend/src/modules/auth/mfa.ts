@@ -232,9 +232,20 @@ export async function completeTwoStepSignIn(mfaToken: string, code: string) {
 
 const codeSchema = z.object({ code: z.string().trim().min(6).max(20) });
 
-/** Two-step sign-in is for admin accounts (the keys to every order, payout and personal record). */
+/**
+ * Two-step sign-in is for accounts that move money or see personal records: admins (required in production) and,
+ * optionally, stores and couriers (since 2.16.0). Customers sign in with Google, Apple, phone or a code instead.
+ */
 function adminOnly(req: AuthRequest) {
-  if (req.user!.role !== "ADMIN") throw new ApiError("Two-step sign-in is available for admin accounts", 403);
+  if (!["ADMIN", "VENDOR", "COURIER"].includes(req.user!.role)) throw new ApiError("Two-step sign-in is available for store, courier and admin accounts", 403);
+}
+
+/** Re-authentication (POST /me/reauth): a current authenticator code of an account with two-step sign-in on. */
+export async function checkAuthenticatorCode(userId: number, code: string) {
+  const u = await loadAccount(userId);
+  if (!u || !u.totpEnabledAt) return false;
+  await checkCode(u, code, false);
+  return true;
 }
 
 export const mfaAuthRoutes = Router();
@@ -259,7 +270,7 @@ mfaMeRoutes.get("/me/mfa", auth, async (req: AuthRequest, res: Response) => {
       ok: true,
       enabled: !!u.totpEnabledAt,
       enabledAt: u.totpEnabledAt,
-      required: env.adminMfaRequired,
+      required: req.user!.role === "ADMIN" && env.adminMfaRequired,
       pending: !u.totpEnabledAt && !!u.totpSecret,
       recoveryCodesLeft: u.totpEnabledAt ? u.totpRecoveryCodes.length : null,
       sessionVerified: !!req.user!.mfa,
@@ -331,7 +342,7 @@ mfaMeRoutes.post("/me/mfa/disable", authLimiter, auth, async (req: AuthRequest, 
     forgetSessionState(u.id); // sessions without the mfa claim count again at once
     await audit(u.id, "mfa.disable");
     void notify(u, "disabled");
-    res.json({ ok: true, enabled: false, required: env.adminMfaRequired });
+    res.json({ ok: true, enabled: false, required: req.user!.role === "ADMIN" && env.adminMfaRequired });
   } catch (e) { sendError(res, e); }
 });
 

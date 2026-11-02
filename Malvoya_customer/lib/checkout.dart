@@ -19,6 +19,8 @@ import 'realtime_notification_service.dart';
 import 'screens/location_selector_modal.dart';
 import 'screens/order_detail.dart';
 import 'widgets/app_image.dart';
+import 'widgets/free_delivery_hint.dart';
+import 'widgets/pre_contract_box.dart';
 import 'screens/main_navigation.dart';
 
 /// Checkout: delivery or "collect from the shop", address, items, an optional courier tip, a promo
@@ -87,6 +89,14 @@ class _CheckoutPageState extends State<CheckoutPage> {
   bool _quoteNow = true;
   Timer? _debounce;
 
+  /// The seller as `GET /stores/:id` describes it (name, trader status, address, contact), for the
+  /// "Before you pay" box. Null until loaded or when it could not be loaded.
+  Map<String, dynamic>? _seller;
+  int? _sellerFor;
+
+  /// Where the receipt goes when the account has no email address (phone sign-in). Optional.
+  final _receiptEmailCtrl = TextEditingController();
+
   @override
   void initState() {
     super.initState();
@@ -114,6 +124,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
     _addressCtrl.dispose();
     _promoCtrl.dispose();
     _notesCtrl.dispose();
+    _receiptEmailCtrl.dispose();
     super.dispose();
   }
 
@@ -313,6 +324,34 @@ class _CheckoutPageState extends State<CheckoutPage> {
     });
   }
 
+  // ── Seller details (pre-contract information) ───────────────────────────
+
+  void _loadSeller(int storeId) {
+    if (_sellerFor == storeId) return;
+    _sellerFor = storeId;
+    _seller = null;
+    final api = ApiClient(Provider.of<AuthService>(context, listen: false));
+    api.get('/stores/$storeId').then((res) {
+      if (!mounted || _sellerFor != storeId || !res.ok || res.data['store'] is! Map) return;
+      setState(() => _seller = Map<String, dynamic>.from(res.data['store'] as Map));
+    });
+  }
+
+  /// The store from `GET /stores/:id`, with any seller details the quote carries on top.
+  Map<String, dynamic>? get _sellerDetails {
+    final fromQuote = _quote?['seller'];
+    if (_seller == null && fromQuote is! Map) return null;
+    return {...?_seller, if (fromQuote is Map) ...Map<String, dynamic>.from(fromQuote)};
+  }
+
+  /// The account has no email address of its own: phone-only accounts carry a placeholder.
+  bool _needsReceiptEmail(AuthService auth) {
+    final email = (auth.currentUser?.email ?? '').trim();
+    return auth.isAuthenticated && (email.isEmpty || email.endsWith('@phone.malvoya.app'));
+  }
+
+  static final _emailPattern = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+
   // ── Address & payment ───────────────────────────────────────────────────
 
   Future<void> _pickAddress() async {
@@ -360,6 +399,11 @@ class _CheckoutPageState extends State<CheckoutPage> {
       await _signInToPay();
       return;
     }
+    final receiptEmail = _needsReceiptEmail(auth) ? _receiptEmailCtrl.text.trim() : '';
+    if (receiptEmail.isNotEmpty && (!_emailPattern.hasMatch(receiptEmail) || receiptEmail.length > 254)) {
+      _fail(tr(context, 'Check the email address for your receipt, or leave it empty.', 'Tarkista kuitin sähköpostiosoite tai jätä kenttä tyhjäksi.'));
+      return;
+    }
 
     setState(() {
       _paying = true;
@@ -384,6 +428,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
               'storeId': cart.storeId,
               'fulfilment': 'PICKUP',
               if (promo != null) 'promoCode': promo,
+              if (receiptEmail.isNotEmpty) 'receiptEmail': receiptEmail,
               'items': _orderItems(cart),
             }
           : {
@@ -396,6 +441,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
               // Door code and instructions reach the courier with the order
               if (notes.isNotEmpty) 'notes': notes.length > 500 ? notes.substring(0, 500) : notes,
               if (slot != null) 'deliverySlot': _slotInput(slot),
+              if (receiptEmail.isNotEmpty) 'receiptEmail': receiptEmail,
               'items': _orderItems(cart),
             },
     );
@@ -492,6 +538,12 @@ class _CheckoutPageState extends State<CheckoutPage> {
     final auth = Provider.of<AuthService>(context, listen: false);
     final key = cart.items.isEmpty || cart.storeId == null ? null : _inputsKey(cart);
     if (key != null && key != _wantedKey) _scheduleQuote(key);
+    final storeId = cart.storeId;
+    if (storeId != null && cart.items.isNotEmpty && storeId != _sellerFor) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _loadSeller(storeId);
+      });
+    }
 
     final loading = key != null && _quotedKey != key;
     final q = _quote;
@@ -612,8 +664,33 @@ class _CheckoutPageState extends State<CheckoutPage> {
                           ],
                         ]),
                       ],
+                      if (_needsReceiptEmail(auth)) ...[
+                        const SizedBox(height: 14),
+                        _section(tr(context, 'Receipt', 'Kuitti'), [
+                          TextField(
+                            controller: _receiptEmailCtrl,
+                            keyboardType: TextInputType.emailAddress,
+                            autocorrect: false,
+                            autofillHints: const [AutofillHints.email],
+                            maxLength: 254,
+                            decoration: InputDecoration(
+                              labelText: tr(context, 'Email for your receipt (optional)', 'Sähköposti kuittia varten (valinnainen)'),
+                              prefixIcon: const Icon(Icons.mail_outline_rounded),
+                              counterText: '',
+                            ),
+                          ),
+                          const SizedBox(height: MSpace.xs),
+                          Text(
+                            tr(context, 'Your account has no email address. We send the order confirmation here; it is also on your order in the app.',
+                                'Tililläsi ei ole sähköpostiosoitetta. Lähetämme tilausvahvistuksen tähän; se löytyy myös tilauksestasi sovelluksessa.'),
+                            style: TextStyle(fontSize: MTextSize.caption, color: AppTheme.secondaryText(context)),
+                          ),
+                        ]),
+                      ],
                       const SizedBox(height: 14),
                       _section(tr(context, 'Summary', 'Yhteenveto'), _summary(q, loading: loading, error: error)),
+                      const SizedBox(height: 14),
+                      PreContractBox(seller: _sellerDetails, fallbackName: cart.storeName, pickup: _pickup),
                     ],
                   ),
                 ),
@@ -656,13 +733,17 @@ class _CheckoutPageState extends State<CheckoutPage> {
       if (_pickup)
         _summaryRow(tr(context, 'Collect from the shop', 'Nouto kaupasta'),
             cents('deliveryFeeCents') == 0 ? tr(context, 'Free', 'Maksuton') : money('deliveryFeeCents'))
-      else
+      else ...[
         _summaryRow(
           [tr(context, 'Delivery', 'Toimitus'), if (_slot != null) (q?['deliverySlot'] is Map ? localized(context, q!['deliverySlot']['label']) : null) ?? localized(context, _slot!['label'])]
               .whereType<String>()
               .join(' · '),
-          money('deliveryFeeCents'),
+          q != null && asInt(q['deliveryFeeCents']) == 0 && asInt(q['freeDeliveryThresholdCents']) != null
+              ? tr(context, 'Free', 'Maksuton')
+              : money('deliveryFeeCents'),
         ),
+        if (q != null) FreeDeliveryHint(quote: q),
+      ],
       if (cents('serviceFeeCents') > 0) ...[
         const SizedBox(height: MSpace.sm),
         _summaryRow(tr(context, 'Service fee', 'Palvelumaksu'), money('serviceFeeCents')),

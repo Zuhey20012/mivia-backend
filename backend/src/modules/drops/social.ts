@@ -1,3 +1,4 @@
+import { reportOutcome, statementOfReasons } from "../me/notices";
 import { Router, Response } from "express";
 import { readIpNotice } from "../../lib/ipNotice";
 import { z } from "zod";
@@ -122,8 +123,12 @@ export async function reportComment(dropId: number, commentId: number, reporterI
     if (e?.code === "P2002") return { reported: true }; // already reported by this user
     throw e;
   }
-  const updated = await prisma.dropComment.update({ where: { id: commentId }, data: { reportCount: { increment: 1 } }, select: { reportCount: true } });
-  if (updated.reportCount >= AUTO_HIDE_REPORTS) await takeDown(commentId, "HIDDEN");
+  const updated = await prisma.dropComment.update({ where: { id: commentId }, data: { reportCount: { increment: 1 } }, select: { reportCount: true, status: true, body: true } });
+  if (updated.reportCount >= AUTO_HIDE_REPORTS && updated.status === "VISIBLE") {
+    await takeDown(commentId, "HIDDEN");
+    // Statement of reasons to the author (DSA Art. 17): hidden automatically until a person decides (2.17)
+    statementOfReasons({ userId: comment.userId, kind: "comment", entityId: commentId, excerpt: updated.body, decision: "hidden", reason: "Reported by three different users", automatic: true }).catch(() => {});
+  }
   return { reported: true };
 }
 
@@ -140,12 +145,22 @@ export async function adminReportedComments() {
   });
 }
 
-export async function adminModerateComment(commentId: number, action: "remove" | "restore") {
-  const comment = await prisma.dropComment.findUnique({ where: { id: commentId }, select: { status: true, dropId: true } });
+export async function adminModerateComment(commentId: number, action: "remove" | "restore", reason?: string) {
+  const comment = await prisma.dropComment.findUnique({
+    where: { id: commentId },
+    select: { status: true, dropId: true, userId: true, body: true, reports: { select: { reporterId: true }, take: 500 } },
+  });
   if (!comment) throw new ApiError("Comment not found", 404);
+  const reporters = comment.reports.map((r) => r.reporterId);
   if (action === "remove") {
     await takeDown(commentId, "REMOVED");
+    // DSA Art. 17 statement to the author; Art. 16(5) outcome to everyone who reported it (2.17)
+    if (comment.status !== "REMOVED") {
+      statementOfReasons({ userId: comment.userId, kind: "comment", entityId: commentId, excerpt: comment.body, decision: "removed", reason: reason?.trim() || "It breaks Malvoya's content rules", automatic: false }).catch(() => {});
+    }
+    reportOutcome(reporters, "comment", commentId, "actioned").catch(() => {});
   } else if (comment.status === "HIDDEN") {
+    reportOutcome(reporters, "comment", commentId, "kept").catch(() => {});
     await prisma.$transaction([
       prisma.dropComment.update({ where: { id: commentId }, data: { status: "VISIBLE", reportCount: 0 } }),
       prisma.dropCommentReport.deleteMany({ where: { commentId } }),
@@ -229,6 +244,18 @@ socialRoutes.put("/stores/:id(\\d+)/follow", auth, async (req: AuthRequest, res:
   } catch (e) { sendError(res, e); }
 });
 
+/** Mute or unmute a followed store (2.17): still followed (Following feed), but no pushes from it. */
+socialRoutes.patch("/stores/:id(\\d+)/follow", auth, async (req: AuthRequest, res: Response) => {
+  const body = z.object({ muted: z.boolean() }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ ok: false, error: "Send muted: true or false" });
+  try {
+    const storeId = positiveId(req.params.id)!;
+    const r = await prisma.storeFollow.updateMany({ where: { userId: req.user!.id, storeId }, data: { muted: body.data.muted } });
+    if (!r.count) throw new ApiError("You are not following this store", 404);
+    res.json({ ok: true, following: true, muted: body.data.muted, followerCount: await prisma.storeFollow.count({ where: { storeId } }) });
+  } catch (e) { sendError(res, e); }
+});
+
 socialRoutes.delete("/stores/:id(\\d+)/follow", auth, async (req: AuthRequest, res: Response) => {
   try {
     res.json({ ok: true, ...(await unfollow(positiveId(req.params.id)!, req.user!.id)) });
@@ -242,9 +269,9 @@ socialRoutes.get("/admin/comments/reported", auth, requireRole("ADMIN"), async (
 });
 
 socialRoutes.post("/admin/comments/:commentId(\\d+)", auth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
-  const body = z.object({ action: z.enum(["remove", "restore"]) }).safeParse(req.body);
+  const body = z.object({ action: z.enum(["remove", "restore"]), reason: z.string().trim().max(500).optional() }).safeParse(req.body);
   if (!body.success) return res.status(400).json({ ok: false, error: "Invalid action" });
   try {
-    res.json({ ok: true, comment: await adminModerateComment(positiveId(req.params.commentId)!, body.data.action) });
+    res.json({ ok: true, comment: await adminModerateComment(positiveId(req.params.commentId)!, body.data.action, body.data.reason) });
   } catch (e) { sendError(res, e); }
 });

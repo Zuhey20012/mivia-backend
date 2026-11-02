@@ -36,8 +36,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
       setState(() => _error = tr(context, 'Please fill in all fields.', 'Täytä kaikki kentät.'));
       return;
     }
-    if (_passCtrl.text.length < 8) {
-      setState(() => _error = tr(context, 'The password needs at least 8 characters.', 'Salasanassa on oltava vähintään 8 merkkiä.'));
+    // API 2.16: new passwords need 10 characters; the server also refuses passwords known from data
+    // breaches, and its message is shown as it is
+    if (_passCtrl.text.length < 10) {
+      setState(() => _error = tr(context, 'The password needs at least 10 characters.', 'Salasanassa on oltava vähintään 10 merkkiä.'));
       return;
     }
     if (!_acceptTerms) {
@@ -132,6 +134,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
               ),
 
+              const SizedBox(height: MSpace.xs),
+              Text(tr(context, 'At least 10 characters. Passwords known from data breaches are refused.', 'Vähintään 10 merkkiä. Tietovuodoista tunnettuja salasanoja ei hyväksytä.'),
+                  style: const TextStyle(fontSize: MTextSize.caption, color: AppTheme.textSecondary)),
               const SizedBox(height: 14),
               // Required: the server records when the Seller Terms were accepted, and which version
               Container(

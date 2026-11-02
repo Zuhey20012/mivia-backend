@@ -8,7 +8,7 @@ export const registerSchema = z.object({
   email: identifier,
   phone: z.string().trim().max(20).optional(),
   // bcrypt only uses the first 72 bytes
-  password: z.string().min(8, "Password must be at least 8 characters").max(72),
+  password: z.string().min(10, "Password must be at least 10 characters").max(72),
   role:  z.enum(["CUSTOMER", "VENDOR", "COURIER"]).default("CUSTOMER"),
   // The agreement for the role (customer terms / seller terms / courier agreement); required for stores and
   // couriers. When given, the time and the version of the text are stored on the account.

@@ -194,6 +194,23 @@ export const env = {
     return Number.isFinite(v) && v > 0 && v <= 200 ? v : 10;
   })(),
   returnWindowDays:  14,  // statutory withdrawal period, counted from delivery
+  // Free delivery (2.17): an item subtotal (before any promo discount) at or above this pays no delivery fee; courier
+  // pay is unchanged (Malvoya pays it). 0 = off.
+  freeDeliveryThresholdCents: cents("FREE_DELIVERY_THRESHOLD_CENTS"),
+  // Commission a new store gets when it is created (fraction of the item price, 0–0.5; 2.17). Admins set per-store
+  // rates on Vendors; existing stores keep theirs.
+  defaultCommissionRate: (() => {
+    const v = Number(process.env.DEFAULT_COMMISSION_RATE);
+    return process.env.DEFAULT_COMMISSION_RATE !== undefined && process.env.DEFAULT_COMMISSION_RATE !== "" && Number.isFinite(v) && v >= 0 && v <= 0.5
+      ? Math.round(v * 100) / 100 : 0;
+  })(),
+  // Orders with a total of at least this get a 4-digit handover PIN for in-person delivery (2.17)
+  handoverPinMinCents: cents("HANDOVER_PIN_MIN_CENTS", 8000),
+  // Checkout velocity (2.17): new orders per customer and per client address per hour
+  checkoutLimits: {
+    perUserPerHour: cents("CHECKOUT_USER_LIMIT_PER_HOUR", 10) || 10,
+    perIpPerHour: cents("CHECKOUT_IP_LIMIT_PER_HOUR", 30) || 30,
+  },
   // Courier pay per job (formula or the old share of the delivery fee); see courierPayConfig above
   courierPay:        courierPayConfig(),
   // Service and small-order fees (all off by default)

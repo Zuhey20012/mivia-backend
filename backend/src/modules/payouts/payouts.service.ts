@@ -5,6 +5,7 @@ import { ApiError } from "../../lib/errors";
 import { env } from "../../config/env";
 import { pushToUser } from "../../lib/push";
 import { euros, t } from "../../lib/i18n";
+import { alertAdmins } from "../../lib/adminAlerts";
 
 const logger = pino({ name: "payouts" });
 
@@ -185,7 +186,11 @@ export async function processDuePayouts() {
       releaseAt: { lte: new Date() },
       // A store is not paid while a return on the order is still open: the refund may take the
       // money back. The payout goes out once the return is refunded (reduced) or rejected.
-      NOT: { party: "STORE", order: { returns: { some: { status: { in: ["REQUESTED", "APPROVED", "IN_TRANSIT", "RECEIVED"] } } } } },
+      NOT: [
+        { party: "STORE", order: { returns: { some: { status: { in: ["REQUESTED", "APPROVED", "IN_TRANSIT", "RECEIVED"] } } } } },
+        // A chargeback freezes the store's payout until the dispute is won (2.17)
+        { party: "STORE", order: { disputedAt: { not: null }, disputeStatus: { notIn: ["won", "warning_closed"] } } },
+      ],
     },
     include: {
       order: { select: { stripePaymentIntentId: true, totalCents: true, refundedCents: true, sellerPayoutCents: true } },
@@ -243,6 +248,7 @@ export async function processDuePayouts() {
     } catch (err: any) {
       logger.error({ payoutId: p.id, err: err?.message }, "Transfer failed");
       await prisma.payout.update({ where: { id: p.id }, data: { status: "FAILED", failureReason: String(err?.message ?? "Transfer failed").slice(0, 300) } });
+      alertAdmins(`Payout #${p.id} failed`, [`The ${p.party === "STORE" ? "store" : "courier"} payout for order #${p.orderId} could not be sent. Retry it under Payouts once the cause is fixed.`], { type: "payout", payoutId: String(p.id) }).catch(() => {});
     }
   }
 }

@@ -18,6 +18,8 @@ import { availableSlots } from "../../utils/deliverySlots";
 import { readyForApprovalList } from "../onboarding/onboarding";
 import { unpublishedLegalChanges } from "../legal/admin.legal";
 import { LEGAL_DOCS, DOC_KEYS, legalState, versionText } from "../legal/legalDocs";
+import { allSwitches } from "../../lib/settings";
+import { smsLimits } from "../auth/otp.service";
 
 const startedAt = new Date();
 
@@ -77,6 +79,13 @@ export function integrationStatus() {
  */
 export async function getSystemStatus(_req: Request, res: Response) {
   try {
+    res.json({ ok: true, ...(await systemSnapshot()) });
+  } catch (e) { sendError(res, e); }
+}
+
+/** Everything System shows; the ops-alerts job reads `attention` from it (2.17). */
+export async function systemSnapshot() {
+  {
     const t = env.orderTimers;
     const fresh = new Date(Date.now() - 10 * 60_000);
     const [
@@ -187,17 +196,33 @@ export async function getSystemStatus(_req: Request, res: Response) {
     if (admins > adminsWithTwoStep) {
       attention.push(`${admins - adminsWithTwoStep} admin account(s) without two-step sign-in${env.adminMfaRequired ? " (they can only set it up until they do: Security)" : ": turn it on under Security"}`);
     }
+    // 2.17: chargebacks, courier incidents, approved stores that changed name/address, reported live messages, switches
+    const [disputes, incidents, changedStores, reportedLiveMessages, switches] = await Promise.all([
+      prisma.order.findMany({ where: { disputedAt: { not: null }, disputeStatus: { notIn: ["won", "lost", "warning_closed", "closed"] } }, select: { id: true, disputeStatus: true }, orderBy: { disputedAt: "asc" }, take: 20 }),
+      prisma.courierIncident.findMany({ where: { status: "OPEN" }, select: { id: true, type: true, createdAt: true, courier: { select: { name: true } } }, orderBy: { createdAt: "asc" }, take: 20 }),
+      prisma.store.findMany({ where: { changedAfterApprovalAt: { not: null }, isVerified: true }, select: { id: true, name: true, changedFields: true }, orderBy: { changedAfterApprovalAt: "asc" }, take: 20 }),
+      prisma.liveMessage.count({ where: { reportCount: { gt: 0 }, reviewedAt: null } }),
+      allSwitches(),
+    ]);
+    for (const d of disputes) attention.push(`Order #${d.id}: chargeback (${d.disputeStatus ?? "open"}): answer it in Stripe; the store's payout is held (Disputes)`);
+    for (const i of incidents) attention.push(`Courier incident #${i.id} (${i.type.toLowerCase()}) from ${i.courier.name}: contact the courier and resolve it (Incidents)`);
+    for (const st of changedStores) attention.push(`Store "${st.name}" (#${st.id}) changed its ${st.changedFields.join(", ")} after approval: check and approve again (Vendors)`);
+    if (reportedLiveMessages) attention.push(`${reportedLiveMessages} reported live chat message(s) to look at (Live)`);
+    for (const sw of switches) {
+      if (sw.key.endsWith("Enabled") ? !sw.on : sw.on) attention.push(`Switch on: ${sw.label}${sw.key.endsWith("Enabled") ? " is OFF" : ""} (Switches)`);
+    }
 
-    res.json({
-      ok: true,
-      version: "2.16.1",
+    return {
+      version: "2.17.0",
       region: "frankfurt",
       startedAt,
       readyForOrders: blockers.length === 0,
       blockers,
       attention,
       integrations,
-      security: { adminTwoStepRequired: env.adminMfaRequired, admins, adminsWithTwoStep },
+      security: { adminTwoStepRequired: env.adminMfaRequired, admins, adminsWithTwoStep, sms: smsLimits() },
+      // Runtime switches (2.17): same shape as GET /admin/settings
+      switches,
       marketplace: {
         liveStores: liveStores.length, storesOpenNow, pendingStores,
         approvedCouriers, onlineCouriers, pendingCouriers,
@@ -224,9 +249,13 @@ export async function getSystemStatus(_req: Request, res: Response) {
         courierPay: courierPaySummary(),
         // Customer delivery fee by distance (DELIVERY_FEE_* env vars); flat fee when the distance is unknown
         deliveryFee: { ...env.deliveryFee, unknownDistanceCents: env.deliveryFeeCents },
+        // Free delivery from this item subtotal (FREE_DELIVERY_THRESHOLD_CENTS, 0 = off) and the commission new stores get
+        freeDeliveryThresholdCents: env.freeDeliveryThresholdCents,
+        defaultCommissionRate: env.defaultCommissionRate,
+        handoverPinMinCents: env.handoverPinMinCents,
       },
       apps: appConfigSummary(),
       backgroundJobs: jobs.map((j) => ({ name: j.name, lastRunAt: j.lastRunAt })),
-    });
-  } catch (e) { sendError(res, e); }
+    };
+  }
 }

@@ -4,6 +4,7 @@ import { Euro, Percent, Bell } from 'lucide-react';
 import { isAxiosError } from 'axios';
 import Layout from '../components/Layout';
 import api from '../utils/api';
+import { readFreeDeliveryThreshold, readDefaultCommission, percent } from '../utils/pricing';
 
 // The fee part of GET /admin/system (read-only here: fees are env vars on Render, commission is set per store)
 type Pricing = {
@@ -26,10 +27,13 @@ function Row({ label, value }: { label: string; value: string }) {
 export default function Settings() {
   const [pricing, setPricing] = useState<Pricing | null>(null);
   const [error, setError] = useState('');
+  // Contract F (2.16): null while loading or when the API does not report it
+  const [freeFrom, setFreeFrom] = useState<number | null>(null);
+  const [defaultCommission, setDefaultCommission] = useState<number | null>(null);
 
   useEffect(() => {
     api.get('/admin/system')
-      .then((r) => setPricing(r.data.pricing ?? null))
+      .then((r) => { setPricing(r.data.pricing ?? null); setFreeFrom(readFreeDeliveryThreshold(r.data)); setDefaultCommission(readDefaultCommission(r.data)); })
       .catch((e) => setError((isAxiosError(e) && e.response?.data?.error) || 'Could not load the current fees.'));
   }, []);
 
@@ -64,11 +68,17 @@ export default function Settings() {
               <p className="text-xs text-gray-400">Malvoya's share of each store's item sales</p>
             </div>
           </div>
+          {defaultCommission !== null && (
+            <div className="flex flex-col text-sm mb-4">
+              <Row label="New stores start at" value={percent(defaultCommission)} />
+            </div>
+          )}
           <p className="text-sm text-gray-600">
-            Every store starts at 0 %: stores keep 100 % of their item sales (paid out through Stripe 15 days after delivery,
-            less refunds). When you want to charge one, set its rate on <Link to="/vendors" className="text-blue-600 hover:underline">Vendors</Link>.
-            A rate applies to new orders only, is recorded in the store's commission history, and needs the seller terms
-            updated on Legal at least 15 days before (they say there is no commission).
+            A new store gets the default rate when it is created ({defaultCommission !== null ? percent(defaultCommission) : 'DEFAULT_COMMISSION_RATE on Render'});
+            stores created before keep their own rate. Change a single store's rate on <Link to="/vendors" className="text-blue-600 hover:underline">Vendors</Link>:
+            it applies to new orders only and is recorded in the store's commission history. The seller terms state the commission
+            rate; charging a store more than the published rate needs updated seller terms published on Legal at least 15 days before.
+            The store keeps the rest of its item sales (paid out through Stripe 15 days after delivery, less refunds).
           </p>
         </div>
 
@@ -87,13 +97,14 @@ export default function Settings() {
             <div className="flex flex-col text-sm mb-4">
               {fee && <Row label="Delivery fee" value={`${euro(fee.baseCents)} for the first ${fee.baseKm} km, then ${euro(fee.perKmCents)}/km, at most ${euro(fee.maxCents)}`} />}
               {fee && <Row label="Delivery fee when the distance is unknown" value={euro(fee.unknownDistanceCents)} />}
+              {freeFrom !== null && <Row label="Free delivery" value={freeFrom > 0 ? `When the items cost ${euro(freeFrom)} or more (before promo discounts); Malvoya still pays the courier` : 'Off'} />}
               <Row label="Service fee" value={serviceFee} />
               <Row label="Small-order fee" value={smallOrder} />
               <Row label="Smallest card charge" value={euro(pricing.minChargeCents)} />
             </div>
           ) : !error && <p className="text-sm text-gray-400 mb-4">Loading…</p>}
           <p className="text-xs text-gray-400">
-            These are changed with the <code>DELIVERY_FEE_*</code>, <code>SERVICE_FEE_*</code> and <code>SMALL_ORDER_*</code> settings
+            These are changed with the <code>DELIVERY_FEE_*</code>, <code>FREE_DELIVERY_THRESHOLD_CENTS</code>, <code>SERVICE_FEE_*</code> and <code>SMALL_ORDER_*</code> settings
             on Render (the API restarts with the new values). Courier pay and the delivery margin are on{' '}
             <Link to="/system" className="text-blue-600 hover:underline">System</Link>.
           </p>

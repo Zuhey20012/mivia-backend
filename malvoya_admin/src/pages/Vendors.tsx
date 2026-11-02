@@ -3,6 +3,7 @@ import { Search, Store, CheckCircle, XCircle, RefreshCw, Pencil } from 'lucide-r
 import Layout from '../components/Layout';
 import api from '../utils/api';
 import { BusinessCheckBadge, type BusinessCheck } from '../components/BusinessCheckBadge';
+import { readDefaultCommission } from '../utils/pricing';
 
 interface Vendor {
   id: number; name: string; category: string;
@@ -29,6 +30,12 @@ export default function Vendors() {
   const [search, setSearch] = useState('');
   const [actionId, setActionId] = useState<number | null>(null);
   const [editing, setEditing] = useState<{ id: number; percent: string } | null>(null);
+  // Rate a new store gets (DEFAULT_COMMISSION_RATE, 2.16) = the rate the published seller terms state; null = not reported
+  const [defaultRate, setDefaultRate] = useState<number | null>(null);
+
+  useEffect(() => {
+    api.get('/admin/system').then((r) => setDefaultRate(readDefaultCommission(r.data))).catch(() => { /* the warning then names no number */ });
+  }, []);
 
   const load = async () => {
     setLoading(true);
@@ -71,9 +78,13 @@ export default function Vendors() {
     }
     const old = Math.round(v.commissionRate * 100);
     if (pct === old) { setEditing(null); return; }
-    // The seller terms promise no commission (2.13): charging one needs new terms published on Legal first
-    const termsNote = old === 0 && pct > 0
-      ? '\n\nThe seller terms say Malvoya takes no commission. Publish updated seller terms on Legal (at least 15 days\' notice) before charging one.'
+    // New stores start at the default rate (2.16), which is the rate the published seller terms state. Charging a store
+    // more than that needs updated seller terms published on Legal first (at least 15 days' notice).
+    const termsPct = defaultRate !== null ? Math.round(defaultRate * 100) : null;
+    const termsNote = pct > old && (termsPct === null || pct > termsPct)
+      ? termsPct !== null
+        ? `\n\nThe published seller terms state a commission of ${termsPct} %. Charging more needs updated seller terms published on Legal (at least 15 days' notice) before the new rate is used.`
+        : '\n\nCheck the commission rate the published seller terms state. Charging more than that needs updated seller terms published on Legal (at least 15 days\' notice) before the new rate is used.'
       : '';
     if (!confirm(`Change the commission of "${v.name}" from ${old} % to ${pct} %?\n\nIt applies to new orders only; existing orders keep their commission.${termsNote}`)) return;
     setActionId(v.id);
@@ -99,6 +110,7 @@ export default function Vendors() {
           <h1 style={{ fontSize:'1.5rem', fontWeight:600, letterSpacing:'-0.02em' }}>Vendors</h1>
           <p style={{ color:'#8E8E93', fontSize:'0.875rem', marginTop:'0.25rem' }}>
             {vendors.length} store{vendors.length !== 1 ? 's' : ''} · {vendors.filter(v=>!v.isVerified).length} pending approval
+            {defaultRate !== null && ` · new stores start at ${Math.round(defaultRate * 100)} % commission`}
           </p>
         </div>
         <button onClick={load} style={{ display:'flex',alignItems:'center',gap:'0.375rem',color:'#0071E3',fontSize:'0.875rem',fontWeight:500,background:'none',border:'none',cursor:'pointer' }}>

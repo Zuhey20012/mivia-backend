@@ -23,6 +23,12 @@ import { RIDE_SPEED_KMH, calcCourierPay, courierPayOf, presentCourierPay, withAp
 import { freshPosition } from "../../utils/courierPosition";
 import { Slot, SlotInput, availableSlots, beforeDispatch, checkSlot, scheduledDispatchHorizon, scheduledFee, windowText } from "../../utils/deliverySlots";
 import { Text, euros, joinText, lowerFirst, t } from "../../lib/i18n";
+import { assertOpen } from "../../lib/settings";
+import { audit } from "../../lib/audit";
+import { bump, peek, setFlag } from "../../lib/counters";
+import { legalState } from "../legal/legalDocs";
+import { isDeliverableEmail } from "../../services/notificationDeliveryService";
+import { sellerInfo } from "../stores/sellerInfo";
 
 const logger = pino({ name: "orders" });
 
@@ -41,8 +47,14 @@ type Db = Prisma.TransactionClient | typeof prisma;
 
 type CheckoutInput = {
   storeId: number; fulfilment?: Fulfilment; deliveryLat?: number; deliveryLng?: number; items: ItemInput[];
-  tipCents?: number; promoCode?: string; deliverySlot?: SlotInput;
+  tipCents?: number; promoCode?: string; deliverySlot?: SlotInput; receiptEmail?: string;
 };
+
+/** Free delivery (2.17): the item subtotal before any promo discount reaches FREE_DELIVERY_THRESHOLD_CENTS. */
+export function freeDeliveryFor(subtotalCents: number) {
+  const threshold = env.freeDeliveryThresholdCents;
+  return threshold > 0 && subtotalCents >= threshold;
+}
 
 /** A courier counts as "at the shop" within this distance. */
 const ARRIVAL_RADIUS_KM = 0.3;
@@ -153,8 +165,9 @@ function priceCheckout(
     throw new OrderError(`This address is too far from the store for delivery (at most ${env.deliveryMaxKm} km). Choose Reserve & collect or a store nearer to you.`, 409);
   }
   const fullFeeCents = deliveryFeeForDistance(distanceKm);
-  // A scheduled slot may carry a platform discount on the delivery fee (never below 0)
-  const deliveryFeeCents = slot ? scheduledFee(fullFeeCents) : fullFeeCents;
+  // A scheduled slot may carry a platform discount on the delivery fee (never below 0); free delivery from the
+  // threshold (2.17) makes it 0. Courier pay below is computed from the full fee either way: Malvoya pays it.
+  const deliveryFeeCents = freeDeliveryFor(subtotalCents) ? 0 : slot ? scheduledFee(fullFeeCents) : fullFeeCents;
   const tipCents = input.tipCents ?? 0;
   // Courier pay is computed on its own (per-job formula), not from what the customer pays for delivery; the
   // scheduled-delivery discount is Malvoya's, so courier pay uses the undiscounted fee (fee_share mode)
@@ -187,8 +200,12 @@ function presentSlot(s: Slot, feeCents: number) {
  * Checks the code typed at checkout: a promo code, or (when referrals are on and no promo code has that name)
  * another customer's invite code. "Cannot be used" becomes an OrderError with the user-readable reason.
  */
-async function promoForCheckout(db: Db, code: string | undefined, userId: number, subtotalCents: number): Promise<CheckoutDiscount | null> {
+async function promoForCheckout(db: Db, code: string | undefined, userId: number, subtotalCents: number, storeOwnerId?: number): Promise<CheckoutDiscount | null> {
   if (!code?.trim()) return null;
+  // Platform-funded discounts never go to a store buying from itself (2.17)
+  if (storeOwnerId !== undefined && storeOwnerId === userId) {
+    throw new OrderError("Discount codes cannot be used on your own store's products. / Alennuskoodeja ei voi käyttää oman kauppasi tuotteisiin.", 409);
+  }
   try {
     const normalized = normalizeCode(code);
     if (!(await db.promoCode.findUnique({ where: { code: normalized }, select: { id: true } }))) {
@@ -222,7 +239,7 @@ export async function quoteOrder(userId: number, input: CheckoutInput) {
   let promo: CheckoutDiscount | null = null;
   let promoError: string | null = null;
   try {
-    promo = await promoForCheckout(prisma, input.promoCode, userId, subtotalCents);
+    promo = await promoForCheckout(prisma, input.promoCode, userId, subtotalCents, store.ownerId);
   } catch (e) {
     if (!(e instanceof OrderError)) throw e;
     promoError = e.message;
@@ -233,6 +250,8 @@ export async function quoteOrder(userId: number, input: CheckoutInput) {
   const cfg = env.pricing;
   const availability = storeAvailability(store);
   const delivery = input.fulfilment !== "PICKUP";
+  const threshold = env.freeDeliveryThresholdCents;
+  const seller = await sellerInfo(store);
   return {
     subtotalCents: pricing.subtotalCents,
     deliveryFeeCents: pricing.deliveryFeeCents,
@@ -247,7 +266,11 @@ export async function quoteOrder(userId: number, input: CheckoutInput) {
     promoError,
     fulfilment: input.fulfilment ?? "DELIVERY",
     ...(input.fulfilment === "PICKUP" ? { pickup: { storeName: store.name, address: store.address } } : {}),
-    store: { openNow: availability.openNow, closedReason: availability.closedReason, opensAt: availability.opensAt },
+    // Free delivery from this item subtotal (0 = off); how much more is needed (0 once reached or off; null for pickup)
+    freeDeliveryThresholdCents: threshold,
+    amountToFreeDeliveryCents: input.fulfilment === "PICKUP" ? null : threshold > 0 ? Math.max(0, threshold - pricing.subtotalCents) : 0,
+    // Pre-contract information (2.17): who sells, trader status, contact, withdrawal right and return cost
+    store: { openNow: availability.openNow, closedReason: availability.closedReason, opensAt: availability.opensAt, id: store.id, name: store.name, ...seller, seller },
     // Scheduled delivery: the slots this store can deliver in (today/tomorrow), each with its delivery fee,
     // and the one picked (null = as soon as possible). Pickup orders have none.
     slots: delivery ? availableSlots(store).map((s) => presentSlot(s, scheduledFee(fullFeeCents))) : [],
@@ -255,7 +278,20 @@ export async function quoteOrder(userId: number, input: CheckoutInput) {
   };
 }
 
+/** Admin switches (2.17): all orders, delivery or pickup paused → 503 with the switch's message. */
+async function assertOrdersOpen(fulfilment: Fulfilment | undefined) {
+  await assertOpen("ordersPaused");
+  await assertOpen(fulfilment === "PICKUP" ? "pickupPaused" : "deliveryPaused");
+}
+
+/** After 4 failed payments in an hour a customer's new checkouts are refused for 1 hour (2.17, card testing). */
+const PAYMENT_FAILURES_BEFORE_LOCK = 4;
+
 export async function createOrder(userId: number, input: CheckoutInput & { deliveryAddress?: string; notes?: string }) {
+  await assertOrdersOpen(input.fulfilment);
+  if ((await peek(`checkout-lock:${userId}`)).count > 0) {
+    throw new OrderError("Several payments failed in a row, so checkout is paused for an hour. Check your card or try another payment method later.", 429, { code: "CHECKOUT_LOCKED" });
+  }
   const store = await loadOrderStore(input.storeId);
   const availability = storeAvailability(store);
   if (!availability.openNow) throw closedStoreError(availability);
@@ -291,7 +327,7 @@ export async function createOrder(userId: number, input: CheckoutInput & { deliv
     return prisma.$transaction(async (tx) => {
       const { subtotalCents, lines } = await priceItems(tx, store.id, input.items, true);
       // A code that cannot be used is refused (409), so the customer never pays a different price than quoted.
-      const promo = await promoForCheckout(tx, input.promoCode, userId, subtotalCents);
+      const promo = await promoForCheckout(tx, input.promoCode, userId, subtotalCents, store.ownerId);
       const { pricing, distanceKm, courierPay } = priceCheckout(store, input, subtotalCents, promo, slot);
       if (pricing.totalCents < MIN_CHARGE_CENTS) throw new OrderError(`The minimum order is ${formatCents(MIN_CHARGE_CENTS)}`);
       // A scheduled order is promised its window (scheduledStart–scheduledEnd), not a "minutes from now" estimate
@@ -306,6 +342,7 @@ export async function createOrder(userId: number, input: CheckoutInput & { deliv
           deliveryLat: pickup ? null : input.deliveryLat,
           deliveryLng: pickup ? null : input.deliveryLng,
           notes: input.notes,
+          receiptEmail: input.receiptEmail?.trim().toLowerCase() || null,
           ...pricing, // includes tipCents and courierFeeCents (the tip goes to the courier in full, no commission)
           // the breakdown behind courierFeeCents; none for pickup (no courier)
           ...(courierPay ? { courierPay: courierPay as unknown as Prisma.InputJsonValue } : {}),
@@ -345,7 +382,20 @@ export async function createOrder(userId: number, input: CheckoutInput & { deliv
 }
 
 /** Called from the Stripe webhook once the money has actually arrived. */
-export async function markOrderPaid(orderId: number, paymentIntentId: string, amountReceived: number) {
+/** The payment's card fingerprint (same card = same value across accounts), from the expanded or retrieved charge. */
+async function cardFingerprintOf(latestCharge: unknown): Promise<string | null> {
+  try {
+    let charge: any = latestCharge;
+    if (typeof latestCharge === "string" && latestCharge) charge = await getStripe().charges.retrieve(latestCharge);
+    const fp = charge?.payment_method_details?.card?.fingerprint;
+    return typeof fp === "string" && fp ? fp.slice(0, 100) : null;
+  } catch (e: any) {
+    logger.warn({ err: e?.message }, "Card fingerprint not read");
+    return null;
+  }
+}
+
+export async function markOrderPaid(orderId: number, paymentIntentId: string, amountReceived: number, extra: { latestCharge?: unknown } = {}) {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
     omit: { referrerId: false },
@@ -365,7 +415,7 @@ export async function markOrderPaid(orderId: number, paymentIntentId: string, am
   }
   if (order.status === "CANCELLED") {
     // Paid after it was cancelled (e.g. slow SEPA): give the money back.
-    await getStripe().refunds.create({ payment_intent: paymentIntentId }, { idempotencyKey: `late-refund-${orderId}` });
+    await getStripe().refunds.create({ payment_intent: paymentIntentId, metadata: { source: "malvoya" } }, { idempotencyKey: `late-refund-${orderId}` });
     await prisma.order.update({ where: { id: orderId }, data: { paymentStatus: "REFUNDED", refundedCents: order.totalCents } });
     return;
   }
@@ -373,19 +423,43 @@ export async function markOrderPaid(orderId: number, paymentIntentId: string, am
   // A promo code counts as used only once the order is paid (released again if it is cancelled before delivery).
   // The same goes for an invite code (one referral per new customer). Pickup orders get their handover code now.
   const pickup = order.fulfilment === "PICKUP";
+  const cardFingerprint = await cardFingerprintOf(extra.latestCharge);
+  // Expensive deliveries get a handover PIN the customer tells the courier (2.17)
+  const needsPin = !pickup && order.totalCents >= env.handoverPinMinCents;
   // Only an order that is still open becomes paid: the watchdog may cancel it between the read above and now
   const marked = await prisma.order.updateMany({
     where: { id: orderId, status: { not: "CANCELLED" }, paymentStatus: { not: "SUCCEEDED" } },
-    data: { paymentStatus: "SUCCEEDED", paidAt: new Date(), ...(pickup ? { pickupCode: newPickupCode() } : {}) },
+    data: {
+      paymentStatus: "SUCCEEDED", paidAt: new Date(), ...(pickup ? { pickupCode: newPickupCode() } : {}),
+      ...(needsPin ? { handoverPin: String(crypto.randomInt(0, 10_000)).padStart(4, "0") } : {}),
+      ...(cardFingerprint ? { cardFingerprint } : {}),
+    },
   });
   if (marked.count !== 1) {
     const now = await prisma.order.findUnique({ where: { id: orderId }, select: { status: true, paymentStatus: true } });
     if (now?.status === "CANCELLED" && now.paymentStatus !== "SUCCEEDED" && now.paymentStatus !== "REFUNDED") {
       // Cancelled meanwhile: the money that just arrived goes back
-      await getStripe().refunds.create({ payment_intent: paymentIntentId }, { idempotencyKey: `late-refund-${orderId}` });
+      await getStripe().refunds.create({ payment_intent: paymentIntentId, metadata: { source: "malvoya" } }, { idempotencyKey: `late-refund-${orderId}` });
       await prisma.order.update({ where: { id: orderId }, data: { paymentStatus: "REFUNDED", refundedCents: order.totalCents } });
     }
     return;
+  }
+  // Linked accounts (2.17): a first-order offer or an invite code paid with a card that already paid an earlier order
+  // (on any account) is refused after the fact: the order is cancelled and fully refunded
+  if (cardFingerprint && (order.referrerId || order.promoCodeId)) {
+    const firstOrderOffer = order.referrerId
+      || (await prisma.promoCode.findUnique({ where: { id: order.promoCodeId! }, select: { firstOrderOnly: true } }))?.firstOrderOnly;
+    const seen = firstOrderOffer ? await prisma.order.count({
+      where: { id: { not: orderId }, cardFingerprint, paymentStatus: { in: ["SUCCEEDED", "REFUNDED"] }, status: { not: "CANCELLED" } },
+    }) : 0;
+    if (seen > 0) {
+      logger.warn({ orderId }, "First-order offer paid with a card already used for another order: cancelled");
+      await cancelOrderInternal(orderId, "First-order offer already used with this card", {
+        customerMessage: t("The first-order offer was already used with this payment card, so the order was cancelled. Order again without the code.",
+          "Ensimmäisen tilauksen etu on jo käytetty tällä maksukortilla, joten tilaus peruttiin. Tilaa uudelleen ilman koodia."),
+      });
+      return;
+    }
   }
   await prisma.$transaction([
     ...(order.referrerId
@@ -426,11 +500,16 @@ export async function markOrderPaid(orderId: number, paymentIntentId: string, am
     channel: "new_orders",
   }).catch(() => {});
 
+  const termsVersion = (await legalState("terms").catch(() => null))?.current?.version ?? null;
   sendOrderConfirmation({
     orderId: order.id,
     customerName: order.user.name,
-    email: order.user.email,
+    // Phone-only accounts have no deliverable address: the receipt address given at checkout (2.17)
+    email: isDeliverableEmail(order.user.email) ? order.user.email : (await prisma.order.findUnique({ where: { id: orderId }, select: { receiptEmail: true } }))?.receiptEmail ?? null,
     storeName: order.store.name,
+    seller: { type: order.store.sellerType, address: order.store.address, businessId: order.store.businessId, email: order.store.email, phone: order.store.phone },
+    fulfilment: order.fulfilment,
+    termsVersion,
     items: order.items.map((i) => ({ name: i.product.name, quantity: i.quantity, unitCents: i.unitCents, hygieneSealed: i.hygieneSealed })),
     subtotalCents: order.subtotalCents,
     deliveryFeeCents: order.deliveryFeeCents,
@@ -449,6 +528,9 @@ export async function markOrderPaymentFailed(orderId: number, paymentIntentId: s
   const order = await prisma.order.findUnique({ where: { id: orderId } });
   if (!order || order.stripePaymentIntentId !== paymentIntentId || order.paymentStatus === "SUCCEEDED") return;
   await prisma.order.update({ where: { id: orderId }, data: { paymentStatus: "FAILED" } });
+  // Card testing: 4 failed payments within an hour pause the customer's checkout for an hour (2.17)
+  const fails = await bump(`payfail:${order.userId}`, 3600_000);
+  if (fails.count >= PAYMENT_FAILURES_BEFORE_LOCK) await setFlag(`checkout-lock:${order.userId}`, 3600_000);
   emitOrderStatus(orderId, { status: order.status, paymentStatus: "FAILED" });
 }
 
@@ -508,7 +590,7 @@ export async function cancelOrderInternal(
         const refundable = updated.totalCents - updated.refundedCents;
         if (refundable > 0) {
           await getStripe().refunds.create(
-            { payment_intent: order.stripePaymentIntentId, amount: refundable },
+            { payment_intent: order.stripePaymentIntentId, amount: refundable, metadata: { source: "malvoya" } },
             { idempotencyKey: `cancel-refund-${orderId}` }
           );
           await prisma.order.update({ where: { id: orderId }, data: { paymentStatus: "REFUNDED", refundedCents: order.totalCents } });
@@ -854,11 +936,16 @@ export async function collectOrder(orderId: number, userId: number, code: string
  * The courier completes a delivery: handed over in person, or left at the door with a photo.
  * The courier's position at handover is stored with the order as proof of delivery.
  */
+/** An in-person handover must happen at the door (2.17): a fresh courier position within this distance. */
+const HANDOVER_RADIUS_KM = 0.25;
+const PIN_MAX_ATTEMPTS = 5;
+const PIN_LOCK_MINUTES = 15;
+
 export async function deliverOrder(orderId: number, userId: number, input: {
-  method: "IN_PERSON" | "PHOTO"; upload?: UploadProof; latitude?: number; longitude?: number;
+  method: "IN_PERSON" | "PHOTO"; upload?: UploadProof; latitude?: number; longitude?: number; handoverPin?: string;
 }) {
   const courier = await requireApprovedCourier(userId);
-  const order = await prisma.order.findUnique({ where: { id: orderId }, include: { user: { select: { email: true } } } });
+  const order = await prisma.order.findUnique({ where: { id: orderId }, omit: { handoverPin: false }, include: { user: { select: { email: true } } } });
   if (!order || order.courierId !== courier.id) throw new OrderError("Order not found", 404);
   if (order.status !== "SHIPPED") throw new OrderError("Pick the order up before completing the delivery", 409);
 
@@ -867,6 +954,17 @@ export async function deliverOrder(orderId: number, userId: number, input: {
     if (!input.upload) throw new OrderError("Take a photo of where you left the order");
     await verifyOwnedUpload("delivery_proof", { id: userId, role: "COURIER" }, input.upload, orderId);
     proofId = input.upload.publicId;
+  } else {
+    // In person: the courier must be at the delivery point now (the position sent with this request, or one reported
+    // in the last 2 minutes), otherwise the delivery needs a photo (2.17)
+    const sent = input.latitude !== undefined && input.longitude !== undefined ? { lat: input.latitude, lng: input.longitude } : null;
+    const pos = sent ?? freshPosition(courier);
+    const atDoor = !!pos && order.deliveryLat !== null && order.deliveryLng !== null
+      && haversineKm(pos.lat, pos.lng, order.deliveryLat, order.deliveryLng) <= HANDOVER_RADIUS_KM;
+    if (!atDoor) {
+      throw new OrderError("Your position is not at the delivery address (within 250 m) or is not known right now. Complete the delivery with a photo instead.", 409, { code: "PHOTO_REQUIRED" });
+    }
+    if (order.handoverPin) await checkHandoverPin(order.id, order.handoverPin, input.handoverPin, order.pickupLockedUntil);
   }
 
   const updated = await prisma.$transaction(async (tx) => {
@@ -883,11 +981,41 @@ export async function deliverOrder(orderId: number, userId: number, input: {
     });
     if (res.count === 0) throw new OrderError("The order changed in the meantime, please refresh", 409);
     await tx.courier.updateMany({ where: { id: courier.id, currentOrderId: orderId }, data: { currentOrderId: null } });
-    return tx.order.findUniqueOrThrow({ where: { id: orderId }, omit: { courierPay: false } });
+    return withPinFlag(await tx.order.findUniqueOrThrow({ where: { id: orderId }, omit: { courierPay: false, handoverPin: false } }));
   });
 
   afterStatusChange(updated, order.user.email, "DELIVERED");
   return updated;
+}
+
+/**
+ * The customer's 4-digit PIN; 5 wrong ones lock the in-person handover for 15 minutes (a photo still works). Wrong
+ * PINs reuse pickupFailedAttempts / pickupLockedUntil (delivery orders never use them for pickup).
+ */
+async function checkHandoverPin(orderId: number, pin: string, given: string | undefined, lockedUntil: Date | null) {
+  const now = new Date();
+  if (lockedUntil && lockedUntil > now) {
+    throw new OrderError("Too many wrong PINs. Try again later or complete the delivery with a photo.", 400, { code: "HANDOVER_PIN_WRONG", attemptsLeft: 0, lockedUntil });
+  }
+  if (!given?.trim()) throw new OrderError("Ask the customer for the 4-digit handover PIN shown in their app", 400, { code: "HANDOVER_PIN_REQUIRED" });
+  const reserved = await prisma.order.updateMany({
+    where: { id: orderId, pickupFailedAttempts: { lt: PIN_MAX_ATTEMPTS }, OR: [{ pickupLockedUntil: null }, { pickupLockedUntil: { lte: now } }] },
+    data: { pickupFailedAttempts: { increment: 1 } },
+  });
+  if (reserved.count !== 1) throw new OrderError("Too many wrong PINs. Try again later.", 400, { code: "HANDOVER_PIN_WRONG", attemptsLeft: 0 });
+  const a = Buffer.from(given.trim()), b = Buffer.from(pin);
+  if (a.length === b.length && crypto.timingSafeEqual(a, b)) {
+    await prisma.order.update({ where: { id: orderId }, data: { pickupFailedAttempts: 0, pickupLockedUntil: null } });
+    return;
+  }
+  const after = await prisma.order.findUniqueOrThrow({ where: { id: orderId }, select: { pickupFailedAttempts: true } });
+  const attemptsLeft = Math.max(0, PIN_MAX_ATTEMPTS - after.pickupFailedAttempts);
+  if (attemptsLeft === 0) {
+    const until = new Date(Date.now() + PIN_LOCK_MINUTES * 60_000);
+    await prisma.order.update({ where: { id: orderId }, data: { pickupLockedUntil: until, pickupFailedAttempts: 0 } });
+    throw new OrderError("Wrong PIN. The in-person handover is locked for 15 minutes; you can complete it with a photo.", 400, { code: "HANDOVER_PIN_WRONG", attemptsLeft: 0, lockedUntil: until });
+  }
+  throw new OrderError(`Wrong PIN. ${attemptsLeft} ${attemptsLeft === 1 ? "try" : "tries"} left.`, 400, { code: "HANDOVER_PIN_WRONG", attemptsLeft });
 }
 
 /** Delivery photo, for the customer, the courier who took it and Malvoya only. */
@@ -953,20 +1081,35 @@ const orderDetailInclude = {
   promoCode: { select: { code: true, description: true } },
 } satisfies Prisma.OrderInclude;
 
-/** The pickup code is the customer's alone, and only while it is needed (accepted or ready, not yet collected). */
-function withPickupCode<T extends { status: OrderStatus; pickupCode: string | null }>(order: T): T {
-  return { ...order, pickupCode: order.status === "CONFIRMED" || order.status === "PROCESSING" ? order.pickupCode : null };
+/**
+ * The pickup code is the customer's alone, and only while it is needed (accepted or ready, not yet collected); the
+ * handover PIN (2.17) only while the order is on its way.
+ */
+function withPickupCode<T extends { status: OrderStatus; pickupCode: string | null; handoverPin?: string | null }>(order: T): T {
+  return {
+    ...order,
+    pickupCode: order.status === "CONFIRMED" || order.status === "PROCESSING" ? order.pickupCode : null,
+    handoverPin: order.status === "SHIPPED" ? order.handoverPin ?? null : null,
+  };
 }
+
+/** Courier and store views carry only whether a PIN is needed, never the PIN (2.17). */
+export function withPinFlag<T extends { handoverPin?: string | null }>(order: T): Omit<T, "handoverPin"> & { handoverPinRequired: boolean } {
+  const { handoverPin, ...rest } = order;
+  return { ...rest, handoverPinRequired: !!handoverPin };
+}
+
+const CUSTOMER_OMIT = { pickupCode: false, handoverPin: false } as const;
 
 export async function getOrder(id: number, actor: Actor) {
   const relation = await getOrderRelation(id, actor);
   if (!relation) throw new OrderError("Order not found", 404);
   if (relation === "customer") {
-    const order = withCourierPosition(withPickupCode(await prisma.order.findUniqueOrThrow({ where: { id }, omit: { pickupCode: false }, include: orderDetailInclude })), relation);
+    const order = withCourierPosition(withPickupCode(await prisma.order.findUniqueOrThrow({ where: { id }, omit: CUSTOMER_OMIT, include: orderDetailInclude })), relation);
     // The withdrawal function's availability (2.16.0): business sellers only, within the withdrawal period
     return { ...order, withdrawal: withdrawalInfo(order) };
   }
-  return withCourierPosition(await prisma.order.findUniqueOrThrow({ where: { id }, include: orderDetailInclude }), relation);
+  return withPinFlag(withCourierPosition(await prisma.order.findUniqueOrThrow({ where: { id }, omit: { handoverPin: false }, include: orderDetailInclude }), relation));
 }
 
 /** The same endpoint serves every app; what you get depends on your role. */
@@ -997,7 +1140,7 @@ export async function listOrdersFor(actor: Actor, page: ListPage = {}) {
   if (actor.role === "COURIER") return listCourierOrders(actor.id, page);
 
   const mine = await prisma.order.findMany({
-    where: { userId: actor.id, ...beforeId(page) }, omit: { pickupCode: false }, include, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: pageTake(page, 200),
+    where: { userId: actor.id, ...beforeId(page) }, omit: CUSTOMER_OMIT, include, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: pageTake(page, 200),
   });
   return mine.map((o) => ({ ...withPickupCode(o), withdrawal: withdrawalInfo(o) }));
 }
@@ -1019,7 +1162,7 @@ export async function listAvailableOrders(userId: number) {
       courierId: null, fulfilment: "DELIVERY", paymentStatus: "SUCCEEDED", status: { in: ["CONFIRMED", "PROCESSING"] },
       OR: [{ scheduledStart: null }, { scheduledStart: { lte: scheduledDispatchHorizon() } }],
     },
-    omit: { courierPay: false },
+    omit: { courierPay: false, handoverPin: false },
     include: {
       store: { select: { id: true, name: true, address: true, latitude: true, longitude: true, prepMinutes: true } },
       items: { select: { quantity: true } },
@@ -1044,6 +1187,7 @@ export async function listAvailableOrders(userId: number) {
       courierFeeCents: courierPay.totalCents, // tip included; = courierPay.totalCents
       tipCents: o.tipCents,
       courierPay,
+      handoverPinRequired: !!o.handoverPin,
       deliveryAreaLat: o.deliveryLat === null ? null : Math.round(o.deliveryLat * 100) / 100,
       deliveryAreaLng: o.deliveryLng === null ? null : Math.round(o.deliveryLng * 100) / 100,
       // When the job was first offered (the store accepted it, or dispatch for its slot started)
@@ -1061,7 +1205,7 @@ export async function listCourierOrders(userId: number, page: ListPage = {}) {
   if (!courier) return [];
   const orders = await prisma.order.findMany({
     where: { courierId: courier.id, ...beforeId(page) },
-    omit: { courierPay: false },
+    omit: { courierPay: false, handoverPin: false },
     include: {
       store: { select: { id: true, name: true, address: true, latitude: true, longitude: true, phone: true } },
       items: { include: { product: { select: { name: true, images: true } } } },
@@ -1071,7 +1215,7 @@ export async function listCourierOrders(userId: number, page: ListPage = {}) {
     take: pageTake(page, 100),
   });
   // courierArrivedAt is a plain column; courierPay is the final breakdown (waiting is added at pickup)
-  return orders.map((o) => ({ ...o, courierPay: presentCourierPay(o) }));
+  return orders.map((o) => withPinFlag({ ...o, courierPay: presentCourierPay(o) }));
 }
 
 /** First courier to accept wins; the conditional update makes double assignment impossible. */
@@ -1082,8 +1226,13 @@ export async function acceptOrder(orderId: number, userId: number) {
   // A courier whose fresh position is beyond the maximum ride cannot take the job (and cannot inflate ride pay)
   const target = await prisma.order.findUnique({
     where: { id: orderId },
-    select: { scheduledStart: true, store: { select: { latitude: true, longitude: true, prepMinutes: true } } },
+    select: { scheduledStart: true, userId: true, cardFingerprint: true, store: { select: { latitude: true, longitude: true, prepMinutes: true } } },
   });
+  // Couriers never deliver their own orders, nor orders paid with a card their own account paid with (2.17)
+  if (target && courier.userId && (target.userId === courier.userId
+    || (target.cardFingerprint && (await prisma.order.count({ where: { userId: courier.userId, cardFingerprint: target.cardFingerprint } })) > 0))) {
+    throw new OrderError("You cannot deliver an order linked to your own account", 409, { code: "OWN_ORDER" });
+  }
   if (target && beforeDispatch(target, target.store.prepMinutes)) {
     throw new OrderError("This delivery is scheduled for later and is not open to couriers yet", 409);
   }
@@ -1100,7 +1249,7 @@ export async function acceptOrder(orderId: number, userId: number) {
     if (res.count === 0) throw new OrderError("This delivery is no longer available", 409);
     await tx.courier.update({ where: { id: courier.id }, data: { currentOrderId: orderId } });
     await addApproachPay(tx, orderId, courier);
-    return tx.order.findUniqueOrThrow({ where: { id: orderId }, omit: { courierPay: false } });
+    return withPinFlag(await tx.order.findUniqueOrThrow({ where: { id: orderId }, omit: { courierPay: false, handoverPin: false } }));
   });
 
   emitToAllCouriers("courier:offer_closed", { orderId, reason: "taken" });
@@ -1516,7 +1665,7 @@ export async function updateReturnStatus(id: number, actor: Actor, data: {
   if (claimed.count !== 1) throw new OrderError("This return was just changed. Reload and try again.", 409);
   try {
     await getStripe().refunds.create(
-      { payment_intent: order.stripePaymentIntentId, amount: refundCents, metadata: { returnId: String(id) } },
+      { payment_intent: order.stripePaymentIntentId, amount: refundCents, metadata: { returnId: String(id), source: "malvoya" } },
       { idempotencyKey: `return-refund-${id}` }
     );
   } catch (e) {
@@ -1542,6 +1691,10 @@ export async function updateReturnStatus(id: number, actor: Actor, data: {
   // The store gives back the value of the returned goods (less the commission on them); with a store-chosen
   // amount the refund itself is scaled back to goods value as before
   await adjustStorePayoutForRefund(order.id, refundCents, data.refundCents === undefined ? Math.max(0, plan.goodsCents - deduction) : undefined);
+  // Refunds made by Malvoya (an admin) are audited (2.17)
+  if (actor.role === "ADMIN") {
+    await audit(actor.id, "return.refund", "Return", id, { oldValue: { status: ret.status }, newValue: { status: "REFUNDED", refundCents, orderId: order.id } });
+  }
   const refunded = euros(refundCents);
   pushToUser(ret.userId, {
     title: t("Refund sent", "Hyvitys lähetetty"),
@@ -1708,7 +1861,7 @@ export async function returnToStore(orderId: number, userId: number) {
   if (refundCents > 0 && order.stripePaymentIntentId && order.paymentStatus === "SUCCEEDED") {
     try {
       await getStripe().refunds.create(
-        { payment_intent: order.stripePaymentIntentId, amount: refundCents, metadata: { orderId: String(orderId), reason: "returned_to_store" } },
+        { payment_intent: order.stripePaymentIntentId, amount: refundCents, metadata: { orderId: String(orderId), reason: "returned_to_store", source: "malvoya" } },
         { idempotencyKey: `return-to-store-${orderId}` },
       );
       await prisma.order.update({ where: { id: orderId }, data: { refundedCents: { increment: refundCents } } });

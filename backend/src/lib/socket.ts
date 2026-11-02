@@ -6,6 +6,7 @@ import { prisma } from "./prisma";
 import { env } from "../config/env";
 import { getOrderRelation, getRentalRelation, getCourierForUser } from "../modules/orders/access";
 import { haversineKm } from "../utils/distance";
+import { plausibleMove } from "../utils/courierPosition";
 import { pushToUser } from "./push";
 import { t } from "./i18n";
 import { canReadChat, chatHistory, postMessage } from "../modules/orders/chat";
@@ -108,6 +109,8 @@ export function initSocket(httpServer: HttpServer): SocketServer {
     // Destination of each verified order, for the one-time "arriving" notification
     const destinations = new Map<number, { lat: number; lng: number; userId: number; notified: boolean; triedAt: number }>();
     let lastDbWrite = 0;
+    // The last position this connection accepted: jumps faster than 120 km/h are never stored (2.17)
+    let lastAccepted: { lat: number; lng: number; at: number } | null = null;
 
     const handleLocation = async (data: any) => {
       await ready;
@@ -116,6 +119,12 @@ export function initSocket(httpServer: HttpServer): SocketServer {
       const lat = toCoord(data?.lat ?? data?.latitude, 90);
       const lng = toCoord(data?.lng ?? data?.longitude, 180);
       if (!courierId || !orderId || lat === null || lng === null) return;
+      // Mock-location apps (the phone says so) are ignored entirely (2.17)
+      if (data?.mocked === true) return;
+      // A jump faster than 120 km/h is relayed to the map but never stored as the courier's position (which proves
+      // arrivals and handovers and earns ride pay)
+      const plausible = plausibleMove(lastAccepted, { lat, lng });
+      if (plausible) lastAccepted = { lat, lng, at: Date.now() };
 
       if (Date.now() - (verifiedCourierOrders.get(orderId) ?? 0) > 60_000) {
         const order = await prisma.order.findFirst({
@@ -159,7 +168,7 @@ export function initSocket(httpServer: HttpServer): SocketServer {
           .catch(() => { dest.notified = false; });
       }
 
-      if (Date.now() - lastDbWrite > LOCATION_DB_WRITE_INTERVAL_MS) {
+      if (plausible && Date.now() - lastDbWrite > LOCATION_DB_WRITE_INTERVAL_MS) {
         lastDbWrite = Date.now();
         prisma.courier.update({ where: { id: courierId }, data: { latitude: lat, longitude: lng, locationAt: new Date(), locationExpiredAt: null } }).catch(() => {});
       }

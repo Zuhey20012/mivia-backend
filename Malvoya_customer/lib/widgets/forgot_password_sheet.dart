@@ -23,8 +23,9 @@ Future<PasswordResetOutcome?> showForgotPasswordSheet(BuildContext context, {Str
   return showMSheet<PasswordResetOutcome>(context, builder: (_) => _ForgotPasswordSheet(initialEmail: email ?? '', changing: changing), isScrollControlled: true, useSafeArea: true);
 }
 
-// Same rules as registration (backend auth.schema.ts: 8–72 characters)
-const _minLength = 8;
+// Same rules as registration (backend auth.schema.ts since 2.16: 10–72 characters; the server
+// also refuses passwords found in known data breaches, and that message is shown as it is)
+const _minLength = 10;
 const _maxLength = 72;
 const _resendSeconds = 60;
 

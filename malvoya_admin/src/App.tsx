@@ -23,6 +23,10 @@ import ProductReports from './pages/ProductReports';
 import Recalls from './pages/Recalls';
 import Sounds from './pages/Sounds';
 import Live from './pages/Live';
+import Incidents from './pages/Incidents';
+import Disputes from './pages/Disputes';
+import Switches from './pages/Switches';
+import AuditLog from './pages/AuditLog';
 
 function RequireAuth({ children }: { children: React.ReactElement }) {
   const token = localStorage.getItem('token');
@@ -57,6 +61,10 @@ function App() {
         <Route path="/recalls" element={<RequireAuth><Recalls /></RequireAuth>} />
         <Route path="/sounds"  element={<RequireAuth><Sounds /></RequireAuth>} />
         <Route path="/live"    element={<RequireAuth><Live /></RequireAuth>} />
+        <Route path="/incidents" element={<RequireAuth><Incidents /></RequireAuth>} />
+        <Route path="/disputes" element={<RequireAuth><Disputes /></RequireAuth>} />
+        <Route path="/switches" element={<RequireAuth><Switches /></RequireAuth>} />
+        <Route path="/audit"   element={<RequireAuth><AuditLog /></RequireAuth>} />
         <Route path="*"         element={<Navigate to="/" replace />} />
       </Routes>
     </Router>

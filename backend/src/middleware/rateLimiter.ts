@@ -2,6 +2,7 @@ import crypto from "crypto";
 import rateLimit, { Options } from "express-rate-limit";
 import { RedisStore } from "rate-limit-redis";
 import { redis, rkey } from "../lib/redis";
+import { env } from "../config/env";
 
 /**
  * Where the counters live. With REDIS_URL they are shared by every instance (a client gets the same limit however
@@ -76,4 +77,27 @@ export const passwordResetLimiter = rateLimit({
   legacyHeaders: false,
   message: tooMany,
   ...rateLimitStore("pwreset"),
+});
+
+/**
+ * Checkout velocity (2.17): new orders per signed-in customer and per client address per hour
+ * (CHECKOUT_USER_LIMIT_PER_HOUR 10, CHECKOUT_IP_LIMIT_PER_HOUR 30). Mounted after auth.
+ */
+const checkoutTooMany = { ok: false, code: "CHECKOUT_RATE_LIMIT", error: "Too many checkouts in a short time. Please try again later." };
+export const checkoutUserLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: env.checkoutLimits.perUserPerHour,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: checkoutTooMany,
+  keyGenerator: (req) => `u:${(req as any).user?.id ?? "anon"}`,
+  ...rateLimitStore("checkout-user"),
+});
+export const checkoutIpLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: env.checkoutLimits.perIpPerHour,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: checkoutTooMany,
+  ...rateLimitStore("checkout-ip"),
 });

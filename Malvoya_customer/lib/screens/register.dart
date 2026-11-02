@@ -47,7 +47,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       setState(() => _error = l10n.translate('fillAllFields'));
       return;
     }
-    if (_passCtrl.text.length < 8) {
+    if (_passCtrl.text.length < 10) {
       setState(() => _error = l10n.translate('passTooShort'));
       return;
     }
@@ -70,7 +70,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
     if (!mounted) return;
     if (err != null) {
-      setState(() { _error = err; _loading = false; });
+      // Server messages (e.g. a password found in known data breaches) are shown as they are
+      setState(() { _error = localizeServerMessage(context, err); _loading = false; });
     } else {
       RealtimeNotificationService.notifyCustomerJoined(
         context,
@@ -309,6 +310,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ],
 
               const SizedBox(height: MSpace.xl),
+
 
               // Legal Terms & Privacy Policy Checkbox (Ultra-High Contrast OLED & Light Compliant)
               Container(

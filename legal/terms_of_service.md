@@ -14,13 +14,15 @@ Malvoya is an **online marketplace**. Products are sold by independent stores, n
 - Each store page shows **who the seller is** and **whether the seller is a business (trader) or a private individual**.
 - Consumer protection rights, including the right of withdrawal, apply only when you buy from a **business seller**.
 
-Malvoya arranges payment and local delivery by independent couriers.
+Malvoya arranges payment and local delivery by independent couriers. Malvoya receives your payment as the seller's commercial agent: paying Malvoya for an order is paying the seller.
+
+Before you pay, the checkout shows the seller's name, whether it is a business or a private seller, its address and contact details (for private sellers, their town only), your right of withdrawal or that there is none, and the return cost.
 
 ## 3. Account
 
 - You must be at least 18 years old. You confirm this when you create your account ("I am 18 or older"); if you sign up with Google, Apple or your phone number, the app asks you to confirm it before your first order. You can browse without an account.
 - **Emails.** We send service messages about your orders, returns, account and agreements; they always say why you got them. Optional emails (for example "Malvoya is open near you") have an unsubscribe link, and you can switch them off at any time in the app (Profile → Privacy → Email preferences). Push notifications for launch news can be switched off in the same place.
-- Keep your sign-in details secret. If you forget your password, you can set a new one with a code we email to you ("Forgot password?" in the app). Setting a new password signs you out on all your other devices.
+- Keep your sign-in details secret. If you forget your password, you can set a new one with a code we email to you ("Forgot password?" in the app). Setting a new password signs you out on all your other devices. New passwords need at least 10 characters, and passwords known from data breaches are refused. After 5 wrong passwords, signing in is locked for 15 minutes. You can see the devices signed in to your account and sign them out in Settings → Signed-in devices.
 - You can delete your account at any time in the app. How, and what happens to your data, is explained at [malvoya-api-eu.onrender.com/legal/delete-account](https://malvoya-api-eu.onrender.com/legal/delete-account).
 - When you create an account you accept these terms and confirm you have read the Privacy Policy. We record when you accepted, which version, how (when signing up or in the app), your network address shortened to its first part, your app or browser type and the app version, and we email you a copy of the text you accepted. You can open that copy in the app at any time.
 
@@ -38,10 +40,25 @@ Malvoya arranges payment and local delivery by independent couriers.
 
 - **Drops** are short videos and photos posted by stores. How the feed is ranked is explained in the app ("Why am I seeing this?") and in the Privacy Policy. You can switch to the chronological "Latest" view.
 - **Reviews** can only be written by customers whose order was delivered, once per order, within 30 days. We do not edit reviews or pay for them. Reviews that break the law are hidden, which also removes them from the store's rating.
-- **Reporting:** you can report any drop that you think is illegal or breaks these terms, also without an account. A person reviews every report. Three reports from different users hide the drop until it has been reviewed. You can also report a comment or a review; a person on the Malvoya team decides whether to hide it.
+- **Reporting:** you can report any drop, live, live-chat message, comment or review that you think is illegal or breaks these terms (drops and lives also without an account). A person reviews every report. Three reports from different users hide a drop, a comment or a live-chat message automatically until a person has reviewed it. You are told the outcome of your report in the app and by email.
+- **Statement of reasons:** if we hide or remove something you posted (a comment, a review or a live-chat message), we tell you in the app and by email what we decided, why, whether it was automatic (three reports) or a person, and how to ask us to look at it again.
 - **Reporting a product:** every product has "Report this product" (unsafe, counterfeit, illegal, misleading, copyright, trademark or other), also without an account; you may leave an email address to hear the outcome. Product-safety reports are reviewed within three working days.
 - **Copyright and trademark:** rights holders can report a product, drop or comment that infringes their copyright or trademark. How, what a notice must contain, how sellers can respond and what happens to repeat infringers: [malvoya-api-eu.onrender.com/legal/ip-notice](https://malvoya-api-eu.onrender.com/legal/ip-notice).
 - **Blocking:** you can block another user. Their comments and reviews are then hidden for you. They are not told. You can unblock them at any time.
+
+## 5c. Content rules
+
+These rules apply to everything users post on Malvoya: comments, reviews, live-chat messages, reports and messages to couriers. Do not post:
+- anything illegal, such as threats, incitement, defamation, discrimination or hate speech, or content that sexualises minors;
+- harassment, insults or slurs against anyone, including stores and couriers;
+- spam, advertising for other services, links to scams, or attempts to trade outside Malvoya;
+- other people's personal data (addresses, phone numbers, photos) without permission;
+- fake reviews or reviews of your own store.
+Live chat has a small automatic word filter that refuses messages with some abusive words; the store running the live can hide messages and mute viewers; three reports from different viewers hide a message until a person decides. Content that breaks these rules is hidden or removed, and repeated breaches can lead to suspension (section 10). How search results and drops are ranked is explained in the app ("How results are sorted", "Why am I seeing this?").
+
+## 5d. Live shopping
+
+Stores can show their products live. Lives are not recorded. Prices in a live must be the same as in the app; you always buy at the price shown in the app. Live-chat messages are visible to everyone watching and are kept for 30 days after the live ends.
 
 ## 5a. Delivery
 
@@ -74,7 +91,7 @@ A checkout you did not pay for is cancelled automatically after 30 minutes, or a
 ## 7. Right of withdrawal (14 days) — business sellers
 
 - You may withdraw from a purchase within **14 days of receiving the item**, without giving a reason (Consumer Protection Act, chapter 6).
-- **Withdrawal function.** Each delivered order from a business seller shows **"Withdraw from contract here"** in the app (on the order and in Profile → Returns) for the whole withdrawal period. Choose the items, optionally say why, and press **"Confirm withdrawal"**. We email you at once an acknowledgement with the date and time of your withdrawal, the order and the items, and what happens next (Consumer Protection Act chapter 6 §14 a). You can also send an unambiguous statement through the contact form at https://malvoya-api-eu.onrender.com/contact (topic "Withdrawal or return of an order").
+- **Withdrawal function.** Each delivered order from a business seller shows **"Withdraw from contract here"** in the app (on the order and in Profile → Returns) for the whole withdrawal period. Choose the items, optionally say why, and press **"Confirm withdrawal"**. We email you at once an acknowledgement with the date and time of your withdrawal, the order and the items, and what happens next (Consumer Protection Act chapter 6 §14 a). You can also send an unambiguous statement through the contact form at https://malvoya-api-eu.onrender.com/contact (topic "Withdrawal or return of an order"). You may use the model withdrawal form at [malvoya-api-eu.onrender.com/legal/withdrawal-form](https://malvoya-api-eu.onrender.com/legal/withdrawal-form), but you do not have to.
 - Purchases from **private sellers** are not covered by the statutory right of withdrawal; the app says so on those orders.
 - We refund the price and the original standard delivery fee (and any service or small-order fee, less a promo discount) within 14 days of receiving your withdrawal. The refund goes to your original payment method.
 - You can also return only some of the items. Then we refund the price of those items, less the matching share of any promo discount. The delivery fee and any service or small-order fee are refunded when the whole order has been returned.
@@ -118,7 +135,7 @@ Nothing in these terms limits liability that cannot be limited under mandatory l
 
 1. Contact us first through Support in the app or the contact form at https://malvoya-api-eu.onrender.com/contact.
 2. If we cannot resolve the matter, you can take the dispute to the **Consumer Disputes Board (Kuluttajariitalautakunta)**, kuluttajariita.fi. Consumer advice is available from the **Consumer Advisory Services**, kkv.fi.
-3. EU residents can also use the EU ODR platform.
+3. If you live in another EU country, or the seller does, the **European Consumer Centre Finland (ECC Finland)**, kuluttajaneuvonta.fi/ecc, can help for free. (The EU online dispute resolution platform closed on 20 July 2025.)
 
 Finnish law applies. As a consumer you may also bring a claim in the district court of your home municipality.
 
@@ -126,6 +143,10 @@ Finnish law applies. As a consumer you may also bring a claim in the district co
 
 - **Users:** Support in the app or the contact form at https://malvoya-api-eu.onrender.com/contact (choose "Report illegal content or an unsafe product" for notices about content or products). You can write in Finnish or English, and you will get a reply from a person.
 - **Authorities, the European Commission and the European Board for Digital Services:** the contact form at https://malvoya-api-eu.onrender.com/contact (topic "Authority contact (Digital Services Act)"), in Finnish or English.
+
+## 12b. Optional notifications
+
+Service messages about your orders, deliveries, refunds, recalls and account security are always sent. Push notifications about new drops and lives from stores you follow, invite rewards and "Malvoya opens near you" are optional: switch them off in Settings → Notifications, or mute one store you follow.
 
 ## 13. Changes
 

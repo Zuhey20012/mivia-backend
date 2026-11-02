@@ -1,3 +1,4 @@
+import { statementOfReasons } from "../me/notices";
 import { Router, Response } from "express";
 import { z } from "zod";
 import { AuthRequest } from "../../middleware/auth";
@@ -74,7 +75,13 @@ router.patch("/reviews/:id(\\d+)", async (req: AuthRequest, res: Response) => {
   const isHidden = req.body?.isHidden;
   if (typeof isHidden !== "boolean") return res.status(400).json({ ok: false, error: "isHidden must be true or false" });
   try {
+    const before = await prisma.review.findUnique({ where: { id }, select: { isHidden: true, userId: true, comment: true } });
     const review = await prisma.review.update({ where: { id }, data: { isHidden } });
+    // Statement of reasons to the author when moderation hides a review (DSA Art. 17, 2.17)
+    if (isHidden && before && !before.isHidden) {
+      const reason = typeof req.body?.reason === "string" && req.body.reason.trim() ? req.body.reason.trim().slice(0, 500) : "It breaks Malvoya's review rules";
+      statementOfReasons({ userId: before.userId, kind: "review", entityId: id, excerpt: before.comment, decision: "hidden", reason, automatic: false }).catch(() => {});
+    }
     const agg = await prisma.review.aggregate({ where: { storeId: review.storeId, isHidden: false }, _avg: { storeRating: true }, _count: { _all: true } });
     await prisma.store.update({
       where: { id: review.storeId },

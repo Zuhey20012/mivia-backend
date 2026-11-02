@@ -1,3 +1,4 @@
+import { reportOutcome } from "../me/notices";
 import crypto from "crypto";
 import pino from "pino";
 import { Prisma } from "@prisma/client";
@@ -577,7 +578,11 @@ async function notifyFollowers(dropId: number) {
     select: { storeId: true, store: { select: { name: true, ownerId: true } }, product: { select: { name: true } } },
   });
   if (!drop) return;
-  const followers = await prisma.storeFollow.findMany({ where: { storeId: drop.storeId }, select: { userId: true }, take: MAX_FOLLOWER_PUSHES });
+  // Muted stores and people who switched off "new drops from stores I follow" get nothing (2.17)
+  const followers = await prisma.storeFollow.findMany({
+    where: { storeId: drop.storeId, muted: false, user: { notifyFollowedDrops: true, isActive: true } },
+    select: { userId: true }, take: MAX_FOLLOWER_PUSHES,
+  });
   const ids = followers.map((f) => f.userId).filter((id) => id !== drop.store.ownerId);
   if (ids.length) {
     await pushToUsers(ids, { title: t(`New drop from ${drop.store.name}`, `Uusi drop: ${drop.store.name}`), body: drop.product.name, data: { type: "drop", dropId: String(dropId) } });
@@ -645,7 +650,10 @@ export async function moderate(dropId: number, adminId: number, action: "remove"
   const drop = await prisma.drop.findUnique({ where: { id: dropId }, include: { store: { include: { owner: { select: { id: true, email: true, name: true } } } } } });
   if (!drop) throw new ApiError("Drop not found", 404);
 
+  // Everyone who reported the drop hears the outcome (DSA Art. 16(5), 2.17)
+  const reporters = (await prisma.dropReport.findMany({ where: { dropId, status: "OPEN" }, select: { reporterId: true }, take: 500 })).map((r) => r.reporterId);
   if (action === "restore") {
+    reportOutcome(reporters, "drop", dropId, "kept").catch(() => {});
     await prisma.$transaction([
       prisma.drop.update({ where: { id: dropId }, data: { status: "READY", removedReason: null, publishedAt: drop.publishedAt ?? new Date() } }),
       prisma.dropReport.updateMany({ where: { dropId, status: "OPEN" }, data: { status: "DISMISSED", resolvedById: adminId, resolvedAt: new Date() } }),
@@ -659,6 +667,7 @@ export async function moderate(dropId: number, adminId: number, action: "remove"
     prisma.dropReport.updateMany({ where: { dropId, status: "OPEN" }, data: { status: "ACTIONED", resolvedById: adminId, resolvedAt: new Date() } }),
   ]);
 
+  reportOutcome(reporters, "drop", dropId, "actioned").catch(() => {});
   const owner = drop.store.owner;
   localeOfUser(owner.id).then((locale) => sendDropRemovedEmail(owner.email, dropId, reason.trim(), locale)).catch(() => {});
   pushToUser(owner.id, { title: t("A drop was removed", "Drop poistettiin"), body: reason.trim().slice(0, 120), data: { type: "drop", dropId: String(dropId) } }).catch(() => {});
@@ -668,5 +677,6 @@ export async function moderate(dropId: number, adminId: number, action: "remove"
 export async function resolveReport(reportId: number, adminId: number, status: "ACTIONED" | "DISMISSED") {
   const r = await prisma.dropReport.findUnique({ where: { id: reportId } });
   if (!r) throw new ApiError("Report not found", 404);
+  if (r.status === "OPEN") reportOutcome([r.reporterId], "drop", r.dropId, status === "ACTIONED" ? "actioned" : "kept").catch(() => {});
   return prisma.dropReport.update({ where: { id: reportId }, data: { status, resolvedById: adminId, resolvedAt: new Date() } });
 }

@@ -127,9 +127,15 @@ export async function purgeOldContactMessages(now = new Date()) {
 
 /** C9: expired sign-in and reset codes, and expired refresh tokens of every user (also those who never come back). */
 export async function purgeExpiredCredentials(now = new Date()) {
-  const [codes, tokens] = await Promise.all([
+  const [codes, tokens, counters, sessions] = await Promise.all([
     prisma.otpCode.deleteMany({ where: { expiresAt: { lt: now } } }),
     prisma.refreshToken.deleteMany({ where: { expiresAt: { lt: now } } }),
+    // Shared counters (sign-in failures, SMS per day, code guesses, failed payments; 2.17) whose window has ended
+    prisma.counter.deleteMany({ where: { expiresAt: { lt: now } } }),
+    // Signed-in devices (2.17): ended a day ago, or unused for longer than a refresh token lives
+    prisma.userSession.deleteMany({
+      where: { OR: [{ revokedAt: { lt: new Date(now.getTime() - 86_400_000) } }, { lastUsedAt: { lt: new Date(now.getTime() - 8 * 86_400_000) } }] },
+    }),
   ]);
-  return { codes: codes.count, refreshTokens: tokens.count };
+  return { codes: codes.count, refreshTokens: tokens.count, counters: counters.count, sessions: sessions.count };
 }

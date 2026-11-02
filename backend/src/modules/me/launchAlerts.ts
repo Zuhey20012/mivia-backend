@@ -69,7 +69,9 @@ export async function notifyLaunchAlertsNear(store: { id: number; name: string; 
   if (!near.length) return 0;
 
   await prisma.launchAlert.updateMany({ where: { id: { in: near.map((a) => a.id) } }, data: { notifiedAt: new Date() } });
-  await pushToUsers(near.map((a) => a.userId), {
+  // Only to people who still want it (Settings → Notifications, 2.17)
+  const wanting = await prisma.user.findMany({ where: { id: { in: near.map((a) => a.userId) }, notifyLaunchAlerts: true }, select: { id: true } });
+  await pushToUsers(wanting.map((u) => u.id), {
     title: t("Malvoya is open near you", "Malvoya on avattu lähelläsi"),
     body: t(`${store.name} now delivers to your area. Take a look!`, `${store.name} toimittaa nyt alueellesi. Käy katsomassa!`),
     data: { type: "store", storeId: String(store.id) },

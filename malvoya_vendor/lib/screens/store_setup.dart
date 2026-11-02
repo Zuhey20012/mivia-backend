@@ -62,6 +62,22 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
   ApiClient get _api => ApiClient(Provider.of<AuthService>(context, listen: false));
   bool get _verified => _existing?['isVerified'] == true;
 
+  /// An approved store changed what shoppers and couriers rely on (name, address, map pin): Malvoya
+  /// reviews such changes (API 2.16). The store stays open meanwhile.
+  bool get _identityChanged {
+    final s = _existing;
+    if (s == null || !_verified) return false;
+    bool moved(Object? old, double? now) {
+      final o = (old as num?)?.toDouble();
+      if (o == null || now == null) return o != now;
+      return (o - now).abs() > 0.00001;
+    }
+    return _name.text.trim() != '${s['name'] ?? ''}'.trim() ||
+        _address.text.trim() != '${s['address'] ?? ''}'.trim() ||
+        moved(s['latitude'], _lat) ||
+        moved(s['longitude'], _lng);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -167,6 +183,7 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
       setState(() => _error = hoursProblem);
       return;
     }
+    final identityChanged = _identityChanged;
     setState(() {
       _saving = true;
       _error = null;
@@ -192,6 +209,10 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
       setState(() => _error = res.error);
       return;
     }
+    if (identityChanged || res.data['reviewRequired'] == true || res.data['changeReview'] == true) {
+      MSnack.show(context, tr(context, 'Saved. Malvoya reviews the new name or address; your store stays open meanwhile.',
+          'Tallennettu. Malvoya tarkistaa uuden nimen tai osoitteen; kauppasi pysyy auki sillä välin.'));
+    }
     if (_existing == null) {
       // The app's home follows the store's state and switches to the dashboard by itself
       await Provider.of<AuthService>(context, listen: false).checkStore();
@@ -199,6 +220,23 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
       Navigator.pop(context, true);
     }
   }
+
+  Widget _reviewNote() => Container(
+        padding: const EdgeInsets.all(MSpace.md),
+        decoration: BoxDecoration(color: AppTheme.sand, borderRadius: MRadius.brMd),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Icon(Icons.verified_user_outlined, size: 20, color: AppTheme.primary),
+          const SizedBox(width: MSpace.sm),
+          Expanded(
+            child: Text(
+              tr(context,
+                  'Changes to the store name, pickup address or map pin are reviewed by Malvoya, so shoppers and couriers can trust them. Your store stays open meanwhile.',
+                  'Malvoya tarkistaa kaupan nimen, nouto-osoitteen tai karttamerkin muutokset, jotta asiakkaat ja kuriirit voivat luottaa niihin. Kauppasi pysyy auki sillä välin.'),
+              style: const TextStyle(color: AppTheme.textPrimary, height: 1.4, fontSize: MTextSize.bodyM),
+            ),
+          ),
+        ]),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -227,8 +265,13 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                     _pictures(),
                     const SizedBox(height: MSpace.xl),
                   ],
+                  if (_verified) ...[
+                    _reviewNote(),
+                    const SizedBox(height: MSpace.md),
+                  ],
                   TextFormField(
                     controller: _name,
+                    onChanged: (_) => setState(() {}),
                     maxLength: 100,
                     decoration: InputDecoration(labelText: tr(context, 'Store name', 'Kaupan nimi')),
                     validator: (v) => (v ?? '').trim().length < 2 ? tr(context, 'Enter the store name', 'Anna kaupan nimi') : null,
@@ -290,9 +333,17 @@ class _StoreSetupScreenState extends State<StoreSetupScreen> {
                   const SizedBox(height: MSpace.xl),
                   TextFormField(
                     controller: _address,
+                    onChanged: (_) => setState(() {}),
                     decoration: InputDecoration(labelText: tr(context, 'Pickup address', 'Noutoosoite'), hintText: 'Mannerheimintie 1, 00100 Helsinki'),
                     validator: (v) => (v ?? '').trim().length < 5 ? tr(context, 'Enter the address couriers pick up from', 'Anna osoite, josta kuriirit noutavat') : null,
                   ),
+                  if (_identityChanged)
+                    Padding(
+                      padding: const EdgeInsets.only(top: MSpace.sm),
+                      child: Text(
+                          tr(context, 'Malvoya reviews this change after you save.', 'Malvoya tarkistaa tämän muutoksen, kun tallennat.'),
+                          style: const TextStyle(fontSize: MTextSize.caption, color: MPalette.amberInk, fontWeight: FontWeight.w600)),
+                    ),
                   const SizedBox(height: MSpace.sm),
                   _locationCard(),
                   const SizedBox(height: MSpace.sm),

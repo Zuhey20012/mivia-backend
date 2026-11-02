@@ -52,6 +52,12 @@ Malvoya is a marketplace. Stores that sell through Malvoya are independent selle
 | Withdrawals you make with the withdrawal function: the order, the items, your optional note, the date and time, and when and how we sent you the acknowledgement | Handle your withdrawal and prove that we acknowledged it (Consumer Protection Act chapter 6 §14 a) | Legal obligation (6(1)(c)); contract (6(1)(b)) |
 | Copyright or trademark notices you send: your name and email, the work or mark concerned, where it is used, whether you act for someone else, and your good-faith statement | Process the notice (Digital Services Act Art. 16) and tell you the outcome. We tell the seller what was reported and why, but not your name or email unless you agree or the law requires it | Legal obligation (6(1)(c)) |
 | Users you blocked, and reports you make about comments or reviews | Hide blocked users' content for you; let our team review reported content | Legitimate interest (6(1)(f)); legal obligation (Digital Services Act) |
+| Signed-in devices (2.17): a short device name from your app or browser (for example "Malvoya app (Android)"), when you signed in and last used it, never the network address; failed sign-in attempts counted per account as a one-way hash | Show you where you are signed in and let you sign devices out (Settings → Signed-in devices); lock sign-in for 15 minutes after 5 wrong passwords; email stores, couriers and admins about each new sign-in | Legitimate interest in account security (6(1)(f)) |
+| When you choose a new password: the first 5 characters of its one-way SHA-1 hash are sent to the Have I Been Pwned service, never the password or the full hash | Refuse passwords that have appeared in known data breaches | Legitimate interest in account security (6(1)(f)) |
+| A card's fingerprint as Stripe gives it (a code that is the same for the same card, not the card number) and how many payments failed in the last hour | Prevent fraud: a first-order offer cannot be used again with the same card, couriers cannot deliver their own orders, repeated failed payments pause checkout for an hour | Legitimate interest in preventing fraud (6(1)(f)) |
+| Notices to you: statements of reasons when we hide or remove something you posted, and the outcome of reports you made | Tell you what we decided, why and how to object (Digital Services Act Art. 16 and 17); also emailed | Legal obligation (6(1)(c)) |
+| Your choices about optional notifications (new drops and lives from stores you follow, invite rewards, launch alert) and stores you muted | Send only the optional notifications you want (Settings → Notifications) | Consent through the settings; legitimate interest (6(1)(f)) |
+| For couriers: incident reports from the Help button (type, note, optional position, order) | Help the courier and handle the incident | Contract; legitimate interest; vital interests where someone is in danger |
 | Technical logs: one line per request to our server with a random request id, the time, the method, the path without its query part and the result code; error logs. Bodies, passwords, tokens and your IP address are not written to these logs. Your IP address is used only to limit how many requests one address can make; the limiter keeps it in memory (or in our cache server, when one is used) for at most one hour. If error tracking (Sentry) is switched on, its reports carry only your numeric account id and are cleaned of email addresses, phone numbers, codes and network addresses | Security, abuse prevention and fixing faults | Legitimate interest (6(1)(f)) |
 
 We do not sell personal data, and we do not use your data for advertising profiling.
@@ -89,9 +95,11 @@ Delivery jobs are offered to approved, online couriers within 7.5 km of the stor
   - Cloudinary (storing and delivering photos, videos and sound)
   - Google Firebase (sign-in incl. phone and Apple sign-in, push notifications, Crashlytics crash reports) and Google Sign-In
   - Render (hosting and database, Frankfurt)
-  - Twilio (SMS codes, and withdrawal acknowledgements for accounts that have only a phone number)
+  - Twilio (SMS codes, sent only to Finnish +358 numbers, and withdrawal acknowledgements for accounts that have only a phone number)
   - LiveKit (live-stream video), only while live shopping is switched on
   - Sentry (error reports), only if switched on
+  - Have I Been Pwned (Cloudflare): receives only a 5-character hash prefix of a new password (k-anonymity), never the password
+  - [Redis provider] (shared counters, queues and caches, no customer content), only if switched on
   - [EMAIL PROVIDER] (email), and [MAILBOX PROVIDER] for the team mailbox that receives support requests
 - **OpenStreetMap Foundation** (an independent recipient, not our processor): the apps load map pictures from tile.openstreetmap.org and look up addresses at nominatim.openstreetmap.org directly from your phone.
 - **The Finnish Patent and Registration Office (PRH)**, for business sellers only: we look up the business ID in its free open data service (avoindata.prh.fi). PRH receives only the business ID, not who asked.
@@ -117,6 +125,11 @@ Our servers and database are hosted by Render in Frankfurt, Germany (EU). Some p
 | Likes, saves, "Not interested" marks, follows and favourites | Until you remove them or delete your account |
 | Drop comments | Until you, the store or our team delete the comment, or you delete your account |
 | Live-stream chat messages and mutes | 30 days after the live stream ended (deleted with your account) |
+| Reports you made about live-chat messages | Deleted with the live's chat (30 days after it ended) or with your account |
+| Signed-in device records | Until you sign the device out (then 1 day), 8 days without use, or your account is deleted |
+| Sign-in failure, SMS, code-guess and failed-payment counters | 15 minutes to 1 day |
+| Notices to you (statements of reasons, report outcomes) | Until you delete your account |
+| Courier incident reports | [INCIDENT RETENTION] after they are resolved |
 | "Tell me when Malvoya opens near me" alert | Until you cancel it (also by switching optional emails off) or delete your account |
 | Reviews | The text until you delete your account; the star rating stays, without your name, because it is part of the store's rating |
 | Courier job history and pay breakdowns, payout records and sellers' monthly statements | As order records: 6 years from the end of the financial year (Accounting Act 2:10) |

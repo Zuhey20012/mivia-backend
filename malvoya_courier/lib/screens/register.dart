@@ -4,6 +4,7 @@ import 'package:malvoya_core/malvoya_core.dart';
 import 'package:malvoya_ui/malvoya_ui.dart';
 import '../auth_service.dart';
 import '../config/theme.dart';
+import '../core/account_security.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -34,6 +35,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Future<void> _handleRegister() async {
     if (_nameCtrl.text.trim().isEmpty || _emailCtrl.text.trim().isEmpty || _passCtrl.text.isEmpty) {
       setState(() => _error = tr(context, 'Please fill out all fields.', 'Täytä kaikki kentät.'));
+      return;
+    }
+    if (_passCtrl.text.length < kMinPasswordLength) {
+      setState(() => _error = tr(context, 'Use a password of at least $kMinPasswordLength characters.', 'Käytä vähintään $kMinPasswordLength merkin salasanaa.'));
       return;
     }
     if (!_agreed) {
@@ -112,9 +117,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 controller: _passCtrl,
                 obscureText: _obscurePass,
                 textInputAction: TextInputAction.done,
+                autofillHints: const [AutofillHints.newPassword],
                 onSubmitted: (_) => _handleRegister(),
                 decoration: InputDecoration(
                   labelText: tr(context, 'Password', 'Salasana'),
+                  helperText: tr(context, 'At least $kMinPasswordLength characters', 'Vähintään $kMinPasswordLength merkkiä'),
                   prefixIcon: const Icon(Icons.lock_outline_rounded),
                   suffixIcon: IconButton(
                     icon: Icon(_obscurePass ? Icons.visibility_off_outlined : Icons.visibility_outlined),

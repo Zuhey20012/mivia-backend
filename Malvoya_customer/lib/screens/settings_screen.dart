@@ -6,6 +6,8 @@ import '../config/theme.dart';
 import '../theme_provider.dart';
 import '../auth_service.dart';
 import '../l10n.dart';
+import 'notification_settings_screen.dart';
+import 'signed_in_devices_screen.dart';
 import 'terms_legal_screen.dart';
 import 'privacy_gdpr_screen.dart';
 
@@ -155,6 +157,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   if (SignInSetup.google) ...[
                     Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
                     GoogleLinkTile(account: Provider.of<AuthService>(context, listen: false), leading: const Icon(Icons.link_rounded, color: AppTheme.primary, size: 22)),
+                  ],
+                  if (auth.isAuthenticated) ...[
+                    Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
+                    ListTile(
+                      leading: const Icon(Icons.notifications_none_rounded, color: AppTheme.primary, size: 22),
+                      title: Text(tr(context, 'Notifications', 'Ilmoitukset'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: MTextSize.bodyM, color: textPrimary)),
+                      subtitle: Text(tr(context, 'Drops, lives and other optional messages', 'Dropit, livet ja muut valinnaiset viestit'),
+                          style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
+                      trailing: Icon(Icons.chevron_right_rounded, color: AppTheme.secondaryText(context)),
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationSettingsScreen())),
+                    ),
+                    Divider(height: 1, indent: 16, endIndent: 16, color: dividerColor),
+                    ListTile(
+                      leading: const Icon(Icons.devices_rounded, color: AppTheme.primary, size: 22),
+                      title: Text(tr(context, 'Signed-in devices', 'Kirjautuneet laitteet'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: MTextSize.bodyM, color: textPrimary)),
+                      subtitle: Text(tr(context, 'See where you are signed in and sign out other devices', 'Katso, missä olet kirjautuneena, ja kirjaa muut laitteet ulos'),
+                          style: TextStyle(fontSize: MTextSize.caption, color: textSecondary)),
+                      trailing: Icon(Icons.chevron_right_rounded, color: AppTheme.secondaryText(context)),
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SignedInDevicesScreen())),
+                    ),
                   ],
                 ],
               ),

@@ -1,4 +1,4 @@
-// End-to-end test for API v2.16.1 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
+// End-to-end test for API v2.17.0 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
 const { execSync, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -25,7 +25,8 @@ async function callAt(api, method, path, body, token, raw) {
     headers: {
       "Content-Type": "application/json",
       // Different client address per call, so the strict sign-in limiter does not trip during the test
-      "X-Forwarded-For": `10.9.${Math.floor(ipSeq / 250)}.${ipSeq++ % 250}`,
+      // (wraps into the next /16 after 62 500 calls, so the address stays valid in long runs)
+      "X-Forwarded-For": `10.${9 + (Math.floor(ipSeq / 62500) % 200)}.${Math.floor(ipSeq / 250) % 250}.${ipSeq++ % 250}`,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(raw?.headers || {}),
     },
@@ -175,7 +176,7 @@ function ean13(d12) {
   check("customer can register", regA.status === 201 && regA.body.accessToken, regA);
   const takeover = await call("POST", "/auth/register", { ageConfirmed: true, name: "Evil", email: `aino${uniq}@example.fi`, password: "whatever12", role: "VENDOR", acceptTerms: true });
   check("register with existing email is refused and returns no tokens", takeover.status === 409 && !takeover.body.accessToken, takeover);
-  check("cannot self-register as ADMIN", (await call("POST", "/auth/register", { name: "X", email: `x${uniq}@example.fi`, password: "whatever12", role: "ADMIN" })).status === 400);
+  check("cannot self-register as ADMIN", (await call("POST", "/auth/register", { ageConfirmed: true, name: "X", email: `x${uniq}@example.fi`, password: "whatever12", role: "ADMIN" })).status === 400);
   check("wrong password rejected", (await call("POST", "/auth/login", { email: `aino${uniq}@example.fi`, password: "wrong-password" })).status === 401);
   const loginA = await call("POST", "/auth/login", { email: `AINO${uniq}@example.fi`, password: "correct-horse-1" });
   check("login works (case-insensitive email)", loginA.status === 200 && loginA.body.accessToken);
@@ -318,6 +319,12 @@ function ean13(d12) {
   const c2 = await register("Linnea", "COURIER");
   check("unapproved courier cannot see jobs", (await call("GET", "/orders/available", null, c1.accessToken)).status === 403);
   // Payout onboarding is a step towards approval, so it is open before approval; jobs (and so money) only come after
+  // 2.17: payout links need the password again within 10 minutes (or a two-step session)
+  const noReauth = await call("POST", "/payouts/onboarding", null, c1.accessToken);
+  check("payout links need the password again first (403 REAUTH_REQUIRED)", noReauth.status === 403 && noReauth.body.code === "REAUTH_REQUIRED", noReauth.body);
+  check("re-authentication refuses a wrong password", (await call("POST", "/me/reauth", { password: "wrong-password-1" }, c1.accessToken)).status === 400);
+  const reauthC1 = await call("POST", "/me/reauth", { password: "strong-pass-123" }, c1.accessToken);
+  check("re-authentication with the password opens payout links for 10 minutes", reauthC1.status === 200 && Math.abs(new Date(reauthC1.body.reauthUntil).getTime() - Date.now() - 600_000) < 30_000, reauthC1.body);
   const earlyPayout = await call("POST", "/payouts/onboarding", null, c1.accessToken);
   check("an unapproved courier can already set up payouts (Stripe onboarding), but still gets no jobs", earlyPayout.status === 200 && /^https?:\/\//.test(earlyPayout.body.url || "") && (await call("GET", "/orders/available", null, c1.accessToken)).status === 403, earlyPayout.body);
   const couriers = (await call("GET", "/admin/couriers", null, adminToken)).body.couriers;
@@ -413,6 +420,7 @@ function ean13(d12) {
   check("courier payout waits for payout setup", sql(`select status from "Payout" where "orderId"=${orderId} and party='COURIER'`) === "WAITING_FOR_ACCOUNT");
 
   console.log("\n— Payouts (Stripe Connect via stripe-mock)");
+  await call("POST", "/me/reauth", { password: "strong-pass-123" }, winner.tok);
   const onboard = await call("POST", "/payouts/onboarding", null, winner.tok);
   check("approved courier starts Stripe payout onboarding", onboard.status === 200 && /^https?:\/\//.test(onboard.body.url || ""), onboard.body);
   check("Stripe account saved for the courier", sql(`select "stripeAccountId" is not null from "Courier" where "userId"=${winner.user.id}`) === "t");
@@ -997,7 +1005,7 @@ function ean13(d12) {
   }));
 
   const sysDefault = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.16.1", sysDefault.pricing);
+  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.17.0", sysDefault.pricing);
   const stockBeforeQuote = stockOf(productId);
   const ordersBeforeQuote = sql(`select count(*) from "Order" where "userId"=${otherCust.user.id}`);
   const q0 = await quote(quoteBody, otherCust.accessToken);
@@ -1237,7 +1245,7 @@ function ean13(d12) {
   const farMine = (await call("GET", "/orders/courier/mine", null, c2.accessToken)).body.orders?.find((o) => o.id === far.id);
   check("waiting beyond 5 min is added at pickup: 12 min → 7 × 0.20 € = 1.40 €", farMine?.courierPay?.waitMinutes === 12 && farMine.courierPay.waitCents === 140 && farMine.courierPay.totalCents === 1422 && farMine.courierFeeCents === 1422 && !!farMine.courierArrivedAt && farMine.courierPay.explanation.en.includes("waiting 12 min = 1.40 €"), farMine?.courierPay);
   check("checking in after pickup is refused", (await call("POST", `/orders/${far.id}/arrived-at-store`, null, c2.accessToken)).status === 409);
-  const farDone = await call("POST", `/orders/${far.id}/deliver`, { method: "IN_PERSON" }, c2.accessToken);
+  const farDone = await call("POST", `/orders/${far.id}/deliver`, { method: "IN_PERSON", latitude: far.deliveryLat, longitude: far.deliveryLng }, c2.accessToken);
   await sleep(800);
   check("the courier payout is exactly the explained total", farDone.status === 200 && sql(`select "amountCents" from "Payout" where "orderId"=${far.id} and party='COURIER'`) === "1422");
   // Charge 54.15 €: the store's 45.00 € is reserved on it, so the courier's 14.22 € (> 9.15 € left) is paid from Malvoya's balance
@@ -1266,7 +1274,7 @@ function ean13(d12) {
   sql(`update "Order" set "acceptedAt" = now() - interval '60 minutes', "courierArrivedAt" = now() - interval '20 minutes', "readyAt" = now() - interval '11 minutes' where id=${stale.id}`);
   await call("PATCH", `/orders/${stale.id}/status`, { status: "SHIPPED" }, c1.accessToken);
   check("waiting counts only until the store marked the order ready (20 min at the shop, ready after 9 → 9 min)", sql(`select ("courierPay"->>'waitMinutes') || '|' || ("courierPay"->>'waitCents') from "Order" where id=${stale.id}`) === "9|80");
-  await call("POST", `/orders/${stale.id}/deliver`, { method: "IN_PERSON" }, c1.accessToken);
+  await call("POST", `/orders/${stale.id}/deliver`, { method: "IN_PERSON", latitude: stale.deliveryLat, longitude: stale.deliveryLng }, c1.accessToken);
 
   console.log("\n— Catalogue import: Shopify feed");
   let shopPrice = "49.90", shopStock = 3;
@@ -2073,7 +2081,7 @@ function ean13(d12) {
   cob = (await call("GET", "/courier/me/onboarding", null, onni.accessToken)).body;
   check("courier ready for approval when everything but approval is done", cob.readyForApproval === true && cob.approved === false && cob.percent === 83 && sql(`select "readyForApprovalAt" is not null from "Courier" where "userId"=${onni.user.id}`) === "t", cob);
   const sys211 = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("System lists them as ready for approval", sys211.version === "2.16.1" && sys211.attention.some((a) => a.includes(`(#${pekkaStore.id}) is ready for approval`)) && sys211.attention.some((a) => a.includes("Courier \"Onni\"") && a.includes("ready for approval")) && sys211.readyForApproval?.stores?.some((s) => s.id === pekkaStore.id), sys211.attention);
+  check("System lists them as ready for approval", sys211.version === "2.17.0" && sys211.attention.some((a) => a.includes(`(#${pekkaStore.id}) is ready for approval`)) && sys211.attention.some((a) => a.includes("Courier \"Onni\"") && a.includes("ready for approval")) && sys211.readyForApproval?.stores?.some((s) => s.id === pekkaStore.id), sys211.attention);
   check("admin courier list shows vehicle, disclosure and readiness", (await call("GET", "/admin/couriers", null, adminToken)).body.couriers?.find((c) => c.user?.id === onni.user.id)?.vehicleType === "ebike");
 
   // Publishing changes (second instance reading a copy of the legal texts, same database)
@@ -2502,7 +2510,7 @@ function ean13(d12) {
     await call("POST", "/courier/status", { isOnline: false }, cOnline.accessToken);
     // Sign in with Apple (iOS): the Apple user id first, then the verified email; loaded from dist (no real Firebase token here)
     const social = require(path.join(__dirname, "..", "..", "dist", "modules", "auth", "social.service.js"));
-    const appleId = (x) => ({ firebase: { identities: { "apple.com": [x] } } });
+    const appleId = (x) => ({ firebase: { sign_in_provider: "apple.com", identities: { "apple.com": [x] } } });
     const subA = `001234.apple${uniq}.0101`;
     const ap1 = await social.signInWithAppleClaims({ email: `apple${uniq}@privaterelay.appleid.com`, email_verified: true, ...appleId(subA) }, "CUSTOMER", "  Anna Apple  ");
     check("Sign in with Apple creates the account with the Apple id and the name the app sends (trimmed)", ap1.user?.name === "Anna Apple" && !!ap1.accessToken && sql(`select "appleSub" from "User" where id=${ap1.user.id}`) === subA, ap1.user);
@@ -2516,6 +2524,12 @@ function ean13(d12) {
     check("a verified-sign-in account found by its email gets the Apple id on first use", ap3.user?.id === codeNew.body.user.id && sql(`select "appleSub" from "User" where id=${codeNew.body.user.id}`) === subB);
     let apNoEmail = null;
     try { await social.signInWithAppleClaims({ ...appleId(`new.${uniq}`) }); } catch (e) { apNoEmail = e.status; }
+    // 2.17: only a token from an actual Apple sign-in counts, and only a verified email opens or creates an account
+    let apOtherProvider = 0, apUnverified = 0;
+    try { await social.signInWithAppleClaims({ email: `apple-g${uniq}@example.fi`, email_verified: true, firebase: { sign_in_provider: "google.com", identities: { "apple.com": [`g.${uniq}`] } } }); } catch (e) { apOtherProvider = e.status; }
+    try { await social.signInWithAppleClaims({ email: `apple-u${uniq}@example.fi`, ...appleId(`u.${uniq}`) }); } catch (e) { apUnverified = e.status; }
+    check("Apple sign-in refuses a token from another provider (401)", apOtherProvider === 401, apOtherProvider);
+    check("Apple sign-in refuses an unverified email (401) and creates no account", apUnverified === 401 && sql(`select count(*) from "User" where email='apple-u${uniq}@example.fi'`) === "0", apUnverified);
     check("a new Apple user without a verified email is refused (401)", apNoEmail === 401);
     check("POST /auth/apple validates the name (≤ 100) and the token", (await call("POST", "/auth/apple", { idToken: "x", name: "a".repeat(101) })).status === 400 && (await call("POST", "/auth/apple", { name: "Anna" })).status === 400 && (await call("POST", "/auth/apple", { idToken: "not-a-token", name: "Anna" })).status === 401);
     check("account deletion clears the Apple id", (await call("DELETE", "/auth/me", null, ap1.accessToken)).status === 200 && sql(`select "appleSub" is null from "User" where id=${ap1.user.id}`) === "t");
@@ -2842,7 +2856,7 @@ function ean13(d12) {
   check("registering with ageConfirmed stores the time; GET /me says ageConfirmed", sql(`select "ageConfirmedAt" is not null from "User" where id=${ag_reg.user.id}`) === "t" && ag_regMe?.ageConfirmed === true && !!ag_regMe.ageConfirmedAt, ag_regMe);
   check("guests can still browse without an account", (await call("GET", "/products/search?q=coat")).status === 200 && (await call("GET", "/stores")).status === 200);
   const ag_social = require(path.join(__dirname, "..", "..", "dist", "modules", "auth", "social.service.js"));
-  const ag_apple = await ag_social.signInWithAppleClaims({ email: `apple-age${uniq}@example.fi`, email_verified: true, firebase: { identities: { "apple.com": [`age.${uniq}`] } } }, "CUSTOMER", "Alva Apple");
+  const ag_apple = await ag_social.signInWithAppleClaims({ email: `apple-age${uniq}@example.fi`, email_verified: true, firebase: { sign_in_provider: "apple.com", identities: { "apple.com": [`age.${uniq}`] } } }, "CUSTOMER", "Alva Apple");
   const ag_tok = ag_apple.accessToken;
   const ag_agr = (await call("GET", "/me/agreements", null, ag_tok)).body;
   check("a social sign-up has not confirmed its age: GET /me/agreements says ageConfirmationRequired", ag_agr.ageConfirmationRequired === true && ag_agr.ageConfirmedAt === null && sql(`select "ageConfirmedAt" is null from "User" where id=${ag_apple.user.id}`) === "t", ag_agr);
@@ -2859,7 +2873,7 @@ function ean13(d12) {
   const ag_o3 = await call("POST", "/orders", {}, ag_tok);
   check("…after which ordering passes the agreement gate (400 for the empty basket, not 428)", ag_o3.status === 400, ag_o3);
   check("GET /me/agreements and GET /me show it confirmed", (await call("GET", "/me/agreements", null, ag_tok)).body.ageConfirmationRequired === false && (await call("GET", "/me", null, ag_tok)).body.user?.ageConfirmed === true);
-  const ag_courier = await ag_social.signInWithAppleClaims({ email: `apple-courier${uniq}@example.fi`, email_verified: true, firebase: { identities: { "apple.com": [`agec.${uniq}`] } } }, "COURIER", "Kalle Courier");
+  const ag_courier = await ag_social.signInWithAppleClaims({ email: `apple-courier${uniq}@example.fi`, email_verified: true, firebase: { sign_in_provider: "apple.com", identities: { "apple.com": [`agec.${uniq}`] } } }, "COURIER", "Kalle Courier");
   const ag_online = await call("POST", "/courier/status", { isOnline: true }, ag_courier.accessToken);
   check("a social courier going online gets 428 with ageConfirmationRequired", ag_online.status === 428 && ag_online.body.ageConfirmationRequired === true && ag_online.body.doc === "courier-agreement", ag_online.body);
   const ag_ageOnly = await call("POST", "/me/agreements/accept", { ageConfirmed: true }, ag_courier.accessToken);
@@ -3135,6 +3149,385 @@ function ean13(d12) {
       && sql(`select ("deliveryProblemNote" is null and "deliveredLat" is null and "totalCents" = 2290)::text from "Order" where id=${pv_active}`) === "true");
   await call("POST", "/courier/status", { isOnline: false }, pv_cour.accessToken);
 
+  { // 2.17: gold-standard fixes (fraud, accounts, operations, law, pricing)
+    console.log("\n— 2.17: accounts and sign-in security");
+    const g_jwt = (tok) => JSON.parse(Buffer.from(tok.split(".")[1], "base64url").toString());
+    // Passwords: at least 10 characters
+    check("B6: a new password needs at least 10 characters", (await call("POST", "/auth/register", { ageConfirmed: true, name: "Short Pw", email: `shortpw${uniq}@example.fi`, password: "nine-char", acceptTerms: true })).status === 400);
+    // Login lock: 5 wrong passwords lock the identifier for 15 minutes
+    const g_lockU = await register("Lukko");
+    const g_lockEmail = `lukko${uniq}@example.fi`;
+    const g_fails = [];
+    for (let i = 0; i < 5; i++) g_fails.push((await call("POST", "/auth/login", { email: g_lockEmail, password: `wrong-password-${i}` })).status);
+    const g_locked = await call("POST", "/auth/login", { email: g_lockEmail, password: "strong-pass-123" });
+    check("B6: five wrong passwords answer 401, then sign-in is locked even with the right password (429 LOGIN_LOCKED)", g_fails.join() === "401,401,401,401,401" && g_locked.status === 429 && g_locked.body.code === "LOGIN_LOCKED", [g_fails, g_locked.body]);
+    check("B6: the failure counter is a hash, never the address", sql(`select count(*) from "Counter" where key like 'login-lock:%' and key not like '%@%'`) !== "0" && sql(`select count(*) from "Counter" where key like '%lukko%'`) === "0");
+    void g_lockU;
+
+    // Sessions: list, end one, end all others
+    const g_sess = await register("Sessa");
+    const g_s2 = (await call("POST", "/auth/login", { email: `sessa${uniq}@example.fi`, password: "strong-pass-123" })).body;
+    const g_list = await call("GET", "/me/sessions", null, g_s2.accessToken);
+    const g_sid1 = g_jwt(g_sess.accessToken).sid, g_sid2 = g_jwt(g_s2.accessToken).sid;
+    check("B8: GET /me/sessions lists the devices with id, device, createdAt, lastUsedAt and the current one", g_list.status === 200 && g_list.body.sessions?.length === 2
+      && g_list.body.sessions.find((x) => x.id === g_sid2)?.current === true && g_list.body.sessions.find((x) => x.id === g_sid1)?.current === false
+      && g_list.body.sessions.every((x) => typeof x.device === "string" && x.createdAt && x.lastUsedAt), g_list.body);
+    const g_end1 = await call("DELETE", `/me/sessions/${g_sid1}`, null, g_s2.accessToken);
+    check("B8: ending another device signs it out at once (access and refresh token refused)", g_end1.status === 200
+      && (await call("GET", "/me", null, g_sess.accessToken)).status === 401 && (await call("POST", "/auth/refresh", { refreshToken: g_sess.refreshToken })).status === 401
+      && (await call("GET", "/me", null, g_s2.accessToken)).status === 200, g_end1.body);
+    check("B8: someone else's session id is 404", (await call("DELETE", `/me/sessions/${g_sid2}`, null, otherCust.accessToken)).status === 404);
+    const g_s3 = (await call("POST", "/auth/login", { email: `sessa${uniq}@example.fi`, password: "strong-pass-123" })).body;
+    const g_endAll = await call("DELETE", "/me/sessions", null, g_s2.accessToken);
+    check("B8: DELETE /me/sessions signs out every other device and keeps this one", g_endAll.status === 200 && g_endAll.body.ended === 1
+      && (await call("GET", "/me", null, g_s3.accessToken)).status === 401 && (await call("GET", "/me", null, g_s2.accessToken)).status === 200, g_endAll.body);
+    // Refresh-token family: a reused (already exchanged) token ends the whole sign-in
+    const g_r1 = (await call("POST", "/auth/login", { email: `sessa${uniq}@example.fi`, password: "strong-pass-123" })).body;
+    const g_r2 = (await call("POST", "/auth/refresh", { refreshToken: g_r1.refreshToken })).body;
+    sql(`update "RefreshToken" set "usedAt" = now() - interval '1 minute' where "usedAt" is not null and "userId"=${g_r1.user.id}`);
+    const g_reuse = await call("POST", "/auth/refresh", { refreshToken: g_r1.refreshToken });
+    check("B8: reusing an exchanged refresh token is refused and ends the whole sign-in (the newer token stops too)", !!g_r2.refreshToken && g_reuse.status === 401
+      && (await call("POST", "/auth/refresh", { refreshToken: g_r2.refreshToken })).status === 401 && (await call("GET", "/me", null, g_r2.accessToken)).status === 401);
+
+    // Two-step sign-in for stores (opt-in) and the payout re-auth bypass
+    const g_b32dec = (t) => { let bits = 0, v = 0; const out = []; for (const ch of t) { v = (v << 5) | "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".indexOf(ch); bits += 5; if (bits >= 8) { out.push((v >>> (bits - 8)) & 255); bits -= 8; } } return Buffer.from(out); };
+    const g_totp = (secretB32, step) => {
+      const c = Buffer.alloc(8); c.writeBigUInt64BE(BigInt(step));
+      const h = crypto.createHmac("sha1", g_b32dec(secretB32)).update(c).digest(); const o = h[19] & 15;
+      return String((((h[o] & 127) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3]) % 1e6).padStart(6, "0");
+    };
+    const g_mv = await register("Mfastore", "VENDOR");
+    const g_mvSt = await call("GET", "/me/mfa", null, g_mv.accessToken);
+    check("B9: stores can set up two-step sign-in (opt-in, not required)", g_mvSt.status === 200 && g_mvSt.body.enabled === false && g_mvSt.body.required === false, g_mvSt.body);
+    const g_setup = (await call("POST", "/me/mfa/setup", { password: "strong-pass-123" }, g_mv.accessToken)).body;
+    const g_step = Math.floor(Date.now() / 30000);
+    const g_en = await call("POST", "/me/mfa/enable", { code: g_totp(g_setup.secret, g_step) }, g_mv.accessToken);
+    const g_mlogin = await call("POST", "/auth/login", { email: `mfastore${uniq}@example.fi`, password: "strong-pass-123" });
+    check("B9: with two-step on, a store's sign-in returns { mfaRequired, mfaToken } like an admin's", g_en.status === 200 && g_mlogin.status === 200 && g_mlogin.body.mfaRequired === true && !!g_mlogin.body.mfaToken && !g_mlogin.body.accessToken, g_mlogin.body);
+    const g_m2 = await call("POST", "/auth/login/mfa", { mfaToken: g_mlogin.body.mfaToken, code: g_totp(g_setup.secret, g_step + 1) });
+    const g_payMfa = await call("POST", "/payouts/onboarding", null, g_m2.body.accessToken);
+    check("B9: a two-step session opens payout links without re-entering the password", g_m2.status === 200 && g_jwt(g_m2.body.accessToken).mfa === true && g_payMfa.status !== 403, [g_m2.body, g_payMfa.body]);
+    check("B9: customers cannot turn two-step sign-in on (403)", (await call("GET", "/me/mfa", null, otherCust.accessToken)).status === 403);
+
+    // SMS limits and code guesses
+    const g_sms46 = await call("POST", "/auth/otp/send", { phone: "+46701234567" });
+    check("A1: text messages only go to allowed country prefixes (+358 by default): 400", g_sms46.status === 400 && g_sms46.body.code === "SMS_COUNTRY_NOT_ALLOWED", g_sms46.body);
+    const g_phone = `+35850${String(uniq).slice(-7)}`;
+    const g_smsSt = [];
+    for (let i = 0; i < 6; i++) {
+      sql(`delete from "OtpCode" where target='${g_phone}'`); // skip the 60-second resend wait
+      g_smsSt.push((await call("POST", "/auth/otp/send", { phone: g_phone })).status);
+    }
+    check("A1: at most 5 codes to one number a day (the 6th: 429)", g_smsSt.join() === "200,200,200,200,200,429", g_smsSt);
+    const g_guessT = `guess${uniq}@example.fi`;
+    const g_plant = (target, code) => sql(`INSERT INTO "OtpCode" (target, "codeHash", "expiresAt") VALUES ('${target}', '${crypto.createHash("sha256").update(`${target}:${code}`).digest("hex")}', now() + interval '10 minutes')
+      ON CONFLICT (target) DO UPDATE SET "codeHash" = EXCLUDED."codeHash", attempts = 0, "expiresAt" = EXCLUDED."expiresAt"`);
+    g_plant(g_guessT, "111111");
+    for (let i = 0; i < 4; i++) await call("POST", "/auth/otp/verify", { target: g_guessT, code: `00000${i}`, ageConfirmed: true });
+    g_plant(g_guessT, "222222");
+    await call("POST", "/auth/otp/verify", { target: g_guessT, code: "000009", ageConfirmed: true });
+    const g_guess6 = await call("POST", "/auth/otp/verify", { target: g_guessT, code: "222222", ageConfirmed: true });
+    check("A1: a new code does not give new guesses within 15 minutes (the 6th try is refused even with the right code)", g_guess6.status === 429, g_guess6.body);
+
+    // Audit log viewer and unban
+    const g_banU = await register("Bannu");
+    await call("DELETE", `/admin/users/${g_banU.user.id}`, null, adminToken);
+    const g_unban = await call("PATCH", `/admin/users/${g_banU.user.id}/unban`, null, adminToken);
+    const g_aud = await call("GET", "/admin/audit?limit=5", null, adminToken);
+    const g_banLogin = await call("POST", "/auth/login", { email: `bannu${uniq}@example.fi`, password: "strong-pass-123" });
+    const g_banTok = g_banLogin.body;
+    check("B10: unban reactivates the account and is audited; GET /admin/audit lists entries newest first with the admin", g_unban.status === 200
+      && g_banLogin.status === 200
+      && g_aud.status === 200 && g_aud.body.entries?.[0]?.action === "user.unban" && g_aud.body.entries[0].admin?.id && typeof g_aud.body.nextBefore === "number", g_aud.body.entries?.[0]);
+    const g_aud2 = await call("GET", `/admin/audit?limit=5&before=${g_aud.body.nextBefore}`, null, adminToken);
+    check("B10: the audit log pages with before=", g_aud2.status === 200 && g_aud2.body.entries.every((e) => e.id < g_aud.body.nextBefore));
+    check("B10: customers cannot read the audit log", (await call("GET", "/admin/audit", null, otherCust.accessToken)).status === 403);
+
+    console.log("\n— 2.17: a business store, its seller information and checkout");
+    const g_v = await register("Kultakauppias", "VENDOR");
+    check("B12: store coordinates must be in Finland (400)", (await call("POST", "/stores", { name: `Far ${uniq}`, category: "APPAREL", latitude: 52.52, longitude: 13.40 }, g_v.accessToken)).status === 400);
+    const g_st = (await call("POST", "/stores", {
+      name: `Kulta ${uniq}`, category: "APPAREL", sellerType: "BUSINESS", businessId: "7654321-2", latitude: 60.17, longitude: 24.94,
+      address: "Aleksanterinkatu 1, 00100 Helsinki", phone: "+358401112222", email: `kulta${uniq}@example.fi`,
+    }, g_v.accessToken)).body.store;
+    const g_mfr = await sellerReady(g_v.accessToken);
+    const g_mk = async (n, price, extra = {}) => (await call("POST", "/products", { name: `Kulta shirt ${n}`, category: "Shirt", salePriceCents: price, stockQuantity: 30, images: [ownImage(g_st.id, `kulta${n}`)], ...clothing(g_mfr, "clothing-shirts-blouses"), ...extra }, g_v.accessToken)).body.product;
+    const g_p = await g_mk(1, 9000), g_pc = await g_mk(2, 2500);
+    await call("PATCH", `/admin/vendors/${g_st.id}/approve`, null, adminToken);
+    check("2.17 set-up: an approved business store with products", !!(g_st?.id && g_p?.id && g_pc?.id), [g_st, g_p]);
+    check("F: a new store gets the default commission (0 here; DEFAULT_COMMISSION_RATE)", sql(`select "commissionRate" from "Store" where id=${g_st.id}`) === "0");
+
+    const g_c = await register("Kulta Asiakas");
+    const g_store = (await call("GET", `/stores/${g_st.id}`, null, g_c.accessToken)).body.store;
+    check("D19: a business store's page carries trader information (address, phone, email, Y-tunnus), the withdrawal period and the free-delivery threshold",
+      g_store?.sellerType === "BUSINESS" && g_store.address === "Aleksanterinkatu 1, 00100 Helsinki" && g_store.phone === "+358401112222" && g_store.email === `kulta${uniq}@example.fi`
+        && g_store.businessId === "7654321-2" && g_store.legalName === null && g_store.withdrawal?.days === 14 && g_store.freeDeliveryThresholdCents === 0 && g_store.followMuted === false
+        && !!g_store.returnCost?.en, g_store);
+    const g_priv = (await call("GET", `/stores/${lv_lStore.id}`)).body.store;
+    check("D19: a private seller shows its city only (no street address, phone or email) and no withdrawal right",
+      g_priv?.sellerType === "PRIVATE" && g_priv.address === null && g_priv.phone === null && g_priv.email === null && g_priv.city === "Helsinki" && g_priv.withdrawal === null, g_priv);
+    const g_privProd = (await call("GET", `/products/${lv_lp1.id}`)).body.product;
+    check("D19: product pages hide a private seller's address too", g_privProd?.store?.address === null && g_privProd.store.city === "Helsinki", g_privProd?.store);
+    const g_bizProd = (await call("GET", `/products/${g_p.id}`)).body.product;
+    check("D19: product pages carry a business seller's contact details", g_bizProd?.store?.address === "Aleksanterinkatu 1, 00100 Helsinki" && g_bizProd.store.email === `kulta${uniq}@example.fi`, g_bizProd?.store);
+
+    // Follow, mute and notification settings
+    await call("PUT", `/stores/${g_st.id}/follow`, null, g_c.accessToken);
+    const g_mute = await call("PATCH", `/stores/${g_st.id}/follow`, { muted: true }, g_c.accessToken);
+    check("D25: a followed store can be muted (followMuted on the store payload)", g_mute.status === 200 && g_mute.body.muted === true
+      && (await call("GET", `/stores/${g_st.id}`, null, g_c.accessToken)).body.store?.followMuted === true, g_mute.body);
+    check("D25: muting a store you do not follow is 404", (await call("PATCH", `/stores/${g_st.id}/follow`, { muted: true }, otherCust.accessToken)).status === 404);
+    const g_ns0 = await call("GET", "/me/notification-settings", null, g_c.accessToken);
+    const g_ns1 = await call("PATCH", "/me/notification-settings", { lives: false, launchAlerts: false }, g_c.accessToken);
+    check("D25: notification settings default to on and take any subset", g_ns0.status === 200 && JSON.stringify(g_ns0.body.settings) === JSON.stringify({ followedDrops: true, lives: true, referralRewards: true, launchAlerts: true })
+      && g_ns1.status === 200 && g_ns1.body.settings.lives === false && g_ns1.body.settings.launchAlerts === false && g_ns1.body.settings.followedDrops === true, [g_ns0.body, g_ns1.body]);
+    check("D25: unknown notification keys are refused (400)", (await call("PATCH", "/me/notification-settings", { marketing: true }, g_c.accessToken)).status === 400);
+
+    // Quote: seller information
+    const g_body = (pid, q = 1, extra = {}) => ({ storeId: g_st.id, deliveryLat: 60.18, deliveryLng: 24.95, items: [{ productId: pid, quantity: q }], ...extra });
+    const g_q = (await call("POST", "/orders/quote", g_body(g_pc.id), g_c.accessToken)).body.quote;
+    check("D19/F: the quote carries the seller box and free-delivery fields (threshold off here)", g_q?.store?.seller?.sellerType === "BUSINESS" && g_q.store.address === "Aleksanterinkatu 1, 00100 Helsinki"
+      && g_q.freeDeliveryThresholdCents === 0 && g_q.amountToFreeDeliveryCents === 0 && g_q.deliveryFeeCents > 0, g_q);
+    check("D24: GET /products/ranking explains how search results are sorted (fi/en)", await (async () => { const r = await call("GET", "/products/ranking"); return r.status === 200 && !!r.body.explanation?.en && !!r.body.explanation?.fi; })());
+
+    // Switches
+    const g_sw = await call("PATCH", "/admin/settings/ordersPaused", { on: true, message: "Back at six" }, adminToken);
+    const g_paused = await call("POST", "/orders", { ...g_body(g_pc.id), deliveryAddress: "Mannerheimintie 5, Helsinki" }, g_c.accessToken);
+    const g_cfg = await call("GET", "/app-config?app=customer&build=99");
+    check("C16: pausing orders answers 503 ORDERS_PAUSED with the admin's message; /app-config shows it", g_sw.status === 200 && g_paused.status === 503 && g_paused.body.code === "ORDERS_PAUSED" && g_paused.body.error === "Back at six"
+      && g_cfg.body.switches?.ordersPaused?.on === true, [g_paused.body, g_cfg.body.switches]);
+    const g_sys = (await call("GET", "/admin/system", null, adminToken)).body;
+    check("C16: System lists the switches and says one is on; the change is audited", g_sys.switches?.length === 6 && g_sys.attention?.some((a) => a.startsWith("Switch on: Pause all new orders"))
+      && sql(`select count(*) from "AdminAuditLog" where action='setting.update'`) !== "0" && g_sys.pricing?.freeDeliveryThresholdCents === 0 && g_sys.pricing?.defaultCommissionRate === 0, g_sys.switches);
+    await call("PATCH", "/admin/settings/ordersPaused", { on: false }, adminToken);
+    await call("PATCH", "/admin/settings/deliveryPaused", { on: true }, adminToken);
+    const g_dp = await call("POST", "/orders", { ...g_body(g_pc.id), deliveryAddress: "Mannerheimintie 5, Helsinki" }, g_c.accessToken);
+    await call("PATCH", "/admin/settings/deliveryPaused", { on: false }, adminToken);
+    await call("PATCH", "/admin/settings/signupsPaused", { on: true }, adminToken);
+    const g_su = await call("POST", "/auth/register", { ageConfirmed: true, name: "Late", email: `late${uniq}@example.fi`, password: "strong-pass-123", acceptTerms: true });
+    await call("PATCH", "/admin/settings/signupsPaused", { on: false }, adminToken);
+    await call("PATCH", "/admin/settings/liveEnabled", { on: false }, adminToken);
+    const g_lv = await call("POST", "/live", { title: "Paused live", productIds: [g_p.id] }, g_v.accessToken);
+    await call("PATCH", "/admin/settings/liveEnabled", { on: true }, adminToken);
+    check("C16: delivery, sign-ups and going live can be paused separately (503 with codes)", g_dp.status === 503 && g_dp.body.code === "DELIVERY_PAUSED" && g_su.status === 503 && g_su.body.code === "SIGNUPS_PAUSED"
+      && g_lv.status === 503 && g_lv.body.code === "LIVE_PAUSED", [g_dp.body, g_su.body, g_lv.body]);
+    const g_sets = await call("GET", "/admin/settings", null, adminToken);
+    check("C16: GET /admin/settings → switches with key, on, message, customMessage, updatedAt, updatedById; unknown key 404", g_sets.status === 200 && g_sets.body.switches.length === 6
+      && g_sets.body.switches.every((x) => "key" in x && "on" in x && "message" in x && "customMessage" in x && "updatedAt" in x && "updatedById" in x)
+      && (await call("PATCH", "/admin/settings/nonsense", { on: true }, adminToken)).status === 404, g_sets.body);
+
+    console.log("\n— 2.17: payment, card fingerprint, handover PIN and delivery proof");
+    const g_pay = (o, extra = {}) => call("POST", "/payments/webhook", null, null, signedWebhook({
+      id: `evt_g_${o.id}_${uniq}`, type: "payment_intent.succeeded",
+      data: { object: { id: o.stripePaymentIntentId, amount_received: o.totalCents, metadata: { type: "ORDER", orderId: String(o.id) }, ...extra } },
+    }));
+    const g_fp = `fp_gold_${uniq}`;
+    const g_card = { latest_charge: { id: `ch_g_${uniq}`, payment_method_details: { card: { fingerprint: g_fp } } } };
+    const g_o1Res = await call("POST", "/orders", { ...g_body(g_p.id), deliveryAddress: "Mannerheimintie 5, Helsinki", receiptEmail: `Receipts${uniq}@Example.fi` }, g_c.accessToken);
+    const g_o1 = g_o1Res.body.order;
+    await g_pay(g_o1, g_card);
+    check("D17/A4: the receipt address and the card fingerprint are stored with the order", g_o1Res.status === 201 && sql(`select "receiptEmail" || '|' || "cardFingerprint" from "Order" where id=${g_o1.id}`) === `receipts${uniq}@example.fi|${g_fp}`, g_o1Res.body);
+    check("A5: an order of 80 € or more gets a 4-digit handover PIN (stored, not shown before pickup)", /^\d{4}$/.test(sql(`select "handoverPin" from "Order" where id=${g_o1.id}`))
+      && (await call("GET", `/orders/${g_o1.id}`, null, g_c.accessToken)).body.order?.handoverPin === null);
+    check("A5: the PIN never reaches the store", !JSON.stringify((await call("GET", `/orders/${g_o1.id}`, null, g_v.accessToken)).body).includes("\"handoverPin\":\""));
+    // Linked accounts: a first-order code paid with a card that already paid
+    const g_promo = (await call("POST", "/admin/promo-codes", { code: `FIRST${uniq}`.slice(0, 32), description: "First order 5 €", kind: "AMOUNT", value: 500, firstOrderOnly: true }, adminToken)).body.promoCode;
+    check("B10: creating a promo code is audited", !!g_promo?.id && sql(`select count(*) from "AdminAuditLog" where action='promo.create' and "entityId"=${g_promo.id}`) === "1");
+    const g_c2 = await register("Toinen Tili");
+    const g_o2 = (await call("POST", "/orders", { ...g_body(g_pc.id), deliveryAddress: "Mannerheimintie 5, Helsinki", promoCode: g_promo.code }, g_c2.accessToken)).body.order;
+    await g_pay(g_o2, g_card);
+    check("A4: a first-order offer paid with a card that already paid an order (another account) is cancelled and refunded", sql(`select status || '|' || "cancelReason" from "Order" where id=${g_o2.id}`) === "CANCELLED|First-order offer already used with this card");
+
+    // Courier
+    const g_cour = await register("Kultalähetti", "COURIER");
+    const g_courId = (await call("GET", "/admin/couriers", null, adminToken)).body.couriers.find((x) => x.user?.id === g_cour.user.id)?.id;
+    await call("PATCH", `/admin/couriers/${g_courId}/approve`, null, adminToken);
+    await call("POST", "/courier/status", { isOnline: true, latitude: 60.17, longitude: 24.94 }, g_cour.accessToken);
+    await call("PATCH", `/orders/${g_o1.id}/status`, { status: "CONFIRMED" }, g_v.accessToken);
+    const g_avail = (await call("GET", "/orders/available", null, g_cour.accessToken)).body.orders?.find((o) => o.id === g_o1.id);
+    const g_acc = await call("PATCH", `/orders/${g_o1.id}/assign-courier`, null, g_cour.accessToken);
+    check("A5: courier views say a PIN is needed, never the PIN", g_avail?.handoverPinRequired === true && g_acc.status === 200 && g_acc.body.order?.handoverPinRequired === true && !("handoverPin" in g_acc.body.order), [g_avail, g_acc.body]);
+    const g_mock = await call("POST", "/courier/telemetry", { latitude: 60.18, longitude: 24.95, mocked: true, orderId: g_o1.id }, g_cour.accessToken);
+    const g_jump = await call("POST", "/courier/telemetry", { latitude: 61.5, longitude: 23.77, orderId: g_o1.id }, g_cour.accessToken);
+    check("A5: telemetry from a mock-location app and impossible jumps (> 120 km/h) are ignored", g_mock.body.ignored === "mocked" && g_jump.body.ignored === "jump"
+      && sql(`select latitude || ',' || longitude from "Courier" where id=${g_courId}`) === "60.17,24.94", [g_mock.body, g_jump.body]);
+    await call("PATCH", `/orders/${g_o1.id}/status`, { status: "SHIPPED" }, g_cour.accessToken);
+    const g_custPin = (await call("GET", `/orders/${g_o1.id}`, null, g_c.accessToken)).body.order?.handoverPin;
+    check("A5: the customer sees the PIN while the order is on its way", /^\d{4}$/.test(g_custPin || ""), g_custPin);
+    const g_far = await call("POST", `/orders/${g_o1.id}/deliver`, { method: "IN_PERSON" }, g_cour.accessToken);
+    check("A5: in person needs a fresh position at the door; from the shop it is 409 PHOTO_REQUIRED", g_far.status === 409 && g_far.body.code === "PHOTO_REQUIRED", g_far.body);
+    const g_door = { method: "IN_PERSON", latitude: 60.1801, longitude: 24.9501 };
+    const g_noPin = await call("POST", `/orders/${g_o1.id}/deliver`, g_door, g_cour.accessToken);
+    const g_wrong = await call("POST", `/orders/${g_o1.id}/deliver`, { ...g_door, handoverPin: g_custPin === "0000" ? "1111" : "0000" }, g_cour.accessToken);
+    const g_right = await call("POST", `/orders/${g_o1.id}/deliver`, { ...g_door, handoverPin: g_custPin }, g_cour.accessToken);
+    check("A5: at the door the PIN is asked (400 HANDOVER_PIN_REQUIRED), a wrong one is refused with tries left, the right one completes the delivery",
+      g_noPin.status === 400 && g_noPin.body.code === "HANDOVER_PIN_REQUIRED" && g_wrong.status === 400 && g_wrong.body.code === "HANDOVER_PIN_WRONG" && g_wrong.body.attemptsLeft === 4
+        && g_right.status === 200 && g_right.body.order?.status === "DELIVERED" && !("handoverPin" in g_right.body.order), [g_noPin.body, g_wrong.body, g_right.body]);
+
+    // Order confirmation page
+    const g_link = await call("GET", `/orders/${g_o1.id}/confirmation/link`, null, g_c.accessToken);
+    const g_page = g_link.body.url ? await fetch(g_link.body.url) : null;
+    const g_html = g_page ? await g_page.text() : "";
+    check("D17: the confirmation page (signed 10-minute link) names the seller, its Y-tunnus and the 14-day withdrawal right with the form link",
+      g_link.status === 200 && g_page?.status === 200 && g_html.includes(`Kulta ${uniq}`) && g_html.includes("7654321-2") && g_html.includes("/legal/withdrawal-form") && g_html.includes("14"), g_link.body);
+    check("D17: a tampered link is 403 and other customers get no link", g_link.body.url && (await fetch(g_link.body.url.replace(/sig=.{4}/, "sig=AAAA"))).status === 403
+      && (await call("GET", `/orders/${g_o1.id}/confirmation/link`, null, otherCust.accessToken)).status === 404);
+    const g_wf = await fetch(`${BASE}/legal/withdrawal-form`);
+    check("D18: /legal/withdrawal-form serves the model form in Finnish and English", g_wf.status === 200 && /Peruuttamislomake/.test(await g_wf.text()));
+
+    console.log("\n— 2.17: disputes, dashboard refunds, the order console and incidents");
+    const g_ret = await call("POST", "/payments/webhook", null, null, signedWebhook({
+      id: `evt_g_ref_${uniq}`, type: "charge.refunded",
+      data: { object: { id: `ch_g_${uniq}`, payment_intent: g_o1.stripePaymentIntentId, amount_refunded: 1299, refunds: { has_more: false, data: [
+        { amount: 300, status: "succeeded", metadata: {} }, { amount: 999, status: "succeeded", metadata: { source: "malvoya" } },
+      ] } } },
+    }));
+    const g_ret2 = await call("POST", "/payments/webhook", null, null, signedWebhook({
+      id: `evt_g_ref2_${uniq}`, type: "charge.refunded",
+      data: { object: { id: `ch_g_${uniq}`, payment_intent: g_o1.stripePaymentIntentId, refunds: { has_more: false, data: [{ amount: 300, status: "succeeded", metadata: {} }] } } },
+    }));
+    check("A2: a refund made in the Stripe dashboard is synced once (Malvoya's own refunds are not counted again)", g_ret.status === 200 && g_ret2.status === 200
+      && sql(`select "refundedCents" || '|' || "externalRefundedCents" from "Order" where id=${g_o1.id}`) === "300|300");
+    sql(`update "Payout" set "releaseAt" = now() - interval '1 day' where "orderId"=${g_o1.id} and party='STORE'`);
+    const g_disp = (type, status) => call("POST", "/payments/webhook", null, null, signedWebhook({
+      id: `evt_g_${type}_${status}_${uniq}`, type, data: { object: { id: `dp_g_${uniq}`, payment_intent: g_o1.stripePaymentIntentId, amount: 9000, reason: "fraudulent", status } },
+    }));
+    await g_disp("charge.dispute.created", "needs_response");
+    const g_payouts = require(path.join(__dirname, "..", "..", "dist", "modules", "payouts", "payouts.service.js"));
+    await g_payouts.processDuePayouts();
+    const g_dl = await call("GET", "/admin/disputes", null, adminToken);
+    const g_sysD = (await call("GET", "/admin/system", null, adminToken)).body;
+    check("A2: a chargeback flags the order, freezes the store's payout, and appears in Disputes and System", sql(`select "disputeStatus" from "Order" where id=${g_o1.id}`) === "needs_response"
+      && sql(`select status from "Payout" where "orderId"=${g_o1.id} and party='STORE'`) === "SCHEDULED"
+      && g_dl.body.disputes?.some((d) => d.orderId === g_o1.id && d.storePayoutFrozen === true) && g_sysD.attention?.some((a) => a.includes(`Order #${g_o1.id}: chargeback`)), g_dl.body);
+    await g_disp("charge.dispute.closed", "won");
+    await g_payouts.processDuePayouts();
+    check("A2: a won dispute releases the store's payout to the normal flow", sql(`select "disputeStatus" from "Order" where id=${g_o1.id}`) === "won"
+      && sql(`select status from "Payout" where "orderId"=${g_o1.id} and party='STORE'`) !== "SCHEDULED");
+
+    const g_find = await call("GET", `/admin/orders?q=${g_o1.id}`, null, adminToken);
+    const g_byEmail = await call("GET", `/admin/orders?q=${encodeURIComponent(`kultaasiakas${uniq}@example.fi`)}&limit=5`, null, adminToken);
+    check("C13: the order console finds orders by number and customer email, paged", g_find.status === 200 && g_find.body.orders?.length === 1 && g_find.body.orders[0].id === g_o1.id
+      && g_byEmail.body.orders?.some((o) => o.id === g_o1.id) && "nextBefore" in g_byEmail.body, g_find.body);
+    const g_det = (await call("GET", `/admin/orders/${g_o1.id}`, null, adminToken)).body.order;
+    check("C13: the order detail has people, timeline, payments, payouts, chat, proof, dispute and refundableCents; no PIN or fingerprint",
+      g_det?.refundableCents === g_o1.totalCents - 300 && g_det.timeline?.some((x) => x.event === "delivered") && g_det.payments?.externalRefundedCents === 300
+        && Array.isArray(g_det.payouts) && Array.isArray(g_det.chat) && g_det.deliveryProof?.method === "IN_PERSON" && g_det.dispute?.status === "won"
+        && g_det.handoverPinRequired === true && !("handoverPin" in g_det) && !("cardFingerprint" in g_det) && g_det.sameCardOtherAccounts === 1, g_det);
+    const g_tooMuch = await call("POST", `/admin/orders/${g_o1.id}/refund`, { cents: g_o1.totalCents, reason: "Goodwill" }, adminToken);
+    const g_ref = await call("POST", `/admin/orders/${g_o1.id}/refund`, { cents: 200, reason: "Late delivery", fromStore: false }, adminToken);
+    check("C13: a goodwill refund is limited to what is left, refunds and is audited", g_tooMuch.status === 400 && g_ref.status === 200 && g_ref.body.order?.refundedCents === 500
+      && sql(`select count(*) from "AdminAuditLog" where action='order.refund' and "entityId"=${g_o1.id}`) === "1", [g_tooMuch.body, g_ref.body.order?.refundedCents]);
+    check("C13: a delivered order cannot be cancelled from the console (409)", (await call("POST", `/admin/orders/${g_o1.id}/cancel`, { reason: "Test" }, adminToken)).status === 409);
+    // Cancel and unassign on new orders
+    const g_o3 = (await call("POST", "/orders", { ...g_body(g_pc.id), deliveryAddress: "Mannerheimintie 5, Helsinki" }, g_c.accessToken)).body.order;
+    await g_pay(g_o3);
+    await call("PATCH", `/orders/${g_o3.id}/status`, { status: "CONFIRMED" }, g_v.accessToken);
+    const g_acc3 = await call("PATCH", `/orders/${g_o3.id}/assign-courier`, null, g_cour.accessToken);
+    const g_un = await call("POST", `/admin/orders/${g_o3.id}/unassign-courier`, null, adminToken);
+    check("C13: unassigning the courier before pickup offers the job again and is audited", g_acc3.status === 200 && g_un.status === 200 && g_un.body.order?.courier === null
+      && sql(`select coalesce("currentOrderId"::text,'none') from "Courier" where id=${g_courId}`) === "none" && sql(`select count(*) from "AdminAuditLog" where action='order.unassign_courier' and "entityId"=${g_o3.id}`) === "1", g_un.body);
+    const g_can = await call("POST", `/admin/orders/${g_o3.id}/cancel`, { reason: "Store asked us" }, adminToken);
+    check("C13: cancelling from the console refunds in full and is audited", g_can.status === 200 && g_can.body.order?.status === "CANCELLED" && g_can.body.order.cancelReason === "Cancelled by Malvoya: Store asked us"
+      && sql(`select count(*) from "AdminAuditLog" where action='order.cancel' and "entityId"=${g_o3.id}`) === "1", g_can.body.order?.status);
+
+    // Incidents
+    const g_inc = await call("POST", "/courier/incident", { type: "THREAT", orderId: g_o1.id, note: "Aggressive dog at the gate", lat: 60.18, lng: 24.95 }, g_cour.accessToken);
+    const g_myInc = await call("GET", "/courier/incidents", null, g_cour.accessToken);
+    const g_sysI = (await call("GET", "/admin/system", null, adminToken)).body;
+    check("C14: a courier reports an incident; it is listed for the courier and in System", g_inc.status === 201 && g_myInc.body.incidents?.[0]?.status === "OPEN" && g_myInc.body.incidents[0].orderId === g_o1.id
+      && g_sysI.attention?.some((a) => a.includes(`Courier incident #${g_inc.body.incident?.id}`)), [g_inc.body, g_myInc.body]);
+    check("C14: only couriers report incidents; type is checked", (await call("POST", "/courier/incident", { type: "THREAT" }, g_c.accessToken)).status === 403
+      && (await call("POST", "/courier/incident", { type: "PARTY" }, g_cour.accessToken)).status === 400);
+    const g_ainc = await call("GET", "/admin/incidents", null, adminToken);
+    const g_res = await call("POST", `/admin/incidents/${g_inc.body.incident.id}/resolve`, { note: "Called the courier, all fine" }, adminToken);
+    check("C14: admins list and resolve incidents; the courier sees the resolution", g_ainc.body.incidents?.some((x) => x.id === g_inc.body.incident.id && x.courier?.id === g_courId)
+      && g_res.status === 200 && (await call("GET", "/courier/incidents", null, g_cour.accessToken)).body.incidents?.[0]?.resolutionNote === "Called the courier, all fine");
+
+    // Ops alerts (the job runs in this process against the same database)
+    const g_ops = require(path.join(__dirname, "..", "..", "dist", "services", "opsAlerts.js"));
+    const g_n1 = await g_ops.runOpsAlerts(), g_n2 = await g_ops.runOpsAlerts();
+    check("C15: ops-alerts tells admins about new attention items once (deduplicated by hash)", g_n1 > 0 && g_n2 === 0 && Number(sql(`select count(*) from "OpsAlert"`)) >= g_n1, [g_n1, g_n2]);
+
+    console.log("\n— 2.17: reviews, statements of reasons and report outcomes");
+    const g_rev = await call("POST", `/orders/${g_o1.id}/review`, { storeRating: 2, comment: "Rude store" }, g_c.accessToken);
+    const g_rep = await call("POST", `/reviews/${g_rev.body.review?.id}/report`, { reason: "Insulting" }, otherCust.accessToken);
+    const g_hide = await call("POST", `/admin/reviews/${g_rev.body.review?.id}/resolve`, { action: "hide", reason: "Insulting language" }, adminToken);
+    await sleep(400);
+    const g_nC = (await call("GET", "/me/notices", null, g_c.accessToken)).body;
+    const g_nR = (await call("GET", "/me/notices", null, otherCust.accessToken)).body;
+    check("D21: hiding a review sends its author a statement of reasons (in-app notice) and the reporter the outcome", g_rev.status === 201 && g_rep.status === 200 && g_hide.status === 200
+      && g_nC.notices?.some((n) => n.kind === "statement_of_reasons" && n.entity === "Review" && n.body.en.includes("Insulting language")) && g_nC.unread >= 1
+      && g_nR.notices?.some((n) => n.kind === "report_outcome" && n.entity === "Review"), [g_nC, g_nR.notices?.[0]]);
+    check("D21: notices can be marked read", (await call("POST", "/me/notices/read", {}, g_c.accessToken)).status === 200 && (await call("GET", "/me/notices", null, g_c.accessToken)).body.unread === 0);
+
+    console.log("\n— 2.17: live chat word filter and message reports");
+    const g_live = (await call("POST", "/live", { title: "Kulta live", productIds: [g_p.id] }, g_v.accessToken)).body.live?.id;
+    const g_vs = await Promise.all([g_c, otherCust, g_c2, g_banTok].map((u) => connect(u.accessToken)));
+    for (const sk of g_vs) await ack(sk, "live:join", g_live);
+    const g_bad = await ack(g_vs[0], "live:chat", { liveId: g_live, text: "you are a HUORA" });
+    const g_good = await ack(g_vs[0], "live:chat", { liveId: g_live, text: "Lovely colour" });
+    check("D26: the word filter refuses abusive words; normal messages go out", g_live && g_bad?.ok === false && g_good?.ok === true, [g_bad, g_good]);
+    const g_mid = g_good?.message?.id;
+    const g_rp = (u) => call("POST", `/live/${g_live}/messages/${g_mid}/report`, { reason: "HARASSMENT" }, u.accessToken);
+    check("D26: nobody reports their own message (400)", (await g_rp(g_c)).status === 400);
+    for (const u of [otherCust, g_c2, g_banTok]) await g_rp(u);
+    await sleep(400);
+    check("D26: three reports hide the message for everyone and send the writer a statement of reasons", sql(`select hidden::text || '|' || "hiddenBy" || '|' || "reportCount" from "LiveMessage" where id=${g_mid}`) === "true|reports|3"
+      && (await call("GET", "/me/notices", null, g_c.accessToken)).body.notices?.some((n) => n.entity === "LiveMessage" && n.kind === "statement_of_reasons"));
+    const g_q2 = await call("GET", "/admin/live/messages/reported", null, adminToken);
+    const g_keep = await call("POST", `/admin/live/messages/${g_mid}`, { action: "keep" }, adminToken);
+    check("D26: admins see reported live messages and can keep one (shown again; reporters told)", g_q2.body.messages?.some((m) => m.id === g_mid) && g_keep.status === 200 && g_keep.body.message?.hidden === false
+      && (await call("GET", "/me/notices", null, g_c2.accessToken)).body.notices?.some((n) => n.kind === "report_outcome" && n.entity === "LiveMessage"), g_keep.body);
+    g_vs.forEach((sk) => sk.close());
+    await call("POST", `/live/${g_live}/end`, {}, g_v.accessToken);
+
+    // Hold words and the approved store's address change
+    const g_matcher = require(path.join(__dirname, "..", "..", "dist", "modules", "catalog", "matcher.js"));
+    check("D23: imports of prohibited goods (puukko, snus, pepper spray) are held", ["Puukko 10 cm", "Snus mint", "Pepper spray pocket"].every((n) => !!g_matcher.matchTaxonomy([n]).hold));
+    const g_chg = await call("PATCH", `/stores/${g_st.id}`, { address: "Esplanadi 2, 00130 Helsinki" }, g_v.accessToken);
+    const g_sysC = (await call("GET", "/admin/system", null, adminToken)).body;
+    check("B12: an approved store changing its address stays open, is told it is reviewed and appears in System", g_chg.status === 200 && g_chg.body.store?.changeReview?.fields?.includes("address")
+      && g_sysC.attention?.some((a) => a.includes(`(#${g_st.id}) changed its address after approval`)), g_chg.body.store?.changeReview);
+    await call("PATCH", `/admin/vendors/${g_st.id}/approve`, null, adminToken);
+    check("B12: approving again clears the change review", sql(`select ("changedAfterApprovalAt" is null)::text from "Store" where id=${g_st.id}`) === "true");
+
+    // Store owner cannot review its own store, and payment failures lock checkout
+    const g_fail = await register("Kortti Testaaja");
+    const g_fo = (await call("POST", "/orders", { ...g_body(g_pc.id), deliveryAddress: "Mannerheimintie 5, Helsinki" }, g_fail.accessToken)).body.order;
+    for (let i = 0; i < 4; i++) {
+      await call("POST", "/payments/webhook", null, null, signedWebhook({ id: `evt_gf_${i}_${uniq}`, type: "payment_intent.payment_failed", data: { object: { id: g_fo.stripePaymentIntentId, metadata: { type: "ORDER", orderId: String(g_fo.id) } } } }));
+    }
+    const g_lockedOut = await call("POST", "/orders", { ...g_body(g_pc.id), deliveryAddress: "Mannerheimintie 5, Helsinki" }, g_fail.accessToken);
+    check("A3: four failed payments in an hour pause the customer's checkout for an hour (429 CHECKOUT_LOCKED)", g_lockedOut.status === 429 && g_lockedOut.body.code === "CHECKOUT_LOCKED", g_lockedOut.body);
+
+    // Data export
+    const g_exp = (await call("GET", "/auth/me/data", null, g_c.accessToken)).body.data;
+    check("GDPR: the export carries signed-in devices, notices, notification settings and muted follows", Array.isArray(g_exp?.sessions) && g_exp.sessions.length >= 1 && Array.isArray(g_exp.notices)
+      && g_exp.notifyLives === false && g_exp.follows?.some((f) => f.storeId === g_st.id && f.muted === true), Object.keys(g_exp || {}));
+
+    console.log("\n— 2.17: free delivery, default commission, checkout limits and SMS cap (second instance)");
+    check("API with the 2.17 pricing settings started", await startFeeApi({ FREE_DELIVERY_THRESHOLD_CENTS: "8000", DEFAULT_COMMISSION_RATE: "0.15", CHECKOUT_USER_LIMIT_PER_HOUR: "10", SMS_DAILY_CAP: "0" }));
+    const g_fq1 = (await callAt(FEE_API, "POST", "/orders/quote", g_body(g_pc.id, 1), g_c.accessToken)).body.quote;
+    const g_fq2 = (await callAt(FEE_API, "POST", "/orders/quote", g_body(g_pc.id, 4), g_c.accessToken)).body.quote;
+    check("F: below the threshold the delivery fee is charged and the quote says how much more is needed", g_fq1?.freeDeliveryThresholdCents === 8000 && g_fq1.amountToFreeDeliveryCents === 5500 && g_fq1.deliveryFeeCents > 0, g_fq1);
+    check("F: from 80 € of items delivery is free", g_fq2?.deliveryFeeCents === 0 && g_fq2.amountToFreeDeliveryCents === 0 && g_fq2.totalCents === 10000, g_fq2);
+    const g_fo1 = (await callAt(FEE_API, "POST", "/orders", { ...g_body(g_pc.id, 4), deliveryAddress: "Mannerheimintie 5, Helsinki" }, g_c.accessToken)).body.order;
+    check("F: a free-delivery order still pays the courier (Malvoya pays it)", g_fo1?.deliveryFeeCents === 0 && g_fo1.courierFeeCents > 0, g_fo1);
+    const g_fv = await register("Uusi Kauppa", "VENDOR");
+    const g_fst = (await callAt(FEE_API, "POST", "/stores", { name: `Uusi ${uniq}`, category: "THRIFT", sellerType: "PRIVATE" }, g_fv.accessToken)).body.store;
+    check("F: a new store gets DEFAULT_COMMISSION_RATE (15 %)", g_fst?.commissionRate === 0.15, g_fst);
+    const g_fsys = (await callAt(FEE_API, "GET", "/admin/system", null, adminToken)).body;
+    check("F: System lists the free-delivery threshold and the default commission", g_fsys.pricing?.freeDeliveryThresholdCents === 8000 && g_fsys.pricing?.defaultCommissionRate === 0.15);
+    const g_vel = await register("Pikaostaja");
+    const g_velSt = [];
+    for (let i = 0; i < 11; i++) g_velSt.push((await callAt(FEE_API, "POST", "/orders", { ...g_body(g_pc.id), deliveryAddress: "Mannerheimintie 5, Helsinki" }, g_vel.accessToken)).status);
+    check("A3: at most 10 checkouts per customer an hour (the 11th: 429)", g_velSt.slice(0, 10).every((x) => x === 201) && g_velSt[10] === 429, g_velSt);
+    const g_smsCap = await callAt(FEE_API, "POST", "/auth/otp/send", { phone: `+35845${String(uniq).slice(-7)}` });
+    check("A1: past the daily SMS cap text messages are paused (503 SMS_PAUSED)", g_smsCap.status === 503 && g_smsCap.body.code === "SMS_PAUSED", g_smsCap.body);
+    feeApi.kill(); feeApi = null;
+  }
+
   console.log("\n— Background jobs and input hardening");
   const leaseSql = `INSERT INTO "JobLease" ("name","lockedUntil") VALUES ('t${uniq}', now() + interval '1 minute') ON CONFLICT ("name") DO UPDATE SET "lockedUntil" = now() + interval '1 minute' WHERE "JobLease"."lockedUntil" < now() RETURNING "name"`;
   const firstLine = (q) => sql(q).split(/\r?\n/)[0];
@@ -3145,7 +3538,7 @@ function ean13(d12) {
   check("huge search input rejected", (await call("GET", `/products/search?q=${"a".repeat(200)}`)).status === 400);
   const cors = await fetch(`${API}/stores`, { headers: { Origin: "https://evil.example" } });
   check("CORS does not allow unknown origins", !cors.headers.get("access-control-allow-origin"));
-  check("health reports v2.16.1", (await (await fetch(`${BASE}/health`)).json()).version === "2.16.1");
+  check("health reports v2.17.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.17.0");
 
   [vendorSock, custSock, otherSock, c1Sock, c2Sock].forEach((s) => s.close());
   console.log(`\n${pass} passed, ${fail} failed`);

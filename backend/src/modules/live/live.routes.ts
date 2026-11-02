@@ -120,6 +120,16 @@ router.post("/live/:id(\\d+)/report", reportLimiter, optionalAuth, async (req: A
   } catch (e) { sendError(res, e); }
 });
 
+/** Report one chat message (2.17): three reporters hide it until an admin decides. */
+const messageReportLimiter = rateLimit({ windowMs: 60 * 60_000, max: 30, standardHeaders: true, legacyHeaders: false, message: tooMany, ...rateLimitStore("live-msg-report") });
+router.post("/live/:id(\\d+)/messages/:mid(\\d+)/report", messageReportLimiter, auth, async (req: AuthRequest, res: Response) => {
+  const body = z.object({ reason: z.enum(REPORT_REASONS) }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ ok: false, error: "Choose a reason" });
+  try {
+    res.json({ ok: true, ...(await live.reportMessage(id(req), positiveId(req.params.mid)!, req.user!.id, body.data.reason)) });
+  } catch (e) { sendError(res, e); }
+});
+
 router.get("/stores/my/live", auth, requireRole("VENDOR"), async (req: AuthRequest, res: Response) => {
   try {
     res.json({ ok: true, ...(await live.myLives(req.user!.id)) });
@@ -147,6 +157,20 @@ router.post("/admin/live/:id(\\d+)/end", ...admin, async (req: AuthRequest, res:
 router.get("/admin/live/:id(\\d+)/messages", ...admin, async (req: AuthRequest, res: Response) => {
   try {
     res.json({ ok: true, ...(await live.adminMessages(id(req))) });
+  } catch (e) { sendError(res, e); }
+});
+
+router.get("/admin/live/messages/reported", ...admin, async (_req: AuthRequest, res: Response) => {
+  try {
+    res.json({ ok: true, messages: await live.adminReportedMessages() });
+  } catch (e) { sendError(res, e); }
+});
+
+router.post("/admin/live/messages/:mid(\\d+)", ...admin, async (req: AuthRequest, res: Response) => {
+  const body = z.object({ action: z.enum(["hide", "keep"]), reason: z.string().trim().max(500).optional() }).safeParse(req.body);
+  if (!body.success) return res.status(400).json({ ok: false, error: "Action must be hide or keep" });
+  try {
+    res.json({ ok: true, message: await live.adminResolveMessage(positiveId(req.params.mid)!, req.user!.id, body.data.action, body.data.reason) });
   } catch (e) { sendError(res, e); }
 });
 

@@ -1,3 +1,5 @@
+import { audit } from "../../lib/audit";
+import { prisma } from "../../lib/prisma";
 import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { positiveId, sendError, ApiError } from "../../lib/errors";
@@ -40,7 +42,9 @@ router.post("/promo-codes", async (req: Request, res: Response) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.issues[0]?.message ?? "Invalid promo code", errors: parsed.error.flatten() });
   try {
-    res.status(201).json({ ok: true, promoCode: await createPromoCode(parsed.data) });
+    const promoCode = await createPromoCode(parsed.data);
+    await audit((req as any).user.id, "promo.create", "PromoCode", promoCode.id, { newValue: parsed.data });
+    res.status(201).json({ ok: true, promoCode });
   } catch (e) { sendError(res, e); }
 });
 
@@ -50,7 +54,10 @@ router.patch("/promo-codes/:id", async (req: Request, res: Response) => {
   try {
     if (!id) throw new ApiError("Promo code not found", 404);
     if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.issues[0]?.message ?? "Invalid change", errors: parsed.error.flatten() });
-    res.json({ ok: true, promoCode: await updatePromoCode(id, parsed.data) });
+    const before = await prisma.promoCode.findUnique({ where: { id }, select: { active: true, endsAt: true, description: true, maxRedemptions: true } });
+    const promoCode = await updatePromoCode(id, parsed.data);
+    await audit((req as any).user.id, "promo.update", "PromoCode", id, { oldValue: before, newValue: parsed.data });
+    res.json({ ok: true, promoCode });
   } catch (e) { sendError(res, e); }
 });
 

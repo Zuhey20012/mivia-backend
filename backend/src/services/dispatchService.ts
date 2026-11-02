@@ -29,7 +29,7 @@ function approximate(value: number | null) {
 export async function offerOrderToCouriers(orderId: number) {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
-    omit: { courierPay: false },
+    omit: { courierPay: false, handoverPin: false },
     include: { store: { select: { id: true, name: true, address: true, latitude: true, longitude: true, prepMinutes: true } } },
   });
   // Pickup orders are collected by the customer: couriers never see them
@@ -64,6 +64,8 @@ export async function offerOrderToCouriers(orderId: number) {
     deliveryFeeCents: order.deliveryFeeCents,
     courierFeeCents: order.courierFeeCents, // tip included; = courierPay.totalCents
     tipCents: order.tipCents,
+    // The customer tells the courier a 4-digit PIN at an in-person handover (orders of 80 € or more, 2.17)
+    handoverPinRequired: order.handoverPin !== null,
     // Before the courier accepts (Platform Work Directive). Ride to the shop: estimated per nearby courier,
     // fixed on acceptance; waiting at the shop is added at pickup.
     courierPay: presentCourierPay(order),

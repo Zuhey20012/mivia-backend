@@ -7,6 +7,8 @@ import '../config/theme.dart';
 import '../core/delete_account_tile.dart';
 import '../core/download_data_tile.dart';
 import '../screens/chatbot.dart';
+import '../screens/signed_in_devices_screen.dart';
+import '../screens/two_step_screen.dart';
 
 /// Help, sign out, your data (the plain-language page and a download) and delete account, for screens shown before the store exists (the dashboard has
 /// the same entries in its Store tab). Google Play requires account deletion to be reachable in the app.
@@ -26,6 +28,22 @@ Future<void> showAccountSheet(BuildContext context) {
             onTap: () {
               Navigator.pop(ctx);
               Navigator.push(context, MaterialPageRoute(builder: (_) => const ChatbotScreen()));
+            },
+          ),
+          ListTile(
+            leading: const CircleAvatar(backgroundColor: AppTheme.primaryLight, child: Icon(Icons.shield_outlined, color: AppTheme.primary)),
+            title: Text(tr(ctx, 'Two-step sign-in', 'Kaksivaiheinen kirjautuminen'), style: const TextStyle(fontWeight: FontWeight.w600)),
+            onTap: () {
+              Navigator.pop(ctx);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const TwoStepScreen()));
+            },
+          ),
+          ListTile(
+            leading: const CircleAvatar(backgroundColor: AppTheme.primaryLight, child: Icon(Icons.devices_rounded, color: AppTheme.primary)),
+            title: Text(tr(ctx, 'Signed-in devices', 'Kirjautuneet laitteet'), style: const TextStyle(fontWeight: FontWeight.w600)),
+            onTap: () {
+              Navigator.pop(ctx);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const SignedInDevicesScreen()));
             },
           ),
           ListTile(

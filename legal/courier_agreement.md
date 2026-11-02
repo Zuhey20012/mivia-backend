@@ -31,7 +31,9 @@ The courier app shows a checklist of the steps before approval: name and phone, 
 ## 4. How jobs are offered (transparency of automated systems)
 
 - Jobs are offered to approved, online couriers within 7.5 km of the store, nearest first. If none is nearby, the job is shown to all online couriers.
-- The only factor used is distance to the store. Ratings, acceptance rates and past declines are **not** used.
+- The only factor used is distance to the store. Ratings, acceptance rates and past declines are **not** used, neither for which offers a Courier gets nor for pay. Customers' ratings of couriers are not shown to anyone else and are used only by a person at Malvoya when looking into a complaint.
+- Automated systems Malvoya uses in courier work, all explained in the app ("How offers and pay work"): the offer order by distance (above), the pay formula (section 5), the check that a position is fresh and near the store or the door before check-in and in-person handover, the ignoring of positions from mock-location apps or impossible jumps (over 120 km/h), and the handover PIN for orders of 80 € or more. None of them decides on suspension, deactivation or pay cuts.
+- Questions about offers or pay are answered by a person: Support in the courier app or the contact form at https://malvoya-api-eu.onrender.com/contact.
 - Every offer shows the pickup store, the approximate delivery area and the Courier's pay for the job, with a line-by-line explanation of how it was calculated, before the Courier accepts.
 - Malvoya does not use automated systems to suspend or terminate couriers. Any such decision is made by a person, with written reasons, and the Courier may request a review.
 
@@ -46,9 +48,10 @@ The courier app shows a checklist of the steps before approval: name and phone, 
   - plus any **tip**.
 - The current values of these parameters are [COURIER PAY PARAMETERS: base amount, per-km rate, road factor, minimum, ride-to-store free distance and rate, free waiting minutes, per-minute rate and maximum] and are always shown in the app in one sentence before a job is accepted. Malvoya gives at least [NOTICE PERIOD] notice before changing them. The rates in force when a job is offered apply to that whole job, including ride-to-store and waiting pay; a later change never reduces the pay of a job already offered or accepted.
 - The same formula applies to every Courier. Ratings, acceptance rates and past declines do not affect pay.
-- Tips: customers can add an optional tip at checkout. Malvoya passes every tip to the Courier in full and takes no commission on it. A tip shown in an offer is already included in the pay shown.
+- Tips: customers can add an optional tip at checkout. Malvoya receives tips as the Courier's agent and passes every tip to the Courier in full, taking no commission on it. A tip shown in an offer is already included in the pay shown.
 - Each completed delivery is paid to the Courier's own Stripe account right after delivery (Stripe Connect). Stripe verifies the Courier's identity and bank account on its own pages.
-- The Courier is responsible for their own taxes and insurance as an independent contractor.
+- The Courier is responsible for their own taxes as an independent contractor.
+- **Insurance.** [INSURANCE — the owner fills in: whether Malvoya has accident and third-party liability insurance that covers couriers during jobs, the insurer, what it covers and how to claim; otherwise that the Courier arranges their own accident and liability insurance (for example voluntary accident insurance for entrepreneurs) and the vehicle insurance the law requires.]
 - Each job's final pay breakdown stays visible in the app. Malvoya provides a monthly statement of completed jobs and pay.
 - **Customer not reached.** If the Courier is at the delivery address and cannot reach the customer (or cannot find the address), the Courier reports it in the app ("Can't deliver?"). The customer is told at once and can answer in the order chat. If the customer has not been reached 10 minutes after the report, the Courier may take the order back to the store and hand the items over at the counter. The Courier is then paid as for a completed delivery: the job pay shown (including any ride-to-store and waiting pay) and the tip in full. The Courier must hand the items back; the store confirms in its app that it received them.
 
@@ -59,6 +62,9 @@ The Courier's location is processed only while they are online, as described in 
 ## 7. Conduct and safety
 
 The Courier follows traffic law and treats customers and stores respectfully. The customer's address and door codes are used only to complete the delivery.
+
+- **Help button.** While online, the courier app has a Help button: it calls the emergency number 112 on the Courier's phone, and lets the Courier report an incident (accident, threat, damaged goods, theft or other). Malvoya's team is alerted at once and contacts the Courier; the report stays open until a person has handled it.
+- **Handover.** An in-person handover is confirmed in the app at the delivery address (within 250 m); for orders of 80 € or more the customer tells the Courier a 4-digit PIN. When the app cannot confirm the Courier's position at the door, the order is completed with a photo instead.
 
 ## 7a. Accepting this agreement and changes to it
 

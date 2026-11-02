@@ -7,6 +7,7 @@ import '../core/delivery_location.dart';
 import '../core/catalog.dart';
 import 'category_detail.dart';
 import '../widgets/product_tile.dart';
+import '../widgets/ranking_sheet.dart';
 import 'store_detail.dart';
 import '../widgets/app_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -358,6 +359,12 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
         chip(_condition == null ? tr(context, 'Condition', 'Kunto') : _conditionLabel(_condition!), _condition != null,
             () => _pick(['NEW', 'LIKE_NEW', 'GOOD', 'FAIR'], {for (final c in ['NEW', 'LIKE_NEW', 'GOOD', 'FAIR']) c: _conditionLabel(c)}, _condition, (v) => _condition = v),
             onRemove: () => _condition = null),
+        // DSA Art. 27: what decides the order of the results, in the server's own words
+        ActionChip(
+          avatar: const Icon(Icons.info_outline_rounded, size: 18),
+          label: Text(tr(context, 'How results are sorted', 'Miten tulokset järjestetään')),
+          onPressed: () => showSearchRankingSheet(context),
+        ),
       ],
     );
   }

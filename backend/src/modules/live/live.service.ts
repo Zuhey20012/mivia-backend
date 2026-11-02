@@ -1,3 +1,6 @@
+import { reportOutcome, statementOfReasons } from "../me/notices";
+import { audit } from "../../lib/audit";
+import { assertOpen } from "../../lib/settings";
 import pino from "pino";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
@@ -105,6 +108,7 @@ function endedError(row: { endedReason: string | null }) {
 
 export async function startLive(user: Actor, input: { title: string; productIds: number[] }) {
   if (!liveConfigured()) throw new LiveOffError();
+  await assertOpen("liveEnabled"); // admin switch (2.17): 503 LIVE_PAUSED
   const store = await prisma.store.findUnique({ where: { ownerId: user.id }, select: { id: true, name: true, isVerified: true } });
   if (!store) throw new ApiError("Create your store first", 409);
   if (!store.isVerified) throw new ApiError("Your store must be approved before you can go live", 403);
@@ -151,7 +155,11 @@ async function notifyFollowers(liveId: number, store: { id: number; name: string
   });
   if (!claimed.count) return null;
   const owner = await prisma.store.findUnique({ where: { id: store.id }, select: { ownerId: true } });
-  const followers = await prisma.storeFollow.findMany({ where: { storeId: store.id }, select: { userId: true }, take: MAX_FOLLOWER_PUSHES });
+  // Muted stores and people who switched off live notifications get nothing (2.17)
+  const followers = await prisma.storeFollow.findMany({
+    where: { storeId: store.id, muted: false, user: { notifyLives: true, isActive: true } },
+    select: { userId: true }, take: MAX_FOLLOWER_PUSHES,
+  });
   const ids = followers.map((f) => f.userId).filter((id) => id !== owner?.ownerId);
   await prisma.liveStream.update({ where: { id: liveId }, data: { followersNotified: ids.length } });
   if (ids.length) {
@@ -299,9 +307,32 @@ export async function joinRoom(id: number, user: Actor) {
   };
 }
 
+// ─── Word filter (2.17) ──────────────────────────────────────────────────────
+// A small list of slurs and threats that are never allowed in live chat (Terms → Content rules). Messages containing
+// them are refused before anyone sees them. LIVE_CHAT_BLOCKED_WORDS (comma-separated) replaces the list.
+const DEFAULT_BLOCKED_WORDS = [
+  "neekeri", "nigger", "nigga", "faggot", "huora", "whore", "mutakuono", "ryssä", "kill yourself", "tapa itsesi", "kys",
+];
+const fold = (v: string) => v.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+function blockedWords() {
+  const raw = process.env.LIVE_CHAT_BLOCKED_WORDS;
+  return (raw !== undefined && raw.trim() !== "" ? raw.split(",") : DEFAULT_BLOCKED_WORDS).map((w) => fold(w)).filter(Boolean);
+}
+export function containsBlockedWord(text: string) {
+  const padded = ` ${fold(text)} `;
+  return blockedWords().some((w) => padded.includes(` ${w} `));
+}
+
+const AUTO_HIDE_REPORTS = 3;
+
 export async function postMessage(id: number, user: Actor, raw: string) {
   const text = raw.replace(/\s+/g, " ").trim();
   if (!text) throw new ApiError("Write a message first", 400);
+  if (containsBlockedWord(text)) {
+    const e = new ApiError("This message breaks the chat rules and was not sent", 400);
+    e.extra = { code: "MESSAGE_BLOCKED" };
+    throw e;
+  }
   if (text.length > MAX_MESSAGE_LENGTH) throw new ApiError(`Messages can be up to ${MAX_MESSAGE_LENGTH} characters`, 400);
   const row = await visibleLive(id, user);
   if (row.status !== "LIVE") throw endedError(row);
@@ -325,13 +356,82 @@ async function moderatedLive(id: number, user: Actor) {
 
 /** The store or an admin hides a message for everyone. */
 export async function hideMessage(id: number, messageId: number, user: Actor) {
-  await moderatedLive(id, user);
-  const done = await prisma.liveMessage.updateMany({ where: { id: messageId, liveId: id, hidden: false }, data: { hidden: true } });
-  if (!done.count && !(await prisma.liveMessage.findFirst({ where: { id: messageId, liveId: id }, select: { id: true } }))) {
-    throw new ApiError("Message not found", 404);
+  const row = await moderatedLive(id, user);
+  const by = isAdmin(user) ? "admin" : "store";
+  const done = await prisma.liveMessage.updateMany({ where: { id: messageId, liveId: id, hidden: false }, data: { hidden: true, hiddenBy: by } });
+  const msg = await prisma.liveMessage.findFirst({ where: { id: messageId, liveId: id }, select: { id: true, userId: true, text: true } });
+  if (!done.count && !msg) throw new ApiError("Message not found", 404);
+  if (done.count) {
+    emitToLive(id, "live:message_hidden", { id: messageId });
+    // Statement of reasons to the writer (DSA Art. 17, 2.17)
+    if (msg && msg.userId !== row.store.ownerId) {
+      statementOfReasons({
+        userId: msg.userId, kind: "live_message", entityId: messageId, excerpt: msg.text, decision: "hidden", automatic: false,
+        reason: by === "admin" ? "Hidden by the Malvoya team: it breaks the live chat rules" : `Hidden by the store (${row.store.name}) that runs the live`,
+      }).catch(() => {});
+    }
   }
-  if (done.count) emitToLive(id, "live:message_hidden", { id: messageId });
   return { hidden: true };
+}
+
+/**
+ * A viewer reports a live chat message (DSA Art. 16, 2.17). Three different reporters hide it for everyone until an
+ * admin decides (the writer gets a statement of reasons). Nobody can report their own message.
+ */
+export async function reportMessage(id: number, messageId: number, reporterId: number, reason: string) {
+  const msg = await prisma.liveMessage.findFirst({ where: { id: messageId, liveId: id }, select: { id: true, userId: true, text: true, hidden: true } });
+  if (!msg) throw new ApiError("Message not found", 404);
+  if (msg.userId === reporterId) throw new ApiError("You cannot report your own message", 400);
+  try {
+    await prisma.liveMessageReport.create({ data: { messageId, reporterId, reason } });
+  } catch (e: any) {
+    if (e?.code === "P2002") return { reported: true };
+    throw e;
+  }
+  const after = await prisma.liveMessage.update({ where: { id: messageId }, data: { reportCount: { increment: 1 }, reviewedAt: null }, select: { reportCount: true } });
+  if (after.reportCount >= AUTO_HIDE_REPORTS && !msg.hidden) {
+    const hid = await prisma.liveMessage.updateMany({ where: { id: messageId, hidden: false }, data: { hidden: true, hiddenBy: "reports" } });
+    if (hid.count) {
+      emitToLive(id, "live:message_hidden", { id: messageId });
+      statementOfReasons({ userId: msg.userId, kind: "live_message", entityId: messageId, excerpt: msg.text, decision: "hidden", reason: "Reported by three different viewers", automatic: true }).catch(() => {});
+    }
+  }
+  return { reported: true };
+}
+
+/** Admin queue: reported live messages nobody has decided on, most reported first. */
+export async function adminReportedMessages() {
+  return prisma.liveMessage.findMany({
+    where: { reportCount: { gt: 0 }, reviewedAt: null },
+    select: {
+      id: true, liveId: true, text: true, hidden: true, hiddenBy: true, reportCount: true, createdAt: true,
+      user: { select: { id: true, name: true } },
+      reports: { select: { reason: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 10 },
+    },
+    orderBy: [{ reportCount: "desc" }, { id: "desc" }],
+    take: 100,
+  });
+}
+
+/** An admin hides the reported message or keeps (restores) it; writer and reporters are told; audited. */
+export async function adminResolveMessage(messageId: number, adminId: number, action: "hide" | "keep", reason?: string) {
+  const msg = await prisma.liveMessage.findUnique({
+    where: { id: messageId },
+    select: { id: true, liveId: true, userId: true, text: true, hidden: true, hiddenBy: true, reports: { select: { reporterId: true }, take: 500 } },
+  });
+  if (!msg) throw new ApiError("Message not found", 404);
+  const reporters = msg.reports.map((r) => r.reporterId);
+  if (action === "hide") {
+    await prisma.liveMessage.update({ where: { id: messageId }, data: { hidden: true, hiddenBy: "admin", reviewedAt: new Date() } });
+    if (!msg.hidden) emitToLive(msg.liveId, "live:message_hidden", { id: messageId });
+    statementOfReasons({ userId: msg.userId, kind: "live_message", entityId: messageId, excerpt: msg.text, decision: "removed", reason: reason?.trim() || "It breaks the live chat rules", automatic: false }).catch(() => {});
+  } else {
+    // Kept: a message hidden only by the report rule becomes visible again
+    await prisma.liveMessage.update({ where: { id: messageId }, data: { reviewedAt: new Date(), ...(msg.hiddenBy === "reports" ? { hidden: false, hiddenBy: null } : {}) } });
+  }
+  await audit(adminId, `live_message.${action}`, "LiveMessage", messageId, { newValue: { reason: reason ?? null } });
+  reportOutcome(reporters, "live_message", messageId, action === "hide" ? "actioned" : "kept").catch(() => {});
+  return prisma.liveMessage.findUnique({ where: { id: messageId }, select: { id: true, hidden: true, hiddenBy: true, reviewedAt: true } });
 }
 
 /** The store or an admin mutes a viewer in this live: their messages are refused from now on. */
@@ -465,8 +565,10 @@ export async function adminEnd(id: number, adminId: number, rawReason: string) {
     include: { store: { select: { id: true, name: true, owner: { select: { id: true, email: true } } } } },
   });
   if (!row) throw new ApiError("Live not found", 404);
+  const reporters = (await prisma.liveReport.findMany({ where: { liveId: id, status: "OPEN" }, select: { reporterId: true }, take: 500 })).map((r) => r.reporterId);
   const ended = await finish(id, reason.slice(0, 500), adminId);
   if (ended) {
+    reportOutcome(reporters, "live", id, "actioned").catch(() => {});
     await prisma.$transaction([
       prisma.adminAuditLog.create({
         data: { adminId, action: "live.end", entity: "LiveStream", entityId: id, oldValue: { status: "LIVE" }, newValue: { status: "ENDED", reason: reason.slice(0, 500) } },
@@ -485,8 +587,9 @@ export async function adminEnd(id: number, adminId: number, rawReason: string) {
 }
 
 export async function resolveReport(reportId: number, adminId: number, status: "ACTIONED" | "DISMISSED") {
-  const r = await prisma.liveReport.findUnique({ where: { id: reportId }, select: { id: true } });
+  const r = await prisma.liveReport.findUnique({ where: { id: reportId }, select: { id: true, status: true, reporterId: true, liveId: true } });
   if (!r) throw new ApiError("Report not found", 404);
+  if (r.status === "OPEN") reportOutcome([r.reporterId], "live", r.liveId, status === "ACTIONED" ? "actioned" : "kept").catch(() => {});
   return prisma.liveReport.update({ where: { id: reportId }, data: { status, resolvedById: adminId, resolvedAt: new Date() } });
 }
 

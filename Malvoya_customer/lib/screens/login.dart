@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../auth_service.dart';
 
 import '../config/theme.dart';
+import '../core/age_gate.dart';
 import '../l10n.dart';
 import 'register.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
@@ -110,7 +111,10 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _handleGoogle() async {
     setState(() { _loading = true; _error = null; });
     final auth = Provider.of<AuthService>(context, listen: false);
-    final err = await auth.loginWithGoogle();
+    final first = await auth.loginWithGoogle();
+    if (!mounted) return;
+    // A new account: the server first needs "I am 18 or older"
+    final err = await resolveAgeGate(context, auth, first);
     if (mounted) {
       if (err != null) {
         setState(() { _error = localizeServerMessage(context, err); _loading = false; });
@@ -140,7 +144,9 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _handleApple() async {
     setState(() { _loading = true; _error = null; });
     final auth = Provider.of<AuthService>(context, listen: false);
-    final err = await auth.loginWithApple();
+    final first = await auth.loginWithApple();
+    if (!mounted) return;
+    final err = await resolveAgeGate(context, auth, first);
     if (!mounted) return;
     // Closing Apple's sheet returns no error and leaves the screen as it was
     setState(() { _error = err == null ? null : localizeServerMessage(context, err); _loading = false; });
@@ -273,9 +279,13 @@ class _LoginScreenState extends State<LoginScreen> {
                                   final cleanDigits = userPhone.replaceAll(RegExp(r'[^0-9]'), '');
                                   final idToken = await userCred.user?.getIdToken();
                                   final auth = Provider.of<AuthService>(context, listen: false);
-                                  final phoneErr = idToken == null
+                                  var phoneErr = idToken == null
                                     ? 'Phone verification failed'
                                     : await auth.exchangeFirebasePhoneToken(idToken);
+                                  if (phoneErr == AuthService.ageConfirmationRequired) {
+                                    if (!mounted) return;
+                                    phoneErr = await resolveAgeGate(context, auth, phoneErr);
+                                  }
                                 if (phoneErr != null) throw Exception(phoneErr);
 
                                   if (mounted) {
@@ -571,9 +581,18 @@ class _LoginScreenState extends State<LoginScreen> {
                             final cleanDigits = userPhone.replaceAll(RegExp(r'[^0-9]'), '');
                             final idToken = await userCred.user?.getIdToken();
 
-                            final phoneErr = idToken == null
+                            var phoneErr = idToken == null
                                     ? 'Phone verification failed'
                                     : await auth.exchangeFirebasePhoneToken(idToken);
+                            if (phoneErr == AuthService.ageConfirmationRequired) {
+                              if (!mounted) return;
+                              phoneErr = await resolveAgeGate(context, auth, phoneErr);
+                            }
+                            if (phoneErr == notOldEnoughMessage) {
+                              setDialogState(() => isProcessing = false);
+                              if (ctx.mounted) MSnack.error(ctx, localizeServerMessage(ctx, phoneErr!));
+                              return;
+                            }
                                 if (phoneErr != null) throw Exception(phoneErr);
 
                             timer?.cancel();
@@ -608,10 +627,24 @@ class _LoginScreenState extends State<LoginScreen> {
                           }
                         } else {
                           // Email OTP verification
-                          final verifyRes = await RealtimeNotificationService.verifyRealOtp(
+                          var verifyRes = await RealtimeNotificationService.verifyRealOtp(
                             destination: destination,
                             code: entered,
                           );
+                          // A new account: the server first needs "I am 18 or older", then the same code again
+                          if (verifyRes['code'] == AuthService.ageConfirmationRequired) {
+                            if (!mounted) return;
+                            if (!await askAgeConfirmation(context)) {
+                              setDialogState(() => isProcessing = false);
+                              if (ctx.mounted) MSnack.error(ctx, localizeServerMessage(ctx, notOldEnoughMessage));
+                              return;
+                            }
+                            verifyRes = await RealtimeNotificationService.verifyRealOtp(
+                              destination: destination,
+                              code: entered,
+                              ageConfirmed: true,
+                            );
+                          }
                           setDialogState(() => isProcessing = false);
                           if (verifyRes['ok'] == true) {
                             await auth.saveSession(

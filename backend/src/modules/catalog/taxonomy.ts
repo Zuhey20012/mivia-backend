@@ -324,6 +324,19 @@ export const HOLD_WORDS: { key: string; words: string[]; reason: { en: string; f
     reason: { en: "Biocides such as hand sanitiser are not sold on Malvoya.", fi: "Biosidejä, kuten käsidesiä, ei myydä Malvoyassa." } },
   { key: "chemical", words: ["kynsiliima", "nail glue", "tatuointiväri", "tattoo ink"],
     reason: { en: "Classified chemicals such as nail glue and tattoo ink are not sold on Malvoya.", fi: "Luokiteltuja kemikaaleja, kuten kynsiliimaa ja tatuointivärejä, ei myydä Malvoyassa." } },
+  // Prohibited goods (seller terms §3, 2.17)
+  { key: "knife", words: ["puukko", "puukot", "veitsi", "veitset", "knives", "machete", "viidakkoveitsi", "butterfly knife", "perhosveitsi", "linkkuveitsi", "switchblade"],
+    reason: { en: "Knives, puukko and machetes are not sold on Malvoya.", fi: "Veitsiä, puukkoja ja viidakkoveitsiä ei myydä Malvoyassa." } },
+  { key: "spray", words: ["pippurisumute", "pepper spray", "kaasusumutin", "kaasusumute", "gas spray", "tear gas", "kyynelkaasu"],
+    reason: { en: "Gas and pepper sprays are not sold on Malvoya.", fi: "Kaasu- ja pippurisumuttimia ei myydä Malvoyassa." } },
+  { key: "fireworks", words: ["ilotulite", "ilotulitteet", "firework", "fireworks", "sparkler", "tähtisädetikku"],
+    reason: { en: "Fireworks are not sold on Malvoya.", fi: "Ilotulitteita ei myydä Malvoyassa." } },
+  { key: "nicotine", words: ["sähkötupakka", "e-savuke", "e-cigarette", "e-cig", "vape", "vapes", "nikotiini", "nicotine", "nuuska", "snus", "nikotiinipussi", "nicotine pouch", "savuke", "savukkeet", "liquid nicotine"],
+    reason: { en: "E-cigarettes, nicotine products, snus and tobacco are not sold on Malvoya.", fi: "Sähkösavukkeita, nikotiinituotteita, nuuskaa ja tupakkaa ei myydä Malvoyassa." } },
+  { key: "alcohol", words: ["alkoholi", "alkoholijuoma", "olut", "beer", "vodka", "viina", "liköör", "liqueur", "whisky", "siideri", "cider", "lonkero"],
+    reason: { en: "Alcoholic drinks are not sold on Malvoya.", fi: "Alkoholijuomia ei myydä Malvoyassa." } },
+  { key: "weapon", words: ["ase", "aseet", "weapon", "weapons", "ampuma-ase", "firearm", "pistooli", "pistol", "kivääri", "rifle", "ammukset", "ammunition", "patruuna", "patruunat", "airsoft gun", "ilmakivääri", "air rifle", "nyrkkirauta", "brass knuckles", "teleskooppipatukka", "taser", "etälamautin"],
+    reason: { en: "Weapons, ammunition and items like brass knuckles are not sold on Malvoya.", fi: "Aseita, ammuksia ja esimerkiksi nyrkkirautoja ei myydä Malvoyassa." } },
 ];
 
 export const HOLD_REASONS: Record<string, { en: string; fi: string }> = Object.fromEntries(HOLD_WORDS.map((h) => [h.key, h.reason]));

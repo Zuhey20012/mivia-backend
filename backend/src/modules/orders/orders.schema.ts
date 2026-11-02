@@ -37,6 +37,8 @@ export const createOrderSchema = checkoutSchema.extend({
   // Required for delivery; not used for pickup
   deliveryAddress: z.string().trim().min(5).max(300).optional(),
   notes:           z.string().max(500).optional(),
+  // Where to send the receipt when the account has no email address (phone sign-in), 2.17
+  receiptEmail:    z.string().trim().email("Enter a valid email address for the receipt").max(254).optional(),
 }).superRefine((d, ctx) => {
   if (d.fulfilment === "DELIVERY" && !d.deliveryAddress) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["deliveryAddress"], message: "Enter a delivery address" });

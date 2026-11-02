@@ -1,3 +1,4 @@
+import { reportOutcome, statementOfReasons } from "./notices";
 import { Router, Response } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
@@ -89,9 +90,17 @@ async function refreshStoreRating(storeId: number) {
 }
 
 /** An admin hides the reported review (rating recalculated) or keeps it; either way its open reports are closed. */
-export async function resolveReviewReports(reviewId: number, action: "hide" | "keep") {
-  const review = await prisma.review.findUnique({ where: { id: reviewId }, select: { id: true, storeId: true } });
+export async function resolveReviewReports(reviewId: number, action: "hide" | "keep", reason?: string) {
+  const review = await prisma.review.findUnique({
+    where: { id: reviewId },
+    select: { id: true, storeId: true, userId: true, comment: true, isHidden: true, reports: { where: { resolvedAt: null }, select: { reporterId: true }, take: 500 } },
+  });
   if (!review) throw new ApiError("Review not found", 404);
+  // DSA: the author gets a statement of reasons when it is hidden; reporters hear the outcome either way (2.17)
+  if (action === "hide" && !review.isHidden) {
+    statementOfReasons({ userId: review.userId, kind: "review", entityId: reviewId, excerpt: review.comment, decision: "hidden", reason: reason?.trim() || "It breaks Malvoya's review rules", automatic: false }).catch(() => {});
+  }
+  reportOutcome(review.reports.map((r) => r.reporterId), "review", reviewId, action === "hide" ? "actioned" : "kept").catch(() => {});
   await prisma.$transaction([
     ...(action === "hide" ? [prisma.review.update({ where: { id: reviewId }, data: { isHidden: true } })] : []),
     prisma.reviewReport.updateMany({ where: { reviewId, resolvedAt: null }, data: { resolvedAt: new Date(), resolution: action === "hide" ? "HIDDEN" : "KEPT" } }),
@@ -139,9 +148,9 @@ safetyRoutes.get("/admin/reviews/reported", auth, requireRole("ADMIN"), async (_
 });
 
 safetyRoutes.post("/admin/reviews/:id(\\d+)/resolve", auth, requireRole("ADMIN"), async (req: AuthRequest, res: Response) => {
-  const body = z.object({ action: z.enum(["hide", "keep"]) }).safeParse(req.body);
+  const body = z.object({ action: z.enum(["hide", "keep"]), reason: z.string().trim().max(500).optional() }).safeParse(req.body);
   if (!body.success) return res.status(400).json({ ok: false, error: "Action must be hide or keep" });
   try {
-    res.json({ ok: true, review: await resolveReviewReports(positiveId(req.params.id)!, body.data.action) });
+    res.json({ ok: true, review: await resolveReviewReports(positiveId(req.params.id)!, body.data.action, body.data.reason) });
   } catch (e) { sendError(res, e); }
 });
