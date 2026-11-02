@@ -8,6 +8,7 @@ import { translateChatMessage } from "../../services/translationService";
 import * as ordersService from "./orders.service";
 import { sendOrderError } from "./orders.controller";
 import { requireAgreement } from "../legal/agreements";
+import { plausibleMove } from "../../utils/courierPosition";
 import { courierOnboarding, checkReadyForApproval } from "../onboarding/onboarding";
 
 const router = Router();
@@ -156,6 +157,8 @@ const telemetrySchema = z.object({
   speed: z.number().nullish(),
   accuracy: z.number().nullish(),
   orderId: z.coerce.number().int().positive().nullish().catch(null),
+  // The phone says this position comes from a mock-location app (Geolocator isMocked, 2.17): it is ignored
+  mocked: z.boolean().nullish(),
 });
 
 /** HTTP fallback for background location updates when the socket is not connected. */
@@ -165,7 +168,12 @@ router.post("/courier/telemetry", ...courierOnly, async (req: AuthRequest, res: 
   try {
     const courier = await ordersService.requireApprovedCourier(req.user!.id);
     if (!courier.isActive) return res.status(409).json({ ok: false, error: "You are offline" });
-    const { latitude, longitude, bearing, speed, accuracy, orderId } = parsed.data;
+    const { latitude, longitude, bearing, speed, accuracy, orderId, mocked } = parsed.data;
+    if (mocked) return res.json({ ok: true, ignored: "mocked" });
+    // Positions implying more than 120 km/h since the last one are ignored (GPS jumps, spoofing)
+    const prev = courier.latitude !== null && courier.longitude !== null && courier.locationAt
+      ? { lat: courier.latitude, lng: courier.longitude, at: courier.locationAt.getTime() } : null;
+    if (!plausibleMove(prev, { lat: latitude, lng: longitude })) return res.json({ ok: true, ignored: "jump" });
 
     await prisma.courier.update({ where: { id: courier.id }, data: { latitude, longitude, locationAt: new Date(), locationExpiredAt: null } });
 

@@ -9,12 +9,13 @@ import {
 } from "./orders.controller";
 import { chatRoutes } from "./chat";
 import { requireAgreement } from "../legal/agreements";
+import { checkoutIpLimiter, checkoutUserLimiter } from "../../middleware/rateLimiter";
 
 const router = Router();
 
 // Orders — `:id(\\d+)` keeps paths like /orders/available (courier router) from being captured here.
 // Placing an order needs the Terms of Service in force to be accepted (428 AGREEMENT_REQUIRED)
-router.post("/orders",                        auth, requireRole("CUSTOMER"), requireAgreement(), createOrder);
+router.post("/orders",                        auth, requireRole("CUSTOMER"), checkoutIpLimiter, checkoutUserLimiter, requireAgreement(), createOrder);
 // Exact price (fees, promo discount, total) before payment; reserves and creates nothing
 router.post("/orders/quote",                  auth, requireRole("CUSTOMER"), quoteOrder);
 router.get("/orders",                         auth, listOrders);

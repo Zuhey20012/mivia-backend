@@ -212,6 +212,8 @@ const deliverSchema = z.object({
   method: z.enum(["IN_PERSON", "PHOTO"]),
   latitude: z.number().min(-90).max(90).optional(),
   longitude: z.number().min(-180).max(180).optional(),
+  // The customer's 4-digit PIN for in-person handovers of orders of 80 € or more (2.17)
+  handoverPin: z.string().trim().max(10).optional(),
   upload: z.object({
     publicId: z.string().min(5).max(200),
     version: z.union([z.string().max(20), z.number().int()]),

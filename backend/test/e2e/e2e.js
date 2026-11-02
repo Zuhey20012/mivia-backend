@@ -2509,7 +2509,7 @@ function ean13(d12) {
     await call("POST", "/courier/status", { isOnline: false }, cOnline.accessToken);
     // Sign in with Apple (iOS): the Apple user id first, then the verified email; loaded from dist (no real Firebase token here)
     const social = require(path.join(__dirname, "..", "..", "dist", "modules", "auth", "social.service.js"));
-    const appleId = (x) => ({ firebase: { identities: { "apple.com": [x] } } });
+    const appleId = (x) => ({ firebase: { sign_in_provider: "apple.com", identities: { "apple.com": [x] } } });
     const subA = `001234.apple${uniq}.0101`;
     const ap1 = await social.signInWithAppleClaims({ email: `apple${uniq}@privaterelay.appleid.com`, email_verified: true, ...appleId(subA) }, "CUSTOMER", "  Anna Apple  ");
     check("Sign in with Apple creates the account with the Apple id and the name the app sends (trimmed)", ap1.user?.name === "Anna Apple" && !!ap1.accessToken && sql(`select "appleSub" from "User" where id=${ap1.user.id}`) === subA, ap1.user);
@@ -2523,6 +2523,12 @@ function ean13(d12) {
     check("a verified-sign-in account found by its email gets the Apple id on first use", ap3.user?.id === codeNew.body.user.id && sql(`select "appleSub" from "User" where id=${codeNew.body.user.id}`) === subB);
     let apNoEmail = null;
     try { await social.signInWithAppleClaims({ ...appleId(`new.${uniq}`) }); } catch (e) { apNoEmail = e.status; }
+    // 2.17: only a token from an actual Apple sign-in counts, and only a verified email opens or creates an account
+    let apOtherProvider = 0, apUnverified = 0;
+    try { await social.signInWithAppleClaims({ email: `apple-g${uniq}@example.fi`, email_verified: true, firebase: { sign_in_provider: "google.com", identities: { "apple.com": [`g.${uniq}`] } } }); } catch (e) { apOtherProvider = e.status; }
+    try { await social.signInWithAppleClaims({ email: `apple-u${uniq}@example.fi`, ...appleId(`u.${uniq}`) }); } catch (e) { apUnverified = e.status; }
+    check("Apple sign-in refuses a token from another provider (401)", apOtherProvider === 401, apOtherProvider);
+    check("Apple sign-in refuses an unverified email (401) and creates no account", apUnverified === 401 && sql(`select count(*) from "User" where email='apple-u${uniq}@example.fi'`) === "0", apUnverified);
     check("a new Apple user without a verified email is refused (401)", apNoEmail === 401);
     check("POST /auth/apple validates the name (≤ 100) and the token", (await call("POST", "/auth/apple", { idToken: "x", name: "a".repeat(101) })).status === 400 && (await call("POST", "/auth/apple", { name: "Anna" })).status === 400 && (await call("POST", "/auth/apple", { idToken: "not-a-token", name: "Anna" })).status === 401);
     check("account deletion clears the Apple id", (await call("DELETE", "/auth/me", null, ap1.accessToken)).status === 200 && sql(`select "appleSub" is null from "User" where id=${ap1.user.id}`) === "t");
@@ -2849,7 +2855,7 @@ function ean13(d12) {
   check("registering with ageConfirmed stores the time; GET /me says ageConfirmed", sql(`select "ageConfirmedAt" is not null from "User" where id=${ag_reg.user.id}`) === "t" && ag_regMe?.ageConfirmed === true && !!ag_regMe.ageConfirmedAt, ag_regMe);
   check("guests can still browse without an account", (await call("GET", "/products/search?q=coat")).status === 200 && (await call("GET", "/stores")).status === 200);
   const ag_social = require(path.join(__dirname, "..", "..", "dist", "modules", "auth", "social.service.js"));
-  const ag_apple = await ag_social.signInWithAppleClaims({ email: `apple-age${uniq}@example.fi`, email_verified: true, firebase: { identities: { "apple.com": [`age.${uniq}`] } } }, "CUSTOMER", "Alva Apple");
+  const ag_apple = await ag_social.signInWithAppleClaims({ email: `apple-age${uniq}@example.fi`, email_verified: true, firebase: { sign_in_provider: "apple.com", identities: { "apple.com": [`age.${uniq}`] } } }, "CUSTOMER", "Alva Apple");
   const ag_tok = ag_apple.accessToken;
   const ag_agr = (await call("GET", "/me/agreements", null, ag_tok)).body;
   check("a social sign-up has not confirmed its age: GET /me/agreements says ageConfirmationRequired", ag_agr.ageConfirmationRequired === true && ag_agr.ageConfirmedAt === null && sql(`select "ageConfirmedAt" is null from "User" where id=${ag_apple.user.id}`) === "t", ag_agr);
@@ -2866,7 +2872,7 @@ function ean13(d12) {
   const ag_o3 = await call("POST", "/orders", {}, ag_tok);
   check("…after which ordering passes the agreement gate (400 for the empty basket, not 428)", ag_o3.status === 400, ag_o3);
   check("GET /me/agreements and GET /me show it confirmed", (await call("GET", "/me/agreements", null, ag_tok)).body.ageConfirmationRequired === false && (await call("GET", "/me", null, ag_tok)).body.user?.ageConfirmed === true);
-  const ag_courier = await ag_social.signInWithAppleClaims({ email: `apple-courier${uniq}@example.fi`, email_verified: true, firebase: { identities: { "apple.com": [`agec.${uniq}`] } } }, "COURIER", "Kalle Courier");
+  const ag_courier = await ag_social.signInWithAppleClaims({ email: `apple-courier${uniq}@example.fi`, email_verified: true, firebase: { sign_in_provider: "apple.com", identities: { "apple.com": [`agec.${uniq}`] } } }, "COURIER", "Kalle Courier");
   const ag_online = await call("POST", "/courier/status", { isOnline: true }, ag_courier.accessToken);
   check("a social courier going online gets 428 with ageConfirmationRequired", ag_online.status === 428 && ag_online.body.ageConfirmationRequired === true && ag_online.body.doc === "courier-agreement", ag_online.body);
   const ag_ageOnly = await call("POST", "/me/agreements/accept", { ageConfirmed: true }, ag_courier.accessToken);
