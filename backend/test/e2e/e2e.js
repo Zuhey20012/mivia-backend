@@ -1,4 +1,4 @@
-// End-to-end test for API v2.16.1 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
+// End-to-end test for API v2.17.0 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
 const { execSync, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -318,6 +318,12 @@ function ean13(d12) {
   const c2 = await register("Linnea", "COURIER");
   check("unapproved courier cannot see jobs", (await call("GET", "/orders/available", null, c1.accessToken)).status === 403);
   // Payout onboarding is a step towards approval, so it is open before approval; jobs (and so money) only come after
+  // 2.17: payout links need the password again within 10 minutes (or a two-step session)
+  const noReauth = await call("POST", "/payouts/onboarding", null, c1.accessToken);
+  check("payout links need the password again first (403 REAUTH_REQUIRED)", noReauth.status === 403 && noReauth.body.code === "REAUTH_REQUIRED", noReauth.body);
+  check("re-authentication refuses a wrong password", (await call("POST", "/me/reauth", { password: "wrong-password-1" }, c1.accessToken)).status === 400);
+  const reauthC1 = await call("POST", "/me/reauth", { password: "strong-pass-123" }, c1.accessToken);
+  check("re-authentication with the password opens payout links for 10 minutes", reauthC1.status === 200 && Math.abs(new Date(reauthC1.body.reauthUntil).getTime() - Date.now() - 600_000) < 30_000, reauthC1.body);
   const earlyPayout = await call("POST", "/payouts/onboarding", null, c1.accessToken);
   check("an unapproved courier can already set up payouts (Stripe onboarding), but still gets no jobs", earlyPayout.status === 200 && /^https?:\/\//.test(earlyPayout.body.url || "") && (await call("GET", "/orders/available", null, c1.accessToken)).status === 403, earlyPayout.body);
   const couriers = (await call("GET", "/admin/couriers", null, adminToken)).body.couriers;
@@ -413,6 +419,7 @@ function ean13(d12) {
   check("courier payout waits for payout setup", sql(`select status from "Payout" where "orderId"=${orderId} and party='COURIER'`) === "WAITING_FOR_ACCOUNT");
 
   console.log("\n— Payouts (Stripe Connect via stripe-mock)");
+  await call("POST", "/me/reauth", { password: "strong-pass-123" }, winner.tok);
   const onboard = await call("POST", "/payouts/onboarding", null, winner.tok);
   check("approved courier starts Stripe payout onboarding", onboard.status === 200 && /^https?:\/\//.test(onboard.body.url || ""), onboard.body);
   check("Stripe account saved for the courier", sql(`select "stripeAccountId" is not null from "Courier" where "userId"=${winner.user.id}`) === "t");
@@ -997,7 +1004,7 @@ function ean13(d12) {
   }));
 
   const sysDefault = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.16.1", sysDefault.pricing);
+  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.17.0", sysDefault.pricing);
   const stockBeforeQuote = stockOf(productId);
   const ordersBeforeQuote = sql(`select count(*) from "Order" where "userId"=${otherCust.user.id}`);
   const q0 = await quote(quoteBody, otherCust.accessToken);
@@ -1237,7 +1244,7 @@ function ean13(d12) {
   const farMine = (await call("GET", "/orders/courier/mine", null, c2.accessToken)).body.orders?.find((o) => o.id === far.id);
   check("waiting beyond 5 min is added at pickup: 12 min → 7 × 0.20 € = 1.40 €", farMine?.courierPay?.waitMinutes === 12 && farMine.courierPay.waitCents === 140 && farMine.courierPay.totalCents === 1422 && farMine.courierFeeCents === 1422 && !!farMine.courierArrivedAt && farMine.courierPay.explanation.en.includes("waiting 12 min = 1.40 €"), farMine?.courierPay);
   check("checking in after pickup is refused", (await call("POST", `/orders/${far.id}/arrived-at-store`, null, c2.accessToken)).status === 409);
-  const farDone = await call("POST", `/orders/${far.id}/deliver`, { method: "IN_PERSON" }, c2.accessToken);
+  const farDone = await call("POST", `/orders/${far.id}/deliver`, { method: "IN_PERSON", latitude: far.deliveryLat, longitude: far.deliveryLng }, c2.accessToken);
   await sleep(800);
   check("the courier payout is exactly the explained total", farDone.status === 200 && sql(`select "amountCents" from "Payout" where "orderId"=${far.id} and party='COURIER'`) === "1422");
   // Charge 54.15 €: the store's 45.00 € is reserved on it, so the courier's 14.22 € (> 9.15 € left) is paid from Malvoya's balance
@@ -1266,7 +1273,7 @@ function ean13(d12) {
   sql(`update "Order" set "acceptedAt" = now() - interval '60 minutes', "courierArrivedAt" = now() - interval '20 minutes', "readyAt" = now() - interval '11 minutes' where id=${stale.id}`);
   await call("PATCH", `/orders/${stale.id}/status`, { status: "SHIPPED" }, c1.accessToken);
   check("waiting counts only until the store marked the order ready (20 min at the shop, ready after 9 → 9 min)", sql(`select ("courierPay"->>'waitMinutes') || '|' || ("courierPay"->>'waitCents') from "Order" where id=${stale.id}`) === "9|80");
-  await call("POST", `/orders/${stale.id}/deliver`, { method: "IN_PERSON" }, c1.accessToken);
+  await call("POST", `/orders/${stale.id}/deliver`, { method: "IN_PERSON", latitude: stale.deliveryLat, longitude: stale.deliveryLng }, c1.accessToken);
 
   console.log("\n— Catalogue import: Shopify feed");
   let shopPrice = "49.90", shopStock = 3;
@@ -2073,7 +2080,7 @@ function ean13(d12) {
   cob = (await call("GET", "/courier/me/onboarding", null, onni.accessToken)).body;
   check("courier ready for approval when everything but approval is done", cob.readyForApproval === true && cob.approved === false && cob.percent === 83 && sql(`select "readyForApprovalAt" is not null from "Courier" where "userId"=${onni.user.id}`) === "t", cob);
   const sys211 = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("System lists them as ready for approval", sys211.version === "2.16.1" && sys211.attention.some((a) => a.includes(`(#${pekkaStore.id}) is ready for approval`)) && sys211.attention.some((a) => a.includes("Courier \"Onni\"") && a.includes("ready for approval")) && sys211.readyForApproval?.stores?.some((s) => s.id === pekkaStore.id), sys211.attention);
+  check("System lists them as ready for approval", sys211.version === "2.17.0" && sys211.attention.some((a) => a.includes(`(#${pekkaStore.id}) is ready for approval`)) && sys211.attention.some((a) => a.includes("Courier \"Onni\"") && a.includes("ready for approval")) && sys211.readyForApproval?.stores?.some((s) => s.id === pekkaStore.id), sys211.attention);
   check("admin courier list shows vehicle, disclosure and readiness", (await call("GET", "/admin/couriers", null, adminToken)).body.couriers?.find((c) => c.user?.id === onni.user.id)?.vehicleType === "ebike");
 
   // Publishing changes (second instance reading a copy of the legal texts, same database)
@@ -3145,7 +3152,7 @@ function ean13(d12) {
   check("huge search input rejected", (await call("GET", `/products/search?q=${"a".repeat(200)}`)).status === 400);
   const cors = await fetch(`${API}/stores`, { headers: { Origin: "https://evil.example" } });
   check("CORS does not allow unknown origins", !cors.headers.get("access-control-allow-origin"));
-  check("health reports v2.16.1", (await (await fetch(`${BASE}/health`)).json()).version === "2.16.1");
+  check("health reports v2.17.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.17.0");
 
   [vendorSock, custSock, otherSock, c1Sock, c2Sock].forEach((s) => s.close());
   console.log(`\n${pass} passed, ${fail} failed`);
