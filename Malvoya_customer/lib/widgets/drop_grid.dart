@@ -177,7 +177,7 @@ class _PagedDropGridState extends State<PagedDropGrid> {
         ),
       );
     }
-    return RefreshIndicator(
+    return MRefreshIndicator(
       onRefresh: _refresh,
       child: NotificationListener<ScrollNotification>(
         onNotification: (n) {

@@ -143,7 +143,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          RefreshIndicator(
+          MRefreshIndicator(
             onRefresh: _load,
             child: NotificationListener<ScrollNotification>(
               onNotification: (n) {

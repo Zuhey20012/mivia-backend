@@ -9,6 +9,7 @@ import '../config/theme.dart';
 import '../l10n.dart';
 import '../core/catalog.dart';
 import '../core/delivery_location.dart';
+import '../core/drops_badge.dart';
 import '../core/network_status.dart';
 import '../core/store_hours.dart';
 import '../core/notification_primer.dart';
@@ -322,6 +323,60 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       ), transparent: true, isScrollControlled: true, useSafeArea: false);
   }
 
+  // ── Greeting ─────────────────────────────────────────────────────────────
+  /// "Huomenta, Aino" for a signed-in customer ("Hei" for guests), rising in softly the first time
+  /// Home opens in a session. The line under it only appears when the Drops badge (the newest
+  /// drop near the pinned address is newer than the last visit to Drops) says so: no counts, since
+  /// the API sends none.
+  Widget _greeting(BuildContext context) {
+    final c = context.mColors;
+    final auth = Provider.of<AuthService>(context);
+    final first = auth.isAuthenticated ? firstNameOf(auth.currentUser?.name) : null;
+    final hello = auth.isAuthenticated ? mGreeting(context) : tr(context, 'Hi', 'Hei');
+    return MRiseIn(
+      onceKey: 'customer-home-greeting',
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.md, MSpace.lg, 0),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Semantics(
+            header: true,
+            child: Text(first == null ? hello : '$hello, $first', maxLines: 1, overflow: TextOverflow.ellipsis, style: MType.displayS.copyWith(color: c.onSurface)),
+          ),
+          ListenableBuilder(
+            listenable: DropsBadge.instance,
+            builder: (context, _) {
+              if (!DropsBadge.instance.hasNew || widget.onOpenDrops == null) return const SizedBox.shrink();
+              return Semantics(
+                button: true,
+                child: InkWell(
+                  borderRadius: MRadius.brXs,
+                  onTap: () {
+                    Haptics.selection();
+                    widget.onOpenDrops!();
+                  },
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: kMinTouchTarget - 8),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Container(width: 8, height: 8, decoration: BoxDecoration(color: c.sunshine, shape: BoxShape.circle)),
+                      const SizedBox(width: MSpace.sm),
+                      Flexible(
+                        child: Text(
+                          tr(context, 'New Drops from shops near you since your last visit', 'Lähikaupoilla on uusia droppeja edellisen käyntisi jälkeen'),
+                          style: MType.bodyM.copyWith(color: c.onSurfaceVariant),
+                        ),
+                      ),
+                      Icon(Icons.chevron_right_rounded, size: 18, color: c.onSurfaceVariant),
+                    ]),
+                  ),
+                ),
+              );
+            },
+          ),
+        ]),
+      ),
+    );
+  }
+
   // ── Header ───────────────────────────────────────────────────────────────
   String _addressLabel(BuildContext context) => _currentDeliveryCity.isEmpty
       ? tr(context, 'Choose your address', 'Valitse osoitteesi')
@@ -568,7 +623,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         MSectionHeader(tr(context, 'Shop by category', 'Osta kategorioittain')),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: MSpace.lg),
-          child: Column(children: [
+          // The tiles come in one after another, once per session
+          child: MStaggerIn(onceKey: 'customer-home-categories', count: shown.length, child: Column(children: [
             for (final r in rows)
               Padding(
                 padding: const EdgeInsets.only(bottom: MSpace.sm),
@@ -576,7 +632,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                     for (var i = 0; i < 3; i++) ...[
                       if (i > 0) const SizedBox(width: MSpace.sm),
-                      Expanded(child: i < r.length ? _categoryTile(context, r[i]) : const SizedBox.shrink()),
+                      Expanded(child: i < r.length ? MStaggerItem(index: rows.indexOf(r) * 3 + i, child: _categoryTile(context, r[i])) : const SizedBox.shrink()),
                     ],
                   ]),
                 ),
@@ -591,7 +647,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 onPressed: () => _push(AllCategoriesScreen(categories: _categories, audience: _audience)),
               ),
             ),
-          ]),
+          ])),
         ),
       ],
     );
@@ -975,7 +1031,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           backgroundColor: Theme.of(context).scaffoldBackgroundColor,
           body: SafeArea(
             bottom: false,
-            child: RefreshIndicator(
+            child: MRefreshIndicator(
               color: c.primary,
               onRefresh: _refresh,
               child: ListView(
@@ -983,6 +1039,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 // Room for the floating tab bar and bag bar
                 padding: EdgeInsets.only(bottom: bottomInset + 96),
                 children: [
+                  _greeting(context),
                   _header(context, l10n),
                   _searchPill(context),
                   _audienceSwitch(context),

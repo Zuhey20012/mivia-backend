@@ -65,6 +65,7 @@ class _GalleryAppState extends State<GalleryApp> {
               const _Commerce(),
               const _Feedback(),
               const _Lists(),
+              const _Welcome(),
             ],
           ),
         ),
@@ -343,4 +344,102 @@ class _Lists extends StatelessWidget {
         const SizedBox(height: MSpace.md),
         const Row(children: [BrandTile(size: 56, background: MPalette.malva), SizedBox(width: 8), BrandTile(size: 56, background: MPalette.moss), SizedBox(width: 8), BrandTile(size: 56, background: MPalette.lingon)]),
       ]);
+}
+
+/// The welcome experience: the intro, the Thread M pull-to-refresh, greetings and the signature
+/// animations.
+class _Welcome extends StatefulWidget {
+  const _Welcome();
+
+  @override
+  State<_Welcome> createState() => _WelcomeState();
+}
+
+class _WelcomeState extends State<_Welcome> {
+  int _checks = 0;
+  int _refreshed = 0;
+
+  void _playIntro(BuildContext context) {
+    final brand = MalvoyaTokens.of(context).brand;
+    final (name, tagline) = switch (brand.color) {
+      MPalette.moss => ('Malvoya Store', (BuildContext c) => tr(c, 'Sell to your neighbourhood', 'Myy lähellesi')),
+      MPalette.lingon => ('Malvoya Courier', (BuildContext c) => tr(c, 'Deliver at your own pace', 'Toimita omaan tahtiisi')),
+      _ => ('Malvoya', (BuildContext c) => tr(c, 'Local fashion and beauty', 'Lähikauppojen muoti ja kauneus')),
+    };
+    Navigator.of(context).push(PageRouteBuilder<void>(
+      transitionDuration: Duration.zero,
+      pageBuilder: (ctx, _, __) => MalvoyaIntro(
+        brand: brand,
+        playOnce: false,
+        appName: name,
+        tagline: tagline,
+        // Pretend start-up work shorter than the intro
+        ready: Future<void>.delayed(const Duration(milliseconds: 300)),
+        builder: (_) => Scaffold(
+          body: Center(
+            child: MButton(label: tr(ctx, 'Back to the gallery', 'Takaisin galleriaan'), onPressed: () => Navigator.pop(ctx)),
+          ),
+        ),
+      ),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.mColors;
+    return _Section(tr(context, 'Welcome', 'Tervetuloa'), [
+      Text('${mGreeting(context)}, Aino', style: MType.displayS.copyWith(color: c.onSurface)),
+      const SizedBox(height: MSpace.sm),
+      Wrap(spacing: MSpace.sm, runSpacing: MSpace.sm, crossAxisAlignment: WrapCrossAlignment.center, children: [
+        MStatusPill(label: tr(context, 'Open', 'Avoinna'), live: true),
+        MStatusPill(label: tr(context, 'Paused', 'Tauolla'), color: c.onSurfaceVariant, background: c.surfaceVariant),
+      ]),
+      const SizedBox(height: MSpace.md),
+      Wrap(spacing: MSpace.sm, runSpacing: MSpace.sm, children: [
+        MButton(label: tr(context, 'Play the intro', 'Toista esittely'), size: MButtonSize.sm, onPressed: () => _playIntro(context)),
+        MButton(
+          label: tr(context, 'Order accepted', 'Tilaus hyväksytty'),
+          variant: MButtonVariant.outline,
+          size: MButtonSize.sm,
+          onPressed: () {
+            setState(() => _checks++);
+            showMSuccessCheck(context, tr(context, 'Order accepted', 'Tilaus hyväksytty'));
+          },
+        ),
+        MButton(
+          label: tr(context, 'First sale', 'Ensimmäinen myynti'),
+          variant: MButtonVariant.outline,
+          size: MButtonSize.sm,
+          onPressed: () => showMCelebration(
+            context,
+            title: tr(context, 'Your first sale!', 'Ensimmäinen myyntisi!'),
+            message: tr(context, 'Order #1 is accepted. This is where it starts.', 'Tilaus #1 on hyväksytty. Tästä se alkaa!'),
+          ),
+        ),
+      ]),
+      const SizedBox(height: MSpace.md),
+      Center(child: MSuccessCheck(key: ValueKey(_checks))),
+      const SizedBox(height: MSpace.md),
+      Text(tr(context, 'Pull the list down', 'Vedä listaa alas'), style: MType.label.copyWith(color: c.onSurfaceVariant)),
+      const SizedBox(height: MSpace.xs),
+      Container(
+        height: 220,
+        decoration: BoxDecoration(border: Border.all(color: c.outline), borderRadius: MRadius.brMd),
+        clipBehavior: Clip.antiAlias,
+        child: MRefreshIndicator(
+          onRefresh: () async {
+            await Future<void>.delayed(const Duration(seconds: 2));
+            if (mounted) setState(() => _refreshed++);
+          },
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            children: [
+              for (var i = 0; i < 6; i++)
+                MListTile(icon: Icons.storefront_outlined, title: tr(context, 'Shop ${i + 1}', 'Kauppa ${i + 1}'), subtitle: tr(context, 'Refreshed $_refreshed times', 'Päivitetty $_refreshed kertaa')),
+            ],
+          ),
+        ),
+      ),
+    ]);
+  }
 }

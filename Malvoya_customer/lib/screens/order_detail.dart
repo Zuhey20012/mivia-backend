@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
@@ -15,11 +14,18 @@ import '../core/reorder.dart';
 import '../core/network_status.dart';
 import '../services/socket_service.dart';
 import '../core/notification_primer.dart';
+import '../core/route_path.dart';
+import '../widgets/live_route_map.dart';
 import '../widgets/paid_moment.dart';
 import 'returns_screen.dart';
 
 /// One order: live map while it is on its way, a timeline with real times, chat with the
 /// courier, and — once delivered — the delivery photo, a rating and returns.
+///
+/// While a paid delivery is under way (since 2.17) the screen is a full map with a draggable sheet:
+/// the street route of the current stage from `GET /orders/:id/route` (courier → shop, then
+/// shop → home), the courier moving along it, a large ETA, a 4-step progress bar and shortcuts to
+/// the chat. Without a route (an older server) the map draws what it drew before.
 class OrderDetailScreen extends StatefulWidget {
   final int orderId;
 
@@ -32,7 +38,7 @@ class OrderDetailScreen extends StatefulWidget {
   State<OrderDetailScreen> createState() => _OrderDetailScreenState();
 }
 
-class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindingObserver, SingleTickerProviderStateMixin {
+class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindingObserver {
   Map<String, dynamic>? _order;
   Map<String, dynamic>? _review;
   String? _error;
@@ -45,15 +51,37 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
 
   /// A courier message arrived while the chat was closed (a dot on the chat button).
   bool _unread = false;
-  final _map = MapController();
-  bool _mapReady = false;
 
-  /// The camera has been fitted to shop, home and the courier (once the courier is known).
-  bool _fittedWithCourier = false;
+  // ── Live route (API 2.17) ──
+  /// The street route of the current stage, its stage (`to_shop`, `to_customer`, `preview`) and the
+  /// provider's distance and time for the whole of it. Null: none (yet), or an older server.
+  RoutePath? _route;
+  String? _routeStage;
+  int? _routeDistanceM;
+  int? _routeDurationS;
 
-  /// The courier marker glides from where it was drawn to each new position instead of jumping.
-  late final _courierMove = AnimationController(vsync: this, duration: const Duration(milliseconds: 1400));
-  LatLng? _courierFrom;
+  /// What the route was fetched for (status, courier, stage), so a stage change fetches the next one.
+  String? _routeKey;
+  DateTime? _routeFetchedAt;
+  bool _routeLoading = false;
+
+  /// The server has no route endpoint (older API): the map works as before, without asking again.
+  bool _routeUnavailable = false;
+
+  /// How far along [_route] the courier is (metres); null when not on it.
+  double? _courierAlong;
+
+  /// The marker takes about as long to reach a new position as the courier took to report it.
+  Duration _moveDuration = const Duration(milliseconds: 1400);
+
+  /// The courier app's own estimate from the last position update (minutes), if it sent one.
+  int? _courierEta;
+
+  /// "Almost there" has buzzed once.
+  bool _almostBuzzed = false;
+
+  /// The order arrived while this screen was open: a short "Delivered" moment.
+  bool _deliveredMoment = false;
 
   /// "Thanks for your order": a short moment right after paying.
   late bool _celebrate = widget.justPaid;
@@ -101,8 +129,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
     socket.removeReconnectListener(_onReconnect);
     socket.stopTracking(widget.orderId);
     socket.leaveChat(widget.orderId);
-    _map.dispose();
-    _courierMove.dispose();
     _chat.dispose();
     super.dispose();
   }
@@ -141,39 +167,111 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
     final lng = (d['lng'] as num?)?.toDouble();
     if (lat == null || lng == null || !mounted) return;
     final next = LatLng(lat, lng);
-    final firstFix = _courier == null;
+    final now = DateTime.now();
+    final last = _courierSeenAt;
     setState(() {
-      _courierFrom = firstFix ? next : _courierShown;
+      // Glide for about as long as the courier took to report again (1.2–12 s), so the marker
+      // keeps moving between updates instead of hopping and waiting
+      if (last != null) _moveDuration = Duration(milliseconds: now.difference(last).inMilliseconds.clamp(1200, 12000));
       _courier = next;
-      _courierSeenAt = DateTime.now();
+      _courierSeenAt = now;
+      _courierAlong = _snap(next);
+      final eta = asInt(d['etaMinutes']);
+      _courierEta = eta != null && eta > 0 ? eta : null;
     });
-    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) {
-      _courierMove.value = 1;
-    } else {
-      _courierMove.forward(from: 0);
+    _checkAlmostThere();
+    // Courier → shop routes are recomputed by the server at most once a minute
+    final fetched = _routeFetchedAt;
+    final stale = fetched == null || now.difference(fetched) > const Duration(seconds: 60);
+    if (stale && (_routeStage != _expectedStage || (_routeStage == 'to_shop' && _courierAlong == null))) {
+      unawaited(_refreshRoute(force: true));
     }
-    if (firstFix || !_fittedWithCourier) WidgetsBinding.instance.addPostFrameCallback((_) => _fitCamera());
   }
 
-  /// Where the courier marker is drawn right now (between the last two positions while it moves).
-  LatLng? get _courierShown {
-    final to = _courier;
-    final from = _courierFrom;
-    if (to == null || from == null) return to;
-    final t = Curves.easeInOut.transform(_courierMove.value);
-    return LatLng(from.latitude + (to.latitude - from.latitude) * t, from.longitude + (to.longitude - from.longitude) * t);
+  /// The courier's place on the route (metres along it), or null when the route is not the
+  /// courier's own (a preview, or another stage) or the courier is more than ~80 m off it.
+  double? _snap(LatLng p) {
+    final r = _route;
+    if (r == null || (_routeStage != 'to_shop' && _routeStage != 'to_customer') || _routeStage != _expectedStage) return null;
+    final hit = r.project(p, from: _courierAlong);
+    return hit.offset <= 80 ? hit.along : null;
   }
 
-  List<LatLng> get _mapPoints => [if (_storePos != null) _storePos!, if (_homePos != null) _homePos!, if (_courier != null) _courier!];
+  /// The stage the order is in now, as the route endpoint names it.
+  String get _expectedStage {
+    final o = _order;
+    if (o == null) return 'preview';
+    if (o['status'] == 'SHIPPED') return 'to_customer';
+    if (o['courier'] != null && (o['status'] == 'CONFIRMED' || o['status'] == 'PROCESSING') && _courier != null) return 'to_shop';
+    return 'preview';
+  }
 
-  /// Shows the shop, the courier and home together.
-  void _fitCamera() {
-    final points = _mapPoints;
-    if (!_mapReady || !mounted || points.length < 2) return;
-    try {
-      _map.fitCamera(CameraFit.bounds(bounds: LatLngBounds.fromPoints(points), padding: const EdgeInsets.all(56), maxZoom: 16.5));
-      if (_courier != null) _fittedWithCourier = true;
-    } catch (_) {}
+  /// A paid delivery that is still under way: the full-screen map with the sheet.
+  bool _tracking(Map<String, dynamic> o) =>
+      !_isPickup && o['paymentStatus'] == 'SUCCEEDED' && _active.contains(o['status']) && (_storePos != null || _homePos != null);
+
+  /// Fetches the street route for the current stage (API 2.17). A 404 on an active order means an
+  /// older server: the map then keeps the pre-2.17 look and the route is not asked for again.
+  Future<void> _refreshRoute({bool force = false}) async {
+    final o = _order;
+    if (o == null || _routeUnavailable || _routeLoading) return;
+    if (!_tracking(o)) {
+      if (_route != null) setState(_clearRoute);
+      return;
+    }
+    final key = _routeKeyNow;
+    if (!force && key == _routeKey) return;
+    _routeLoading = true;
+    final res = await ApiClient(Provider.of<AuthService>(context, listen: false)).get('/orders/${widget.orderId}/route');
+    _routeLoading = false;
+    if (!mounted) return;
+    _routeFetchedAt = DateTime.now();
+    if (res.status == 404) {
+      setState(() {
+        _clearRoute();
+        _routeUnavailable = true;
+      });
+      return;
+    }
+    // Offline or a hiccup: keep what is drawn and try again with the next update
+    if (!res.ok) return;
+    final path = RoutePath.fromJson(res.data['points']);
+    setState(() {
+      _routeKey = key;
+      _route = path;
+      _routeStage = path == null ? null : res.data['stage']?.toString();
+      _routeDistanceM = asInt(res.data['distanceM']);
+      _routeDurationS = asInt(res.data['durationS']);
+      _courierAlong = _courier == null ? null : _snap(_courier!);
+    });
+    // The order moved on while this request was out: fetch the next stage's route
+    if (_routeKeyNow != key) unawaited(_refreshRoute());
+  }
+
+  String get _routeKeyNow => '${_order?['status']}|${_order?['courier']?['id']}|$_expectedStage';
+
+  void _clearRoute() {
+    _route = null;
+    _routeStage = null;
+    _routeKey = null;
+    _routeDistanceM = null;
+    _routeDurationS = null;
+    _courierAlong = null;
+  }
+
+  /// Within about 300 m of home after pickup.
+  bool get _almostThere {
+    final o = _order;
+    if (o == null || o['status'] != 'SHIPPED') return false;
+    final c = _courier, home = _homePos;
+    if (c != null && home != null) return RoutePath.metres(c, home) <= 300;
+    return o['arrivingNotifiedAt'] != null;
+  }
+
+  void _checkAlmostThere() {
+    if (_almostBuzzed || !_almostThere) return;
+    _almostBuzzed = true;
+    Haptics.light();
   }
 
   void _onOrderStatus(Map<String, dynamic> d) {
@@ -319,6 +417,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
       return;
     }
     final order = Map<String, dynamic>.from(res.data['order']);
+    // It arrived while this screen was open: a short "Delivered" moment before the rating card
+    final arrivedNow = _order != null && _order!['status'] == 'SHIPPED' && order['status'] == 'DELIVERED' && order['fulfilment'] != 'PICKUP';
     Map<String, dynamic>? review;
     if (order['status'] == 'DELIVERED') {
       final r = await api.get('/orders/${widget.orderId}/review');
@@ -329,14 +429,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
       _order = order;
       _review = review;
       _error = null;
+      if (arrivedNow) _deliveredMoment = true;
       final c = order['courier'];
-      if (_courier == null && c?['latitude'] != null && c?['longitude'] != null && order['status'] == 'SHIPPED') {
+      // The server sends the courier's coordinates only while the order is active and assigned (2.16.1)
+      if (_courier == null && c?['latitude'] != null && c?['longitude'] != null && _active.contains(order['status'])) {
         _courier = LatLng((c['latitude'] as num).toDouble(), (c['longitude'] as num).toDouble());
-        _courierFrom = _courier;
-        _courierMove.value = 1;
       }
+      if (!_active.contains(order['status'])) _courier = null;
     });
-    if (_courier != null && !_fittedWithCourier) WidgetsBinding.instance.addPostFrameCallback((_) => _fitCamera());
+    if (arrivedNow) Haptics.success();
+    _checkAlmostThere();
+    unawaited(_refreshRoute());
   }
 
   void _snack(String t) => MSnack.show(context, t);
@@ -397,14 +500,59 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
     // A scheduled delivery is promised its window, not minutes from now
     final window = scheduledWindow(context, o['scheduledStart'], o['scheduledEnd']);
     if (window != null) return tr(context, 'Scheduled: $window', 'Ajastettu: $window');
+    final eta = _etaWindow(o);
+    return eta == null ? null : tr(context, 'Estimated arrival $eta', 'Arvioitu saapuminen $eta');
+  }
+
+  /// The 10-minute window promised at payment ("12.40–12.50"), or null.
+  String? _etaWindow(Map<String, dynamic> o) {
     final eta = asInt(o['etaMinutes']);
     final paid = _time('paidAt') ?? _time('createdAt');
-    if (eta != null && paid != null) {
-      final from = paid.add(Duration(minutes: eta));
-      final to = from.add(const Duration(minutes: 10));
-      return tr(context, 'Estimated arrival ${_clock(from)}–${_clock(to)}', 'Arvioitu saapuminen ${_clock(from)}–${_clock(to)}');
+    if (eta == null || paid == null) return null;
+    final from = paid.add(Duration(minutes: eta));
+    return '${_clock(from)}–${_clock(from.add(const Duration(minutes: 10)))}';
+  }
+
+  /// Minutes until the courier is at the door after pickup: the routing provider's time for the
+  /// route, scaled by the part still ahead; else the courier app's own estimate. Null = unknown.
+  int? get _minutesLeft {
+    if (_order?['status'] != 'SHIPPED') return null;
+    final r = _route, total = _routeDurationS;
+    if (r != null && _routeStage == 'to_customer' && total != null && total > 0 && r.length > 0) {
+      return (total * _fractionLeft(r) / 60).ceil();
     }
-    return null;
+    return _courierEta;
+  }
+
+  /// Share of the shop → home route still ahead of the courier (all of it while the courier is unknown).
+  double _fractionLeft(RoutePath r) {
+    final c = _courier;
+    final along = _courierAlong ?? (c == null ? 0.0 : r.project(c).along);
+    return ((r.length - along) / r.length).clamp(0.0, 1.0);
+  }
+
+  /// Metres still to ride after pickup: along the route when there is one, else in a straight line.
+  double? get _metresLeft {
+    if (_order?['status'] != 'SHIPPED') return null;
+    final r = _route;
+    if (r != null && _routeStage == 'to_customer') return (_routeDistanceM?.toDouble() ?? r.length) * _fractionLeft(r);
+    final c = _courier, home = _homePos;
+    return c == null || home == null ? null : RoutePath.metres(c, home);
+  }
+
+  /// "about 6 min": whole minutes up to 10, then steps of 5 — never more precise than the data.
+  String _aboutMinutes(int minutes) {
+    final m = minutes <= 1 ? 1 : (minutes <= 10 ? minutes : (minutes / 5).round() * 5);
+    return tr(context, 'about $m min', 'noin $m min');
+  }
+
+  String _distanceText(double metres) {
+    if (metres < 950) {
+      final m = ((metres / 50).round() * 50).clamp(50, 950);
+      return '$m m';
+    }
+    final km = (metres / 1000).toStringAsFixed(1);
+    return tr(context, '$km km', '${km.replaceAll('.', ',')} km');
   }
 
   // ── Actions ─────────────────────────────────────────────────────────────
@@ -546,8 +694,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
     }
   }
 
-  Future<void> _openChat() async {
-    final input = TextEditingController();
+  Future<void> _openChat({String? prefill}) async {
+    final input = TextEditingController(text: prefill ?? '');
     final scroll = ScrollController();
     final auth = Provider.of<AuthService>(context, listen: false);
     final myName = (auth.currentUser?.name ?? '').split(' ').first;
@@ -697,6 +845,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
       body: Stack(children: [
         Positioned.fill(child: _body(o)),
         if (_celebrate) Positioned.fill(child: PaidMoment(onDone: _afterCelebration)),
+        if (_deliveredMoment && !_celebrate)
+          Positioned.fill(
+            child: PaidMoment(
+              title: tr(context, 'Delivered!', 'Toimitettu!'),
+              subtitle: tr(context, 'Enjoy your new things.', 'Nauti uusista ostoksistasi.'),
+              onDone: () {
+                if (mounted) setState(() => _deliveredMoment = false);
+              },
+            ),
+          ),
       ]),
     );
   }
@@ -709,6 +867,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
   }
 
   Widget _body(Map<String, dynamic>? o) {
+    if (o != null && _tracking(o)) return _trackingBody(o);
     return o == null
           ? (_error == null ? const MSkeletonDetail(heroHeight: 240) : MStateMessage.error(message: _error!, onRetry: _load))
           : RefreshIndicator(
@@ -768,96 +927,256 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
     ));
   }
 
-  Widget _mapCard() {
-    final points = _mapPoints;
-    Widget pin(IconData icon, Color color, String label) => Semantics(
-          label: label,
-          child: Container(
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: Border.all(color: MPalette.white, width: 3),
-                boxShadow: [BoxShadow(color: MPalette.night.withValues(alpha: 0.26), blurRadius: 6)]),
-            child: Icon(icon, color: AppTheme.onBrand, size: 18),
-          ),
-        );
-    return Container(
-      height: 280,
-      margin: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.sm, MSpace.lg, 0),
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(AppTheme.radiusLg)),
-      child: Stack(
-        children: [
-          FlutterMap(
-            mapController: _map,
-            options: MapOptions(
-              initialCenter: points.first,
-              initialZoom: 14,
-              maxZoom: 18,
-              // Shop and home (and the courier, when known) all in view from the start
-              initialCameraFit: points.length > 1
-                  ? CameraFit.bounds(bounds: LatLngBounds.fromPoints(points), padding: const EdgeInsets.all(56), maxZoom: 16.5)
-                  : null,
-              onMapReady: () {
-                _mapReady = true;
-                if (_courier != null) _fittedWithCourier = true;
-              },
+  Widget _mapCard() => Container(
+        height: 280,
+        margin: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.sm, MSpace.lg, 0),
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(borderRadius: BorderRadius.circular(AppTheme.radiusLg)),
+        child: _liveMap(),
+      );
+
+  Widget _liveMap({EdgeInsets cameraPadding = const EdgeInsets.all(56)}) => LiveRouteMap(
+        shop: _storePos,
+        home: _homePos,
+        courier: _courier,
+        route: _route,
+        courierAlong: _courierAlong,
+        moveDuration: _moveDuration,
+        courierIcon: _vehicleIcon(_order?['courier']?['vehicleType']?.toString()),
+        // Paid and waiting for the shop to accept; then home, once the courier is nearly there
+        pulseShop: _order?['status'] == 'PENDING' && _order?['paymentStatus'] == 'SUCCEEDED',
+        pulseHome: _almostThere,
+        cameraPadding: cameraPadding,
+      );
+
+  static IconData _vehicleIcon(String? vehicle) => switch (vehicle) {
+        'car' => Icons.directions_car_rounded,
+        'moped' => Icons.moped_rounded,
+        'scooter' => Icons.electric_scooter_rounded,
+        'ebike' => Icons.electric_bike_rounded,
+        'on_foot' => Icons.directions_walk_rounded,
+        _ => Icons.pedal_bike_rounded,
+      };
+
+  String? _vehicleText(String? vehicle) => switch (vehicle) {
+        'bicycle' => tr(context, 'Bike courier', 'Pyöräkuriiri'),
+        'ebike' => tr(context, 'E-bike courier', 'Sähköpyöräkuriiri'),
+        'moped' => tr(context, 'Moped courier', 'Mopokuriiri'),
+        'scooter' => tr(context, 'Scooter courier', 'Skootterikuriiri'),
+        'car' => tr(context, 'Car courier', 'Autokuriiri'),
+        'on_foot' => tr(context, 'Courier on foot', 'Kuriiri kävellen'),
+        _ => null,
+      };
+
+  // ── Live tracking: full map with a Wolt-style sheet ───────────────────────
+
+  static const _sheetInitial = 0.46;
+
+  Widget _trackingBody(Map<String, dynamic> o) {
+    return LayoutBuilder(builder: (context, box) {
+      final sheetTop = box.maxHeight * _sheetInitial;
+      return Stack(children: [
+        Positioned.fill(
+          // The route stays clear of the sheet as it first opens
+          child: _liveMap(cameraPadding: EdgeInsets.fromLTRB(48, 72, 48, sheetTop + MSpace.xxl)),
+        ),
+        DraggableScrollableSheet(
+          initialChildSize: _sheetInitial,
+          minChildSize: 0.3,
+          maxChildSize: 0.94,
+          snap: true,
+          snapSizes: const [_sheetInitial],
+          builder: (context, scroll) => DecoratedBox(
+            decoration: BoxDecoration(
+              color: context.mColors.surface,
+              borderRadius: MRadius.sheetTop,
+              boxShadow: context.mTokens.shadow(MElevation.e3),
             ),
-            children: [
-              TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.malvoya.customer'),
-              // Only the courier layers repaint while the marker glides
-              AnimatedBuilder(
-                animation: _courierMove,
-                builder: (context, _) {
-                  final courier = _courierShown;
-                  return PolylineLayer(polylines: [
-                    if (courier != null && _homePos != null)
-                      Polyline(
-                        points: [courier, _homePos!],
-                        strokeWidth: 4,
-                        color: AppTheme.primary.withValues(alpha: 0.6),
-                        pattern: StrokePattern.dashed(segments: const [10, 8]),
-                      ),
-                  ]);
-                },
-              ),
-              AnimatedBuilder(
-                animation: _courierMove,
-                builder: (context, _) {
-                  final courier = _courierShown;
-                  return MarkerLayer(markers: [
-                    if (_storePos != null)
-                      Marker(point: _storePos!, width: 38, height: 38, child: pin(Icons.storefront_rounded, AppTheme.primary, tr(context, 'Shop', 'Kauppa'))),
-                    if (_homePos != null)
-                      Marker(point: _homePos!, width: 38, height: 38, child: pin(Icons.home_rounded, AppTheme.success, tr(context, 'Your address', 'Osoitteesi'))),
-                    if (courier != null)
-                      Marker(point: courier, width: 46, height: 46, child: pin(Icons.pedal_bike_rounded, AppTheme.lingon, tr(context, 'Courier', 'Kuriiri'))),
-                  ]);
-                },
-              ),
-              const Align(
-                alignment: Alignment.bottomRight,
-                child: Padding(padding: EdgeInsets.all(MSpace.sm), child: Text('© OpenStreetMap', style: TextStyle(fontSize: MTextSize.caption, color: AppTheme.ink))),
-              ),
-            ],
+            child: ListView(
+              controller: scroll,
+              padding: const EdgeInsets.only(bottom: MSpace.x3l),
+              children: [
+                const MSheetHandle(),
+                _sheetHeader(o),
+                if (_deliveryProblem(o)) _deliveryProblemCard(o),
+                _statusCard(o, compact: true),
+                _itemsCard(o),
+                _actions(o),
+              ],
+            ),
           ),
-          if (points.length > 1)
-            Positioned(
-              top: 8,
-              right: 8,
-              child: Material(
-                color: MPalette.white,
-                shape: const CircleBorder(),
-                elevation: 2,
-                child: IconButton(
-                  tooltip: tr(context, 'Show the whole route', 'Näytä koko reitti'),
-                  icon: const Icon(Icons.center_focus_strong_rounded, color: AppTheme.ink),
-                  onPressed: () {
+        ),
+      ]);
+    });
+  }
+
+  /// Large ETA, one status line, the 4-step bar, the courier and the chat shortcuts.
+  Widget _sheetHeader(Map<String, dynamic> o) {
+    final c = context.mColors;
+    final status = o['status'];
+    final store = (o['store']?['name'] ?? '').toString();
+    final courier = o['courier'] is Map ? Map<String, dynamic>.from(o['courier']) : null;
+    final name = (courier?['name'] ?? '').toString().split(' ').first;
+    final window = scheduledWindow(context, o['scheduledStart'], o['scheduledEnd']) ?? _etaWindow(o);
+    final arrival = tr(context, 'Estimated arrival', 'Arvioitu saapuminen');
+    String? label;
+    String big;
+    String line;
+    if (status == 'SHIPPED') {
+      final minutes = _minutesLeft;
+      final left = _metresLeft;
+      final onTheWay = name.isEmpty ? tr(context, 'Your courier is on the way', 'Kuriiri on matkalla') : tr(context, '$name is on the way', '$name on matkalla');
+      if (_almostThere) {
+        big = tr(context, 'Almost there', 'Melkein perillä');
+        line = name.isEmpty ? tr(context, 'Your courier is nearly at your door', 'Kuriiri on kohta ovellasi') : tr(context, '$name is nearly at your door', '$name on kohta ovellasi');
+      } else if (minutes != null) {
+        label = tr(context, 'Arriving in', 'Perillä');
+        big = _aboutMinutes(minutes);
+        line = left == null ? onTheWay : '$onTheWay · ${_distanceText(left)}';
+      } else {
+        big = left == null ? (window ?? tr(context, 'On the way', 'Matkalla')) : _distanceText(left);
+        label = left == null && window != null ? arrival : (left != null ? tr(context, 'Distance', 'Matkaa jäljellä') : null);
+        line = onTheWay;
+      }
+    } else if (courier != null && (status == 'CONFIRMED' || status == 'PROCESSING')) {
+      label = window == null ? null : arrival;
+      big = window ?? tr(context, 'Courier on the way', 'Kuriiri tulossa');
+      line = name.isEmpty
+          ? tr(context, 'Your courier is picking up your order', 'Kuriiri hakee tilauksesi kaupasta')
+          : tr(context, '$name is picking up your order', '$name hakee tilauksesi kaupasta');
+    } else if (status == 'CONFIRMED' || status == 'PROCESSING') {
+      label = window == null ? null : arrival;
+      big = window ?? tr(context, 'Being prepared', 'Valmistellaan');
+      line = status == 'PROCESSING'
+          ? tr(context, '$store has packed your order. Finding a courier…', '$store on pakannut tilauksesi. Etsitään kuriiria…')
+          : tr(context, '$store is preparing your order', '$store valmistelee tilaustasi');
+    } else {
+      label = window == null ? null : arrival;
+      big = window ?? tr(context, 'Waiting for the store', 'Odotetaan kauppaa');
+      line = tr(context, 'Waiting for $store to accept your order', 'Odotetaan, että $store hyväksyy tilauksesi');
+    }
+    final stale = _courierSeenAt != null && DateTime.now().difference(_courierSeenAt!) > const Duration(minutes: 2);
+    final active = ['CONFIRMED', 'PROCESSING', 'SHIPPED'].contains(status);
+    final vehicle = courier?['vehicleType']?.toString();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(MSpace.xl, MSpace.xs, MSpace.xl, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Semantics(
+            liveRegion: true,
+            container: true,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              if (label != null) Text(label, style: MType.label.copyWith(color: c.onSurfaceVariant)),
+              Text(big, style: MType.displayL.copyWith(color: c.onSurface)),
+              const SizedBox(height: MSpace.xs),
+              Text(line, style: MType.bodyL.copyWith(color: c.onSurface)),
+            ]),
+          ),
+          const SizedBox(height: MSpace.lg),
+          _progress4(o),
+          if (courier != null && name.isNotEmpty) ...[
+            const SizedBox(height: MSpace.lg),
+            Row(children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(color: AppTheme.pastel(context, AppTheme.peach, AppTheme.lingon), shape: BoxShape.circle),
+                child: Icon(_vehicleIcon(vehicle), color: AppTheme.lingon, size: 24),
+              ),
+              const SizedBox(width: MSpace.md),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(name, style: MType.title.copyWith(color: c.onSurface)),
+                  if (stale)
+                    Text(tr(context, 'Location updating…', 'Sijaintia päivitetään…'), style: MType.caption.copyWith(color: c.onSurfaceVariant))
+                  else if (_vehicleText(vehicle) != null)
+                    Text(_vehicleText(vehicle)!, style: MType.caption.copyWith(color: c.onSurfaceVariant)),
+                ]),
+              ),
+            ]),
+            if (active) ...[
+              const SizedBox(height: MSpace.md),
+              Wrap(spacing: MSpace.sm, runSpacing: MSpace.sm, children: [
+                MChip(
+                  label: _unread ? tr(context, 'New message', 'Uusi viesti') : tr(context, 'Chat', 'Chat'),
+                  icon: Icons.chat_bubble_outline_rounded,
+                  selected: _unread,
+                  onSelected: (_) {
                     Haptics.selection();
-                    _fitCamera();
+                    _openChat();
                   },
+                ),
+                MChip(
+                  label: tr(context, 'Door code', 'Ovikoodi'),
+                  icon: Icons.dialpad_rounded,
+                  onSelected: (_) {
+                    Haptics.selection();
+                    _openChat(prefill: tr(context, 'The door code is ', 'Ovikoodi on '));
+                  },
+                ),
+              ]),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Received → being prepared → on the way → delivered; the step under way is half filled.
+  Widget _progress4(Map<String, dynamic> o) {
+    final c = context.mColors;
+    final status = o['status'];
+    final reached = [
+      true,
+      ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'].contains(status),
+      ['SHIPPED', 'DELIVERED'].contains(status),
+      status == 'DELIVERED',
+    ];
+    final done = reached.where((r) => r).length;
+    final labels = [
+      tr(context, 'Received', 'Vastaanotettu'),
+      tr(context, 'Preparing', 'Valmistellaan'),
+      tr(context, 'On the way', 'Matkalla'),
+      tr(context, 'Delivered', 'Perillä'),
+    ];
+    final brand = AppTheme.isDarkMode(context) ? MPalette.malvaOnDark : AppTheme.primary;
+    return Semantics(
+      label: tr(context, 'Step $done of 4: ${labels[done - 1]}', 'Vaihe $done/4: ${labels[done - 1]}'),
+      excludeSemantics: true,
+      child: Column(children: [
+        Row(children: [
+          for (var i = 0; i < 4; i++) ...[
+            if (i > 0) const SizedBox(width: MSpace.xs),
+            Expanded(
+              child: Container(
+                height: 6,
+                decoration: BoxDecoration(color: c.outline, borderRadius: BorderRadius.circular(3)),
+                alignment: Alignment.centerLeft,
+                child: AnimatedFractionallySizedBox(
+                  duration: MMotion.of(context, MMotion.slow),
+                  curve: MMotion.standard,
+                  widthFactor: i < done ? 1 : (i == done ? 0.4 : 0),
+                  child: Container(decoration: BoxDecoration(color: brand, borderRadius: BorderRadius.circular(3))),
                 ),
               ),
             ),
-        ],
-      ),
+          ],
+        ]),
+        const SizedBox(height: MSpace.xs),
+        Row(children: [
+          for (var i = 0; i < 4; i++)
+            Expanded(
+              child: Text(
+                labels[i],
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: MType.caption.copyWith(color: i < done ? c.onSurface : c.onSurfaceVariant),
+              ),
+            ),
+        ]),
+      ]),
     );
   }
 
@@ -1002,7 +1321,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
         child: child,
       );
 
-  Widget _statusCard(Map<String, dynamic> o) {
+  Widget _statusCard(Map<String, dynamic> o, {bool compact = false}) {
     final status = o['status'];
     final eta = _etaText();
     final paid = o['paymentStatus'] == 'SUCCEEDED' || o['paymentStatus'] == 'REFUNDED';
@@ -1031,11 +1350,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
 
     final done = steps.where((s) => s.$3).length;
     final brand = AppTheme.isDarkMode(context) ? MPalette.malvaOnDark : AppTheme.primary;
-    final showCourier = !_isPickup && courierName.isNotEmpty && _active.contains(status);
+    final showCourier = !compact && !_isPickup && courierName.isNotEmpty && _active.contains(status);
 
     return _card(Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (!compact) ...[
         Text(
           cancelled
               ? tr(context, 'Cancelled', 'Peruttu')
@@ -1044,8 +1364,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
                   : (eta ?? tr(context, 'Waiting for the store', 'Odotetaan kauppaa')),
           style: AppTheme.display(context, size: 25),
         ),
+        ],
         Padding(
-          padding: const EdgeInsets.only(top: MSpace.xs),
+          padding: EdgeInsets.only(top: compact ? 0 : MSpace.xs),
           child: Text('#${o['id']} · ${o['store']?['name'] ?? ''}', style: TextStyle(color: AppTheme.secondaryText(context))),
         ),
         if (cancelled && o['cancelReason'] != null) ...[
@@ -1087,8 +1408,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
         ],
         if (!cancelled) ...[
           const SizedBox(height: 14),
-          // One segment per step, filled as the order moves along
-          Row(
+          // One segment per step, filled as the order moves along (the sheet has its own 4-step bar)
+          if (!compact) Row(
             children: [
               for (var i = 0; i < steps.length; i++) ...[
                 if (i > 0) const SizedBox(width: MSpace.xs),

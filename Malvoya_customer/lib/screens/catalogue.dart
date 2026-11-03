@@ -300,7 +300,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
       body: _loading
           ? (_storesTab ? const MSkeletonList(thumbnail: true, thumbHeight: 44) : const MSkeletonProductGrid())
           : _error != null
-              ? RefreshIndicator(onRefresh: _search, child: MStateMessage.error(message: _error!, onRetry: _search))
+              ? MRefreshIndicator(onRefresh: _search, child: MStateMessage.error(message: _error!, onRetry: _search))
               : _storesTab
                   ? _storeList()
                   : _itemGrid(),
@@ -438,7 +438,7 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
 
   Widget _itemGrid() {
     final idle = _query.text.trim().isEmpty && !_hasFilters;
-    return RefreshIndicator(
+    return MRefreshIndicator(
       onRefresh: _search,
       child: CustomScrollView(
         controller: _scroll,
@@ -584,12 +584,12 @@ class _CatalogueScreenState extends State<CatalogueScreen> {
 
   Widget _storeList() {
     if (_stores.isEmpty) {
-      return RefreshIndicator(
+      return MRefreshIndicator(
         onRefresh: _search,
         child: MStateMessage(icon: Icons.storefront_outlined, message: tr(context, 'No stores found. Try another name.', 'Kauppoja ei löytynyt. Kokeile toista nimeä.')),
       );
     }
-    return RefreshIndicator(
+    return MRefreshIndicator(
       onRefresh: _search,
       child: ListView.separated(
       padding: const EdgeInsets.fromLTRB(MSpace.sm, MSpace.sm, MSpace.sm, 140),

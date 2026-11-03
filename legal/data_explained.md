@@ -258,7 +258,7 @@ Jokaisesta tiedosta kerromme: mitä keräämme, **miksi tarvitsemme sen**, mitä
 - **Mitä keräämme:** tilin tiedot kuten ostajilla, kulkuneuvon (pyörä, sähköpyörä, mopo, skootteri, auto tai kävellen) ja ajan, jolloin kuittasit lukeneesi, miten sijaintiasi käytetään.
 - **Miksi tarvitsemme sen:** perehdytys ja sopivien keikkojen tarjoaminen.
 - **Jos et anna sitä:** et voi aloittaa keikkoja.
-- **Kuka näkee:** sinä ja Malvoyan ylläpito; asiakas ja kauppa näkevät nimesi toimituksen aikana.
+- **Kuka näkee:** sinä ja Malvoyan ylläpito; asiakas ja kauppa näkevät nimesi ja kulkuneuvosi (esimerkiksi pyörä) toimituksen aikana.
 - **Missä se on:** palvelimellamme.
 - **Miten se on suojattu:** kuten ostajien tilit.
 - **Kuinka kauan:** kunnes poistat tilin.
@@ -345,6 +345,7 @@ Katso kohta **Sijainti tarkemmin** alempana.
 - **Mihin:** lähellä olevien keikkojen tarjoamiseen (7,5 km, lähin ensin), sen tarkistamiseen että olet kaupalla (300 m), kauppaan ajon palkkion laskemiseen ja asiakkaalle näyttämiseen toimituksen aikana. Asiakas saa yhden ilmoituksen "Lähetti on pian perillä", kun olet noin 300 metrin päässä.
 - **Kuka näkee:** vain toimittamasi tilauksen asiakas ja kauppa, siitä kun hyväksyt keikan siihen asti, kun tilaus on toimitettu tai palautettu kauppaan, sekä ylläpito. Valmiissa, perutuissa tai muissa tilauksissa sijaintiasi ei näytetä kenellekään.
 - **Mitä tallennetaan:** vain viimeisin sijainti (enintään 15 sekunnin välein). Ei reittihistoriaa. Keikan mukana tallennetaan kauppaan ajon matka (palkkiota varten) ja luovutuspaikka (30 päivää).
+- **Reitti asiakkaan kartalla:** asiakkaan sovellus näyttää katureitin sijainnistasi kauppaan ja kaupasta asiakkaalle. Reitti lasketaan pyydettäessä eikä sitä tallenneta: palvelin pitää sitä muistissa enintään 10 minuuttia (sijainnistasi alkavaa reittiä minuutin), ja vain tilauksen asiakas ja kauppa saavat sinusta alkavan reitin, kun keikka on kesken. Jos reittipalvelu on käytössä, OpenRouteService (HeiGIT gGmbH, Saksa) saa reitin alku- ja loppupisteen, ei nimiä eikä tilaustietoja.
 - **Milloin se loppuu:** kun poistut linjoilta, sijainnin jakaminen loppuu ja tallennettu sijainti poistetaan. Uloskirjautuminen ja tilin poisto lopettavat jakamisen myös. Yli 2 minuuttia vanha sijainti katsotaan tuntemattomaksi. Jos uutta sijaintia ei tule 15 minuuttiin (esimerkiksi sovellus suljettiin), tallennettu sijainti poistetaan automaattisesti ja sinut merkitään poissa linjoilta; jos sinulla on toimitus kesken, se jatkuu normaalisti ja sijaintisi näkyy taas seuraavasta päivityksestä.
 - **Ei mainontaan.** Sijaintiasi ei käytetä mainontaan eikä myydä.
 
@@ -398,6 +399,7 @@ Lomake: [malvoya-api-eu.onrender.com/contact](https://malvoya-api-eu.onrender.co
 | Twilio | Tekstiviestikoodit | Yhdysvallat | Data Privacy Framework tai vakiolausekkeet |
 | LiveKit | Live-lähetysten video (vain kun käytössä) | [LIVEKIT REGION] | Vakiolausekkeet |
 | Sentry | Virheraportit (vain kun käytössä) | [SENTRY REGION] | Data Privacy Framework tai vakiolausekkeet |
+| OpenRouteService (HeiGIT) | Katureitit toimituskartalle: vain alku- ja loppupiste (vain kun käytössä) | Saksa (EU) | Data EU:ssa |
 | [EMAIL PROVIDER] | Sähköpostit | [REGION] | [SAFEGUARD] |
 | PRH (avoindata.prh.fi) | Y-tunnuksen tarkistus | Suomi | Viranomainen, saa vain Y-tunnuksen |
 | OpenStreetMap Foundation | Kartat ja osoitehaku puhelimesta | Iso-Britannia | Komission tietosuojan riittävyyspäätös; itsenäinen vastaanottaja |
@@ -658,7 +660,7 @@ For each piece of data we say: what we collect, **why we need it**, what happens
 - **What we collect:** account details as for shoppers, your vehicle (bicycle, e-bike, moped, scooter, car or on foot) and when you confirmed you read how your location is used.
 - **Why we need it:** onboarding and offering suitable jobs.
 - **If you don't give it:** you cannot start taking jobs.
-- **Who can see it:** you and Malvoya's admins; the customer and store see your name during a delivery.
+- **Who can see it:** you and Malvoya's admins; the customer and store see your name and your vehicle (for example a bike) during a delivery.
 - **Where it is stored:** on our server.
 - **How it is protected:** as for shopper accounts.
 - **How long we keep it:** until you delete your account.
@@ -745,6 +747,7 @@ See **Location in detail** below.
 - **What for:** offering nearby jobs (7.5 km, nearest first), checking you are at the store (300 m), calculating pay for the ride to the store, and showing the customer your position during the delivery. The customer gets one "Your courier is arriving" notice when you are about 300 m away.
 - **Who sees it:** only the customer and store of the order you are delivering, from when you accept the job until the order is delivered or taken back to the shop, and admins. On finished, cancelled or other orders your position is shown to nobody.
 - **What is stored:** only your latest position (written at most every 15 seconds). No route history. With the job we store the distance of the ride to the store (for your pay) and the handover position (30 days).
+- **The route on the customer's map:** the customer's app shows the street route from your position to the store, and from the store to the customer. It is worked out when asked for and never stored: the server keeps it in memory for at most 10 minutes (a route starting at your position for one minute), and only the order's customer and store get a route that starts at you, while the job is in progress. When the routing service is switched on, OpenRouteService (HeiGIT gGmbH, Germany) receives the start and end point of the route, no names or order details.
 - **When it stops:** when you go offline, sharing stops and the stored position is deleted. Signing out and deleting your account stop it too. A position older than 2 minutes counts as unknown. If no new position arrives for 15 minutes (for example because the app was closed), the stored position is deleted automatically and you are set offline; if you have a delivery in progress, it carries on as normal and your position shows again with your next update.
 - **Never for ads.** Your location is not used for advertising or sold.
 
@@ -798,6 +801,7 @@ Contact form: [malvoya-api-eu.onrender.com/contact](https://malvoya-api-eu.onren
 | Twilio | Text-message codes | US | Data Privacy Framework or Standard Contractual Clauses |
 | LiveKit | Live-stream video (only while switched on) | [LIVEKIT REGION] | Standard Contractual Clauses |
 | Sentry | Error reports (only while switched on) | [SENTRY REGION] | Data Privacy Framework or Standard Contractual Clauses |
+| OpenRouteService (HeiGIT) | Street routes for the delivery map: only the start and end point (only while switched on) | Germany (EU) | Data in the EU |
 | [EMAIL PROVIDER] | Emails | [REGION] | [SAFEGUARD] |
 | PRH (avoindata.prh.fi) | Business ID check | Finland | Public authority; receives only the business ID |
 | OpenStreetMap Foundation | Maps and address search from the phone | United Kingdom | European Commission adequacy decision; independent recipient |

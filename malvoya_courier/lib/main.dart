@@ -20,41 +20,60 @@ import 'services/socket_service.dart';
 import 'auth_service.dart';
 import 'l10n.dart';
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
   registerMalvoyaFontLicenses();
   ApiConfig.baseUrl = AppConstants.apiBase;
   // A failed request lets the "No internet" strip appear even without a system network change
   ApiConfig.onNetworkError = ConnectivityService.instance.verify;
-  // "1.7.0+9", sent as X-App-Version with every API request
-  await AppLanguage.loadAppVersion();
   // Shows a "No internet" strip and lets screens refresh when the connection comes back
   ConnectivityService.instance.start();
-  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
-  // Firebase. On iOS it needs GoogleService-Info.plist (added on the Mac, never committed);
-  // without it the app runs without push and phone sign-in.
-  await SignInSetup.loadIos();
-  try {
-    final app = await Firebase.initializeApp();
-    SignInSetup.firebaseInitialised(appId: app.options.appId, iosClientId: app.options.iosClientId);
-  } catch (e) {
-    debugPrint('Firebase: $e');
-  }
-  // Crash reports (Firebase Crashlytics, docs/release/crashlytics.md): sent from release builds only,
-  // and only when Firebase started (an iPhone build without GoogleService-Info.plist skips them).
-  // Only the numeric user id, the app version and the role go with them.
-  await CrashReporting.instance.init(backend: SignInSetup.firebaseReady ? _crashlyticsBackend() : null, role: 'courier');
-  FlutterError.onError = CrashReporting.instance.recordFlutterFatalError;
-  PlatformDispatcher.instance.onError = CrashReporting.instance.recordPlatformError;
   // Location sharing ends with the session, however it ends (sign-out, account deletion, expiry)
   AuthService.beforeLogout.add((_) async {
     CourierTelemetryService().stop();
     CourierSocketService().disconnect();
   });
-  runApp(const MalvoyaCourierApp());
+  // The welcome animation plays while the services start (together, not one by one); the app opens
+  // as soon as both are done
+  runApp(MalvoyaIntro(
+    brand: MalvoyaBrand.lingon,
+    appName: 'Malvoya Courier',
+    tagline: (context) => tr(context, 'Deliver at your own pace', 'Toimita omaan tahtiisi'),
+    followSystemLanguage: false,
+    ready: _start(),
+    builder: (_) => const MalvoyaCourierApp(),
+  ));
 }
 
-/// Firebase Crashlytics behind the shared [CrashReporting] (built only when Firebase started).
+/// Everything the app needs before its first screen, started in parallel.
+Future<void> _start() async {
+  // "1.7.0+9", sent as X-App-Version with every API request
+  final version = AppLanguage.loadAppVersion();
+  await Future.wait<void>([
+    version,
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]),
+    () async {
+      // Firebase. On iOS it needs GoogleService-Info.plist (added on the Mac, never committed);
+      // without it the app runs without push and phone sign-in.
+      await SignInSetup.loadIos();
+      try {
+        final app = await Firebase.initializeApp();
+        SignInSetup.firebaseInitialised(appId: app.options.appId, iosClientId: app.options.iosClientId);
+      } catch (e) {
+        debugPrint('Firebase: $e');
+      }
+      // Crash reports (Firebase Crashlytics, docs/release/crashlytics.md): sent from release builds
+      // only, and only when Firebase started (an iPhone build without GoogleService-Info.plist skips
+      // them). Only the numeric user id, the app version and the role go with them.
+      await version;
+      await CrashReporting.instance.init(backend: SignInSetup.firebaseReady ? _crashlyticsBackend() : null, role: 'courier');
+      FlutterError.onError = CrashReporting.instance.recordFlutterFatalError;
+      PlatformDispatcher.instance.onError = CrashReporting.instance.recordPlatformError;
+    }(),
+  ]);
+}
+
+// Firebase Crashlytics behind the shared [CrashReporting] (built only when Firebase started).
 CrashBackend _crashlyticsBackend() {
   final c = FirebaseCrashlytics.instance;
   return CallbackCrashBackend(

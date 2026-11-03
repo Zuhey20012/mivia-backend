@@ -104,7 +104,7 @@ class DropsManagerState extends State<DropsManager> {
   @override
   Widget build(BuildContext context) {
     if (_loading) return const MSkeletonList(thumbnail: true, lines: 4, padding: EdgeInsets.fromLTRB(MSpace.lg, MSpace.lg, MSpace.lg, 100));
-    return RefreshIndicator(
+    return MRefreshIndicator(
       onRefresh: load,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),

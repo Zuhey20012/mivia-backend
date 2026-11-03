@@ -112,7 +112,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(title: Text(tr(context, 'Monthly statements', 'Kuukausiraportit'))),
-      body: RefreshIndicator(
+      body: MRefreshIndicator(
         onRefresh: _load,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),

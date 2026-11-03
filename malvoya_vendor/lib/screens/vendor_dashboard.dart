@@ -634,15 +634,81 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       MSnack.show(context, [if (res.notice != null) res.notice!, res.errorMessage].join(' '));
     } else if (status == 'CONFIRMED') {
       final accepted = tr(context, 'Order #${order['id']} accepted.', 'Tilaus #${order['id']} hyväksytty.');
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(res.notice == null ? accepted : '$accepted ${res.notice}')));
+      final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
+      if (res.notice != null) messenger.showSnackBar(SnackBar(content: Text('$accepted ${res.notice}')));
+      final first = await _isFirstSale(order);
+      if (!mounted) return res.ok;
+      if (first) {
+        // The incoming-order sheet closes first, then the one-time celebration opens
+        Future.delayed(MMotion.slow, () {
+          if (!mounted) return;
+          showMCelebration(
+            context,
+            title: tr(context, 'Your first sale!', 'Ensimmäinen myyntisi!'),
+            message: tr(context, 'Order #${order['id']} is accepted. This is where it starts.', 'Tilaus #${order['id']} on hyväksytty. Tästä se alkaa!'),
+            action: tr(context, "Let's go", 'Mennään!'),
+          );
+        });
+      } else {
+        showMSuccessCheck(context, accepted);
+      }
     }
     _loadOrders();
     return res.ok;
   }
 
   static const _red = MPalette.red;
+
+  /// True once, on this phone, when [accepted] is the store's first sale: no other order in the list
+  /// the server sent was ever accepted (anything past PENDING that was not cancelled). The answer
+  /// is remembered, so the celebration never repeats; a store that already has sales is marked as
+  /// celebrated without one.
+  Future<bool> _isFirstSale(Map<String, dynamic> accepted) async {
+    final id = asInt(_store?['id']);
+    if (id == null) return false;
+    final earlier = _orders.any((o) => o['id'] != accepted['id'] && o['status'] != 'PENDING' && o['status'] != 'CANCELLED');
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = 'first_sale_celebrated_$id';
+      if (prefs.getBool(key) == true) return false;
+      await prefs.setBool(key, true);
+      return !earlier;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // ── Welcome ─────────────────────────────────────────────────────────────
+  /// "Hyvää huomenta, <store>" with the store's status as a pill that breathes softly while the
+  /// store takes orders. Rises in once per session.
+  Widget _welcomeHeader() {
+    final c = context.mColors;
+    final accepting = _store?['acceptingOrders'] != false;
+    final openNow = _store?['openNow'] != false;
+    final name = '${_store?['name'] ?? ''}'.trim();
+    final hello = mGreeting(context, formal: true);
+    final pill = !accepting
+        ? MStatusPill(label: tr(context, 'Paused', 'Tauolla'), color: c.onSurfaceVariant, background: c.surfaceVariant)
+        : !openNow
+            ? MStatusPill(label: tr(context, 'Closed', 'Suljettu'), color: c.onWarningSoft, background: c.warningSoft)
+            : MStatusPill(label: tr(context, 'Open', 'Avoinna'), live: true);
+    return MRiseIn(
+      onceKey: 'store-welcome',
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(MSpace.xs, 0, 0, MSpace.md),
+        child: Row(children: [
+          Expanded(
+            child: Semantics(
+              header: true,
+              child: Text(name.isEmpty ? hello : '$hello, $name', maxLines: 2, overflow: TextOverflow.ellipsis, style: AppTheme.display(size: MTextSize.displayS)),
+            ),
+          ),
+          const SizedBox(width: MSpace.sm),
+          pill,
+        ]),
+      ),
+    );
+  }
 
   // ── "Can't fulfil": cancel an accepted order with a full refund ─────────
   // The API lets the store cancel CONFIRMED and PROCESSING orders (not once the courier has it);
@@ -975,7 +1041,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
       body: _loading
           ? const MSkeletonList(button: true)
           : _error != null
-              ? RefreshIndicator(
+              ? MRefreshIndicator(
                   onRefresh: _load,
                   child: ListView(physics: const AlwaysScrollableScrollPhysics(), children: [MStateMessage.error(scrollable: false, top: 56, message: _error, onRetry: _retryLoad)]),
                 )
@@ -1004,12 +1070,13 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     // Orders the courier is bringing back stay on top for a while, so the store expects them at the counter
     final active = _orders.where((o) => ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED'].contains(o['status']) || _isBringingBack(o)).toList();
     final done = _orders.where((o) => !active.contains(o)).take(30).toList();
-    return RefreshIndicator(
+    return MRefreshIndicator(
       onRefresh: () => Future.wait([_loadOrders(), _loadReturns(), PushService.instance.refreshPermission()]),
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(MSpace.lg),
         children: [
+          if (_store != null) _welcomeHeader(),
           _notificationsOffBar(),
           if (_store != null && _onboarding != null)
             OnboardingChecklist(onboarding: _onboarding!, store: _store, onAction: _onOnboardingAction)
@@ -1763,7 +1830,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     ]);
   }
 
-  Widget _productsEmpty() => RefreshIndicator(
+  Widget _productsEmpty() => MRefreshIndicator(
         // Pull to refresh works here too (e.g. after importing on another phone)
         onRefresh: _load,
         child: ListView(
@@ -1814,7 +1881,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
     final noMatch = products.isEmpty && !(paged && (_pageLoading || _pageError != null));
     final count = 1 + products.length + (noMatch ? 1 : 0) + (footer ? 1 : 0);
 
-    return RefreshIndicator(
+    return MRefreshIndicator(
       onRefresh: _load,
       child: ListView.separated(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -1966,7 +2033,7 @@ class _VendorDashboardState extends State<VendorDashboard> with SingleTickerProv
               : Row(mainAxisSize: MainAxisSize.min, children: [badge, const Icon(Icons.chevron_right_rounded)]),
           onTap: onTap,
         );
-    return RefreshIndicator(
+    return MRefreshIndicator(
       onRefresh: _load,
       child: ListView(
       physics: const AlwaysScrollableScrollPhysics(),

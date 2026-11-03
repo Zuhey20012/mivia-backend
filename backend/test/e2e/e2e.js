@@ -1,4 +1,4 @@
-// End-to-end test for API v2.16.1 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
+// End-to-end test for API v2.17.0 against a local API + throwaway Postgres + stripe-mock + Cloudinary mock.
 const { execSync, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -997,7 +997,7 @@ function ean13(d12) {
   }));
 
   const sysDefault = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.16.1", sysDefault.pricing);
+  check("fee levers are off by default and listed in system status", sysDefault.pricing?.serviceFeePercent === 0 && sysDefault.pricing?.smallOrderThresholdCents === 0 && sysDefault.pricing?.minChargeCents === 50 && sysDefault.version === "2.17.0", sysDefault.pricing);
   const stockBeforeQuote = stockOf(productId);
   const ordersBeforeQuote = sql(`select count(*) from "Order" where "userId"=${otherCust.user.id}`);
   const q0 = await quote(quoteBody, otherCust.accessToken);
@@ -2073,7 +2073,7 @@ function ean13(d12) {
   cob = (await call("GET", "/courier/me/onboarding", null, onni.accessToken)).body;
   check("courier ready for approval when everything but approval is done", cob.readyForApproval === true && cob.approved === false && cob.percent === 83 && sql(`select "readyForApprovalAt" is not null from "Courier" where "userId"=${onni.user.id}`) === "t", cob);
   const sys211 = (await call("GET", "/admin/system", null, adminToken)).body;
-  check("System lists them as ready for approval", sys211.version === "2.16.1" && sys211.attention.some((a) => a.includes(`(#${pekkaStore.id}) is ready for approval`)) && sys211.attention.some((a) => a.includes("Courier \"Onni\"") && a.includes("ready for approval")) && sys211.readyForApproval?.stores?.some((s) => s.id === pekkaStore.id), sys211.attention);
+  check("System lists them as ready for approval", sys211.version === "2.17.0" && sys211.attention.some((a) => a.includes(`(#${pekkaStore.id}) is ready for approval`)) && sys211.attention.some((a) => a.includes("Courier \"Onni\"") && a.includes("ready for approval")) && sys211.readyForApproval?.stores?.some((s) => s.id === pekkaStore.id), sys211.attention);
   check("admin courier list shows vehicle, disclosure and readiness", (await call("GET", "/admin/couriers", null, adminToken)).body.couriers?.find((c) => c.user?.id === onni.user.id)?.vehicleType === "ebike");
 
   // Publishing changes (second instance reading a copy of the legal texts, same database)
@@ -3135,6 +3135,147 @@ function ean13(d12) {
       && sql(`select ("deliveryProblemNote" is null and "deliveredLat" is null and "totalCents" = 2290)::text from "Order" where id=${pv_active}`) === "true");
   await call("POST", "/courier/status", { isOnline: false }, pv_cour.accessToken);
 
+  console.log("\n— Live tracking route (2.17.0): GET /orders/:id/route");
+  // Store "Vera Vintage" is at 60.17, 24.94; the delivery pin of these orders is 60.181, 24.951
+  const rt_id = (q) => Number(sql(q).split(/\r?\n/)[0]);
+  const rt_order = (userId, status, set = "") => {
+    const id = rt_id(`insert into "Order" ("userId","storeId","status","subtotalCents","deliveryFeeCents","courierFeeCents","commissionCents","sellerPayoutCents","totalCents","paymentStatus","deliveryAddress","deliveryLat","deliveryLng","updatedAt") values (${userId},${storeId},'${status}',2000,290,650,0,2000,2290,'SUCCEEDED','Reittikatu 2, Helsinki',60.181,24.951,now()) returning id`);
+    if (set) sql(`update "Order" set ${set} where id=${id}`);
+    return id;
+  };
+  const rt_get = (id, tok, api = API) => callAt(api, "GET", `/orders/${id}/route`, null, tok);
+  const rt_near = (p, lat, lng, m = 3) => Array.isArray(p) && Math.abs(p[0] - lat) * 111_000 < m && Math.abs(p[1] - lng) * 55_000 < m;
+  const rt_round5 = (pts) => pts.every((p) => p.length === 2 && p.every((v) => Number.isFinite(v) && Math.abs(v * 1e5 - Math.round(v * 1e5)) < 1e-6));
+  const rt_keys = (b) => Object.keys(b || {}).sort().join(",");
+  const rt_cust = await register("Rtcust");
+  const rt_cour = await register("Rtcourier", "COURIER");
+  const rt_courId = Number(sql(`select id from "Courier" where "userId"=${rt_cour.user.id}`));
+  await call("PATCH", `/admin/couriers/${rt_courId}/approve`, null, adminToken);
+  await call("POST", "/courier/status", { isOnline: true, latitude: 60.165, longitude: 24.93 }, rt_cour.accessToken);
+
+  // Paid, waiting for the store: a shop → home preview, estimated (no ORS_API_KEY on this instance)
+  const rt_o = rt_order(rt_cust.user.id, "PENDING");
+  const rt_p = await rt_get(rt_o, rt_cust.accessToken);
+  const rt_pts = rt_p.body?.points || [];
+  const rt_rad = Math.PI / 180;
+  const rt_straight = 1000 * 6371 * 2 * Math.asin(Math.sqrt(Math.sin((0.011 * rt_rad) / 2) ** 2 + Math.cos(60.17 * rt_rad) * Math.cos(60.181 * rt_rad) * Math.sin((0.011 * rt_rad) / 2) ** 2));
+  check("route: the customer of a paid order waiting for the store gets a shop → home preview with exactly {ok, stage, points, distanceM, durationS, provider}",
+    rt_p.status === 200 && rt_p.body.stage === "preview" && rt_p.body.provider === "estimate" && rt_keys(rt_p.body) === "distanceM,durationS,ok,points,provider,stage"
+      && rt_near(rt_pts[0], 60.17, 24.94) && rt_near(rt_pts[rt_pts.length - 1], 60.181, 24.951), rt_p.body);
+  // Bow of the middle point from the straight line, in metres (a flat projection is fine at this scale)
+  const rt_mid = rt_pts[Math.floor(rt_pts.length / 2)] || [0, 0];
+  const rt_cos = Math.cos(60.1755 * rt_rad);
+  const rt_ax = 24.94 * rt_cos * 111_320, rt_ay = 60.17 * 110_574, rt_bx = 24.951 * rt_cos * 111_320, rt_by = 60.181 * 110_574;
+  const rt_mx = rt_mid[1] * rt_cos * 111_320, rt_my = rt_mid[0] * 110_574;
+  const rt_bow = Math.abs((rt_bx - rt_ax) * (rt_ay - rt_my) - (rt_ax - rt_mx) * (rt_by - rt_ay)) / Math.hypot(rt_bx - rt_ax, rt_by - rt_ay);
+  check("route: the estimate is a smooth gentle curve (8–48 points rounded to 5 decimals, the middle bowed 2–8 % off the straight line), distance = straight × road factor 1.3, time at 15 km/h",
+    rt_pts.length >= 8 && rt_pts.length <= 49 && rt_round5(rt_pts) && rt_bow > 0.02 * rt_straight && rt_bow < 0.08 * rt_straight
+      && Math.abs(rt_p.body.distanceM - rt_straight * 1.3) < 5 && Math.abs(rt_p.body.durationS - rt_p.body.distanceM / (15 / 3.6)) < 2,
+    { n: rt_pts.length, bow: Math.round(rt_bow), straight: Math.round(rt_straight), d: rt_p.body?.distanceM, t: rt_p.body?.durationS });
+  const rt_raw = await fetch(`${API}/orders/${rt_o}/route`, { headers: { Authorization: `Bearer ${rt_cust.accessToken}` } });
+  check("route: the answer is never cached by browsers or proxies (private, no-store)", /no-store/.test(rt_raw.headers.get("cache-control") || ""), rt_raw.headers.get("cache-control"));
+  const rt_s = await rt_get(rt_o, vendor.accessToken);
+  const rt_a = await rt_get(rt_o, adminToken);
+  check("route: the order's store and admins get the same preview", rt_s.status === 200 && rt_s.body.stage === "preview" && JSON.stringify(rt_s.body.points) === JSON.stringify(rt_pts)
+    && rt_a.status === 200 && rt_a.body.stage === "preview", [rt_s.status, rt_a.status]);
+  check("route: anyone else gets 404 (another customer, another store, an unassigned courier) and no token 401",
+    (await rt_get(rt_o, otherCust.accessToken)).status === 404 && (await rt_get(rt_o, otherVendor.accessToken)).status === 404
+      && (await rt_get(rt_o, rt_cour.accessToken)).status === 404 && (await rt_get(rt_o, null)).status === 401);
+
+  // A courier accepts: the customer and the store now get the courier → shop route; admins still only the preview
+  sql(`update "Order" set status='CONFIRMED', "courierId"=${rt_courId}, "acceptedAt"=now(), "confirmedAt"=now() where id=${rt_o}; update "Courier" set "currentOrderId"=${rt_o} where id=${rt_courId}`);
+  const rt_c1 = await rt_get(rt_o, rt_cust.accessToken);
+  const rt_c1p = rt_c1.body?.points || [];
+  const rt_s1 = await rt_get(rt_o, vendor.accessToken);
+  check("route: stage switch — once a courier is on the way to the shop, the customer gets courier → shop (stage to_shop)",
+    rt_c1.status === 200 && rt_c1.body.stage === "to_shop" && rt_near(rt_c1p[0], 60.165, 24.93) && rt_near(rt_c1p[rt_c1p.length - 1], 60.17, 24.94) && rt_round5(rt_c1p), rt_c1.body);
+  check("route: …the store gets the same courier → shop route", rt_s1.status === 200 && rt_s1.body.stage === "to_shop" && rt_near(rt_s1.body.points?.[0], 60.165, 24.93), rt_s1.body?.stage);
+  const rt_a1 = await rt_get(rt_o, adminToken);
+  check("route: a courier-origin route never goes to anyone else: admins get the shop → home preview, the assigned courier 404",
+    rt_a1.status === 200 && rt_a1.body.stage === "preview" && rt_near(rt_a1.body.points?.[0], 60.17, 24.94)
+      && (await rt_get(rt_o, rt_cour.accessToken)).status === 404 && (await rt_get(rt_o, otherCust.accessToken)).status === 404, rt_a1.body?.stage);
+  await call("POST", "/courier/telemetry", { latitude: 60.167, longitude: 24.934, orderId: rt_o }, rt_cour.accessToken);
+  const rt_c2 = await rt_get(rt_o, rt_cust.accessToken);
+  check("route: the courier → shop route is recomputed at most once a minute (a new position within the minute gets the cached route)",
+    rt_c2.status === 200 && rt_c2.body.stage === "to_shop" && JSON.stringify(rt_c2.body.points) === JSON.stringify(rt_c1p), rt_c2.body?.points?.[0]);
+  sql(`update "Courier" set latitude=null, longitude=null, "locationAt"=null, "locationExpiredAt"=now() where id=${rt_courId}`);
+  const rt_np = await rt_get(rt_o, rt_cust.accessToken);
+  check("route: with the courier's position cleared (no update for 15 min) there is no courier-origin route, only the preview",
+    rt_np.status === 200 && rt_np.body.stage === "preview" && rt_near(rt_np.body.points?.[0], 60.17, 24.94), rt_np.body?.stage);
+  await call("POST", "/courier/telemetry", { latitude: 60.169, longitude: 24.939, orderId: rt_o }, rt_cour.accessToken);
+
+  // Picked up: shop → home at once (the stage change invalidates the cache)
+  sql(`update "Order" set status='SHIPPED', "pickedUpAt"=now() where id=${rt_o}`);
+  const rt_c3 = await rt_get(rt_o, rt_cust.accessToken);
+  const rt_c3p = rt_c3.body?.points || [];
+  check("route: stage switch — after pickup the customer gets shop → home (stage to_customer) straight away",
+    rt_c3.status === 200 && rt_c3.body.stage === "to_customer" && rt_near(rt_c3p[0], 60.17, 24.94) && rt_near(rt_c3p[rt_c3p.length - 1], 60.181, 24.951), rt_c3.body);
+  sql(`update "Courier" set "vehicleType"='car' where id=${rt_courId}`);
+  const rt_car = rt_order(rt_cust.user.id, "SHIPPED", `"courierId"=${rt_courId}, "acceptedAt"=now(), "pickedUpAt"=now()`);
+  const rt_carR = await rt_get(rt_car, rt_cust.accessToken);
+  const rt_carO = (await call("GET", `/orders/${rt_car}`, null, rt_cust.accessToken)).body?.order;
+  check("route: the order payload names the courier's vehicle (the map's marker icon), next to the live position",
+    rt_carO?.courier?.vehicleType === "car" && typeof rt_carO.courier.latitude === "number", rt_carO?.courier);
+  check("route: a car or moped courier is timed at car speed (25 km/h) on the same distance",
+    rt_carR.status === 200 && rt_carR.body.distanceM === rt_c3.body.distanceM && Math.abs(rt_carR.body.durationS - rt_carR.body.distanceM / (25 / 3.6)) < 2 && rt_carR.body.durationS < rt_c3.body.durationS,
+    [rt_carR.body?.durationS, rt_c3.body?.durationS]);
+
+  // Finished, unpaid and pickup orders have no route
+  sql(`update "Order" set status='DELIVERED', "deliveredAt"=now() where id=${rt_o}`);
+  const rt_cancel = rt_order(rt_cust.user.id, "CANCELLED", `"cancelledAt"=now(), "courierId"=${rt_courId}`);
+  const rt_unpaid = rt_order(rt_cust.user.id, "PENDING", `"paymentStatus"='PENDING'`);
+  const rt_pickup = rt_order(rt_cust.user.id, "CONFIRMED", `fulfilment='PICKUP', "deliveryLat"=null, "deliveryLng"=null`);
+  check("route: 404 once the order is delivered (customer, store and admin alike)",
+    (await rt_get(rt_o, rt_cust.accessToken)).status === 404 && (await rt_get(rt_o, vendor.accessToken)).status === 404 && (await rt_get(rt_o, adminToken)).status === 404);
+  check("route: 404 for cancelled, unpaid and pickup orders",
+    (await rt_get(rt_cancel, rt_cust.accessToken)).status === 404 && (await rt_get(rt_unpaid, rt_cust.accessToken)).status === 404 && (await rt_get(rt_pickup, rt_cust.accessToken)).status === 404);
+  check("route: nothing is stored: no table or column for routes in the database",
+    sql(`select count(*) from information_schema.columns where table_schema='public' and (column_name ilike '%route%' or table_name ilike '%route%')`) === "0");
+
+  // OpenRouteService on the second instance, against a local mock (never the real service)
+  const orsRequests = [];
+  let orsDown = false;
+  const orsServer = require("http").createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => { body += c; });
+    req.on("end", () => {
+      let parsed = null;
+      try { parsed = JSON.parse(body); } catch {}
+      orsRequests.push({ method: req.method, path: req.url, auth: req.headers.authorization, body: parsed });
+      if (orsDown) { res.writeHead(503); return res.end("{}"); }
+      res.writeHead(200, { "Content-Type": "application/geo+json" });
+      res.end(JSON.stringify({ type: "FeatureCollection", features: [{ type: "Feature", properties: { summary: { distance: 1834.6, duration: 412.3 } },
+        geometry: { type: "LineString", coordinates: [[24.940000491, 60.170000123], [24.9452345678, 60.1754321987], [24.9452345678, 60.1754321987], [24.951, 60.181]] } }] }));
+    });
+  });
+  await new Promise((r) => orsServer.listen(12226, r));
+  check("second instance with ORS_API_KEY (OpenRouteService mock) started", await startFeeApi({ ORS_API_KEY: "ors-e2e-key", ORS_API_TEST_HOST: "localhost:12226" }));
+  sql(`update "Courier" set "vehicleType"='bicycle' where id=${rt_courId}`);
+  const rt_ors1 = rt_order(rt_cust.user.id, "SHIPPED", `"courierId"=${rt_courId}, "acceptedAt"=now(), "pickedUpAt"=now()`);
+  const rt_or = await rt_get(rt_ors1, rt_cust.accessToken, FEE_API);
+  const rt_req = orsRequests[0];
+  check("ORS: the street route comes from OpenRouteService ([lat, lng], rounded to 5 decimals, repeats dropped, distance and time from its summary)",
+    rt_or.status === 200 && rt_or.body.provider === "openrouteservice" && rt_or.body.stage === "to_customer" && rt_or.body.distanceM === 1835 && rt_or.body.durationS === 412
+      && JSON.stringify(rt_or.body.points) === JSON.stringify([[60.17, 24.94], [60.17543, 24.94523], [60.181, 24.951]]), rt_or.body);
+  check("ORS: a bicycle courier asks for cycling-regular; the request carries the key and only two [lng, lat] pairs (no order, name or address)",
+    rt_req?.method === "POST" && rt_req.path === "/v2/directions/cycling-regular/geojson" && rt_req.auth === "ors-e2e-key"
+      && JSON.stringify(rt_req.body?.coordinates) === JSON.stringify([[24.94, 60.17], [24.951, 60.181]]) && rt_keys(rt_req.body) === "coordinates,instructions,radiuses", rt_req);
+  await rt_get(rt_ors1, vendor.accessToken, FEE_API);
+  check("ORS: the route is cached per order and stage (the store's request made no new provider call)", orsRequests.length === 1, orsRequests.length);
+  sql(`update "Courier" set "vehicleType"='moped' where id=${rt_courId}`);
+  const rt_ors2 = rt_order(rt_cust.user.id, "SHIPPED", `"courierId"=${rt_courId}, "acceptedAt"=now(), "pickedUpAt"=now()`);
+  await rt_get(rt_ors2, rt_cust.accessToken, FEE_API);
+  check("ORS: a moped (or car) courier asks for driving-car", orsRequests[1]?.path === "/v2/directions/driving-car/geojson", orsRequests[1]?.path);
+  orsDown = true;
+  const rt_ors3 = rt_order(rt_cust.user.id, "PENDING");
+  const rt_fb = await rt_get(rt_ors3, rt_cust.accessToken, FEE_API);
+  check("ORS: when the provider fails, the estimated path is returned instead (provider estimate)",
+    rt_fb.status === 200 && rt_fb.body.provider === "estimate" && (rt_fb.body.points?.length || 0) >= 8 && orsRequests.length === 3, rt_fb.body?.provider);
+  feeApi.kill(); feeApi = null;
+  orsServer.close();
+  sql(`update "Courier" set "currentOrderId"=null where id=${rt_courId}`);
+  await call("POST", "/courier/status", { isOnline: false }, rt_cour.accessToken);
+
   console.log("\n— Background jobs and input hardening");
   const leaseSql = `INSERT INTO "JobLease" ("name","lockedUntil") VALUES ('t${uniq}', now() + interval '1 minute') ON CONFLICT ("name") DO UPDATE SET "lockedUntil" = now() + interval '1 minute' WHERE "JobLease"."lockedUntil" < now() RETURNING "name"`;
   const firstLine = (q) => sql(q).split(/\r?\n/)[0];
@@ -3145,7 +3286,7 @@ function ean13(d12) {
   check("huge search input rejected", (await call("GET", `/products/search?q=${"a".repeat(200)}`)).status === 400);
   const cors = await fetch(`${API}/stores`, { headers: { Origin: "https://evil.example" } });
   check("CORS does not allow unknown origins", !cors.headers.get("access-control-allow-origin"));
-  check("health reports v2.16.1", (await (await fetch(`${BASE}/health`)).json()).version === "2.16.1");
+  check("health reports v2.17.0", (await (await fetch(`${BASE}/health`)).json()).version === "2.17.0");
 
   [vendorSock, custSock, otherSock, c1Sock, c2Sock].forEach((s) => s.close());
   console.log(`\n${pass} passed, ${fail} failed`);

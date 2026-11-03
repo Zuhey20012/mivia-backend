@@ -281,7 +281,7 @@ class _ReturnsManagerState extends State<ReturnsManager> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(title: Text(tr(context, 'Returns', 'Palautukset'))),
-      body: RefreshIndicator(
+      body: MRefreshIndicator(
         onRefresh: _load,
         child: _loading
             ? const MSkeletonList(lines: 4, button: true)

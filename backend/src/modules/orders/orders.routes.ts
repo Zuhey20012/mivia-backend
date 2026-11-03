@@ -8,6 +8,7 @@ import {
   getOrderPayment, reportDeliveryProblem, returnToStore, confirmReturnReceived,
 } from "./orders.controller";
 import { chatRoutes } from "./chat";
+import { orderRouteRoutes } from "./route";
 import { requireAgreement } from "../legal/agreements";
 
 const router = Router();
@@ -39,6 +40,8 @@ router.post("/orders/:id(\\d+)/return-to-store",  auth, requireRole("COURIER"), 
 router.post("/orders/:id(\\d+)/returned-received", auth, requireRole("VENDOR"), confirmReturnReceived);
 // Order chat history (stored 30 days after the order is closed)
 router.use(chatRoutes);
+// Street route for the live tracking map (2.17.0): computed per request, cached in memory, never stored
+router.use(orderRouteRoutes);
 
 // Rentals
 router.post("/rentals",                       auth, requireRole("CUSTOMER"), requireAgreement(), createRental);

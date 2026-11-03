@@ -340,7 +340,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
           ? const MSkeletonProductGrid()
           : _detailError != null && _detail == null
               ? MStateMessage.error(message: _detailError!, onRetry: () => _open(_slug, first: true))
-              : RefreshIndicator(
+              : MRefreshIndicator(
                   onRefresh: _search,
                   child: CustomScrollView(
                     controller: _scroll,
@@ -638,7 +638,7 @@ class _ProductGridScreenState extends State<ProductGridScreen> {
     final c = context.mColors;
     return Scaffold(
       appBar: AppBar(title: Text(widget.title)),
-      body: RefreshIndicator(
+      body: MRefreshIndicator(
         onRefresh: _load,
         child: CustomScrollView(
           controller: _scroll,

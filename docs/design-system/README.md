@@ -242,6 +242,32 @@ brand ring with a gap when chosen, a hairline for light shades, a diagonal line 
 "Size guide" link, then the customer app's size tiles (≥ 60 × 48, soft brand fill and 2 px border when chosen, sold out crossed
 out and not selectable). Wraps to more rows so every size is visible.
 
+### Welcome and signature motion
+All of these follow the phone's "Remove animations" setting (they show their last frame at once) and use one
+`AnimationController` each, with a `RepaintBoundary` around every painter.
+
+* **MalvoyaIntro**`(brand, appName, tagline: (context) => tr(...), ready, builder)`: the cold-start welcome, right after the
+  native splash and on the same brand colour (`flutter_native_splash.yaml` uses the brand), so nothing flashes. The Thread M
+  draws itself as one stroke (≈ 0.8 s), the sunshine pin dot drops in with a soft bounce, then the app name and tagline fade
+  in: `MalvoyaIntro.duration` 1.2 s + `handOff` 0.15 s ≤ 1.4 s. A tap skips it. It never delays real work: each app starts its
+  services in parallel (`_start()` in `main.dart`, passed as `ready`) and the app is built as soon as both are done; a failed
+  step is reported and the app still opens. It plays once per process (`playOnce`), never on resume. The tagline language
+  comes from the saved choice (read while the mark draws). Taglines: customer "Lähikauppojen muoti ja kauneus / Local fashion
+  and beauty", store "Myy lähellesi / Sell to your neighbourhood", courier "Toimita omaan tahtiisi / Deliver at your own pace".
+* **MRefreshIndicator**: drop-in for `RefreshIndicator` (`onRefresh`, `child`, `color`, `displacement`, `edgeOffset`,
+  `notificationPredicate`, `triggerMode`). The M draws itself as the list is pulled, the sunshine dot appears when it is armed,
+  and a stretch of thread runs along the M while refreshing (still with reduce motion). Built on `RefreshIndicator.noSpinner`,
+  so the gesture is the platform's. Used on the main lists of all three apps.
+* **mGreeting**`(context, {formal})`: "Huomenta / Good morning" (5–11), "Päivää / Good afternoon" (11–18), "Iltaa / Good
+  evening"; `formal` gives "Hyvää huomenta". **firstNameOf**`(name)`.
+* **MRiseIn**`(onceKey:)` (fade + small rise) and **MStaggerIn / MStaggerItem** (items enter one after another, one controller);
+  with an `onceKey` they play once per session (`MOnce`).
+* **MStatusPill**`(label, live)`: "Avoinna / Open" with a dot that breathes softly while `live`.
+* **MSuccessCheck** (the check draws itself with a sunshine burst), **showMSuccessCheck**`(context, label)` (a short toast,
+  announced to screen readers), **showMCelebration**`(context, title, message)` (a one-time moment with pastel confetti, e.g.
+  the store's first sale).
+* `threadMPath(size)`, `threadMDotCenter`, `threadMStroke`: the logo's geometry, so animated versions draw exactly the mark.
+
 ### Also in the package
 `GoogleLinkTile(account:)` (link/unlink Google; the apps' `AuthService` implements `GoogleLinkAccount`), `BrandMark`/`BrandTile`
 (the Thread M), `Pressable` (press scale), `Bump` (pop on change), `AnimatedEuro` (counting money), `colorFromHex`.
@@ -269,7 +295,7 @@ out and not selectable). Wraps to more rows so every size is visible.
 
 ```bash
 cd packages/malvoya_core && flutter test          # 37 unit tests
-cd packages/malvoya_ui && flutter test            # 16 widget tests + 15 golden tests
+cd packages/malvoya_ui && flutter test            # 33 widget tests + 16 golden tests
 cd packages/malvoya_ui && flutter test --update-goldens   # after an intended visual change; review the PNGs
 ```
 Goldens load the bundled fonts and Material icons, so the PNGs show the real type. They are

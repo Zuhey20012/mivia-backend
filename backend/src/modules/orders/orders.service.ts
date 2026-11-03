@@ -927,7 +927,8 @@ export async function purgeOldDeliveryProofs() {
 
 // ─── Reading orders ─────────────────────────────────────────────────────────
 
-const courierPublic = { select: { id: true, name: true, latitude: true, longitude: true } };
+// The vehicle (2.17.0) picks the icon on the customer's tracking map; coordinates are filtered by withCourierPosition
+const courierPublic = { select: { id: true, name: true, vehicleType: true, latitude: true, longitude: true } };
 
 /** From the courier's acceptance until delivery or return to the shop (which cancels the order). */
 const COURIER_TRACKING_STATUSES: readonly OrderStatus[] = ["CONFIRMED", "PROCESSING", "SHIPPED"];

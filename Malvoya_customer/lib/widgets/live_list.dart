@@ -151,7 +151,7 @@ class _LiveListState extends State<LiveList> {
         lives == null ? tr(context, 'Try again', 'Yritä uudelleen') : tr(context, 'Refresh', 'Päivitä'),
       );
     }
-    return RefreshIndicator(
+    return MRefreshIndicator(
       onRefresh: _refresh,
       child: GridView.builder(
         padding: EdgeInsets.fromLTRB(MSpace.md, widget.topInset, MSpace.md, widget.bottomInset),

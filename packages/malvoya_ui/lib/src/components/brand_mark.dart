@@ -53,30 +53,46 @@ class BrandTile extends StatelessWidget {
   }
 }
 
+/// The Thread M's thread (without the pin dot) in a square of [size], in the published logo's
+/// geometry (a 100 × 100 view box). Shared by [BrandMark], [MalvoyaIntro] and [MRefreshIndicator],
+/// so every animated version draws exactly the logo.
+Path threadMPath(double size) {
+  final s = size / 100;
+  return Path()
+    ..moveTo(20 * s, 82 * s)
+    ..lineTo(20 * s, 36 * s)
+    ..cubicTo(20 * s, 21 * s, 36 * s, 18 * s, 43 * s, 30 * s)
+    ..lineTo(50 * s, 43 * s)
+    ..lineTo(57 * s, 30 * s)
+    ..cubicTo(64 * s, 18 * s, 80 * s, 21 * s, 80 * s, 36 * s)
+    ..lineTo(80 * s, 66 * s);
+}
+
+/// Where the Thread M's pin dot sits in a square of [size].
+Offset threadMDotCenter(double size) => Offset(size * 0.80, size * 0.82);
+
+/// The pin dot's radius in a square of [size].
+double threadMDotRadius(double size) => size * 0.07;
+
+/// The thread's stroke width in a square of [size].
+double threadMStrokeWidth(double size) => size * 0.09;
+
+/// A round-capped stroke paint for the thread in a square of [size].
+Paint threadMStroke(double size, Color color) => Paint()
+  ..color = color
+  ..style = PaintingStyle.stroke
+  ..strokeWidth = threadMStrokeWidth(size)
+  ..strokeCap = StrokeCap.round
+  ..strokeJoin = StrokeJoin.round;
+
 class _ThreadMPainter extends CustomPainter {
   final Color color;
   _ThreadMPainter(this.color);
 
   @override
   void paint(Canvas canvas, Size size) {
-    final s = size.width / 100;
-    final stroke = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 9 * s
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-    // Same geometry as the published logo (100×100 view box).
-    final path = Path()
-      ..moveTo(20 * s, 82 * s)
-      ..lineTo(20 * s, 36 * s)
-      ..cubicTo(20 * s, 21 * s, 36 * s, 18 * s, 43 * s, 30 * s)
-      ..lineTo(50 * s, 43 * s)
-      ..lineTo(57 * s, 30 * s)
-      ..cubicTo(64 * s, 18 * s, 80 * s, 21 * s, 80 * s, 36 * s)
-      ..lineTo(80 * s, 66 * s);
-    canvas.drawPath(path, stroke);
-    canvas.drawCircle(Offset(80 * s, 82 * s), 7 * s, Paint()..color = color);
+    canvas.drawPath(threadMPath(size.width), threadMStroke(size.width, color));
+    canvas.drawCircle(threadMDotCenter(size.width), threadMDotRadius(size.width), Paint()..color = color);
   }
 
   @override

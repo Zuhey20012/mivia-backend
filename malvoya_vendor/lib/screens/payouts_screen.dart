@@ -89,7 +89,7 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(title: Text(tr(context, 'Payouts', 'Tilitykset'))),
-      body: RefreshIndicator(
+      body: MRefreshIndicator(
         onRefresh: _load,
         child: _loading
             ? const MSkeletonList(count: 3, lines: 5, button: true)

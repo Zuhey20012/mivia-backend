@@ -28,6 +28,7 @@ import '../widgets/earnings_chart.dart';
 import '../widgets/job_map.dart';
 import '../widgets/courier_profile_sheets.dart';
 import '../widgets/mini_route.dart';
+import '../widgets/online_ride.dart';
 import '../widgets/onboarding_checklist.dart';
 import '../widgets/skeletons.dart';
 import 'agreements_screen.dart';
@@ -1427,13 +1428,9 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
           padding: const EdgeInsets.fromLTRB(MSpace.xxl, MSpace.xxl, MSpace.xxl, MSpace.xl),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: const BoxDecoration(color: MPalette.mint, shape: BoxShape.circle),
-                child: const Icon(Icons.check_rounded, color: AppTheme.success, size: 30),
-              ),
-              const SizedBox(width: MSpace.md),
+              // The check draws itself, with a little sunshine burst: the job is done
+              const MSuccessCheck(size: 52),
+              const SizedBox(width: MSpace.xs),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(tr(context, 'Delivered — nice work!', 'Toimitettu — hyvää työtä!'), style: AppTheme.display(size: 22)),
@@ -1584,12 +1581,17 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
   @override
   Widget build(BuildContext context) {
     final active = _active;
-    final name = (_auth.currentUser?.name ?? '').split(' ').first;
+    final name = firstNameOf(_auth.currentUser?.name);
+    final hello = mGreeting(context);
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         centerTitle: false,
-        title: Text(name.isEmpty ? 'Malvoya Courier' : '${tr(context, 'Hi', 'Hei')} $name', style: AppTheme.display(size: 22)),
+        // "Huomenta, Aino": rises in softly once per session
+        title: MRiseIn(
+          onceKey: 'courier-greeting',
+          child: Text(name == null ? hello : '$hello, $name', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppTheme.display(size: MTextSize.displayS)),
+        ),
         actions: [
           IconButton(tooltip: tr(context, 'How jobs are offered', 'Miten keikat tarjotaan'), icon: const Icon(Icons.info_outline_rounded), onPressed: _howJobsWork),
           IconButton(
@@ -1649,7 +1651,18 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
           borderRadius: BorderRadius.circular(30),
         ),
         padding: const EdgeInsets.fromLTRB(MSpace.sm, MSpace.sm, MSpace.md, MSpace.sm),
-        child: Row(children: [
+        // Going online: the vehicle rides across the bar over moving road lines
+        child: OnlineRide(
+          online: _online,
+          icon: vehicleIcon(_vehicleType),
+          road: AppTheme.onPrimary,
+          rider: AppTheme.surface,
+          riderIcon: AppTheme.successDark,
+          child: _onlineBarContent(active),
+        ),
+      );
+
+  Widget _onlineBarContent(Map<String, dynamic>? active) => Row(children: [
           Container(
             width: 40,
             height: 40,
@@ -1683,8 +1696,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
                   label: tr(context, 'Online', 'Linjoilla'),
                   child: Switch(value: _online, onChanged: (_) => _onSwitch(), activeColor: AppTheme.onPrimary, activeTrackColor: AppTheme.onPrimary.withValues(alpha: 0.38)),
                 ),
-        ]),
-      );
+        ]);
 
   /// Error state for a tab whose first load failed.
   Widget _loadError(String title, String? message, VoidCallback retry) => MStateMessage(centered: true, kind: MStateKind.error,
@@ -1717,7 +1729,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
 
   Widget _jobsTab(Map<String, dynamic>? active) {
     if (active != null) {
-      return RefreshIndicator(
+      return MRefreshIndicator(
         onRefresh: _refreshAll,
         child: MStateMessage(centered: true, icon: Icons.pedal_bike_rounded,
           message: tr(context, 'Finish your current delivery to take the next job.', 'Tee nykyinen toimitus loppuun ottaaksesi seuraavan keikan.'),
@@ -1729,10 +1741,10 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
         ),
       );
     }
-    if (!_online) return RefreshIndicator(onRefresh: _refreshAll, child: _goOnlinePrompt());
+    if (!_online) return MRefreshIndicator(onRefresh: _refreshAll, child: _goOnlinePrompt());
     if (_jobsLoad == _Load.loading) return const JobsSkeleton();
     if (_jobsLoad == _Load.error) {
-      return RefreshIndicator(
+      return MRefreshIndicator(
         onRefresh: () => _loadJobs(manual: true),
         child: _loadError(tr(context, 'Could not load jobs', 'Keikkoja ei voitu ladata'), _jobsError, () {
           setState(() => _jobsLoad = _Load.loading);
@@ -1741,7 +1753,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
       );
     }
     if (_jobs.isEmpty) {
-      return RefreshIndicator(
+      return MRefreshIndicator(
         onRefresh: () => _loadJobs(manual: true),
         child: MStateMessage(centered: true, icon: Icons.hourglass_empty_rounded,
           message: tr(context, 'No jobs right now. Malvoya is just starting, so jobs may be rare at first. While you are online, you get a notification when one comes in.',
@@ -1751,7 +1763,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     }
     // The newest live offer first
     final jobs = [..._jobs]..sort((a, b) => (asInt(a['id']) == _newOfferId ? 0 : 1) - (asInt(b['id']) == _newOfferId ? 0 : 1));
-    return RefreshIndicator(
+    return MRefreshIndicator(
       onRefresh: () => _loadJobs(manual: true),
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -2000,7 +2012,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
   Widget _deliveryTab(Map<String, dynamic>? o) {
     if (_mineLoad == _Load.loading) return const DeliverySkeleton();
     if (_mineLoad == _Load.error) {
-      return RefreshIndicator(
+      return MRefreshIndicator(
         onRefresh: () => _loadMine(manual: true),
         child: _loadError(tr(context, 'Could not load your delivery', 'Toimitusta ei voitu ladata'), _mineError, () {
           setState(() => _mineLoad = _Load.loading);
@@ -2010,7 +2022,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     }
     final returning = o == null ? _returningOrder() : null;
     if (returning != null) {
-      return RefreshIndicator(
+      return MRefreshIndicator(
         onRefresh: () => _loadMine(manual: true),
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -2020,7 +2032,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
       );
     }
     if (o == null) {
-      return RefreshIndicator(
+      return MRefreshIndicator(
         onRefresh: () => _loadMine(manual: true),
         child: MStateMessage(centered: true, icon: Icons.inventory_2_outlined,
           message: tr(context, 'No delivery in progress. Jobs you accept appear here, step by step.', 'Ei toimitusta käynnissä. Hyväksymäsi keikat näkyvät täällä vaihe vaiheelta.'),
@@ -2040,7 +2052,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
     final dropPt = _pt(o['deliveryLat'], o['deliveryLng']);
     return Column(children: [
       Expanded(
-        child: RefreshIndicator(
+        child: MRefreshIndicator(
           onRefresh: () => _loadMine(manual: true),
           child: ListView(physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.fromLTRB(MSpace.lg, MSpace.md, MSpace.lg, MSpace.lg), children: [
             Text('${tr(context, 'Order', 'Tilaus')} #${o['id']} · ${tr(context, 'your pay', 'palkkiosi')} ${_payText(o)}',
@@ -2728,7 +2740,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
   Widget _earningsTab() {
     if (_earnLoad == _Load.loading || (_earnLoad == _Load.ready && _mineLoad == _Load.loading)) return const EarningsSkeleton();
     if (_earnLoad == _Load.error) {
-      return RefreshIndicator(
+      return MRefreshIndicator(
         onRefresh: () => _loadEarnings(manual: true),
         child: _loadError(tr(context, 'Could not load your earnings', 'Ansioita ei voitu ladata'), _earnError, () {
           setState(() => _earnLoad = _Load.loading);
@@ -2808,7 +2820,7 @@ class _CourierDashboardState extends State<CourierDashboard> with SingleTickerPr
       highlightBar = now.hour >= first && now.hour <= last ? now.hour - first : null;
     }
     final periodName = _earnWeek ? tr(context, 'Last 7 days', 'Viimeiset 7 päivää') : tr(context, 'Today', 'Tänään');
-    return RefreshIndicator(
+    return MRefreshIndicator(
       onRefresh: () async => Future.wait([_loadEarnings(manual: true), _loadMine(manual: true)]),
       child: ListView(physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.all(MSpace.lg), children: [
         SegmentedButton<bool>(

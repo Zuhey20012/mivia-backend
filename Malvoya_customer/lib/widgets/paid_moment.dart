@@ -9,7 +9,12 @@ import '../config/theme.dart';
 /// motion" on it shows still and briefly.
 class PaidMoment extends StatefulWidget {
   final VoidCallback onDone;
-  const PaidMoment({super.key, required this.onDone});
+
+  /// Headline and line under it; default "Thanks for your order". Also used when an order
+  /// arrives ("Delivered").
+  final String? title;
+  final String? subtitle;
+  const PaidMoment({super.key, required this.onDone, this.title, this.subtitle});
 
   @override
   State<PaidMoment> createState() => _PaidMomentState();
@@ -49,7 +54,7 @@ class _PaidMomentState extends State<PaidMoment> with SingleTickerProviderStateM
     final bg = AppTheme.scaffoldBackground(context);
     return Semantics(
       liveRegion: true,
-      label: tr(context, 'Thanks for your order', 'Kiitos tilauksestasi'),
+      label: widget.title ?? tr(context, 'Thanks for your order', 'Kiitos tilauksestasi'),
       child: GestureDetector(
         onTap: _close,
         child: AnimatedBuilder(
@@ -87,12 +92,12 @@ class _PaidMomentState extends State<PaidMoment> with SingleTickerProviderStateM
                       ),
                     ),
                     const SizedBox(height: MSpace.sm),
-                    Text(tr(context, 'Thanks for your order', 'Kiitos tilauksestasi'), style: AppTheme.display(context, size: 26)),
+                    Text(widget.title ?? tr(context, 'Thanks for your order', 'Kiitos tilauksestasi'), style: AppTheme.display(context, size: 26)),
                     const SizedBox(height: 6),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: MSpace.x3l),
                       child: Text(
-                        tr(context, 'You can follow every step here.', 'Voit seurata jokaista vaihetta täällä.'),
+                        widget.subtitle ?? tr(context, 'You can follow every step here.', 'Voit seurata jokaista vaihetta täällä.'),
                         textAlign: TextAlign.center,
                         style: TextStyle(color: AppTheme.secondaryText(context), fontSize: MTextSize.bodyL),
                       ),

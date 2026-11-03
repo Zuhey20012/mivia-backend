@@ -79,7 +79,7 @@ class _PayoutsScreenState extends State<PayoutsScreen> with WidgetsBindingObserv
       appBar: AppBar(title: Text(tr(context, 'Earnings and payouts', 'Ansiot ja tilitykset'))),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
+          : MRefreshIndicator(
               onRefresh: _load,
               child: ListView(
                 padding: const EdgeInsets.all(MSpace.lg),

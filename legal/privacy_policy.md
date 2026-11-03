@@ -68,7 +68,7 @@ When a Malvoya app crashes, or a request fails because of a fault on our side, t
 
 - **Customers:** we use the delivery address and the map pin you choose. If you tap "Use my location" when choosing the pin, the app reads your phone's position once, only to place the pin; nothing is sent until you confirm the address. The pin is sent with requests to show nearby stores, delivery fees and delivery times, and it is stored only with an order you place (and removed from the order 30 days after it was delivered or cancelled) or with a "tell me when Malvoya opens near me" alert. Your saved addresses stay on your phone. The app does not track you in the background.
 - **Stores:** if the store owner taps "Use my current location" when setting up the store, the app reads the phone's position once to place the store's pin.
-- **Couriers:** while you are online or delivering, your position is shared with the customer and store of the order you are delivering, from when you accept the job until it is delivered or taken back to the shop; it is never shown on finished or cancelled orders. We keep only your latest position, and it is deleted as soon as you go offline, or automatically when no update has arrived for 15 minutes (you are then set offline; a delivery in progress carries on). We do not store a history of your routes. Two things are kept with a job: the distance of your ride to the store when you accept it (for your pay) and the position where you hand an order over (proof of delivery, for every handover, deleted after 30 days).
+- **Couriers:** while you are online or delivering, your position is shared with the customer and store of the order you are delivering, from when you accept the job until it is delivered or taken back to the shop; it is never shown on finished or cancelled orders. We keep only your latest position, and it is deleted as soon as you go offline, or automatically when no update has arrived for 15 minutes (you are then set offline; a delivery in progress carries on). We do not store a history of your routes. The street route shown on the customer's map (from your position to the store, then from the store to the customer) is worked out when asked for and not stored; only the customer and store of the order get a route that starts at your position, while the job is in progress. Two things are kept with a job: the distance of your ride to the store when you accept it (for your pay) and the position where you hand an order over (proof of delivery, for every handover, deleted after 30 days).
 - **Maps and address search:** the map pictures and the address search in the apps come straight from OpenStreetMap's servers (section 5), which therefore see your phone's network address, the map area you look at and the addresses you search for.
 
 ## 4. Automated decisions and recommendations
@@ -82,7 +82,7 @@ Delivery jobs are offered to approved, online couriers within 7.5 km of the stor
 
 - **The store** you buy from: the items ordered, the delivery address with its map pin and your order notes. The store does not get your name, email address or phone number; for a pickup order it gets no address at all, and you show a pickup code instead.
 - **Your courier:** your name, the delivery address with its map pin and your order notes, but only after they accept the job. Before that, couriers see only the approximate area (about 1 km).
-- **Customers of an order:** the store's name, address and phone number, and the courier's name and live position during the delivery (from the courier's acceptance until delivery; not afterwards).
+- **Customers of an order:** the store's name, address and phone number, and the courier's name, vehicle type and live position during the delivery (from the courier's acceptance until delivery; not afterwards).
 - **Everyone (public):** store profiles (section 2), reviews and drop comments with the writer's first name, live-chat messages with the writer's first name.
 - **Service providers (processors)** under data-processing agreements:
   - Stripe Payments Europe (payments; payouts to stores and couriers through Stripe Connect)
@@ -92,6 +92,7 @@ Delivery jobs are offered to approved, online couriers within 7.5 km of the stor
   - Twilio (SMS codes, and withdrawal acknowledgements for accounts that have only a phone number)
   - LiveKit (live-stream video), only while live shopping is switched on
   - Sentry (error reports), only if switched on
+  - OpenRouteService by HeiGIT gGmbH, Germany (street routes for the delivery map; it receives only the start and end point of a route, no names or order details), only if switched on
   - [EMAIL PROVIDER] (email), and [MAILBOX PROVIDER] for the team mailbox that receives support requests
 - **OpenStreetMap Foundation** (an independent recipient, not our processor): the apps load map pictures from tile.openstreetmap.org and look up addresses at nominatim.openstreetmap.org directly from your phone.
 - **The Finnish Patent and Registration Office (PRH)**, for business sellers only: we look up the business ID in its free open data service (avoindata.prh.fi). PRH receives only the business ID, not who asked.

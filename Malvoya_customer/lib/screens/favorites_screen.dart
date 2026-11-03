@@ -60,7 +60,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
             )
           : _loading
               ? const MSkeletonProductGrid(padding: EdgeInsets.fromLTRB(MSpace.lg, MSpace.lg, MSpace.lg, MSpace.x4l))
-              : RefreshIndicator(
+              : MRefreshIndicator(
                   onRefresh: _load,
                   child: _error != null && _items.isEmpty
                       ? MStateMessage.error(

@@ -182,6 +182,10 @@ The §2 inventory and §3 table above describe 2.16.0 as audited. Since 2.16.1 t
 
 Test-only setting: `test/e2e/test.env` sets `COURIER_POSITION_TTL_MINUTES=600`, so the API's own job does not set the suite's couriers offline during a long run; the privacy checks run the job in the test process with the default and with 30.
 
+### 7a. Addition in API 2.17.0: the live tracking route
+
+`GET /orders/:id/route` (`backend/src/modules/orders/route.ts`) returns the street route of the current delivery stage for the customer's map. It follows the C2 rule: a route that starts at the courier's position (courier → shop) goes only to the order's customer and store while the order is active and assigned; admins get the shop → home preview; the courier, other users and finished, cancelled, unpaid or pickup orders get 404. **Nothing is stored**: no table or column, coordinates are never logged, the response is `Cache-Control: private, no-store`, and the in-memory cache keeps a route for at most 10 minutes (a courier-origin route 1 minute; dropped when the stage changes or the order is finished). With `ORS_API_KEY` set, OpenRouteService (HeiGIT gGmbH, Heidelberg, Germany) receives the two end points and the vehicle profile only, at the fixed host `api.openrouteservice.org`; without it the API draws an estimated curve and sends nothing anywhere. Order payloads now also carry the courier's `vehicleType` (the marker icon) to the same people who see the courier's name. Texts updated: `legal/data_explained.md` (FI + EN: couriers' "who can see", the route bullet, the processor table), `legal/privacy_policy.md` (couriers, customers of an order, processors), `records-of-processing.md` (ORS, courier-location recipients). e2e: 22 checks in "Live tracking route (2.17.0)".
+
 ## 8. TODO: long-term retention job (C6)
 
 Not built in 2.16.1: the first deletion falls due in 2033 at the earliest (no real orders exist before launch) and the rules need the lawyer's sign-off. Design, to be built before the first financial year closes:

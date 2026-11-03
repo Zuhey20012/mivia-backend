@@ -252,6 +252,54 @@ void main() {
       ]);
     });
   });
+
+  testWidgets('Welcome: intro, refresh, status pill, success check', (tester) async {
+    await expectGolden(tester, 'welcome', paneHeight: 330, (context) {
+      final c = context.mColors;
+      Widget disc(double pull, {bool refreshing = false}) => Container(
+            width: MRefreshIndicator.discSize,
+            height: MRefreshIndicator.discSize,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: c.surface, shape: BoxShape.circle, boxShadow: context.mTokens.shadow(MElevation.e2)),
+            child: CustomPaint(
+              size: const Size.square(24),
+              painter: RefreshMarkPainter(pull: ValueNotifier(pull), spin: const AlwaysStoppedAnimation(0.5), refreshing: refreshing, still: false, color: c.primary),
+            ),
+          );
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          // The intro's last frame (the mark is drawn smaller than on a phone)
+          Container(
+            width: 150,
+            height: 140,
+            color: MalvoyaTokens.of(context).brand.color,
+            alignment: Alignment.center,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              CustomPaint(size: const Size.square(56), painter: IntroMarkPainter(progress: const AlwaysStoppedAnimation(1), color: MPalette.birch, dot: MPalette.sunshine)),
+              Text('Malvoya', style: MType.title.copyWith(color: MPalette.birch)),
+              Text(tr(context, 'Local fashion and beauty', 'Lähikauppojen muoti ja kauneus'), textAlign: TextAlign.center, style: MType.caption.copyWith(color: MPalette.birch)),
+            ]),
+          ),
+          const SizedBox(width: MSpace.md),
+          Expanded(
+            child: Wrap(spacing: MSpace.sm, runSpacing: MSpace.sm, crossAxisAlignment: WrapCrossAlignment.center, children: [
+              disc(0.5),
+              disc(1),
+              disc(1, refreshing: true),
+              const MSuccessCheck(size: 40),
+            ]),
+          ),
+        ]),
+        const SizedBox(height: MSpace.md),
+        Text('${mGreeting(context, now: DateTime(2026, 11, 2, 8))}, Aino', style: MType.displayS.copyWith(color: c.onSurface)),
+        const SizedBox(height: MSpace.sm),
+        Wrap(spacing: MSpace.sm, runSpacing: MSpace.sm, children: [
+          MStatusPill(label: tr(context, 'Open', 'Avoinna'), live: true),
+          MStatusPill(label: tr(context, 'Paused', 'Tauolla'), color: c.onSurfaceVariant, background: c.surfaceVariant),
+        ]),
+      ]);
+    });
+  });
 }
 
 /// A SnackBar drawn in place (snackbars normally float over a Scaffold).

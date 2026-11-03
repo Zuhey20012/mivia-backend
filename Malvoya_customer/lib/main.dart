@@ -33,23 +33,10 @@ import 'widgets/offline_banner.dart';
 /// Lets a tapped push notification open the right screen from anywhere.
 final navigatorKey = GlobalKey<NavigatorState>();
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
   registerMalvoyaFontLicenses();
   ApiConfig.baseUrl = AppConstants.apiBase;
-
-  // Lock to portrait
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
-
-  // Local Notifications Engine
-  try {
-    await LocalNotificationService.initialize();
-  } catch (e) {
-    debugPrint('Local notifications init: $e');
-  }
 
   // Stripe — initialize only if a real key is set. Only checkout needs it, so the first frame
   // does not wait for it.
@@ -62,28 +49,6 @@ void main() async {
     debugPrint('Stripe init skipped: $e');
   }
 
-  // Firebase. On iOS it needs GoogleService-Info.plist (added on the Mac, never committed);
-  // without it the app runs without push, phone and Apple sign-in.
-  await SignInSetup.loadIos();
-  try {
-    final app = await Firebase.initializeApp();
-    SignInSetup.firebaseInitialised(appId: app.options.appId, iosClientId: app.options.iosClientId);
-  } catch (e) {
-    debugPrint('Firebase init error: $e');
-  }
-
-  // The app version (X-App-Version) and the saved language, before the first request goes out
-  await AppLanguage.loadAppVersion();
-  AppLanguage.code = await LocaleProvider.savedCode() ?? AppLanguage.code;
-  // Crash reports (Firebase Crashlytics, docs/release/crashlytics.md): sent from release builds only,
-  // and only when Firebase started (an iPhone build without GoogleService-Info.plist skips them).
-  // Only the numeric user id, the app version and the role go with them.
-  await CrashReporting.instance.init(backend: SignInSetup.firebaseReady ? _crashlyticsBackend() : null, role: 'customer');
-  FlutterError.onError = CrashReporting.instance.recordFlutterFatalError;
-  PlatformDispatcher.instance.onError = CrashReporting.instance.recordPlatformError;
-  await Onboarding.load();
-  await DeliveryLocation.instance.load();
-  unawaited(NetworkStatus.instance.start());
   // Live order updates belong to the signed-in account; close the connection on sign-out
   AuthService.beforeLogout.add((_) async => CustomerSocketService().disconnect());
   // Saved and active delivery addresses belong to the account holder, not to the next person
@@ -105,13 +70,57 @@ void main() async {
   // An order refused with 428 AGREEMENT_REQUIRED opens the agreement sheet, then is sent again
   ApiConfig.onAgreementRequired = Agreements.instance.handleRequired;
 
-  // Verified https links to drops, stores and invites (Android App Links)
+  // Verified https links to drops, stores and invites (Android App Links); a link waits until the
+  // main screen is up
   DeepLinks.instance.start(navigatorKey);
 
-  runApp(const MalvoyaApp());
+  // The welcome animation plays while the services start (together, not one by one); the app opens
+  // as soon as both are done
+  runApp(MalvoyaIntro(
+    brand: MalvoyaBrand.malva,
+    appName: 'Malvoya',
+    tagline: (context) => tr(context, 'Local fashion and beauty', 'Lähikauppojen muoti ja kauneus'),
+    ready: _start(),
+    builder: (_) => const MalvoyaApp(),
+  ));
 }
 
-/// Firebase Crashlytics behind the shared [CrashReporting] (built only when Firebase started).
+/// Everything the app needs before its first screen, started in parallel.
+Future<void> _start() async {
+  // The app version (X-App-Version) and the saved language, before the first request goes out
+  final version = AppLanguage.loadAppVersion();
+  await Future.wait<void>([
+    // Lock to portrait
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]),
+    // Local Notifications Engine
+    LocalNotificationService.initialize().catchError((Object e) => debugPrint('Local notifications init: $e')),
+    LocaleProvider.savedCode().then((code) => AppLanguage.code = code ?? AppLanguage.code),
+    Onboarding.load(),
+    DeliveryLocation.instance.load(),
+    version,
+    () async {
+      // Firebase. On iOS it needs GoogleService-Info.plist (added on the Mac, never committed);
+      // without it the app runs without push, phone and Apple sign-in.
+      await SignInSetup.loadIos();
+      try {
+        final app = await Firebase.initializeApp();
+        SignInSetup.firebaseInitialised(appId: app.options.appId, iosClientId: app.options.iosClientId);
+      } catch (e) {
+        debugPrint('Firebase init error: $e');
+      }
+      // Crash reports (Firebase Crashlytics, docs/release/crashlytics.md): sent from release builds
+      // only, and only when Firebase started (an iPhone build without GoogleService-Info.plist skips
+      // them). Only the numeric user id, the app version and the role go with them.
+      await version;
+      await CrashReporting.instance.init(backend: SignInSetup.firebaseReady ? _crashlyticsBackend() : null, role: 'customer');
+      FlutterError.onError = CrashReporting.instance.recordFlutterFatalError;
+      PlatformDispatcher.instance.onError = CrashReporting.instance.recordPlatformError;
+    }(),
+  ]);
+  unawaited(NetworkStatus.instance.start());
+}
+
+// Firebase Crashlytics behind the shared [CrashReporting] (built only when Firebase started).
 CrashBackend _crashlyticsBackend() {
   final c = FirebaseCrashlytics.instance;
   return CallbackCrashBackend(

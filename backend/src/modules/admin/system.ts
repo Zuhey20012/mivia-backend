@@ -4,6 +4,7 @@ import { securityContacts } from "../ops/ops.routes";
 import { env } from "../../config/env";
 import { mediaConfigured } from "../../lib/cloudinary";
 import { liveConfigured } from "../../lib/livekit";
+import { routingConfigured } from "../orders/route";
 import { pushConfigured } from "../../lib/push";
 import { sendError } from "../../lib/errors";
 import { storeAvailability } from "../../utils/openingHours";
@@ -69,6 +70,8 @@ export function integrationStatus() {
     dataEncryption: { configured: encryptionStatus() === "ok", status: encryptionStatus() },
     // Live shopping video (LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET); off = going live answers 503 LIVE_OFF
     live: { configured: liveConfigured() },
+    // Street routes on the tracking map (ORS_API_KEY, OpenRouteService); off = a smooth estimated path is drawn
+    streetRoutes: { configured: routingConfigured() },
   };
 }
 
@@ -190,7 +193,7 @@ export async function getSystemStatus(_req: Request, res: Response) {
 
     res.json({
       ok: true,
-      version: "2.16.1",
+      version: "2.17.0",
       region: "frankfurt",
       startedAt,
       readyForOrders: blockers.length === 0,

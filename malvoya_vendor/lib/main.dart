@@ -17,36 +17,55 @@ import 'auth_service.dart';
 import 'l10n.dart';
 import 'core/push_service.dart';
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
   registerMalvoyaFontLicenses();
   ApiConfig.baseUrl = AppConstants.apiBase;
   // A failed request lets the "No internet" strip appear even without a system network change
   ApiConfig.onNetworkError = ConnectivityService.instance.verify;
-  // Sent as X-App-Version with every request (the server records it with agreement acceptances)
-  await AppLanguage.loadAppVersion();
   // Shows a "No internet" strip and lets screens refresh when the connection comes back
   ConnectivityService.instance.start();
-  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
-  // Firebase. On iOS it needs GoogleService-Info.plist (added on the Mac, never committed);
-  // without it the app runs without push and phone sign-in.
-  await SignInSetup.loadIos();
-  try {
-    final app = await Firebase.initializeApp();
-    SignInSetup.firebaseInitialised(appId: app.options.appId, iosClientId: app.options.iosClientId);
-  } catch (e) {
-    debugPrint('Firebase: $e');
-  }
-  // Crash reports (Firebase Crashlytics, docs/release/crashlytics.md): sent from release builds only,
-  // and only when Firebase started (an iPhone build without GoogleService-Info.plist skips them).
-  // Only the numeric user id, the app version and the role go with them.
-  await CrashReporting.instance.init(backend: SignInSetup.firebaseReady ? _crashlyticsBackend() : null, role: 'store');
-  FlutterError.onError = CrashReporting.instance.recordFlutterFatalError;
-  PlatformDispatcher.instance.onError = CrashReporting.instance.recordPlatformError;
-  runApp(const MalvoyaVendorApp());
+  // The welcome animation plays while the services start (together, not one by one); the app opens
+  // as soon as both are done
+  runApp(MalvoyaIntro(
+    brand: MalvoyaBrand.moss,
+    appName: 'Malvoya Store',
+    tagline: (context) => tr(context, 'Sell to your neighbourhood', 'Myy lähellesi'),
+    followSystemLanguage: false,
+    ready: _start(),
+    builder: (_) => const MalvoyaVendorApp(),
+  ));
 }
 
-/// Firebase Crashlytics behind the shared [CrashReporting] (built only when Firebase started).
+/// Everything the app needs before its first screen, started in parallel.
+Future<void> _start() async {
+  // Sent as X-App-Version with every request (the server records it with agreement acceptances)
+  final version = AppLanguage.loadAppVersion();
+  await Future.wait<void>([
+    version,
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]),
+    () async {
+      // Firebase. On iOS it needs GoogleService-Info.plist (added on the Mac, never committed);
+      // without it the app runs without push and phone sign-in.
+      await SignInSetup.loadIos();
+      try {
+        final app = await Firebase.initializeApp();
+        SignInSetup.firebaseInitialised(appId: app.options.appId, iosClientId: app.options.iosClientId);
+      } catch (e) {
+        debugPrint('Firebase: $e');
+      }
+      // Crash reports (Firebase Crashlytics, docs/release/crashlytics.md): sent from release builds
+      // only, and only when Firebase started (an iPhone build without GoogleService-Info.plist skips
+      // them). Only the numeric user id, the app version and the role go with them.
+      await version;
+      await CrashReporting.instance.init(backend: SignInSetup.firebaseReady ? _crashlyticsBackend() : null, role: 'store');
+      FlutterError.onError = CrashReporting.instance.recordFlutterFatalError;
+      PlatformDispatcher.instance.onError = CrashReporting.instance.recordPlatformError;
+    }(),
+  ]);
+}
+
+// Firebase Crashlytics behind the shared [CrashReporting] (built only when Firebase started).
 CrashBackend _crashlyticsBackend() {
   final c = FirebaseCrashlytics.instance;
   return CallbackCrashBackend(

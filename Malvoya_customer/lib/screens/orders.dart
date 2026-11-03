@@ -180,7 +180,7 @@ class _OrdersScreenState extends State<OrdersScreen> with WidgetsBindingObserver
             )
           : _loading
               ? const MSkeletonList(thumbnail: true)
-              : RefreshIndicator(
+              : MRefreshIndicator(
                   onRefresh: () => _load(quiet: true),
                   child: _error != null
                       ? MStateMessage.error(message: _error!, onRetry: () => _load())
