@@ -177,3 +177,9 @@ The simulated escrow, dispatch engine, telemetry service, "AI garment inspection
 ## Compliance context (Finland / EU)
 
 GDPR: data minimisation, retention, export and delete are implemented. Hosting is in Frankfurt (EU). The Accounting Act requires keeping order records. The Consumer Protection Act chapter 6 gives a 14-day withdrawal right and a refund of the delivery fee. PSD2 SCA is handled by Stripe. The Platform Work Directive (from Dec 2026) requires transparent, non-automated courier management. DAC7 requires seller reporting. Omnibus: `Store.sellerType` (BUSINESS/PRIVATE, with Y-tunnus for businesses) is shown to shoppers and locked after verification; "was" prices follow the 30-day rule; reviews are verified purchases. DSA: notice-and-action, statements of reasons, trader information on product and store pages, recommender transparency. No Y-tunnus exists yet, so never invent company names or business IDs. Legal texts in `legal/` use `[PLACEHOLDERS]`.
+
+## Design skills (installed 2026-11-05)
+Two third-party design skills live in `.claude/skills/`: **impeccable** (pbakaus/impeccable, Apache-2.0, `/impeccable audit|critique|polish|…`) and **taste-skill** (Leonxlnx/taste-skill, MIT, `design-taste-frontend`). They are aids, not the source of truth:
+- **`DESIGN.md` and `packages/malvoya_ui` always win.** Never change Malvoya's palette, fonts or components to follow a skill's generic direction.
+- **No remote fonts, stock-image hotlinks or trackers** (taste-skill's demo assets use Google Fonts, jsDelivr and museum image APIs; never copy those into `web/`, the admin panel or the apps; the CI privacy guard fails the build).
+- Honesty rules still apply: no invented shops, products, reviews or numbers in generated designs.
